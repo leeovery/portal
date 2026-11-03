@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -92,16 +93,10 @@ func TestRun_Unsure(t *testing.T) {
 		}
 	})
 
-	t.Run("the kill key asks Confirm as it is pressed, and kills once it confirms", func(t *testing.T) {
+	t.Run("the kill key asks Confirm as it is pressed, and asks for the kill once it confirms", func(t *testing.T) {
+		sink := logtest.Install(t)
 		calls := new(atomic.Int32)
-		h := unsure(t, confirming(calls, nil), func(h *harness, cfg *runner.Config) {
-			cfg.Kill = func(context.Context, string) error {
-				if calls.Load() != 1 {
-					t.Error("the session was killed before Confirm confirmed it")
-				}
-				return syscall.Kill(h.child(), syscall.SIGUSR1)
-			}
-		})
+		h := unsure(t, confirming(calls, nil))
 		if n := calls.Load(); n != 0 {
 			t.Errorf("Confirm was asked %d times as the switch was seen, want only as the kill key is pressed", n)
 		}
@@ -109,24 +104,28 @@ func TestRun_Unsure(t *testing.T) {
 		h.term.typeIn(t, keyKill)
 		out, err := h.finish(t)
 
-		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
-			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) || !out.AsksKill() {
+			t.Errorf("Run = %+v, %v; want the kill asked", out, err)
 		}
 		if n := calls.Load(); n != 1 {
 			t.Errorf("Confirm was asked %d times, want once", n)
 		}
+		assertDetachedCleanly(t, h, sink)
 	})
 
-	t.Run("a kill Confirm refuses kills nothing and ends the attach for the picker, saying why", func(t *testing.T) {
+	t.Run("a kill Confirm refuses asks for none and ends the attach for the picker, saying why", func(t *testing.T) {
 		sink := logtest.Install(t)
 		doubt := errors.New("another client leads the session")
-		h := unsure(t, confirming(new(atomic.Int32), doubt)) // the harness's Kill fails the test if called
+		h := unsure(t, confirming(new(atomic.Int32), doubt))
 
 		h.term.typeIn(t, keyKill)
 		out, err := h.finish(t)
 
 		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {
 			t.Fatalf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
+		}
+		if out.AsksKill() {
+			t.Error("AsksKill() = true, want no kill asked for a session the terminal may not show")
 		}
 		if !out.Picker() {
 			t.Error("Picker() = false, want the picker to show why")
@@ -144,8 +143,25 @@ func TestRun_Unsure(t *testing.T) {
 		h.term.typeIn(t, keyKill)
 		out, err := h.finish(t)
 
-		if err != nil || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+		if err != nil || !errors.Is(out.Err, runner.ErrUnconfirmed) || out.AsksKill() {
 			t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
+		}
+	})
+
+	t.Run("a signal to Portal while Confirm is asked ends the attach as that signal", func(t *testing.T) {
+		h := unsure(t, func(_ *harness, cfg *runner.Config) {
+			cfg.Confirm = func(context.Context) error {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				time.Sleep(100 * time.Millisecond) // the signal lands while Confirm runs
+				return nil
+			}
+		})
+
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{ExitCode: 128 + int(syscall.SIGTERM)}) {
+			t.Errorf("Run = %+v, %v; want the SIGTERM's outcome", out, err)
 		}
 	})
 
@@ -300,20 +316,19 @@ func TestRun_Unsure(t *testing.T) {
 }
 
 func TestRun_KillWithNoSwitchSeenNeverAsksConfirm(t *testing.T) {
-	h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
+	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
 		cfg.Confirm = func(context.Context) error {
 			t.Error("Confirm was asked with no switch seen")
 			return nil
 		}
-		cfg.Kill = func(context.Context, string) error { return syscall.Kill(h.child(), syscall.SIGUSR1) }
 	})
 	h.ready(t)
 
 	h.term.typeIn(t, keyKill)
 	out, err := h.finish(t)
 
-	if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
-		t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+	if err != nil || !out.AsksKill() {
+		t.Errorf("Run = %+v, %v; want the kill asked", out, err)
 	}
 }
 
@@ -334,7 +349,7 @@ func TestRun_ASwitchPastARefusingTerminalStillMakesItUnsure(t *testing.T) {
 	}) {
 		t.Fatal("the runner never saw the switch the terminal refused")
 	}
-	tm.typeIn(t, keyKill) // the harness's Kill fails the test if called
+	tm.typeIn(t, keyKill)
 	out, err := h.finish(t)
 
 	if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {

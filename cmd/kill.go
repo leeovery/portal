@@ -91,19 +91,26 @@ func sessionGoneError(name string, err error) (error, bool) {
 	return nil, false
 }
 
-// pickerKiller kills from Portal's interactive surfaces, the picker and the
-// attach keys, as portal kill does.
+// pickerKiller kills from the picker as portal kill does, but for the
+// session the kill key asked to kill, which counts as killed once gone (see
+// goneCountsKilled).
 type pickerKiller struct {
 	ctx context.Context
 	b   backend.Backend
+	// asked is the session the kill key asked to kill, empty for none.
+	asked string
 }
 
 func (k pickerKiller) KillSession(name string) error {
-	return killSession(k.ctx, k.b, name, "tui")
+	b := k.b
+	if name == k.asked {
+		b = goneCountsKilled{b}
+	}
+	return killSession(k.ctx, b, name, "tui")
 }
 
 // goneCountsKilled is a backend whose Kill counts a session already gone as
-// killed, for the attach's kill key: the session can end, or be killed
+// killed, for the kill key's prompt: the session can end, or be killed
 // elsewhere, between the key and the kill, and the key's intent is met. A
 // name held under another spelling is still refused: that session lives.
 type goneCountsKilled struct {

@@ -71,9 +71,6 @@ type panicking struct{}
 
 func (panicking) Scan([]byte) ([]byte, attachkeys.Action, bool) { panic("scanner exploded") }
 
-// noKill is a Kill that kills nothing.
-func noKill(context.Context, string) error { return nil }
-
 // terminal is a pseudo-terminal standing in for the user's: the runner gets
 // its tty side, and the test types into and reads from its user side.
 type terminal struct {
@@ -347,12 +344,12 @@ type harness struct {
 	inFlags, outFlags int
 	result            chan result
 	// pid is the fake child's, once it is ready. Run's goroutine reads it
-	// too, in a fake kill.
+	// too, in a fake Confirm.
 	pid atomic.Int64
 }
 
 // option changes an attach's config. It is handed the attach's harness, made
-// before Run starts, so a fake kill can reach the child through it.
+// before Run starts, so a fake Confirm can reach the child through it.
 type option func(h *harness, cfg *runner.Config)
 
 // attach starts runner.Run on a fake child in mode, scanning for keys, with
@@ -379,10 +376,6 @@ func attachOn(t *testing.T, ctx context.Context, tm *terminal, command backend.C
 		In:      tm.tty,
 		Out:     tm.tty,
 		Scanner: keys,
-		Kill: func(context.Context, string) error {
-			t.Error("the session was killed")
-			return nil
-		},
 	}
 	for _, opt := range opts {
 		opt(h, &cfg)

@@ -460,6 +460,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnEnv:         cfg.spawnEnv,
 		SpawnLogger:      cfg.spawnLogger,
 		Flash:            landing.flash,
+		KillAsk:          landing.kill,
 	}
 	if landing.search != nil {
 		deps.Search = landing.search
@@ -579,7 +580,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	// yet, so no session is waiting.
 	cfg := tuiConfig{
 		lister:         pickerLister{ctx: cmd.Context(), b: b},
-		killer:         pickerKiller{ctx: cmd.Context(), b: b},
+		killer:         pickerKiller{ctx: cmd.Context(), b: b, asked: launch.landing.kill},
 		labeller:       pickerLabeller{ctx: cmd.Context(), b: b},
 		projectStore:   store,
 		projectEditor:  store,

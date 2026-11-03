@@ -21,11 +21,12 @@ var attachLogger = log.For("attach")
 
 // attachConnector attaches the terminal to a session through the attach
 // runner, listed in the runner registry while it is attached. Each time the
-// attach ends asking for the picker, it opens the plain picker and attaches
-// its pick; each time a switch ends it, it attaches the session switched to;
-// until the picker is quit or an attach ends any other way. Inside a session
-// it switches instead: through the registry when a runner's terminal leads
-// the session.
+// attach ends asking for the picker, it opens the plain picker, on the kill
+// prompt for the session when the kill key asked, and attaches its pick; each
+// time a switch ends it, it attaches the session switched to; until the
+// picker is quit or an attach ends any other way. Inside a session it
+// switches instead: through the registry when a runner's terminal leads the
+// session.
 type attachConnector struct {
 	cmd     *cobra.Command
 	backend backend.Backend
@@ -72,7 +73,7 @@ func (c attachConnector) connect(name string, first func(string, runnerListing) 
 	for err == nil {
 		if out.Switch != "" {
 			name = out.Switch
-		} else if name, err = c.next(out, listing); err != nil || name == "" {
+		} else if name, err = c.next(name, out, listing); err != nil || name == "" {
 			return err
 		}
 		out, err = c.attachOrPicker(name, listing)
@@ -82,8 +83,8 @@ func (c attachConnector) connect(name string, first func(string, runnerListing) 
 
 // attachOrPicker attaches a session chosen from inside Portal: a pick, or the
 // session a switch named. One that can't be attached for a fault of its own,
-// as kill words them, ends as a failed kill does, the picker following to
-// show why. Any other failure is returned, as a first attach's is.
+// as kill words them, ends as a detach does, the picker following to show
+// why. Any other failure is returned, as a first attach's is.
 func (c attachConnector) attachOrPicker(name string, listing runnerListing) (runner.Outcome, error) {
 	out, err := c.attach(name, listing)
 	if fault, ok := sessionFault(name, err, "nothing was opened"); ok {
@@ -92,15 +93,20 @@ func (c attachConnector) attachOrPicker(name string, listing runnerListing) (run
 	return out, err
 }
 
-// next is the session to attach after an attach that ended with out other
-// than by a switch: the picker's pick. It is empty when Portal exits instead,
-// with the error to exit with. The runner is unlisted meanwhile.
-func (c attachConnector) next(out runner.Outcome, listing runnerListing) (string, error) {
+// next is the session to attach after the attach of name ended with out
+// other than by a switch: the picker's pick, the picker opening on the kill
+// prompt for name when the kill key asked. It is empty when Portal exits
+// instead, with the error to exit with. The runner is unlisted meanwhile.
+func (c attachConnector) next(name string, out runner.Outcome, listing runnerListing) (string, error) {
 	listing.Close()
 	if !out.Picker() {
 		return "", exitStatus(out.ExitCode)
 	}
-	return reopenPickerFunc(c.cmd, c.backend, flashOf(out.Err))
+	landing := pickerLanding{flash: flashOf(out.Err)}
+	if out.AsksKill() {
+		landing.kill = name
+	}
+	return reopenPickerFunc(c.cmd, c.backend, landing)
 }
 
 // attach runs one attach. An exec returns only if it fails, so beside its
@@ -125,7 +131,6 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 		In:      os.Stdin,
 		Out:     os.Stdout,
 		Scanner: attachkeys.NewMatcher(attachBindings(name)),
-		Kill:    c.kill,
 	}
 	listing.Attach(&cfg)
 	listed := cfg.Began
@@ -174,12 +179,6 @@ func (c attachConnector) exec(command backend.Command) error {
 	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }
 
-// kill is the kill key's: the session goes as the picker's kill takes it, its
-// index entry with it, though it is already gone.
-func (c attachConnector) kill(ctx context.Context, name string) error {
-	return pickerKiller{ctx: ctx, b: goneCountsKilled{c.backend}}.KillSession(name)
-}
-
 func flashOf(err error) string {
 	if err == nil {
 		return ""
@@ -197,16 +196,16 @@ func exitStatus(code int) error {
 
 var reopenPickerFunc = reopenPicker
 
-// reopenPicker opens the plain picker an attach's end asked for, on flash, and
-// returns its pick: empty when the picker was quit. It runs no bootstrap, which
-// the first picker or command already ran.
-func reopenPicker(cmd *cobra.Command, b backend.Backend, flash string) (string, error) {
+// reopenPicker opens the plain picker an attach's end asked for, landing as
+// landing says, and returns its pick: empty when the picker was quit. It runs
+// no bootstrap, which the first picker or command already ran.
+func reopenPicker(cmd *cobra.Command, b backend.Backend, landing pickerLanding) (string, error) {
 	var picked string
 	pick := connectorFunc(func(name string) error {
 		picked = name
 		return nil
 	})
-	err := runPicker(cmd, b, pickerLaunch{landing: pickerLanding{flash: flash}}, pick)
+	err := runPicker(cmd, b, pickerLaunch{landing: landing}, pick)
 	return picked, err
 }
 

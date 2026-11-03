@@ -70,18 +70,19 @@ func TestRunOverZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("kill ends the session", func(t *testing.T) {
+	t.Run("kill detaches as detach does, asking for the kill, and the session lives on", func(t *testing.T) {
 		z := attachZmx(t, nil)
 
 		z.h.term.typeIn(t, keyKill)
 		out, err := z.h.finish(t)
 
-		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
-			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) || !out.AsksKill() {
+			t.Errorf("Run = %+v, %v; want the kill asked", out, err)
 		}
 		z.assertEndedByZmx(t)
-		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || alive {
-			t.Errorf("Exists = %v, %v after the kill, want the session gone", alive, err)
+		z.awaitClients(t, 0)
+		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || !alive {
+			t.Errorf("Exists = %v, %v after the kill key, want the session alive for the picker to ask about", alive, err)
 		}
 	})
 
@@ -98,7 +99,7 @@ func TestRunOverZmx(t *testing.T) {
 		z.awaitClients(t, 0)
 	})
 
-	t.Run("a zmx attach typed in the session switches the child under the runner, whose kill key then kills nothing", func(t *testing.T) {
+	t.Run("a zmx attach typed in the session switches the child under the runner, whose kill key then asks for no kill", func(t *testing.T) {
 		z := attachZmx(t, nil)
 		if _, err := z.b.Create(t.Context(), "other", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -109,7 +110,7 @@ func TestRunOverZmx(t *testing.T) {
 		z.h.term.typeIn(t, keyKill)
 		out, err := z.h.finish(t)
 
-		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) || out.AsksKill() {
 			t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
 		}
 		z.assertEndedByZmx(t)
@@ -120,7 +121,7 @@ func TestRunOverZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("a zmx inside the session switching its own client leaves the kill key killing the session", func(t *testing.T) {
+	t.Run("a zmx inside the session switching its own client leaves the kill key asking to kill the session", func(t *testing.T) {
 		z := attachZmx(t, nil)
 		inner := zmxtest.New(t)
 		for _, name := range []string{"inner1", "inner2"} {
@@ -138,13 +139,10 @@ func TestRunOverZmx(t *testing.T) {
 		z.h.term.typeIn(t, keyKill)
 		out, err := z.h.finish(t)
 
-		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
-			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) || !out.AsksKill() {
+			t.Errorf("Run = %+v, %v; want the kill asked", out, err)
 		}
 		z.assertEndedByZmx(t)
-		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || alive {
-			t.Errorf("Exists = %v, %v after the kill, want the session gone", alive, err)
-		}
 	})
 
 	t.Run("the session ending exits to the shell", func(t *testing.T) {
@@ -174,8 +172,8 @@ type zmxAttach struct {
 }
 
 // attachZmx creates a session running command, the shell when nil, in a zmx
-// directory of the test's own, and runs the runner on its attach command,
-// killing through the backend. environ joins the environment the attach
+// directory of the test's own, and runs the runner on its attach command.
+// environ joins the environment the attach
 // command is made in, as the user's own does.
 func attachZmx(t *testing.T, command []string, environ ...string) *zmxAttach {
 	t.Helper()
@@ -187,8 +185,8 @@ func attachZmx(t *testing.T, command []string, environ ...string) *zmxAttach {
 const attachToken = "RUNNER_TEST_ATTACH"
 
 // attachZmxWith is attachZmx with each of opts applied to the attach's
-// config. The runner confirms a kill as Portal does: through the session's
-// leader carrying a token its attach command gave its client.
+// config. The runner confirms its session as Portal does: through the
+// session's leader carrying a token its attach command gave its client.
 func attachZmxWith(t *testing.T, command, environ []string, opts ...option) *zmxAttach {
 	t.Helper()
 	sink := logtest.Install(t)
@@ -199,7 +197,6 @@ func attachZmxWith(t *testing.T, command, environ []string, opts ...option) *zmx
 	const token = "runner-token"
 	h := attachOn(t, t.Context(), newTerminal(t), b.Track(attachCommand(t, b, environ), attachToken, token), append([]option{func(_ *harness, cfg *runner.Config) {
 		cfg.Session = sessionName
-		cfg.Kill = b.Kill
 		cfg.Confirm = func(ctx context.Context) error {
 			env, err := b.LeaderEnv(ctx, sessionName)
 			if err != nil {

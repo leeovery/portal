@@ -30,6 +30,9 @@ const attachSettle = 20 * time.Second
 // pickerMark is on every picker page, and nowhere in a session.
 const pickerMark = "session manager"
 
+// killPrompt titles the picker's kill prompt.
+const killPrompt = "Kill session?"
+
 // Portal's default keys in their legacy forms, as a terminal without the newer
 // encoding sends them.
 const (
@@ -267,7 +270,7 @@ func (p *portalTerm) echoes(t *testing.T, a, b int) {
 func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 
-	t.Run("detach returns to the picker, a pick attaches again, and kill removes the session", func(t *testing.T) {
+	t.Run("detach returns to the picker, a pick attaches again, and the kill key's y removes the session", func(t *testing.T) {
 		p, name := openOnTerminal(t, binary)
 		p.echoes(t, 6, 7)
 
@@ -286,12 +289,17 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 
 		mark = p.mark()
 		p.typeIn(t, altQ)
-		p.awaitAfter(t, mark, pickerMark)
-		if p.alive(t, name) {
-			t.Fatal("the session outlived the kill key")
+		p.awaitClients(t, name, 0)
+		p.awaitAfter(t, mark, killPrompt)
+		if !p.alive(t, name) {
+			t.Fatal("the session ended on the kill key, before its prompt was answered")
 		}
-		if shown := p.shownSince(mark); strings.Contains(shown, name) {
-			t.Errorf("the picker after the kill still shows %s:\n%s", name, shown)
+
+		mark = p.mark()
+		p.typeIn(t, "y")
+		p.awaitAfter(t, mark, pickerMark)
+		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return !p.alive(t, name) }) {
+			t.Fatal("the session outlived y")
 		}
 		idx, err := sessionindex.Read(p.stateDir)
 		if err != nil {
@@ -304,6 +312,28 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		p.typeIn(t, "q")
 		if code := p.exitCode(t); code != 0 {
 			t.Errorf("quitting the picker exited %d, want 0", code)
+		}
+	})
+
+	t.Run("the kill key's Enter keeps the session and attaches it again", func(t *testing.T) {
+		p, name := openOnTerminal(t, binary)
+		p.echoes(t, 6, 7)
+
+		mark := p.mark()
+		p.typeIn(t, altQ)
+		p.awaitClients(t, name, 0)
+		p.awaitAfter(t, mark, killPrompt)
+
+		p.typeIn(t, "\r")
+		p.awaitClients(t, name, 1)
+		p.echoes(t, 7, 7)
+
+		p.typeIn(t, altShiftD)
+		if code := p.exitCode(t); code != 0 {
+			t.Errorf("detaching to the shell exited %d, want 0", code)
+		}
+		if !p.alive(t, name) {
+			t.Error("the session ended")
 		}
 	})
 

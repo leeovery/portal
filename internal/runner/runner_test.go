@@ -88,10 +88,12 @@ func TestRun_BoundKey(t *testing.T) {
 		key        string
 		want       attachkeys.Action
 		wantPicker bool
+		wantAsk    bool
 		reason     string
 	}{
-		{"detach goes to the picker", keyDetach, attachkeys.Detach, true, "detach"},
-		{"detach to shell goes to the shell", keyDetachToShell, attachkeys.DetachToShell, false, "detach_to_shell"},
+		{"detach goes to the picker", keyDetach, attachkeys.Detach, true, false, "detach"},
+		{"detach to shell goes to the shell", keyDetachToShell, attachkeys.DetachToShell, false, false, "detach_to_shell"},
+		{"kill detaches to the picker, asking for the kill", keyKill, attachkeys.Kill, true, true, "kill"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := logtest.Install(t)
@@ -109,6 +111,9 @@ func TestRun_BoundKey(t *testing.T) {
 			}
 			if out.Picker() != tc.wantPicker {
 				t.Errorf("Picker() = %v, want %v", out.Picker(), tc.wantPicker)
+			}
+			if out.AsksKill() != tc.wantAsk {
+				t.Errorf("AsksKill() = %v, want %v", out.AsksKill(), tc.wantAsk)
 			}
 			// ctrl+\ in a read of its own, as zmx detaches only on that.
 			if got, want := h.term.reads(t), []string{"abc", "\x1c"}; !slices.Equal(got, want) {
@@ -130,103 +135,6 @@ func TestRun_BoundKey(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRun_Kill(t *testing.T) {
-	t.Run("a kill that succeeds waits for the session's end to end the child", func(t *testing.T) {
-		var killed []string
-		h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
-			cfg.Kill = func(_ context.Context, name string) error {
-				killed = append(killed, name)
-				return syscall.Kill(h.child(), syscall.SIGUSR1)
-			}
-		})
-		h.ready(t)
-
-		h.term.typeIn(t, keyKill)
-		out, err := h.finish(t)
-
-		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
-			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
-		}
-		if !out.Picker() {
-			t.Errorf("Picker() = false after a kill, want the picker")
-		}
-		if !slices.Equal(killed, []string{"fake"}) {
-			t.Errorf("killed %q, want the attached session once", killed)
-		}
-		if slices.Contains(h.term.reads(t), "\x1c") {
-			t.Errorf("the child was sent ctrl+\\ after a kill that succeeded")
-		}
-		if err := syscall.Kill(h.child(), 0); !errors.Is(err, syscall.ESRCH) {
-			t.Errorf("the child %d outlived Run: %v", h.child(), err)
-		}
-	})
-
-	t.Run("a kill that fails detaches the child and carries the error", func(t *testing.T) {
-		refused := errors.New("kill refused")
-		sink := logtest.Install(t)
-		h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
-			cfg.Kill = func(context.Context, string) error { return refused }
-		})
-		h.ready(t)
-
-		h.term.typeIn(t, keyKill)
-		out, err := h.finish(t)
-
-		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, refused) {
-			t.Errorf("Run = %+v, %v; want a kill carrying %v", out, err, refused)
-		}
-		if !out.Picker() {
-			t.Errorf("Picker() = false after a failed kill, want the picker to show the error")
-		}
-		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
-			t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
-		}
-		rec := sink.Records().Matching("attach", "outcome").Only(t, "outcome record")
-		if got := rec.ErrorAttr(t, "error"); !errors.Is(got, refused) {
-			t.Errorf("outcome error = %v, want %v", got, refused)
-		}
-	})
-
-	t.Run("a signal to Portal during the kill ends the attach as that signal", func(t *testing.T) {
-		h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
-			cfg.Kill = func(context.Context, string) error {
-				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
-				time.Sleep(100 * time.Millisecond) // the signal lands while the kill runs
-				return syscall.Kill(h.child(), syscall.SIGUSR1)
-			}
-		})
-		h.ready(t)
-
-		h.term.typeIn(t, keyKill)
-		out, err := h.finish(t)
-
-		if err != nil || out != (runner.Outcome{ExitCode: 128 + int(syscall.SIGTERM)}) {
-			t.Errorf("Run = %+v, %v; want the SIGTERM's outcome", out, err)
-		}
-	})
-
-	t.Run("a context that ends during the kill ends the attach with its error", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		h := attachWithin(t, ctx, modeZmx, func(_ *harness, cfg *runner.Config) {
-			cfg.Kill = func(ctx context.Context, _ string) error {
-				cancel()
-				return ctx.Err()
-			}
-		})
-		h.ready(t)
-
-		h.term.typeIn(t, keyKill)
-		out, err := h.finish(t)
-
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("Run = %+v, %v; want the context's error", out, err)
-		}
-		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
-			t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
-		}
-	})
 }
 
 func TestRun_ChildEndingOnItsOwnExitsToTheShell(t *testing.T) {
@@ -340,29 +248,29 @@ func TestRun_LeavesAChildThatReadsNothingToItsSignals(t *testing.T) {
 
 func TestRun_DetachingAChildThatHasExitedIsQuick(t *testing.T) {
 	runner.SetGrace(t, 5*time.Second)
-	refused := errors.New("kill refused")
-	var killReturned atomic.Int64
-	h := attach(t, modeFrozen, func(h *harness, cfg *runner.Config) {
-		// The kill ends the child, input still unread in its terminal, and
-		// fails, so the child is detached after its end.
-		cfg.Kill = func(context.Context, string) error {
+	var confirmReturned atomic.Int64
+	h := attach(t, modeFrozenSwitched, func(h *harness, cfg *runner.Config) {
+		// Confirm, asked as the kill key is pressed, ends the child with input
+		// still unread in its terminal, so the child is detached after its end.
+		cfg.Confirm = func(context.Context) error {
 			_ = syscall.Kill(h.child(), syscall.SIGUSR1)
 			harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
 				return errors.Is(syscall.Kill(h.child(), 0), syscall.ESRCH)
 			})
-			killReturned.Store(time.Now().UnixNano())
-			return refused
+			confirmReturned.Store(time.Now().UnixNano())
+			return nil
 		}
 	})
 	h.ready(t)
+	h.term.await(t, switchSignature+switchSignature)
 
 	h.term.typeIn(t, "abc"+keyKill)
 	r := h.end(t)
 
-	if r.err != nil || !errors.Is(r.out.Err, refused) {
-		t.Errorf("Run = %+v, %v; want the failed kill", r.out, r.err)
+	if r.err != nil || !r.out.AsksKill() {
+		t.Errorf("Run = %+v, %v; want the kill asked", r.out, r.err)
 	}
-	if took := r.returned.Sub(time.Unix(0, killReturned.Load())); took > time.Second {
+	if took := r.returned.Sub(time.Unix(0, confirmReturned.Load())); took > time.Second {
 		t.Errorf("Run took %v after the child had gone, want no wait for it to read its input", took)
 	}
 }
@@ -524,20 +432,19 @@ func TestRun_PanicEndOutranksASignal(t *testing.T) {
 		assertPanicLogged(t, sink, "scanner exploded")
 	})
 
-	t.Run("a signal while Kill's panic tears the attach down", func(t *testing.T) {
+	t.Run("a signal while Began's panic tears the attach down", func(t *testing.T) {
 		runner.SetGrace(t, shortGrace)
 		h := attach(t, modeDeaf, func(_ *harness, cfg *runner.Config) {
-			cfg.Kill = func(context.Context, string) error { panic("kill exploded") }
+			cfg.Began = func() { panic("began exploded") }
 		})
 		h.ready(t)
 
-		h.term.typeIn(t, keyKill)
 		h.term.await(t, "in:1c")
 		signalDuringTeardown(t)
 		r := h.end(t)
 
-		if r.panicked != "kill exploded" {
-			t.Errorf("Run = %+v, %v, panicking with %v; want Kill's panic raised again", r.out, r.err, r.panicked)
+		if r.panicked != "began exploded" {
+			t.Errorf("Run = %+v, %v, panicking with %v; want Began's panic raised again", r.out, r.err, r.panicked)
 		}
 	})
 }
@@ -560,32 +467,30 @@ func (s holdThenPanic) Scan([]byte) ([]byte, attachkeys.Action, bool) {
 	panic("scanner exploded")
 }
 
-func TestRun_PanicInKillDetachesThenPropagates(t *testing.T) {
+func TestRun_PanicInConfirmDetachesThenPropagates(t *testing.T) {
 	sink := logtest.Install(t)
-	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
-		cfg.Kill = func(context.Context, string) error { panic("kill exploded") }
+	h := unsure(t, func(_ *harness, cfg *runner.Config) {
+		cfg.Confirm = func(context.Context) error { panic("confirm exploded") }
 	})
-	h.ready(t)
 
 	h.term.typeIn(t, keyKill)
 	r := h.end(t) // the terminal's settings and flags are checked restored
 
-	if r.panicked != "kill exploded" {
-		t.Errorf("Run = %+v, %v, panicking with %v; want Kill's panic raised again", r.out, r.err, r.panicked)
+	if r.panicked != "confirm exploded" {
+		t.Errorf("Run = %+v, %v, panicking with %v; want Confirm's panic raised again", r.out, r.err, r.panicked)
 	}
 	assertDetachedCleanly(t, h, sink)
-	assertPanicLogged(t, sink, "kill exploded")
+	assertPanicLogged(t, sink, "confirm exploded")
 }
 
-func TestRun_GoexitInKillDetachesAndRestores(t *testing.T) {
+func TestRun_GoexitInConfirmDetachesAndRestores(t *testing.T) {
 	sink := logtest.Install(t)
-	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
-		cfg.Kill = func(context.Context, string) error {
-			runtime.Goexit() // as a test's fake Kill calling t.FailNow does
+	h := unsure(t, func(_ *harness, cfg *runner.Config) {
+		cfg.Confirm = func(context.Context) error {
+			runtime.Goexit() // as a test's fake Confirm calling t.FailNow does
 			return nil
 		}
 	})
-	h.ready(t)
 
 	h.term.typeIn(t, keyKill)
 	r := h.end(t) // the terminal's settings and flags are checked restored
@@ -873,7 +778,6 @@ func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 		In:      tm.tty,
 		Out:     tm.tty,
 		Scanner: keys,
-		Kill:    noKill,
 	})
 
 	if !errors.Is(err, os.ErrNotExist) {
@@ -903,7 +807,6 @@ func TestRun_RefusesWithoutStarting(t *testing.T) {
 		{"input that is not a terminal", func(cfg *runner.Config) { cfg.In = notTerminal }, isNoTerminal},
 		{"output that is not a terminal", func(cfg *runner.Config) { cfg.Out = typed }, isNoTerminal},
 		{"a command that switches sessions", func(cfg *runner.Config) { cfg.Command.Switches = true }, says("switches sessions")},
-		{"no kill", func(cfg *runner.Config) { cfg.Kill = nil }, says("no kill")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := runner.Config{
@@ -913,7 +816,6 @@ func TestRun_RefusesWithoutStarting(t *testing.T) {
 				In:      tm.tty,
 				Out:     tm.tty,
 				Scanner: keys,
-				Kill:    noKill,
 			}
 			tc.change(&cfg)
 

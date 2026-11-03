@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,11 +26,12 @@ import (
 )
 
 // pickerScript stands in for the picker an attach's end asks for: it records
-// the flash each opens on and answers with picks in turn, quitting once they
-// run out.
+// the flash each opens on, and the session whose kill prompt it opens on, and
+// answers with picks in turn, quitting once they run out.
 type pickerScript struct {
 	picks   []string
 	flashes []string
+	kills   []string
 	err     error
 	// onOpen runs as each picker opens.
 	onOpen func()
@@ -38,8 +40,9 @@ type pickerScript struct {
 func stagePicker(t *testing.T, picks ...string) *pickerScript {
 	t.Helper()
 	p := &pickerScript{picks: picks}
-	withFuncSeam(t, &reopenPickerFunc, func(_ *cobra.Command, _ backend.Backend, flash string) (string, error) {
-		p.flashes = append(p.flashes, flash)
+	withFuncSeam(t, &reopenPickerFunc, func(_ *cobra.Command, _ backend.Backend, landing pickerLanding) (string, error) {
+		p.flashes = append(p.flashes, landing.flash)
+		p.kills = append(p.kills, landing.kill)
 		if p.onOpen != nil {
 			p.onOpen()
 		}
@@ -156,30 +159,39 @@ func TestAttach_PickerLoop(t *testing.T) {
 		}
 	})
 
-	t.Run("a kill opens the picker with no flash", func(t *testing.T) {
-		_, rec := stageAttach(t, "api-x7Kd9a")
-		rec.answer(outcome(attachkeys.Kill))
+	t.Run("the kill key opens the picker on the kill prompt for the session, killing nothing", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, outcome(attachkeys.Kill))
 		picker := stagePicker(t)
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
+		if want := []string{"blog-c3d4"}; !slices.Equal(picker.kills, want) {
+			t.Errorf("picker kill prompts = %q, want one on %q, the session switched to", picker.kills, want)
+		}
 		if want := []string{""}; !slices.Equal(picker.flashes, want) {
-			t.Errorf("picker flashes = %q, want one picker with no flash", picker.flashes)
+			t.Errorf("picker flashes = %q, want none", picker.flashes)
+		}
+		if kills := fake.CallsTo(backendtest.OpKill); len(kills) != 0 {
+			t.Errorf("Kill calls = %+v, want none before the prompt is answered", kills)
 		}
 	})
 
-	t.Run("a failed kill flashes in the picker", func(t *testing.T) {
+	t.Run("a kill the runner refused, unsure of the session, opens the picker on why, with no prompt", func(t *testing.T) {
 		_, rec := stageAttach(t, "api-x7Kd9a")
-		const why = "session api-x7Kd9a is not answering; the kill may still land"
-		rec.answer(runResult{out: runner.Outcome{Action: attachkeys.Kill, Err: errors.New(why)}})
+		refused := fmt.Errorf("kill refused: %w", runner.ErrUnconfirmed)
+		rec.answer(runResult{out: runner.Outcome{Action: attachkeys.Kill, Err: refused}})
 		picker := stagePicker(t)
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		if want := []string{why}; !slices.Equal(picker.flashes, want) {
+		if want := []string{refused.Error()}; !slices.Equal(picker.flashes, want) {
 			t.Errorf("picker flashes = %q, want %q", picker.flashes, want)
+		}
+		if want := []string{""}; !slices.Equal(picker.kills, want) {
+			t.Errorf("picker kill prompts = %q, want none", picker.kills)
 		}
 	})
 
@@ -239,100 +251,87 @@ func TestAttach_PickerLoop(t *testing.T) {
 	})
 }
 
-func TestAttach_KillKeyKillsAsPortalKillDoes(t *testing.T) {
-	t.Run("the session goes, its index entry with it", func(t *testing.T) {
-		fake, rec := stageAttach(t, "api-x7Kd9a")
-		stateDir := seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"api-x7Kd9a","label":"work"}]}`)
-		stagePicker(t)
+// The kill key's prompt kills as the picker's k does, but for the session
+// already gone, which counts as killed.
+func TestPickerKiller_KillsTheAskedSessionAsTheKillKeyMeansIt(t *testing.T) {
+	asked := func(fake *backendtest.Fake) pickerKiller {
+		return pickerKiller{ctx: context.Background(), b: fake, asked: "api-x7Kd9a"}
+	}
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		if err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("Kill: %v", err)
+	t.Run("the session goes, its index entry with it", func(t *testing.T) {
+		fake := backendtest.New()
+		fake.Add(backend.Session{Name: "api-x7Kd9a"})
+		stateDir := seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"api-x7Kd9a","label":"work"}]}`)
+
+		if err := asked(fake).KillSession("api-x7Kd9a"); err != nil {
+			t.Fatalf("KillSession: %v", err)
 		}
 		if alive, _ := fake.Exists(context.Background(), "api-x7Kd9a"); alive {
 			t.Error("the session outlived the kill")
 		}
-		idx, err := sessionindex.Read(stateDir)
-		if err != nil {
-			t.Fatalf("read index: %v", err)
-		}
-		if _, ok := idx.Lookup("api-x7Kd9a"); ok {
-			t.Errorf("index = %+v, want the killed session's entry gone", idx.Sessions)
-		}
+		assertIndexLacks(t, stateDir, "api-x7Kd9a")
 	})
 
 	t.Run("a refusal is worded as portal kill words it", func(t *testing.T) {
-		fake, rec := stageAttach(t, "api-x7Kd9a")
+		fake := backendtest.New()
+		fake.Add(backend.Session{Name: "api-x7Kd9a"})
 		isolateStateDir(t)
 		fake.Fail(backendtest.OpKill, backend.ErrTimeout)
-		stagePicker(t)
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
+		err := asked(fake).KillSession("api-x7Kd9a")
 		if want := "session api-x7Kd9a is not answering; the kill may still land"; err == nil || err.Error() != want {
-			t.Errorf("Kill = %v, want %q", err, want)
+			t.Errorf("KillSession = %v, want %q", err, want)
 		}
 	})
 
 	t.Run("a session already gone counts as killed: its entry goes, and nothing flashes", func(t *testing.T) {
-		fake, rec := stageAttach(t, "api-x7Kd9a")
 		stateDir := seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"api-x7Kd9a","label":"work"}]}`)
-		stagePicker(t)
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
+		if err := asked(backendtest.New()).KillSession("api-x7Kd9a"); err != nil {
+			t.Errorf("KillSession = %v, want nil: the key's intent is met", err)
 		}
-		// Ended elsewhere between the key and the kill.
-		if err := fake.Kill(context.Background(), "api-x7Kd9a"); err != nil {
-			t.Fatal(err)
-		}
-		if err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a"); err != nil {
-			t.Errorf("Kill = %v, want nil: the key's intent is met", err)
-		}
-		idx, err := sessionindex.Read(stateDir)
-		if err != nil {
-			t.Fatalf("read index: %v", err)
-		}
-		if _, ok := idx.Lookup("api-x7Kd9a"); ok {
-			t.Errorf("index = %+v, want the gone session's entry removed", idx.Sessions)
-		}
+		assertIndexLacks(t, stateDir, "api-x7Kd9a")
 	})
 
 	t.Run("a gone session whose entry can't be removed says so", func(t *testing.T) {
-		fake, rec := stageAttach(t, "api-x7Kd9a")
-		stagePicker(t)
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		if err := fake.Kill(context.Background(), "api-x7Kd9a"); err != nil {
-			t.Fatal(err)
-		}
 		blockStateDir(t)
 
-		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
+		err := asked(backendtest.New()).KillSession("api-x7Kd9a")
 		if want := "killed api-x7Kd9a, but could not remove it from the session index"; err == nil || !strings.HasPrefix(err.Error(), want) {
-			t.Errorf("Kill = %v, want %q", err, want)
+			t.Errorf("KillSession = %v, want %q", err, want)
 		}
 	})
 
 	t.Run("a name held under another spelling is still refused", func(t *testing.T) {
-		fake, rec := stageAttach(t, "api-x7Kd9a")
+		fake := backendtest.New()
 		isolateStateDir(t)
 		fake.Fail(backendtest.OpKill, &backend.HeldAsError{Held: "API-x7Kd9a"})
-		stagePicker(t)
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
+		err := asked(fake).KillSession("api-x7Kd9a")
 		if want := "No session found: api-x7Kd9a; did you mean API-x7Kd9a?"; err == nil || err.Error() != want {
-			t.Errorf("Kill = %v, want %q", err, want)
+			t.Errorf("KillSession = %v, want %q", err, want)
 		}
 	})
+
+	t.Run("any other session gone is refused, as k's kill refuses it", func(t *testing.T) {
+		isolateStateDir(t)
+
+		err := asked(backendtest.New()).KillSession("blog-c3d4")
+		if want := "No session found: blog-c3d4"; err == nil || err.Error() != want {
+			t.Errorf("KillSession = %v, want %q", err, want)
+		}
+	})
+}
+
+func assertIndexLacks(t *testing.T, stateDir, name string) {
+	t.Helper()
+	idx, err := sessionindex.Read(stateDir)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if _, ok := idx.Lookup(name); ok {
+		t.Errorf("index = %+v, want %s's entry gone", idx.Sessions, name)
+	}
 }
 
 // pickerStep is a key typed in a picker, and whether what it asks of the
@@ -344,6 +343,9 @@ type pickerStep struct {
 
 func typed(r rune) pickerStep        { return pickerStep{key: tea.KeyPressMsg{Code: r, Text: string(r)}} }
 func typedCode(code rune) pickerStep { return pickerStep{key: tea.KeyPressMsg{Code: code}} }
+func typedAndLanded(r rune) pickerStep {
+	return pickerStep{key: tea.KeyPressMsg{Code: r, Text: string(r)}, lands: true}
+}
 
 // realPickers runs each picker Portal opens for real but for the terminal:
 // its rows are the backend's sessions as the picker lists them, and each
@@ -401,6 +403,141 @@ func stageRealPickers(t *testing.T, b backend.Backend, scripts ...[]pickerStep) 
 
 func frameOf(model tea.Model) string {
 	return ansi.Strip(model.(tui.Model).View().Content)
+}
+
+func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
+	const prompt = "Kill session?"
+	// blog-c3d4 lists second, so a cursor on it was put there.
+	stage := func(t *testing.T) (*backendtest.Fake, *attachRecorder, string) {
+		t.Helper()
+		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		stateDir := seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"blog-c3d4"}]}`)
+		rec.answer(outcome(attachkeys.Kill))
+		return fake, rec, stateDir
+	}
+
+	t.Run("the picker opens on the kill prompt for the session, offering to attach it again", func(t *testing.T) {
+		fake, _, _ := stage(t)
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typed('q')})
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		for _, want := range []string{prompt, "blog-c3d4", "y kill", "⏎ attach", "esc cancel"} {
+			if !strings.Contains(pickers.opened[0], want) {
+				t.Errorf("the picker shows no %q:\n%s", want, pickers.opened[0])
+			}
+		}
+	})
+
+	t.Run("y kills it as the picker kills, and the picker stays open", func(t *testing.T) {
+		fake, rec, stateDir := stage(t)
+		pickers := stageRealPickers(t, fake, []pickerStep{typedAndLanded('y'), typed('q')})
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if alive, _ := fake.Exists(context.Background(), "blog-c3d4"); alive {
+			t.Error("the session outlived y")
+		}
+		assertIndexLacks(t, stateDir, "blog-c3d4")
+		afterY := pickers.shown[0][0]
+		if strings.Contains(afterY, prompt) || strings.Contains(afterY, "blog-c3d4") || !strings.Contains(afterY, "api-x7Kd9a") {
+			t.Errorf("after y the picker shows, want its rows without the killed session:\n%s", afterY)
+		}
+		if want := []string{"blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want only the first", ranSessions(rec))
+		}
+	})
+
+	t.Run("y on a session killed elsewhere meanwhile counts it killed, and nothing flashes", func(t *testing.T) {
+		fake, _, stateDir := stage(t)
+		pickers := stageRealPickers(t, fake, []pickerStep{typedAndLanded('y'), typed('q')})
+		pickers.landed = func() {
+			if err := fake.Kill(context.Background(), "blog-c3d4"); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		assertIndexLacks(t, stateDir, "blog-c3d4")
+		if afterY := pickers.shown[0][0]; strings.Contains(afterY, "No session found") || strings.Contains(afterY, prompt) {
+			t.Errorf("after y the picker shows, want its rows and no flash:\n%s", afterY)
+		}
+	})
+
+	t.Run("Esc keeps it and stays in the picker, the cursor on it", func(t *testing.T) {
+		fake, rec, _ := stage(t)
+		rec.answer(outcome(attachkeys.DetachToShell))
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typedCode(tea.KeyEnter)})
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if afterEsc := pickers.shown[0][0]; strings.Contains(afterEsc, prompt) || !strings.Contains(afterEsc, "blog-c3d4") {
+			t.Errorf("after Esc the picker shows, want its rows, the session kept:\n%s", afterEsc)
+		}
+		// Enter on the list picks the row the cursor is on.
+		if want := []string{"blog-c3d4", "blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want %q: the cursor on the kept session", ranSessions(rec), want)
+		}
+		if kills := fake.CallsTo(backendtest.OpKill); len(kills) != 0 {
+			t.Errorf("Kill calls = %+v, want none", kills)
+		}
+	})
+
+	t.Run("Enter keeps it and attaches it again", func(t *testing.T) {
+		fake, rec, _ := stage(t)
+		rec.answer(outcome(attachkeys.DetachToShell))
+		stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)})
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if want := []string{"blog-c3d4", "blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want %q", ranSessions(rec), want)
+		}
+		if kills := fake.CallsTo(backendtest.OpKill); len(kills) != 0 {
+			t.Errorf("Kill calls = %+v, want none", kills)
+		}
+	})
+
+	t.Run("Enter on a session killed elsewhere meanwhile reopens the picker, worded as kill words it", func(t *testing.T) {
+		fake, rec, _ := stage(t)
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)}, []pickerStep{typed('q')})
+		pickers.landed = func() {
+			if len(pickers.opened) == 1 {
+				_ = fake.Kill(context.Background(), "blog-c3d4")
+			}
+		}
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession = %v, want the picker", err)
+		}
+		if len(pickers.opened) != 2 || !strings.Contains(pickers.opened[1], "No session found: blog-c3d4") {
+			t.Errorf("pickers shown %d, the last:\n%s\nwant a second, saying the session is gone", len(pickers.opened), pickers.opened[len(pickers.opened)-1])
+		}
+		if want := []string{"blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want only the first", ranSessions(rec))
+		}
+	})
+
+	t.Run("unsure of the session, the picker opens on why, with no prompt", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		isolateStateDir(t)
+		refused := fmt.Errorf("kill refused: %w", runner.ErrUnconfirmed)
+		rec.answer(runResult{out: runner.Outcome{Action: attachkeys.Kill, Err: refused}})
+		pickers := stageRealPickers(t, fake, []pickerStep{typed('q')})
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if opened := pickers.opened[0]; !strings.Contains(opened, refused.Error()) || strings.Contains(opened, prompt) {
+			t.Errorf("the picker shows, want %q and no prompt:\n%s", refused, opened)
+		}
+	})
 }
 
 func TestOpenTUI_APickWhoseSessionCantBeAttachedReopensThePicker(t *testing.T) {
@@ -465,7 +602,7 @@ func TestReopenPicker(t *testing.T) {
 			model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			return model, nil
 		})
-		name, err := reopenPicker(cmd, fake, why)
+		name, err := reopenPicker(cmd, fake, pickerLanding{flash: why})
 		if err != nil {
 			t.Fatalf("reopenPicker: %v", err)
 		}

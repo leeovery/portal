@@ -27,10 +27,10 @@ var logger = log.For("attach")
 // the attach command itself.
 var ErrNoTerminal = errors.New("the attach needs a terminal")
 
-// ErrUnconfirmed is why Run refuses the kill key, a request for the picker
-// and a request to confirm its session, once the child's output has shown a
-// switch and Confirm, asked then, doesn't confirm the terminal still shows
-// its session.
+// ErrUnconfirmed is why Run refuses the kill key's ask, a request for the
+// picker and a request to confirm its session, once the child's output has
+// shown a switch and Confirm, asked then, doesn't confirm the terminal still
+// shows its session.
 var ErrUnconfirmed = errors.New("the terminal may show another session, switched outside Portal")
 
 // ErrPastDeadline refuses a request its asker has given up on.
@@ -40,8 +40,8 @@ var ErrPastDeadline = errors.New("the request is past its deadline")
 var errNothingConfirms = errors.New("nothing confirms the session")
 
 // grace bounds each of the runner's waits but the one for the terminal: for
-// the child to read what it was sent, to exit after a detach, a kill or each
-// signal that ends it, and for its last output to reach the terminal.
+// the child to read what it was sent, to exit after a detach or each signal
+// that ends it, and for its last output to reach the terminal.
 var grace = 2 * time.Second
 
 // Scanner finds Portal's bound keys in the terminal's input.
@@ -63,9 +63,6 @@ type Config struct {
 	In, Out *os.File
 	// Scanner finds Portal's keys in what the user types.
 	Scanner Scanner
-	// Kill kills the named session through the backend. Run refuses a config
-	// without one.
-	Kill func(ctx context.Context, name string) error
 	// Requests carries what is asked of the attach from outside it. Run reads
 	// a request only while it waits for the attach's end, and answers each it
 	// reads: nil when it takes it, which is accepting it, or why it won't.
@@ -81,7 +78,8 @@ type Config struct {
 	// zmx inside the session, one reached over ssh say, may have switched its
 	// own client, writing the same bytes. Unsure, Run asks Confirm each time
 	// the kill key is pressed or a request for the picker or to confirm comes,
-	// and kills or takes it only once Confirm confirms. Nil confirms nothing.
+	// and asks for the kill or takes the request only once Confirm confirms.
+	// Nil confirms nothing.
 	Confirm func(ctx context.Context) error
 }
 
@@ -115,8 +113,9 @@ type Outcome struct {
 	// number when a signal ended the child or Portal's attach, and 0
 	// otherwise.
 	ExitCode int
-	// Err is why the action failed, such as a kill the backend refused, for
-	// the picker to show. The attach ended all the same.
+	// Err is why the action failed, such as the kill key refused while Run
+	// was unsure of the session, for the picker to show. The attach ended all
+	// the same.
 	Err error
 }
 
@@ -126,13 +125,20 @@ func (o Outcome) Picker() bool {
 	return o.Action == attachkeys.Detach || o.Action == attachkeys.Kill
 }
 
+// AsksKill reports whether the kill key ended the attach asking for its
+// session to be killed, which the picker that follows asks the user to
+// confirm. Run itself never kills.
+func (o Outcome) AsksKill() bool {
+	return o.Action == attachkeys.Kill && o.Err == nil
+}
+
 // Run attaches the terminal to cfg.Session until the child ends or an action
 // or a request ends the attach, with the terminal in raw mode until Run
 // returns. An action, a request, a signal to Portal or the context's end
-// detaches the child by sending it zmx's own ctrl+\, except a kill that
-// succeeds, whose session's end ends the child. A child still running after
-// the grace is sent SIGHUP, then SIGKILL. A signal to Portal, or the terminal
-// hanging up, at any point ends the attach with that signal's outcome.
+// detaches the child by sending it zmx's own ctrl+\. A child still running
+// after the grace is sent SIGHUP, then SIGKILL. A signal to Portal, or the
+// terminal hanging up, at any point ends the attach with that signal's
+// outcome.
 //
 // Run reads and writes the terminal through descriptions of its own, so the
 // flags of the ones the shell shares never change. Unless zmx's own reset is
@@ -140,9 +146,8 @@ func (o Outcome) Picker() bool {
 // to take that last write however long it takes.
 //
 // The attach is torn down however Run's goroutine leaves it, and a panic on
-// that goroutine, in Kill or Began say, is raised again once it is. A command
-// that switches sessions rather than attaching, or a config with no Kill, is
-// refused.
+// that goroutine, in Began or Confirm say, is raised again once it is. A
+// command that switches sessions rather than attaching is refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	if err := check(cfg); err != nil {
 		return Outcome{}, err
@@ -178,7 +183,7 @@ func (a *attach) run(ctx context.Context) (out Outcome, err error) {
 
 // interrupted is the end of an attach whose goroutine left await without one:
 // panicking with r, or, with r nil, exiting through runtime.Goexit. Like
-// every end but the child's own and a kill's, it detaches the child.
+// every end but the child's own, it detaches the child.
 func (a *attach) interrupted(r any) *ending {
 	end := ending{err: fmt.Errorf("attach session %q: Run's goroutine exited", a.cfg.Session), reason: "goexit"}
 	if r != nil {
@@ -196,8 +201,6 @@ func check(cfg Config) error {
 		return fmt.Errorf("attach session %q: the backend gave no command to run", cfg.Session)
 	case cfg.Command.Switches:
 		return fmt.Errorf("attach session %q: the command switches sessions instead of attaching", cfg.Session)
-	case cfg.Kill == nil:
-		return fmt.Errorf("attach session %q: no kill for the kill key", cfg.Session)
 	}
 	return nil
 }
@@ -273,32 +276,31 @@ func (a *attach) await(ctx context.Context) ending {
 	}
 }
 
-// act carries out an action, whatever asked for it. A kill that succeeds
-// leaves the child to end with the session; one that fails, or that Run
-// refuses, detaches it, so the picker can show why. A context that ends
-// during the kill ends the attach as it would anywhere else.
+// act carries out an action, whatever asked for it, detaching the child.
+// The kill key detaches as the detach key does, asking for the kill unless
+// Run, unsure of the session, refuses it, so the picker can show why. A
+// context that ends while Run confirms the session ends the attach as it
+// would anywhere else.
 func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	end := ending{out: Outcome{Action: action}, reason: action.String()}
 	if action == attachkeys.Kill {
-		end.out.Err = a.kill(ctx)
+		end.out.Err = a.refuseKill(ctx)
 		if ctx.Err() != nil {
 			end = cancelled(ctx)
-		} else if end.out.Err == nil {
-			return end
 		}
 	}
 	a.detach()
 	return end
 }
 
-// kill kills the session, once nothing leaves Run unsure the terminal shows
-// it.
-func (a *attach) kill(ctx context.Context) error {
+// refuseKill is why the kill key can't ask to kill the session, nil once
+// nothing leaves Run unsure the terminal shows it.
+func (a *attach) refuseKill(ctx context.Context) error {
 	if err := a.unconfirmed(ctx); err != nil {
 		logger.Debug("kill unconfirmed", "session", a.cfg.Session, "error", err)
 		return fmt.Errorf("kill refused: %w", ErrUnconfirmed)
 	}
-	return a.cfg.Kill(ctx, a.cfg.Session)
+	return nil
 }
 
 // admit is why Run won't take req, nil when it will: its asker has stopped

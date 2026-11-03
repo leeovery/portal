@@ -413,7 +413,12 @@ reaches the session untouched.
 |---|---|
 | `Alt+D` | Detach, back to the picker |
 | `Alt+Shift+D` | Detach, straight to the shell |
-| `Alt+Q` | Kill the session, back to the picker |
+| `Alt+Q` | Ask to kill the session: the picker opens on its kill prompt |
+
+On that prompt `y` kills the session and stays in the picker, `Esc` keeps it and stays in the
+picker, and `Enter` keeps it and attaches it again, so a stray `Alt+Q` costs a key, never a
+session. When Portal can't be sure the terminal still shows the session (a `zmx attach` typed
+inside it switched it), the picker opens without the prompt and says why.
 
 zmx's own `Ctrl+\` detaches too, and always to the shell. Portal detaches zmx through that key, so
 under Portal it can't be turned off: `ZMX_NO_DETACH_KEY` isn't honoured. When the session itself
@@ -449,7 +454,12 @@ the log and `xctl doctor` say why. Changes apply from the next attach.
 - With Caps Lock on, `Alt+D` arrives as `Alt+Shift+D` and detaches to the shell, and `Alt+Q`
   arrives as `Alt+Shift+Q` and reaches the session.
 - `Alt+<key>` is sent as Escape then the key. Over a slow link, an Escape typed just before a bound
-  letter can arrive the same way and count as the Alt key: Escape then `q` kills the session.
+  letter can arrive the same way and count as the Alt key: Escape then `q` opens the kill prompt.
+
+**Portal over ssh from a Portal session.** These keys act on the local session: the Portal you
+attached through catches them before ssh sees them, so a Portal on the remote machine gets none.
+Nothing is lost, since a detach only detaches and `Alt+Q` only asks. To drive the remote Portal's
+keys, bind other ones in the remote machine's `prefs.json`; the local Portal passes them through.
 
 ## Session Grouping & Tags
 

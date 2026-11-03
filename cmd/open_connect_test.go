@@ -207,7 +207,7 @@ func contextCommand() *cobra.Command {
 
 // assertAttached checks the one attach ran the session's attach command, its
 // environment and all, marked with the runner's token through the backend, on
-// Portal's own terminal, watching for keys and able to kill.
+// Portal's own terminal, watching for keys.
 func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	t.Helper()
 	cfg := rec.onlyRun(t)
@@ -223,8 +223,8 @@ func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	if cfg.In != os.Stdin || cfg.Out != os.Stdout {
 		t.Errorf("terminal = %v, %v; want Portal's stdin and stdout", cfg.In, cfg.Out)
 	}
-	if cfg.Scanner == nil || cfg.Kill == nil {
-		t.Errorf("scanner %v, kill set %v; want both", cfg.Scanner, cfg.Kill != nil)
+	if cfg.Scanner == nil {
+		t.Error("no scanner watches for Portal's keys")
 	}
 }
 

@@ -314,7 +314,6 @@ func TestRun_Began(t *testing.T) {
 			In:      tm.tty,
 			Out:     tm.tty,
 			Scanner: keys,
-			Kill:    noKill,
 			Began:   func() { called.Store(true) },
 		})
 

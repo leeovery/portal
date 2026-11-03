@@ -172,13 +172,17 @@ func (p *portalTerm) refusingAsAnotherVersion(t *testing.T) {
 }
 
 // awaitKillRefused presses the kill key in p's terminal, a runner zmx
-// switched away, and waits for the picker to show why it killed nothing.
+// switched away, and waits for the picker to show why it asks no kill, with
+// no kill prompt.
 func (p *portalTerm) awaitKillRefused(t *testing.T) {
 	t.Helper()
 	mark := p.mark()
 	p.typeIn(t, altQ)
 	p.awaitAfter(t, mark, pickerMark)
 	p.awaitAfter(t, mark, "kill refused")
+	if shown := p.shownSince(mark); strings.Contains(shown, killPrompt) {
+		t.Errorf("the picker asked to kill a session the terminal may not show:\n%s", shown)
+	}
 }
 
 func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
@@ -307,7 +311,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("a zmx inside a Portal attach switching its own client, as one over ssh does, leaves the kill key killing the session", func(t *testing.T) {
+	t.Run("a zmx inside a Portal attach switching its own client, as one over ssh does, leaves the kill key asking to kill the session", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		p, alpha := w.openProject(t)
 		p.awaitRunner(t, alpha)
@@ -328,10 +332,12 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		p.awaitRunner(t, alpha)
 		mark := p.mark()
 		p.typeIn(t, altQ)
+		p.awaitAfter(t, mark, killPrompt)
+		p.typeIn(t, "y")
 
 		p.awaitAfter(t, mark, pickerMark)
 		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return !w.alive(t, alpha) }) {
-			t.Errorf("%s outlived the kill key", alpha)
+			t.Errorf("%s outlived the kill prompt's y", alpha)
 		}
 		if shown := p.shownSince(mark); strings.Contains(shown, "kill refused") {
 			t.Errorf("the kill was refused:\n%s", shown)

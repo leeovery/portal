@@ -55,6 +55,9 @@ const (
 	// does when switched to another session, each time in two writes that
 	// split it, then acts as modeZmx.
 	modeSwitched = "switched"
+	// modeFrozenSwitched writes zmx's switch as modeSwitched does, then acts
+	// as modeFrozen.
+	modeFrozenSwitched = "frozenswitched"
 	// modeSpillThenSwitch writes lastOutput once it reads input, then, after
 	// switchLag, zmx's switch, then acts as modeZmx: the runner reads the
 	// switch apart from the output before it.
@@ -99,7 +102,7 @@ func fakeChild(mode string) int {
 	switch mode {
 	case modeStubborn:
 		signal.Ignore(syscall.SIGHUP)
-	case modeFrozen, modeHungUpClean:
+	case modeFrozen, modeFrozenSwitched, modeHungUpClean:
 		hup = notified(syscall.SIGHUP)
 	}
 	go func() {
@@ -116,6 +119,10 @@ func fakeChild(mode string) int {
 		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
 		select {}
 	case modeFrozen:
+		<-hup
+		return reportWaiting()
+	case modeFrozenSwitched:
+		writeSwitchTwice()
 		<-hup
 		return reportWaiting()
 	case modeBlob:
@@ -138,14 +145,20 @@ func fakeChild(mode string) int {
 		time.Sleep(switchLag)
 		write([]byte(switchSignature))
 	case modeSwitched:
-		for range 2 {
-			write([]byte(switchSignature[:10]))
-			time.Sleep(readDelay)
-			write([]byte(switchSignature[10:]))
-		}
+		writeSwitchTwice()
 	}
 	go reportSizes(winch)
 	return readInput(mode != modeDeaf && mode != modeStubborn && mode != modeHungUpClean)
+}
+
+// writeSwitchTwice writes zmx's switch twice, each time in two writes that
+// split it.
+func writeSwitchTwice() {
+	for range 2 {
+		write([]byte(switchSignature[:10]))
+		time.Sleep(readDelay)
+		write([]byte(switchSignature[10:]))
+	}
 }
 
 // setUpTerminal makes the child's terminal raw and, as zmx's is, its input

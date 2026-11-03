@@ -59,6 +59,9 @@ type pickerLanding struct {
 	// flash is a warning the picker opens on: why the attach that asked for it
 	// failed to do what was asked.
 	flash string
+	// kill is the session the kill key asked to kill from inside it: the
+	// picker opens on its kill prompt, which offers to attach it again.
+	kill string
 }
 
 // validateOpenArgs refuses a search form beside anything else, a command scoped
