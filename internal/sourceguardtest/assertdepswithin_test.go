@@ -23,6 +23,7 @@ const (
 	fixtureForbiddenPkg = fixtureModule + "/forbidden"
 
 	fixtureDefaultLanePkg = fixtureModule + "/defaultlane"
+	fixtureLinuxPkg       = fixtureModule + "/onlinux"
 )
 
 func TestAssertDepsWithin_ReportsEveryDepOutsideTheAllowlist(t *testing.T) {
@@ -196,6 +197,33 @@ func TestAssertDepsWithin_WithBuildTags(t *testing.T) {
 	})
 }
 
+func TestAssertDepsWithin_ForGOOS(t *testing.T) {
+	t.Run("it reports a forbidden dependency reachable only from a file for that GOOS, naming it", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureLinuxPkg, nil, InDir(dir), ForGOOS("linux")) })
+
+		if !errored(rec, fixtureForbiddenPkg) {
+			t.Errorf("AssertDepsWithin did not report %s, which the fixture reaches only from its _linux.go file; reported %v", fixtureForbiddenPkg, rec.Errors)
+		}
+		if !errored(rec, fixtureLinuxPkg+" under GOOS=linux") {
+			t.Errorf("the finding does not name the GOOS it was resolved for; reported %v", rec.Errors)
+		}
+	})
+
+	t.Run("it leaves that dependency out of another GOOS's reading", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureLinuxPkg, nil, InDir(dir), ForGOOS("darwin")) })
+
+		if rec.Failed() {
+			t.Errorf("the darwin reading faulted the fixture, so the linux one proves nothing: %s", rec.Report())
+		}
+	})
+}
+
 // stageTaggedFixtureModule writes a module holding both shapes a single-lane
 // dependency reading is blind to — one package reaching a third only from an
 // integration-tagged source, one reaching it only from a source gated against
@@ -220,6 +248,8 @@ func stageTaggedFixtureModule(t *testing.T) string {
 	write("defaultlane/defaultlane.go", "package defaultlane\n")
 	write("defaultlane/defaultlane_unit.go", "//go:build !"+IntegrationTag+"\n\npackage defaultlane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("lane/lane_integration.go", "//go:build "+IntegrationTag+"\n\npackage lane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
+	write("onlinux/onlinux.go", "package onlinux\n")
+	write("onlinux/onlinux_linux.go", "package onlinux\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("forbidden/forbidden.go", "package forbidden\n")
 	return dir
 }

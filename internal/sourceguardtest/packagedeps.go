@@ -1,6 +1,7 @@
 package sourceguardtest
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 
@@ -35,6 +36,13 @@ func WithBuildTags(tags ...string) DepsOption {
 	return func(cfg *depsConfig) { cfg.tags = tags }
 }
 
+// ForGOOS resolves the package as it builds for goos, so a guard can judge a
+// platform other than the one it runs on: a dependency reachable only from a
+// file constrained to another GOOS sits outside the host's reading.
+func ForGOOS(goos string) DepsOption {
+	return func(cfg *depsConfig) { cfg.goos = goos }
+}
+
 // Lanes are the build configurations this module compiles its tests in: the
 // default one, and the integration lane. A guard over a package's dependencies
 // runs over both, so a dependency reachable only from an integration-tagged
@@ -46,6 +54,7 @@ func Lanes() []DepsOption {
 type depsConfig struct {
 	dir                 string
 	tags                []string
+	goos                string
 	thirdPartyForbidden bool
 }
 
@@ -54,10 +63,17 @@ type depsConfig struct {
 // a finding is otherwise unreproducible, since the command a reader would run
 // to confirm it resolves a different set from the one that produced it.
 func (c depsConfig) lane() string {
-	if len(c.tags) == 0 {
+	var parts []string
+	if len(c.tags) > 0 {
+		parts = append(parts, "-tags "+strings.Join(c.tags, ","))
+	}
+	if c.goos != "" {
+		parts = append(parts, "GOOS="+c.goos)
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	return " under -tags " + strings.Join(c.tags, ",")
+	return " under " + strings.Join(parts, ", ")
 }
 
 func newDepsConfig(opts []DepsOption) depsConfig {
@@ -90,6 +106,9 @@ var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
 	}
 	cmd := exec.Command("go", append(args, pkg)...)
 	cmd.Dir = cfg.dir
+	if cfg.goos != "" {
+		cmd.Env = append(os.Environ(), "GOOS="+cfg.goos)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, &listError{output: string(out), err: err}

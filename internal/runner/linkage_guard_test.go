@@ -22,22 +22,29 @@ var detectingOrDrawing = []string{
 	"github.com/leeovery/portal/cmd/capturetool",
 }
 
+// released are the platforms Portal is built for, each judged whatever the
+// host, so a file constrained to one can't link the runner unseen.
+var released = []string{"darwin", "linux"}
+
 func TestOnlyWhatAttachesLinksTheRunner(t *testing.T) {
 	root := sourceguardtest.InDir(sourceguardtest.ProjectRoot(t))
-	for _, lane := range sourceguardtest.Lanes() {
-		// The runner's own set holds each forbidden path, so a renamed or
-		// mistyped one can't pass for ever.
-		own := sourceguardtest.PackageDeps(t, runnerPkg, root, lane)
-		for _, forbidden := range runnerOnly {
-			if !slices.Contains(own, forbidden) {
-				t.Fatalf("%s does not depend on %s, so this guard proves nothing about it", runnerPkg, forbidden)
-			}
-		}
-		for _, pkg := range detectingOrDrawing {
-			deps := sourceguardtest.PackageDeps(t, pkg, root, lane)
+	for _, goos := range released {
+		for _, lane := range sourceguardtest.Lanes() {
+			platform := sourceguardtest.ForGOOS(goos)
+			// The runner's own set holds each forbidden path, so a renamed or
+			// mistyped one can't pass for ever.
+			own := sourceguardtest.PackageDeps(t, runnerPkg, root, lane, platform)
 			for _, forbidden := range runnerOnly {
-				if slices.Contains(deps, forbidden) {
-					t.Errorf("%s depends on %s; it attaches nothing, so it must not link the runner", pkg, forbidden)
+				if !slices.Contains(own, forbidden) {
+					t.Fatalf("%s does not depend on %s for %s, so this guard proves nothing about it", runnerPkg, forbidden, goos)
+				}
+			}
+			for _, pkg := range detectingOrDrawing {
+				deps := sourceguardtest.PackageDeps(t, pkg, root, lane, platform)
+				for _, forbidden := range runnerOnly {
+					if slices.Contains(deps, forbidden) {
+						t.Errorf("%s depends on %s for %s; it attaches nothing, so it must not link the runner", pkg, forbidden, goos)
+					}
 				}
 			}
 		}
