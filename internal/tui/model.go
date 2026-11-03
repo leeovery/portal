@@ -327,6 +327,8 @@ type Model struct {
 	spawnGetenv   func(string) string
 	// Wrapped in log.OrDiscard at emit time, so nil never panics.
 	spawnLogger *slog.Logger
+	// multiWindowRefusal, when set, refuses multi-select at `m`.
+	multiWindowRefusal string
 
 	// burstTrigger/burstExternal are the net-N split (trigger = self-attach target)
 	// and burstTotal includes the trigger. The outcome travels on spawnCompleteMsg.
@@ -2760,6 +2762,10 @@ func multiSelectBlockedFlashText(id spawn.Identity) string {
 // being special-cased.
 func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	if !m.multiSelectMode {
+		if m.multiWindowRefusal != "" {
+			(&m).setFlash(m.multiWindowRefusal)
+			return m, flashTickCmd(m.flashGen)
+		}
 		// Proactive block: on a resolved-unsupported terminal `m` must not open a
 		// walkable dead-end mode whose Enter can never fire a burst. Detection
 		// unwired reports false here, so `m` still enters the mode.
@@ -2790,6 +2796,12 @@ func (m Model) handleMultiSelectToggle() (tea.Model, tea.Cmd) {
 	}
 	(&m).refreshSessionDelegate()
 	return m, nil
+}
+
+// WithMultiWindowRefusal makes `m` flash refusal instead of entering
+// multi-select; empty leaves multi-select on.
+func WithMultiWindowRefusal(refusal string) Option {
+	return func(m *Model) { m.multiWindowRefusal = refusal }
 }
 
 func (m Model) exitMultiSelect() Model {

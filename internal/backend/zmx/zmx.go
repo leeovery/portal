@@ -123,9 +123,11 @@ func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 // command keeps the caller's ZMX_SESSION, so zmx switches that session's
 // clients to name and exits at once instead of nesting. Anywhere else it
 // drops ZMX_SESSION, with which zmx attach would switch a session it cannot
-// reach, or another directory's session of the same name. Each session is
-// asked within a probe ceiling of its own, so a slow one cannot starve the
-// other.
+// reach, or another directory's session of the same name. It drops TMUX and
+// TMUX_PANE, as Create does: a session that ends between the probe and the
+// attach is made afresh by zmx attach, and must not take itself to be inside
+// the caller's tmux. Each session is asked within a probe ceiling of its own,
+// so a slow one cannot starve the other.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	if err := CheckAttach(name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
@@ -139,9 +141,9 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 	}
 	cmd := backend.Command{Argv: []string{b.binary, "attach", name}, Switches: switches}
 	if switches {
-		cmd.Env = b.env(envPrefix)
+		cmd.Env = b.env(envPrefix, envTmux, envTmuxPane)
 	} else {
-		cmd.Env = b.env(envPrefix, envSession)
+		cmd.Env = b.env(envPrefix, envSession, envTmux, envTmuxPane)
 	}
 	return cmd, nil
 }

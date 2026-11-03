@@ -65,7 +65,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	zmxBinary := zmxtest.Binary(t)
 
-	if err := b.Create(t.Context(), "api-x7Kd9a", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+	if _, err := b.Create(t.Context(), "api-x7Kd9a", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 		t.Fatalf("Create(api-x7Kd9a): %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 	})
 
 	t.Run("it names a refusing socket, a protocol-2 daemon and a silent one, and exits non-zero", func(t *testing.T) {
-		if err := b.Create(t.Context(), "wedged-Lp4s", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(t.Context(), "wedged-Lp4s", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(wedged-Lp4s): %v", err)
 		}
 		zmxtest.StopDaemon(t, b, "wedged-Lp4s")

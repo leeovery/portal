@@ -22,7 +22,7 @@ func TestPortalKillAgainstZmx(t *testing.T) {
 
 	workDir := t.TempDir()
 	for _, name := range []string{"api-x7Kd9a", "web-Qm3pLz"} {
-		if err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(%s): %v", name, err)
 		}
 		if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {

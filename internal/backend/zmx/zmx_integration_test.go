@@ -30,7 +30,7 @@ const settle = 5 * time.Second
 
 func mustCreate(t *testing.T, b *zmx.Backend, name, dir string, command ...string) {
 	t.Helper()
-	if err := b.Create(t.Context(), name, dir, command); err != nil {
+	if _, err := b.Create(t.Context(), name, dir, command); err != nil {
 		t.Fatalf("Create(%q): %v", name, err)
 	}
 }
@@ -172,7 +172,7 @@ func assertNotAnswering(t *testing.T, b *zmx.Backend, name string) {
 			t.Errorf("%s(%s) = %v, want ErrTimeout and not ErrNoSuchSession", call, name, err)
 		}
 	}
-	err := b.Create(ctx, name, t.TempDir(), []string{"sleep", "1000"})
+	_, err := b.Create(ctx, name, t.TempDir(), []string{"sleep", "1000"})
 	if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != name {
 		t.Errorf("Create(%s) = %v, want a SessionExistsError held as %s", name, err, name)
 	}
@@ -293,7 +293,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 		b := zmxtest.New(t)
 		mustCreate(t, b, "taken", t.TempDir(), "sleep", "1000")
 
-		err := b.Create(t.Context(), "taken", t.TempDir(), []string{"true"})
+		_, err := b.Create(t.Context(), "taken", t.TempDir(), []string{"true"})
 
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "taken" {
 			t.Errorf("Create over a live session = %v, want a SessionExistsError held as taken", err)
@@ -306,7 +306,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 	t.Run("it reports a session made even when its command exits at once", func(t *testing.T) {
 		b := zmxtest.New(t)
 
-		if err := b.Create(t.Context(), "brief", t.TempDir(), []string{"true"}); err != nil {
+		if _, err := b.Create(t.Context(), "brief", t.TempDir(), []string{"true"}); err != nil {
 			t.Errorf("Create of a command that exits at once = %v, want nil", err)
 		}
 	})
@@ -553,7 +553,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 		if exists, err := b.Exists(ctx, "FOO"); err != nil || exists {
 			t.Errorf("Exists(FOO) = %v, %v; want false", exists, err)
 		}
-		err := b.Create(ctx, "FOO", t.TempDir(), []string{"sleep", "1000"})
+		_, err := b.Create(ctx, "FOO", t.TempDir(), []string{"sleep", "1000"})
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "foo" {
 			t.Errorf("Create(FOO) = %v, want a SessionExistsError held as foo", err)
 		}
@@ -580,7 +580,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 		if err := b.Kill(ctx, nfc); !errors.Is(err, backend.ErrNoSuchSession) {
 			t.Errorf("Kill(NFC) = %v, want ErrNoSuchSession", err)
 		}
-		err := b.Create(ctx, nfc, t.TempDir(), []string{"sleep", "1000"})
+		_, err := b.Create(ctx, nfc, t.TempDir(), []string{"sleep", "1000"})
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != nfd {
 			t.Errorf("Create(NFC) = %v, want a SessionExistsError held as the NFD name", err)
 		}
@@ -629,7 +629,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 		if _, err := os.Lstat(socket); err != nil {
 			t.Errorf("the stale socket is gone after Portal's calls: %v; only zmx removes it", err)
 		}
-		if err := b.Create(ctx, "crashed", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(ctx, "crashed", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Errorf("Create over a stale socket = %v, want zmx to replace it", err)
 		}
 		if got := session(t, b, "crashed"); !got.Answered {
@@ -770,7 +770,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 	t.Run("it refuses zmx's log directory as a name", func(t *testing.T) {
 		b := zmxtest.New(t)
 
-		if err := b.Create(t.Context(), "logs", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+		if _, err := b.Create(t.Context(), "logs", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("Create(logs) = %v, want ErrInvalidName", err)
 		}
 	})

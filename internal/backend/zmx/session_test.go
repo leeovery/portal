@@ -300,11 +300,12 @@ func envValues(env []string, key string) []string {
 }
 
 func TestAttachCommand(t *testing.T) {
-	t.Run("it runs zmx attach on the session, pinned to the directory, without the caller's prefix", func(t *testing.T) {
+	t.Run("it runs zmx attach on the session, pinned to the directory, without the caller's prefix or tmux", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "work", answering(infoFrame(t)))
 		b := newBackendRunning(t, "/opt/zmx/bin/zmx", dir,
-			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty")
+			"PATH=/usr/bin:/bin", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION_PREFIX=pre-", "TERM=xterm-ghostty",
+			"TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
 
 		cmd, err := b.AttachCommand(t.Context(), "work")
 		if err != nil {
@@ -317,6 +318,8 @@ func TestAttachCommand(t *testing.T) {
 		for key, want := range map[string][]string{
 			"ZMX_DIR":            {dir},
 			"ZMX_SESSION_PREFIX": nil,
+			"TMUX":               nil,
+			"TMUX_PANE":          nil,
 			"PATH":               {"/usr/bin:/bin"},
 			"TERM":               {"xterm-ghostty"},
 		} {
@@ -349,9 +352,13 @@ func TestAttachCommand(t *testing.T) {
 			{"home in another case", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=HOME"}, false},
 		} {
 			t.Run("inside "+tt.inside, func(t *testing.T) {
-				cmd, err := newBackend(t, dir, tt.env...).AttachCommand(t.Context(), "work")
+				env := append(slices.Clone(tt.env), "TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
+				cmd, err := newBackend(t, dir, env...).AttachCommand(t.Context(), "work")
 				if err != nil {
 					t.Fatalf("AttachCommand: %v", err)
+				}
+				if got := append(envValues(cmd.Env, "TMUX"), envValues(cmd.Env, "TMUX_PANE")...); len(got) != 0 {
+					t.Errorf("Env carries the caller's tmux: %q", got)
 				}
 
 				var want []string

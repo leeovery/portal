@@ -16,7 +16,7 @@ import (
 
 func mustCreate(t *testing.T, b *zmx.Backend, name string) {
 	t.Helper()
-	if err := b.Create(t.Context(), name, t.TempDir(), []string{"sleep", "1000"}); err != nil {
+	if _, err := b.Create(t.Context(), name, t.TempDir(), []string{"sleep", "1000"}); err != nil {
 		t.Fatalf("Create(%s): %v", name, err)
 	}
 }

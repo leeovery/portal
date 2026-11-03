@@ -54,7 +54,9 @@ func buildOpenBurstDeps(cmd *cobra.Command) *OpenBurstDeps {
 		deps.Resolve = sharedSeams().Resolve
 	}
 	if deps.Connector == nil {
-		deps.Connector = buildSessionConnector(tmuxClient(cmd))
+		deps.Connector = connectorFunc(func(name string) error {
+			return openSessionFunc(cmd, name)
+		})
 	}
 	if deps.ExePath == nil {
 		deps.ExePath = sharedSeams().Exe

@@ -131,14 +131,17 @@ type Backend interface {
 	// name. A session it can tell neither live nor gone is ErrTimeout.
 	Exists(ctx context.Context, name string) (bool, error)
 	// Create starts a detached session running command in dir, with no
-	// terminal attached. An empty command runs the user's shell. It returns
-	// nil only once the backend reports it made the session, whatever the
+	// terminal attached. An empty command runs the user's shell. It succeeds
+	// only once the backend reports it made the session, whatever the
 	// command does next: a command that exits at once still made a session.
-	// A held name, including one held under another case or normalisation,
-	// is refused with a *SessionExistsError. The check and the creation are
-	// not atomic: a concurrent creator of the same name can win, and this
-	// call then briefly attaches to its session and returns the same refusal.
-	Create(ctx context.Context, name, dir string, command []string) error
+	// It returns the session as the new session answers, as List would
+	// report it; one that has already ended, or does not answer in time, is
+	// returned with only its name. A held name, including one held under
+	// another case or normalisation, is refused with a *SessionExistsError.
+	// The check and the creation are not atomic: a concurrent creator of the
+	// same name can win, and this call then briefly attaches to its session
+	// and returns the same refusal.
+	Create(ctx context.Context, name, dir string, command []string) (Session, error)
 	// AttachCommand is the process that attaches the caller's terminal to the
 	// live session of exactly this name, or, run inside a session, switches
 	// that session's clients to it, as its Switches says.
