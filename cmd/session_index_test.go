@@ -182,3 +182,45 @@ func TestReadSessionIndex(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateSessionIndex(t *testing.T) {
+	t.Run("it writes a change to the index in the state directory", func(t *testing.T) {
+		dir := isolateStateDir(t)
+
+		err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+			return idx.SetLabel("api-x7Kd9a", "api")
+		})
+		if err != nil {
+			t.Fatalf("updateSessionIndex: %v", err)
+		}
+		idx, err := sessionindex.Read(dir)
+		if err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		if got := idx.Label("api-x7Kd9a"); got != "api" {
+			t.Errorf("label = %q, want %q", got, "api")
+		}
+	})
+
+	t.Run("it refuses a version 1 index with the migrate line and writes nothing", func(t *testing.T) {
+		dir := isolateStateDir(t)
+		path := sessionindex.Path(dir)
+		if err := os.WriteFile(path, []byte(legacyIndexBody), 0o600); err != nil {
+			t.Fatalf("seed legacy index: %v", err)
+		}
+
+		err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+			return idx.SetLabel("api-x7Kd9a", "api")
+		})
+		if !errors.Is(err, sessionindex.ErrLegacyIndex) || !strings.Contains(err.Error(), "portal migrate") {
+			t.Fatalf("err = %v, want the legacy-index refusal naming portal migrate", err)
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read legacy index: %v", readErr)
+		}
+		if string(data) != legacyIndexBody {
+			t.Errorf("legacy index rewritten to %s", data)
+		}
+	})
+}

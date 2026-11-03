@@ -42,6 +42,21 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 	return idx, nil
 }
 
+// updateSessionIndex runs fn on the state directory's index under the commit
+// lock, writing it back when fn changed something. via is cli, tui or
+// internal.
+func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
+	dir, err := state.Dir()
+	if err != nil {
+		return err
+	}
+	err = sessionindex.Update(dir, via, fn)
+	if errors.Is(err, sessionindex.ErrLegacyIndex) {
+		return legacyIndexError{path: sessionindex.Path(dir)}
+	}
+	return err
+}
+
 // refuseUnusableState stops a command while the state directory holds an
 // index this version must not touch: a version 1 sessions.json, or one that is
 // corrupt or from a newer version. A missing one passes. So does one that
