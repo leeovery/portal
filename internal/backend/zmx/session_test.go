@@ -478,15 +478,30 @@ func TestExists(t *testing.T) {
 
 func TestCurrent(t *testing.T) {
 	t.Run("it reads ZMX_SESSION, the last entry winning", func(t *testing.T) {
-		b := newBackend(t, socketDir(t), "ZMX_SESSION=first", "PATH=/bin", "ZMX_SESSION=work")
+		dir := socketDir(t)
+		b := newBackend(t, dir, "ZMX_SESSION=first", "PATH=/bin", "ZMX_DIR="+dir, "ZMX_SESSION=work")
 		if got := b.Current(); got != "work" {
 			t.Errorf("Current = %q, want work", got)
 		}
 	})
 
 	t.Run("it is empty outside a session", func(t *testing.T) {
-		if got := newBackend(t, socketDir(t), "PATH=/bin").Current(); got != "" {
+		dir := socketDir(t)
+		if got := newBackend(t, dir, "PATH=/bin", "ZMX_DIR="+dir).Current(); got != "" {
 			t.Errorf("Current = %q, want empty", got)
+		}
+	})
+
+	t.Run("it is empty in a session of another directory", func(t *testing.T) {
+		for name, environ := range map[string][]string{
+			"another ZMX_DIR":       {"ZMX_SESSION=work", "ZMX_DIR=/tmp/zx-other"},
+			"zmx's default instead": {"ZMX_SESSION=work", "TMPDIR=/var/t"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				if got := newBackend(t, socketDir(t), environ...).Current(); got != "" {
+					t.Errorf("Current = %q, want empty", got)
+				}
+			})
 		}
 	})
 }
@@ -707,19 +722,9 @@ func TestDirFor(t *testing.T) {
 
 func TestReachEnv(t *testing.T) {
 	dir := t.TempDir()
-	for _, tt := range []struct {
-		name    string
-		environ []string
-		want    []string
-	}{
-		{"the bound directory over the environment's own", []string{"ZMX_DIR=/elsewhere"}, []string{"ZMX_DIR=" + dir}},
-		{"the session prefix when set", []string{"ZMX_SESSION_PREFIX=work-"}, []string{"ZMX_DIR=" + dir, "ZMX_SESSION_PREFIX=work-"}},
-		{"the session prefix set empty", []string{"ZMX_SESSION_PREFIX="}, []string{"ZMX_DIR=" + dir, "ZMX_SESSION_PREFIX="}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := newBackend(t, dir, tt.environ...).ReachEnv(); !slices.Equal(got, tt.want) {
-				t.Errorf("ReachEnv = %q, want %q", got, tt.want)
-			}
-		})
+	env := []string{"ZMX_DIR=/elsewhere", "ZMX_SESSION_PREFIX=work-"}
+
+	if got, want := newBackend(t, dir, env...).ReachEnv(), []string{"ZMX_DIR=" + dir}; !slices.Equal(got, want) {
+		t.Errorf("ReachEnv = %q, want %q: the bound directory alone", got, want)
 	}
 }

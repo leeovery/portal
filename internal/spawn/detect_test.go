@@ -14,6 +14,7 @@ import (
 const (
 	wantMsgResolved   = "detection resolved host terminal"
 	wantMsgNullBundle = "detection resolved no host-local terminal"
+	wantMsgUnsure     = "detection could not tell the host terminal"
 	wantMsgTransient  = "detection transient failure"
 )
 
@@ -103,8 +104,8 @@ func TestDetectorDetect(t *testing.T) {
 			t.Fatalf("identity = %+v, want an unsure NULL for two raw clients", got)
 		}
 		rec := sink.Records().Only(t, "log record")
-		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgNullBundle {
-			t.Errorf("record = %v %q, want INFO %q", rec.Level, rec.Msg, wantMsgNullBundle)
+		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgUnsure {
+			t.Errorf("record = %v %q, want INFO %q", rec.Level, rec.Msg, wantMsgUnsure)
 		}
 		want := `inside-session raw client walk: no one terminal leads the session: 2 of 2 zmx attach processes on session "dev" can be its leader, want 1`
 		if v := rec.AttrString(t, "detail"); v != want {

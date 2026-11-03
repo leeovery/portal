@@ -11,7 +11,7 @@ import (
 func realAttachArgv() []string {
 	return composeOpenArgv(
 		"/abs/portal",
-		[]string{"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/zmx dir"},
+		WindowEnvironment{Set: []string{"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/zmx dir"}},
 		Surface{Kind: SurfaceAttach, Value: "proj-abc123"},
 		"batch1", "tok1",
 		nil,
@@ -21,7 +21,7 @@ func realAttachArgv() []string {
 func mintArgvWithSpecials() []string {
 	return composeOpenArgv(
 		"/abs/portal",
-		[]string{"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/zmx dir"},
+		WindowEnvironment{Set: []string{"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/zmx dir"}},
 		Surface{Kind: SurfaceMint, Value: "/abs/dir"},
 		"batch1", "tok1",
 		[]string{`echo 'a';$x"b"`},

@@ -76,6 +76,16 @@ func TestClientEnvMatches(t *testing.T) {
 		})
 	}
 
+	t.Run("a variable the leader has set empty must be set in the client", func(t *testing.T) {
+		leader := backend.ClientEnv{{Name: "DISPLAY", Value: ""}}
+		if leader.Matches([]string{"HOME=/h"}) {
+			t.Error("a leader with DISPLAY set empty matched a client lacking DISPLAY")
+		}
+		if !leader.Matches([]string{"DISPLAY="}) {
+			t.Error("a leader with DISPLAY set empty did not match a client with it set empty")
+		}
+	})
+
 	t.Run("a remote leader never matches a local client", func(t *testing.T) {
 		remote := backend.ClientEnv{{Name: "SSH_CONNECTION", Value: "10.0.0.2 52000 10.0.0.1 22"}}
 		if remote.Matches([]string{"HOME=/h"}) {

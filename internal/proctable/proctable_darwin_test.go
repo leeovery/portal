@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 func TestReadsThisProcess(t *testing.T) {
@@ -120,6 +121,30 @@ func TestReadArgsTellsAGoneProcess(t *testing.T) {
 			t.Errorf("ReadArgs(launchd) = %v, want an error other than ErrGone", err)
 		}
 	})
+}
+
+func TestGoneFrom(t *testing.T) {
+	listed := func(stat int8, flag int32) []unix.KinfoProc {
+		var p unix.KinfoProc
+		p.Proc.P_stat, p.Proc.P_flag = stat, flag
+		return []unix.KinfoProc{p}
+	}
+	const running, flags = 2, 0x4006
+	for name, tc := range map[string]struct {
+		procs []unix.KinfoProc
+		want  bool
+	}{
+		"not listed":           {procs: nil, want: true},
+		"a zombie":             {procs: listed(zombie, flags), want: true},
+		"running, exiting":     {procs: listed(running, flags|exiting), want: true},
+		"running, not exiting": {procs: listed(running, flags), want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := goneFrom(tc.procs); got != tc.want {
+				t.Errorf("goneFrom = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestListTellsWhetherAProcessHasATerminal(t *testing.T) {

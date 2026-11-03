@@ -108,18 +108,11 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	spawnAdapter = func(spawn.Adapter) spawn.Adapter { return poisonedAdapter{} }
+	spawn.PoisonAdaptersForTest()
 
 	code := m.Run()
 	if err := os.RemoveAll(homeDir); err != nil {
 		fmt.Fprintf(os.Stderr, "cmd tests: removing the package-wide temp HOME: %v\n", err)
 	}
 	os.Exit(code)
-}
-
-// poisonedAdapter stands in for every production terminal adapter.
-type poisonedAdapter struct{}
-
-func (poisonedAdapter) OpenWindow(command []string) spawn.Result {
-	panic(fmt.Sprintf("cmd tests: a production adapter asked the terminal for a window: %q", command))
 }

@@ -38,7 +38,7 @@ func resolveSweepRetentionDays(forcedDays *int) int {
 		return *forcedDays
 	}
 
-	retentionDays, source, raw := resolveRetentionDays(os.Getenv("PORTAL_LOG_RETENTION_DAYS"))
+	retentionDays, source, raw := resolveRetentionDays(os.Getenv(retentionDaysVar))
 	if source == sourceFallback {
 		rotateLogger.Warn("invalid PORTAL_LOG_RETENTION_DAYS", "raw", raw, "retention", retentionDays)
 	}

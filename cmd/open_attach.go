@@ -249,7 +249,7 @@ func ackOnce(cmd *cobra.Command) func() {
 	writer := buildAckWriter()
 	return sync.OnceFunc(func() {
 		if err := writer.Write(receipt.batch, receipt.token); err != nil {
-			spawnLogger.Debug("spawn ack write failed", "batch", receipt.batch, "error", err)
+			spawnLogger.Warn("spawn ack write failed", "batch", receipt.batch, "error", err)
 		}
 	})
 }

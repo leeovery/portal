@@ -117,7 +117,7 @@ func TestOpen_AckReceipt(t *testing.T) {
 		}
 	})
 
-	t.Run("a write that fails still attaches, and says so at DEBUG", func(t *testing.T) {
+	t.Run("a write that fails still attaches, and warns, since its burst counts the window failed", func(t *testing.T) {
 		sink := logtest.Install(t)
 		cmd, _, rec, acks := stageAck(t, "b1:t1")
 		acks.err = errors.New("read-only file system")
@@ -129,7 +129,7 @@ func TestOpen_AckReceipt(t *testing.T) {
 		if len(rec.runs) != 1 {
 			t.Errorf("runs = %d, want the attach", len(rec.runs))
 		}
-		rec2 := sink.Records().Matching("spawn", "spawn ack write failed").AtExactLevel(slog.LevelDebug).Only(t, "ack write record")
+		rec2 := sink.Records().Matching("spawn", "spawn ack write failed").AtExactLevel(slog.LevelWarn).Only(t, "ack write record")
 		if rec2.AttrString(t, "batch") != "b1" || rec2.AttrString(t, "error") != acks.err.Error() {
 			t.Errorf("record = %+v, want the batch and the error", rec2)
 		}

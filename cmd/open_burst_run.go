@@ -120,9 +120,10 @@ func runOpenBurstWithDeps(cmd *cobra.Command, surfaces []spawn.Surface, command 
 		return err
 	}
 
-	// Cleaned before the trigger handoff, which may never return. Best-effort:
-	// an ack left behind goes once stale, with a later burst's Clean.
-	_ = deps.Ack.Clean(batch)
+	// Cleaned before the trigger handoff, which may never return.
+	if err := deps.Ack.Clean(batch); err != nil {
+		spawn.LogAckCleanFailed(deps.Logger, batch, err)
+	}
 
 	// The trigger's self-connect below is independent of these outcomes: its target
 	// is unrelated to the externals', so reporting must not gate it. This diverges

@@ -11,9 +11,33 @@ import (
 	"github.com/leeovery/portal/internal/log"
 )
 
+// AdapterSandboxEnv names, in an integration build, the directories whose
+// programs an adapter may run, list-separated; every other program is refused.
+// Every other build ignores it.
+const AdapterSandboxEnv = "PORTAL_TEST_ADAPTER_DIRS"
+
 // runAdapterArgv runs the command an adapter hands a terminal app: the one
-// place a window is asked for. spawn's TestMain poisons it.
-var runAdapterArgv = runArgvCombined
+// place a window is asked for. PoisonAdaptersForTest replaces it.
+var runAdapterArgv = runSandboxedArgv
+
+// runSandboxedArgv runs argv once the adapter sandbox, present in integration
+// builds alone, allows it.
+func runSandboxedArgv(argv []string) (string, int, error) {
+	if err := adapterSandbox(argv); err != nil {
+		return "", 0, err
+	}
+	return runArgvCombined(argv)
+}
+
+// PoisonAdaptersForTest makes every adapter panic as it asks the terminal for
+// a window, for the TestMain of a package whose tests reach detection: it
+// walks a test's ancestry to the developer's own terminal, whatever the
+// environment says.
+func PoisonAdaptersForTest() {
+	runAdapterArgv = func(argv []string) (string, int, error) {
+		panic(fmt.Sprintf("a test's adapter asked the terminal for a window: %q", argv))
+	}
+}
 
 // runArgvCombined runs argv in Portal's environment without the variables no
 // window may inherit.

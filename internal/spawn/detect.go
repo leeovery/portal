@@ -16,6 +16,7 @@ var spawnLogger = log.For("spawn")
 const (
 	msgDetectionResolved   = "detection resolved host terminal"
 	msgDetectionNullBundle = "detection resolved no host-local terminal"
+	msgDetectionUnsure     = "detection could not tell the host terminal"
 	msgDetectionTransient  = "detection transient failure"
 )
 
@@ -77,8 +78,7 @@ func NewDetector(sessions SessionReader, runners RunnerLocator, clients ClientLi
 // Detect emits exactly one spawn-component record. A transient failure, and a
 // session whose leading terminal can't be told, fold to the unsure NULL
 // identity — the same unsupported no-op path as a clean NULL, worded apart —
-// the first with a WARN, the second with the INFO a clean NULL gets, saying
-// why.
+// the first with a WARN, the second with an INFO of its own saying why.
 func (d *Detector) Detect() Identity {
 	id, route, err := d.resolve()
 
@@ -87,7 +87,7 @@ func (d *Detector) Detect() Identity {
 		d.logger.Warn(msgDetectionTransient, "detail", err.Error())
 		return Identity{Unsure: true}
 	case err != nil:
-		d.logger.Info(msgDetectionNullBundle, "detail", route+": "+err.Error())
+		d.logger.Info(msgDetectionUnsure, "detail", route+": "+err.Error())
 		return Identity{Unsure: true}
 	case !id.IsNull():
 		d.logger.Info(msgDetectionResolved, "terminal", id.Name, "bundle_id", id.BundleID, "detail", route)

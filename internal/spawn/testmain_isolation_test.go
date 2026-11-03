@@ -10,7 +10,6 @@ package spawn
 // panics rather than open a window there.
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
@@ -31,20 +30,17 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
-	runAdapterArgv = poisonedAdapterArgv
+	PoisonAdaptersForTest()
 	os.Exit(m.Run())
 }
 
-func poisonedAdapterArgv(argv []string) (string, int, error) {
-	panic(fmt.Sprintf("spawn tests: a production adapter asked the terminal for a window: %q", argv))
-}
-
-// realAdapterExec lets the production adapter boundary run for the rest of t,
-// for a test whose adapter runs only programs of the test's own.
+// realAdapterExec lets the adapter boundary run for the rest of t, for a test
+// whose adapter runs only programs of the test's own.
 func realAdapterExec(t *testing.T) {
 	t.Helper()
+	poisoned := runAdapterArgv
 	runAdapterArgv = runArgvCombined
-	t.Cleanup(func() { runAdapterArgv = poisonedAdapterArgv })
+	t.Cleanup(func() { runAdapterArgv = poisoned })
 }
 
 func TestTheProductionAdaptersArePoisoned(t *testing.T) {

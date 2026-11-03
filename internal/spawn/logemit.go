@@ -71,6 +71,12 @@ func LogUnsupported(logger *slog.Logger, id Identity) {
 	)
 }
 
+// LogAckCleanFailed is a burst's acks left behind: each goes once stale, with
+// a later burst's clean.
+func LogAckCleanFailed(logger *slog.Logger, batch string, err error) {
+	log.OrDiscard(logger).Warn("spawn ack clean failed", "batch", batch, "error", err)
+}
+
 // LogGone carries no resolution or count attrs: detection never ran.
 func LogGone(logger *slog.Logger, gone []string) {
 	log.OrDiscard(logger).Info(GoneMessage(gone))

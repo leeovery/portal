@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/shellquote"
+	"github.com/leeovery/portal/internal/spawn"
 )
 
 // recipeTerminal is the identity of a terminal of the test's own: a
@@ -21,8 +22,9 @@ import (
 // terminal app runs it in a new window.
 const recipeTerminal = "com.example.PortalTestTerm"
 
-// withRecipeTerminal makes the world's portal run under recipeTerminal, and
-// returns the directory its script leaves each window's command in.
+// withRecipeTerminal makes the world's portal run under recipeTerminal, its
+// script the one program the adapter sandbox lets it run, and returns the
+// directory the script leaves each window's command in.
 func (w *portalWorld) withRecipeTerminal(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -44,7 +46,7 @@ func (w *portalWorld) withRecipeTerminal(t *testing.T) string {
 	if err := os.WriteFile(terminals, recipes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	w.env = append(w.env, "PORTAL_TERMINALS_FILE="+terminals, "__CFBundleIdentifier="+recipeTerminal)
+	w.env = append(w.env, "PORTAL_TERMINALS_FILE="+terminals, "__CFBundleIdentifier="+recipeTerminal, spawn.AdapterSandboxEnv+"="+dir)
 	return requests
 }
 
@@ -138,6 +140,27 @@ func TestOpenBurst_AWindowResolvesWhatItsOpenerDid(t *testing.T) {
 		if entries, err := os.ReadDir(decoy); err != nil || len(entries) != 0 {
 			t.Errorf("the window resolved by its own environment: %s holds %v, %v", decoy, entries, err)
 		}
+	}
+}
+
+// A portal binary a test builds walks to the developer's own terminal, so it
+// runs no adapter program the test hasn't allowed: here the recipe's own.
+func TestOpenBurst_ABinaryRunsNoAdapterProgramATestDidNotAllow(t *testing.T) {
+	binary := buildPortalBinary(t)
+	w := newPortalWorld(t, binary)
+	requests := w.withRecipeTerminal(t)
+	w.env = append(w.env, spawn.AdapterSandboxEnv+"=")
+	w.create(t, "api-x7Kd9a")
+	w.create(t, "blog-c3d4")
+
+	opener := w.portal(t, "open", "-s", "api-x7Kd9a", "-s", "blog-c3d4")
+
+	opener.awaitRunner(t, "api-x7Kd9a")
+	if asked, _ := filepath.Glob(filepath.Join(requests, "*")); len(asked) != 0 {
+		t.Errorf("the recipe ran, asked for %q", asked)
+	}
+	if log := portaltest.ReadPortalLogSafe(w.stateDir); !strings.Contains(log, "adapter sandbox") {
+		t.Errorf("portal.log does not say the sandbox refused the recipe:\n%s", log)
 	}
 }
 

@@ -877,6 +877,7 @@ func TestDoctorDetectsThroughTheZmxDirItJudges(t *testing.T) {
 			t.Setenv("ZMX_SESSION", "dev")
 			deps := healthyDoctorDeps(t)
 			deps.Detector, deps.Resolve = nil, nil
+			t.Setenv("ZMX_DIR", deps.ZmxDir)
 
 			_, _, _ = runDoctorWith(t, deps, args...)
 
@@ -894,5 +895,30 @@ func TestDoctorDetectsThroughTheZmxDirItJudges(t *testing.T) {
 				t.Errorf("zmx dir holds %v, %v after doctor; want it untouched", entries, err)
 			}
 		})
+	}
+}
+
+// A session of another zmx directory is none of the one doctor judges, so
+// doctor detects as from outside a session, with no WARN for what is the
+// environment's state.
+func TestDoctorDetectsFromOutsideInASessionOfAnotherZmxDir(t *testing.T) {
+	sink := logtest.Install(t)
+	t.Setenv("ZMX_SESSION", "dev")
+	deps := healthyDoctorDeps(t)
+	deps.Detector, deps.Resolve = nil, nil
+
+	_, _, _ = runDoctorWith(t, deps)
+
+	if warns := sink.Records().Matching("spawn", "detection transient failure"); len(warns) != 0 {
+		t.Errorf("doctor warned %+v for a session of another zmx dir", warns)
+	}
+	var routes []string
+	for _, rec := range sink.Records() {
+		if rec.HasAttr("detail") && strings.HasPrefix(rec.Msg, "detection") {
+			routes = append(routes, rec.AttrString(t, "detail"))
+		}
+	}
+	if len(routes) != 1 || !strings.HasPrefix(routes[0], "outside-session") {
+		t.Errorf("detection details = %q, want one, from outside a session", routes)
 	}
 }

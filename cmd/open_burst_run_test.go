@@ -108,7 +108,9 @@ func openBurstDepsForTest(id spawn.Identity, resolution spawn.Resolution, adapte
 		Resolve:   func(spawn.Identity) (spawn.Adapter, spawn.Resolution) { return adapter, resolution },
 		Connector: conn,
 		ExePath:   func() (string, error) { return spawnPipelineExe, nil },
-		Env:       func() ([]string, error) { return []string{"PATH=" + spawnPipelinePATH}, nil },
+		Env: func() (spawn.WindowEnvironment, error) {
+			return spawn.WindowEnvironment{Set: []string{"PATH=" + spawnPipelinePATH}}, nil
+		},
 		Ack:       &spawntest.FakeAckChannel{},
 		Logger:    nil, // spawn.LogUnsupported is nil-tolerant (log.OrDiscard).
 		LocalMint: mint,
@@ -969,5 +971,29 @@ func TestRunOpenBurst_PerWindowAckTimeout_TimedFromOwnSpawn(t *testing.T) {
 	}
 	if !slices.Equal(conn.calls, []string{"trig"}) {
 		t.Errorf("self-connect targets = %#v, want exactly [trig]", conn.calls)
+	}
+}
+
+func TestRunOpenBurst_ACleanThatFailsWarns(t *testing.T) {
+	inner := &spawntest.FakeAdapter{}
+	ack := &spawntest.FakeAckChannel{FailClean: errors.New("read-only file system")}
+	conn := &cleanOrderConnector{ack: ack}
+	mint := &recordingMint{events: &openBurstEvents{}}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, inner, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, &manualClock{})
+
+	surfaces := []spawn.Surface{{Kind: spawn.SurfaceAttach, Value: "trig"}, {Kind: spawn.SurfaceAttach, Value: "e1"}}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rec := sink.Records().Matching("spawn", "spawn ack clean failed").AtExactLevel(slog.LevelWarn).Only(t, "clean record")
+	if rec.AttrString(t, "batch") != ack.Cleaned[0] || rec.AttrString(t, "error") != ack.FailClean.Error() {
+		t.Errorf("record = %+v, want the batch and the error", rec)
+	}
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want the trigger all the same", conn.calls)
 	}
 }

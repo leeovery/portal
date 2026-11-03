@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
@@ -41,7 +43,7 @@ func buildProductionSpawnSeams(ctx context.Context, b backend.Backend, runners s
 	}
 	return productionSpawnSeams{
 		Detector: spawn.NewDetector(b, runners, clients),
-		Resolve:  resolveThroughSeam(buildResolver()),
+		Resolve:  buildResolver().Resolve,
 		Ack:      stateAcks{},
 		Exe:      os.Executable,
 		Env:      windowEnv(b),
@@ -60,51 +62,75 @@ type sessionReach interface {
 }
 
 // windowEnv is what a spawned window's portal resolves by, so that it finds
-// the sessions, state and config its opener did whatever the window's shell
-// sets: this process's PATH, the state directory as resolved here, what b
-// needs to reach its sessions, and each of Portal's path variables this
-// process has set, set empty included.
+// the sessions, state, config and log its opener did whatever the window's
+// shell sets: this process's PATH, the state directory as resolved here, what
+// b needs to reach its sessions, and each of Portal's path and logging
+// variables as this process has it — a path made absolute against this
+// process's directory, since the window starts in another, and one this
+// process lacks unset.
 func windowEnv(b backend.Backend) spawn.WindowEnv {
-	return func() ([]string, error) {
+	return func() (spawn.WindowEnvironment, error) {
+		var env spawn.WindowEnvironment
 		stateDir, err := state.Dir()
-		if err != nil {
-			return nil, err
+		if err == nil {
+			stateDir, err = filepath.Abs(stateDir)
 		}
-		env := []string{"PATH=" + os.Getenv("PATH"), xdg.StateDir.EnvVar + "=" + stateDir}
+		if err != nil {
+			return env, err
+		}
+		env.Set = []string{"PATH=" + os.Getenv("PATH"), xdg.StateDir.EnvVar + "=" + stateDir}
 		if r, ok := b.(sessionReach); ok {
-			env = append(env, r.ReachEnv()...)
+			env.Set = append(env.Set, r.ReachEnv()...)
 		}
 		for _, name := range xdg.Variables() {
-			if value, set := os.LookupEnv(name); set && name != xdg.StateDir.EnvVar {
-				env = append(env, name+"="+value)
+			if name == xdg.StateDir.EnvVar {
+				continue
+			}
+			if err := carry(&env, name, absolutePath); err != nil {
+				return env, err
+			}
+		}
+		for _, name := range log.Variables() {
+			if err := carry(&env, name, verbatim); err != nil {
+				return env, err
 			}
 		}
 		return env, nil
 	}
 }
 
+// carry sets name in env to this process's value as resolve has it, or unsets
+// it when this process doesn't have it set.
+func carry(env *spawn.WindowEnvironment, name string, resolve func(string) (string, error)) error {
+	value, set := os.LookupEnv(name)
+	if !set {
+		env.Unset = append(env.Unset, name)
+		return nil
+	}
+	value, err := resolve(value)
+	if err != nil {
+		return fmt.Errorf("carry %s to a window: %w", name, err)
+	}
+	env.Set = append(env.Set, name+"="+value)
+	return nil
+}
+
+// absolutePath is path made absolute against this process's directory; set
+// empty, it stays empty, as Portal reads it unset.
+func absolutePath(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	return filepath.Abs(path)
+}
+
+func verbatim(value string) (string, error) { return value, nil }
+
 // noClients finds no zmx client of any session, so detection inside a
 // session no runner leads refuses.
 type noClients struct{}
 
 func (noClients) AttachClients(string) ([]backend.ClientProcess, error) { return nil, nil }
-
-// spawnAdapter is what a resolved terminal opens its windows through: the
-// resolver's own adapter in production. cmd's TestMain poisons it, since
-// detection walks a test's ancestry to the developer's own terminal.
-var spawnAdapter = func(a spawn.Adapter) spawn.Adapter { return a }
-
-// resolveThroughSeam is r's resolution, its adapter passed through
-// spawnAdapter.
-func resolveThroughSeam(r *spawn.Resolver) spawn.AdapterResolver {
-	return func(id spawn.Identity) (spawn.Adapter, spawn.Resolution) {
-		adapter, resolution := r.Resolve(id)
-		if adapter == nil {
-			return nil, resolution
-		}
-		return spawnAdapter(adapter), resolution
-	}
-}
 
 // Fails safe: an unresolvable config path degrades to an empty config —
 // native-only resolution — rather than disabling the feature outright.

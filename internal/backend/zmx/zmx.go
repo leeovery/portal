@@ -107,14 +107,10 @@ func New(cfg Config) (*Backend, error) {
 func (b *Backend) Dir() string { return b.dir }
 
 // ReachEnv is the environment another process needs to reach the sessions b
-// does: b's directory, and the session-name prefix when b's environment sets
-// one, set empty included.
+// does: b's directory. Every zmx Portal runs has ZMX_SESSION_PREFIX removed,
+// so no prefix is needed.
 func (b *Backend) ReachEnv() []string {
-	env := []string{envDir + "=" + b.dir}
-	if prefix, ok := lookupSet(b.environ(), envPrefix); ok {
-		env = append(env, envPrefix+"="+prefix)
-	}
-	return env
+	return []string{envDir + "=" + b.dir}
 }
 
 // Session asks the session held under exactly name for its Info record, within
@@ -183,9 +179,8 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 // would switch the caller's session: one that answers in the zmx directory
 // that environment names, when that is the Backend's own.
 func (b *Backend) switches(ctx context.Context) bool {
-	env := b.environ()
-	current := lookup(env, envSession)
-	if current == "" || filepath.Clean(DirFor(env)) != b.dir {
+	current := b.Current()
+	if current == "" {
 		return false
 	}
 	_, err := b.askWithin(ctx, current)
@@ -281,9 +276,15 @@ func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, e
 	return vt, nil
 }
 
-// Current reads ZMX_SESSION, which zmx sets in every session's processes.
+// Current reads ZMX_SESSION, which zmx sets in every session's processes,
+// when the environment's zmx directory is the Backend's: a session in another
+// directory is none of the Backend's.
 func (b *Backend) Current() string {
-	return CurrentFor(b.environ())
+	env := b.environ()
+	if filepath.Clean(DirFor(env)) != b.dir {
+		return ""
+	}
+	return CurrentFor(env)
 }
 
 // CurrentFor is the session the environment environ runs in, empty outside

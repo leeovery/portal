@@ -74,7 +74,7 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 		if deps.Env == nil {
 			t.Fatal("Env not defaulted from shared builder")
 		}
-		if env, err := deps.Env(); err != nil || len(env) == 0 || env[0] != "PATH="+os.Getenv("PATH") {
+		if env, err := deps.Env(); err != nil || len(env.Set) == 0 || env.Set[0] != "PATH="+os.Getenv("PATH") {
 			t.Errorf("defaulted Env() = %q, %v; want the window environment, this process's PATH first", env, err)
 		}
 

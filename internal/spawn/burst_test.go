@@ -103,8 +103,8 @@ func seqIDGen() func() (string, error) {
 
 const testBurstExe = "/abs/portal"
 
-func fixedEnv(env []string) WindowEnv {
-	return func() ([]string, error) { return env, nil }
+func fixedEnv(env WindowEnvironment) WindowEnv {
+	return func() (WindowEnvironment, error) { return env, nil }
 }
 
 func TestBurster_Run(t *testing.T) {
@@ -452,7 +452,7 @@ func TestBurster_Run(t *testing.T) {
 		b := &Burster{
 			Adapter: adapter, Ack: newDelayingAck(clock.now, 0),
 			Exe:     fixedExe(testBurstExe),
-			Env:     func() ([]string, error) { return nil, sentinel },
+			Env:     func() (WindowEnvironment, error) { return WindowEnvironment{}, sentinel },
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,

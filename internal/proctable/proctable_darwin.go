@@ -53,9 +53,12 @@ func ReadArgs(pid int) (Args, error) {
 // of one on its way to being one alike.
 func gone(pid int) bool {
 	procs, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
-	if err != nil {
-		return false
-	}
+	return err == nil && goneFrom(procs)
+}
+
+// goneFrom reports whether a kern.proc.pid listing shows a process gone: not
+// listed, a zombie, or exiting.
+func goneFrom(procs []unix.KinfoProc) bool {
 	return len(procs) == 0 || procs[0].Proc.P_stat == zombie || procs[0].Proc.P_flag&exiting != 0
 }
 

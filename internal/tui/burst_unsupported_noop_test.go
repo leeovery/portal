@@ -16,7 +16,9 @@ func wireUnsupportedBurstSeams(m *Model, adapter spawn.Adapter, ack spawn.AckCha
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnEnv = func() ([]string, error) { return []string{"PATH=/usr/bin"}, nil }
+	m.spawnEnv = func() (spawn.WindowEnvironment, error) {
+		return spawn.WindowEnvironment{Set: []string{"PATH=/usr/bin"}}, nil
+	}
 }
 
 func markTwo(t *testing.T, m Model) Model {
