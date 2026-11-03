@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/tui"
@@ -96,20 +97,30 @@ func withListDeps(t *testing.T, deps ListDeps) {
 	t.Cleanup(func() { listDeps = nil })
 }
 
+// requireStagedBackend refuses a nil Backend at the staging site, where it
+// would otherwise surface later as a nil-interface panic in a command body.
+func requireStagedBackend(t harnesstest.TestingT, deps BackendDeps) {
+	t.Helper()
+	if deps.Backend == nil {
+		t.Fatalf("withBackendDeps: BackendDeps.Backend is nil; stage a backend, such as backendtest.New()")
+	}
+}
+
+// withBackendDeps installs deps as the package-level backend seam for the rest
+// of the test and registers the restore in the same breath.
+func withBackendDeps(t *testing.T, deps BackendDeps) {
+	t.Helper()
+	requireStagedBackend(t, deps)
+	backendDeps = &deps
+	t.Cleanup(func() { backendDeps = nil })
+}
+
 // withCommitNowDeps installs deps as the package-level commit-now seam for the
 // rest of the test and registers the restore in the same breath.
 func withCommitNowDeps(t *testing.T, deps CommitNowDeps) {
 	t.Helper()
 	commitNowDeps = &deps
 	t.Cleanup(func() { commitNowDeps = nil })
-}
-
-// withUninstallDeps installs deps as the package-level uninstall seam for the
-// rest of the test and registers the restore in the same breath.
-func withUninstallDeps(t *testing.T, deps UninstallDeps) {
-	t.Helper()
-	uninstallDeps = &deps
-	t.Cleanup(func() { uninstallDeps = nil })
 }
 
 // withFuncSeam installs replacement as the package-level function seam at seam

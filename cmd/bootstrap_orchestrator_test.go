@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/spf13/cobra"
 )
 
@@ -28,10 +28,7 @@ func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	runner := &recordingRunner{started: true}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, ForceMemoise: true})
 
-	withListDeps(t, ListDeps{
-		Lister: &mockSessionLister{sessions: []tmux.Session{}},
-		IsTTY:  func() bool { return false },
-	})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	for i := range 3 {
 		resetRootCmd()

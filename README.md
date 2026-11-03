@@ -213,7 +213,7 @@ New sessions auto-resolve to the git repository root when applicable.
 
 ### `xctl list`
 
-List running tmux sessions.
+List running sessions. Portal's own are hidden; a session that does not answer is listed by its name, marked `not answering` in the long form.
 
 ```bash
 xctl list                            # auto-detect format
@@ -223,7 +223,7 @@ xctl list --short                    # names only
 
 | Flag | Description |
 |---|---|
-| `--long` | Full session details (name, status, window count) |
+| `--long` | Full session details (name, label, attached or detached, directory) |
 | `--short` | Session names only, one per line |
 
 ### `xctl kill`

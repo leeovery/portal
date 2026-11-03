@@ -72,11 +72,12 @@ func (t *testSessionLister) ListSessionNames() ([]string, error) {
 }
 
 func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(stubTmuxCommander())})
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	resetRootCmd()
+	// The session-domain pre-check reads the tmux client from context before
+	// path resolution runs.
+	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	buf := new(bytes.Buffer)
 	rootCmd.SetErr(buf)
 	rootCmd.SetOut(buf)
@@ -94,9 +95,7 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 }
 
 func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(stubTmuxCommander())})
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "file.txt")
@@ -105,6 +104,9 @@ func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
 	}
 
 	resetRootCmd()
+	// The session-domain pre-check reads the tmux client from context before
+	// path resolution runs.
+	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	buf := new(bytes.Buffer)
 	rootCmd.SetErr(buf)
 	rootCmd.SetOut(buf)
@@ -2109,28 +2111,6 @@ func TestOpenCommand_CommandThreadsIntoMintedTarget(t *testing.T) {
 	wantCmd := []string{"vim", "."}
 	if !slices.Equal(gotCommand, wantCmd) {
 		t.Errorf("threaded command = %v, want %v", gotCommand, wantCmd)
-	}
-}
-
-func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
-	runner := &recordingRunner{started: true}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-	var capturedServerStarted bool
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
-		capturedServerStarted = serverStarted
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open"})
-	err := rootCmd.Execute()
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !capturedServerStarted {
-		t.Error("direct TUI path passed serverStarted=false; expected true when server was just started")
 	}
 }
 

@@ -3,8 +3,6 @@ package cmd
 import (
 	"testing"
 
-	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -161,109 +159,77 @@ func TestIsTUIPath(t *testing.T) {
 	})
 }
 
-// The decider issues zero tmux round-trips, so the backing commander is
-// never called.
-func probeClient() *tmux.Client {
-	return tmux.NewClient(commandertest.Quiet())
-}
-
 func TestShouldRunConcurrentBootstrap(t *testing.T) {
-	t.Run("it routes concurrent for warm-unlatched open (TUI, not satisfied)", func(t *testing.T) {
-		if !shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, probeClient(), false) {
-			t.Error("TUI + not satisfied: shouldRunConcurrentBootstrap = false, want true")
+	runner := &recordingRunner{}
+
+	t.Run("it routes concurrent for a bare open with a runner", func(t *testing.T) {
+		if !shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, runner) {
+			t.Error("TUI + runner: shouldRunConcurrentBootstrap = false, want true")
 		}
 	})
 
-	t.Run("it routes non-concurrent when the latch is satisfied", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, probeClient(), true) {
-			t.Error("TUI + satisfied: shouldRunConcurrentBootstrap = true, want false")
-		}
-	})
-
-	t.Run("it routes non-concurrent for a nil client", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, nil, false) {
-			t.Error("nil client: shouldRunConcurrentBootstrap = true, want false")
+	t.Run("it routes non-concurrent with no runner, so the picker opens straight onto its list", func(t *testing.T) {
+		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{}, nil) {
+			t.Error("TUI + no runner: shouldRunConcurrentBootstrap = true, want false")
 		}
 	})
 
 	t.Run("it routes non-concurrent for a non-TUI command", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(&cobra.Command{Use: "list"}, []string{}, probeClient(), false) {
+		if shouldRunConcurrentBootstrap(&cobra.Command{Use: "list"}, []string{}, runner) {
 			t.Error("non-TUI command: shouldRunConcurrentBootstrap = true, want false (not the TUI path)")
 		}
 	})
 
 	t.Run("it routes non-concurrent for a direct-path open", func(t *testing.T) {
-		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{"~/dir"}, probeClient(), false) {
+		if shouldRunConcurrentBootstrap(openProbeCmd(), []string{"~/dir"}, runner) {
 			t.Error("direct-path open: shouldRunConcurrentBootstrap = true, want false")
 		}
 	})
 
-	// A domain-pin open dispatches one resolved target directly, so even on a
-	// cold/unlatched server it must take the synchronous bootstrap — restore has
-	// to run before ResolveSessionPin.
+	// A domain-pin open dispatches one resolved target directly, so it must
+	// take the synchronous bootstrap: restore has to run before
+	// ResolveSessionPin.
 	for _, flag := range []string{"session", "path", "zoxide", "alias"} {
-		t.Run("it routes non-concurrent for open --"+flag+" (domain pin, not satisfied)", func(t *testing.T) {
+		t.Run("it routes non-concurrent for open --"+flag+" (domain pin)", func(t *testing.T) {
 			c := openProbeCmdWithFlags()
 			if err := c.Flags().Set(flag, "val"); err != nil {
 				t.Fatalf("set --%s: %v", flag, err)
 			}
-			if shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
-				t.Errorf("open --%s + not satisfied: shouldRunConcurrentBootstrap = true, want false (synchronous direct dispatch)", flag)
+			if shouldRunConcurrentBootstrap(c, []string{}, runner) {
+				t.Errorf("open --%s: shouldRunConcurrentBootstrap = true, want false (synchronous direct dispatch)", flag)
 			}
 		})
 	}
 
-	t.Run("it routes concurrent for open -f text (filter, not satisfied)", func(t *testing.T) {
+	t.Run("it routes concurrent for open -f text (filter)", func(t *testing.T) {
 		c := openProbeCmdWithFlags()
 		if err := c.Flags().Set("filter", "text"); err != nil {
 			t.Fatalf("set --filter: %v", err)
 		}
-		if !shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
-			t.Error("open -f text + not satisfied: shouldRunConcurrentBootstrap = false, want true (filter is a TUI path)")
+		if !shouldRunConcurrentBootstrap(c, []string{}, runner) {
+			t.Error("open -f text: shouldRunConcurrentBootstrap = false, want true (filter is a TUI path)")
 		}
 	})
 
-	t.Run("it routes concurrent for open -e cmd (command, no target, not satisfied)", func(t *testing.T) {
+	t.Run("it routes concurrent for open -e cmd (command, no target)", func(t *testing.T) {
 		c := openProbeCmdWithFlags()
 		if err := c.Flags().Set("exec", "vim"); err != nil {
 			t.Fatalf("set --exec: %v", err)
 		}
-		if !shouldRunConcurrentBootstrap(c, []string{}, probeClient(), false) {
-			t.Error("open -e cmd + not satisfied: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
+		if !shouldRunConcurrentBootstrap(c, []string{}, runner) {
+			t.Error("open -e cmd: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
 		}
 	})
 
-	t.Run("it routes concurrent for open -- cmd (command after the separator, not satisfied)", func(t *testing.T) {
+	t.Run("it routes concurrent for open -- cmd (command after the separator)", func(t *testing.T) {
 		c := openProbeCmd()
 		if err := c.ParseFlags([]string{"--", "claude"}); err != nil {
 			t.Fatalf("ParseFlags: %v", err)
 		}
-		if !shouldRunConcurrentBootstrap(c, c.Flags().Args(), probeClient(), false) {
-			t.Error("open -- claude + not satisfied: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
+		if !shouldRunConcurrentBootstrap(c, c.Flags().Args(), runner) {
+			t.Error("open -- claude: shouldRunConcurrentBootstrap = false, want true (command-only open is a TUI path)")
 		}
 	})
-}
-
-func TestShouldRunConcurrentBootstrap_IssuesNoProbe(t *testing.T) {
-	cases := []struct {
-		name string
-		cmd  *cobra.Command
-		args []string
-	}{
-		{"non-TUI command", &cobra.Command{Use: "list"}, []string{}},
-		{"direct-path open", openProbeCmd(), []string{"/dir/sub"}},
-		{"TUI path", openProbeCmd(), []string{}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := commandertest.Quiet()
-			client := tmux.NewClient(rec)
-			_ = shouldRunConcurrentBootstrap(tc.cmd, tc.args, client, false)
-			if len(rec.Calls()) != 0 {
-				t.Errorf("%s: decider issued %d tmux round-trips %v, want 0", tc.name, len(rec.Calls()), rec.Calls())
-			}
-		})
-	}
 }
 
 func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
@@ -285,41 +251,4 @@ func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
 			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)
 		}
 	})
-}
-
-func TestPersistentPreRunE_LatchedTUI_ReadsLatchExactlyOnce(t *testing.T) {
-	resetBootstrapOnce(t)
-	resetBootstrapWarnings(t)
-
-	rec := satisfiedLatchAliveSaverCommander()
-	client := tmux.NewClient(rec)
-	runner := &recordingRunner{started: false} // warm: server already running
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-
-	var capturedServerStarted bool
-	var openTUIReached bool
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, serverStarted bool) error {
-		capturedServerStarted = serverStarted
-		openTUIReached = true
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !openTUIReached {
-		t.Fatal("openTUI was not reached on the abridged TUI path")
-	}
-	if capturedServerStarted {
-		t.Error("abridged path threaded serverStarted=true to openTUI; want false (no loading page)")
-	}
-	if runner.calls != 0 {
-		t.Errorf("abridged path: orchestrator calls = %d, want 0 (never runs the full bootstrap)", runner.calls)
-	}
-	if got := len(rec.CallsMatching("show-option")); got != 1 {
-		t.Errorf("latch read count (show-option) = %d, want exactly 1 (single-read invariant): %v", got, rec.Calls())
-	}
 }

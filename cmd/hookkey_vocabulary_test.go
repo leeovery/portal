@@ -255,3 +255,11 @@ func assertStandDown(t *testing.T, sink *logtest.Sink, level slog.Level, reason 
 func standDownWant(level slog.Level) hooksRecordWant {
 	return hooksRecordWant{level: level, msg: standDownMsg, op: standDownMsg, via: "internal"}
 }
+
+func keysOf(m hooks.Snapshot) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

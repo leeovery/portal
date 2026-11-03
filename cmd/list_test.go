@@ -1,9 +1,13 @@
 package cmd
 
 import (
-	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -16,253 +20,192 @@ func (m *mockSessionLister) ListSessions() ([]tmux.Session, error) {
 	return m.sessions, m.err
 }
 
+// stageList stages fake as the backend and tty as whether stdout is a
+// terminal, in a state directory of the test's own.
+func stageList(t *testing.T, fake *backendtest.Fake, tty bool) string {
+	t.Helper()
+	withBackendDeps(t, BackendDeps{Backend: fake})
+	withListDeps(t, ListDeps{IsTTY: func() bool { return tty }})
+	return isolateStateDir(t)
+}
+
+// runList executes list with args and returns its stdout, failing on an error.
+func runList(t *testing.T, args ...string) string {
+	t.Helper()
+	stdout, stderr, err := runRootCmd(t, append([]string{"list"}, args...)...)
+	if err != nil {
+		t.Fatalf("list %v: %v\nstderr: %s", args, err, stderr)
+	}
+	return stdout.String()
+}
+
+func assertListed(t *testing.T, fake *backendtest.Fake) {
+	t.Helper()
+	if got := len(fake.CallsTo(backendtest.OpList)); got != 1 {
+		t.Errorf("backend List calls = %d, want 1: %+v", got, fake.Calls())
+	}
+}
+
+func setLabel(t *testing.T, stateDir, name, label string) {
+	t.Helper()
+	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		return idx.SetLabel(name, label)
+	}); err != nil {
+		t.Fatalf("label %s as %q: %v", name, label, err)
+	}
+}
+
 func TestListCommand(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+	twoSessions := func() *backendtest.Fake {
+		return backendtest.New(
+			backend.Session{Name: "claude-lab", Dir: "/work/lab"},
+			backend.Session{Name: "flowx-dev", Dir: "/work/flowx", Clients: 2},
+		)
+	}
 
-	t.Run("TTY output includes name status and window count", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "flowx-dev", Windows: 3, Attached: true},
-				{Name: "claude-lab", Windows: 1, Attached: false},
-			},
+	t.Run("it prints names only when piped", func(t *testing.T) {
+		fake := twoSessions()
+		stageList(t, fake, false)
+
+		if got, want := runList(t), "claude-lab\nflowx-dev\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+		assertListed(t, fake)
+	})
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
+	t.Run("it prints label, attached state and dir on a terminal", func(t *testing.T) {
+		fake := twoSessions()
+		stateDir := stageList(t, fake, true)
+		setLabel(t, stateDir, "flowx-dev", "flowx · api work")
 
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := "flowx-dev    attached    3 windows\nclaude-lab    detached    1 window\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		want := "claude-lab    claude-lab    detached    /work/lab\n" +
+			"flowx-dev    flowx · api work    attached    /work/flowx\n"
+		if got := runList(t); got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("piped output shows names only", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "flowx-dev", Windows: 3, Attached: true},
-				{Name: "claude-lab", Windows: 1, Attached: false},
-			},
-		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return false },
-		})
+	t.Run("it prints names only with --short on a terminal", func(t *testing.T) {
+		stageList(t, twoSessions(), true)
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := "flowx-dev\nclaude-lab\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		if got, want := runList(t, "--short"), "claude-lab\nflowx-dev\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("short flag forces names only even on TTY", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "flowx-dev", Windows: 3, Attached: true},
-				{Name: "claude-lab", Windows: 1, Attached: false},
-			},
-		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+	t.Run("it prints the long form with --long when piped", func(t *testing.T) {
+		stageList(t, twoSessions(), false)
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list", "--short"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := "flowx-dev\nclaude-lab\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		want := "claude-lab    claude-lab    detached    /work/lab\n" +
+			"flowx-dev    flowx-dev    attached    /work/flowx\n"
+		if got := runList(t, "--long"); got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("long flag forces full details even when piped", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "flowx-dev", Windows: 3, Attached: true},
-				{Name: "claude-lab", Windows: 1, Attached: false},
-			},
+	t.Run("it hides Portal's own sessions", func(t *testing.T) {
+		fake := backendtest.New(
+			backend.Session{Name: "_portal-saver", Dir: "/"},
+			backend.Session{Name: "dotfiles-PpaTER", Dir: "/work/dotfiles"},
+		)
+		stageList(t, fake, false)
+
+		if got, want := runList(t), "dotfiles-PpaTER\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return false },
-		})
+		assertListed(t, fake)
+	})
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list", "--long"})
+	t.Run("it lists a session that does not answer by its name, marked not answering in the long form", func(t *testing.T) {
+		fake := twoSessions()
+		fake.StopAnswering("claude-lab")
+		stateDir := stageList(t, fake, false)
+		setLabel(t, stateDir, "claude-lab", "lab")
 
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if got, want := runList(t, "--short"), "claude-lab\nflowx-dev\n"; got != want {
+			t.Errorf("--short output = %q, want %q", got, want)
 		}
-
-		want := "flowx-dev    attached    3 windows\nclaude-lab    detached    1 window\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		want := "claude-lab    not answering\nflowx-dev    flowx-dev    attached    /work/flowx\n"
+		if got := runList(t, "--long"); got != want {
+			t.Errorf("--long output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("no sessions produces empty output", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{},
-		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+	t.Run("it drops only the labels on a terminal when the index cannot be read", func(t *testing.T) {
+		stageList(t, twoSessions(), true)
+		blockStateDir(t)
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if buf.String() != "" {
-			t.Errorf("output = %q, want empty string", buf.String())
+		want := "claude-lab    claude-lab    detached    /work/lab\n" +
+			"flowx-dev    flowx-dev    attached    /work/flowx\n"
+		if got := runList(t); got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("exit code is 0 with no sessions", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{},
-		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+	t.Run("it fails --long when the index cannot be read", func(t *testing.T) {
+		stageList(t, twoSessions(), true)
+		blockStateDir(t)
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("expected nil error (exit 0), got: %v", err)
+		if _, _, err := runRootCmd(t, "list", "--long"); err == nil || !strings.Contains(err.Error(), "sessions.json") {
+			t.Errorf("error = %v, want the index read failure", err)
 		}
 	})
 
-	t.Run("all sessions listed inside tmux including current", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "current-session", Windows: 2, Attached: true},
-				{Name: "other-session", Windows: 1, Attached: false},
-			},
-		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+	t.Run("it leaves the dir column off a session whose dir is unknown", func(t *testing.T) {
+		stageList(t, backendtest.New(backend.Session{Name: "remote-x1"}), false)
 
-		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
-
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := "current-session    attached    2 windows\nother-session    detached    1 window\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		if got, want := runList(t, "--long"), "remote-x1    remote-x1    detached\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("window count pluralisation correct", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "one-win", Windows: 1, Attached: false},
-				{Name: "two-win", Windows: 2, Attached: false},
-				{Name: "many-win", Windows: 10, Attached: true},
-			},
+	t.Run("it surfaces a listing error rather than printing an empty list", func(t *testing.T) {
+		fake := twoSessions()
+		sentinel := errors.New("zmx dir unreadable")
+		fake.Fail(backendtest.OpList, sentinel)
+		stageList(t, fake, false)
+
+		stdout, _, err := runRootCmd(t, "list")
+		if !errors.Is(err, sentinel) {
+			t.Errorf("error = %v, want %v", err, sentinel)
 		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
-
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"list"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := "one-win    detached    1 window\ntwo-win    detached    2 windows\nmany-win    attached    10 windows\n"
-		if buf.String() != want {
-			t.Errorf("output = %q, want %q", buf.String(), want)
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout.String())
 		}
 	})
 
-	t.Run("short and long flags are mutually exclusive", func(t *testing.T) {
-		lister := &mockSessionLister{
-			sessions: []tmux.Session{
-				{Name: "test", Windows: 1, Attached: false},
-			},
+	t.Run("it prints nothing and succeeds with no sessions", func(t *testing.T) {
+		fake := backendtest.New()
+		stageList(t, fake, true)
+
+		if got := runList(t); got != "" {
+			t.Errorf("output = %q, want empty", got)
 		}
-		withListDeps(t, ListDeps{
-			Lister: lister,
-			IsTTY:  func() bool { return true },
-		})
+		assertListed(t, fake)
+	})
 
-		resetRootCmd()
-		buf := new(bytes.Buffer)
-		rootCmd.SetOut(buf)
-		rootCmd.SetErr(buf)
-		rootCmd.SetArgs([]string{"list", "--short", "--long"})
+	t.Run("it refuses --short with --long", func(t *testing.T) {
+		fake := twoSessions()
+		stageList(t, fake, true)
 
-		err := rootCmd.Execute()
-
-		if err == nil {
-			t.Fatal("expected error for mutually exclusive flags, got nil")
+		if _, _, err := runRootCmd(t, "list", "--short", "--long"); err == nil {
+			t.Fatal("expected an error for --short with --long, got nil")
+		}
+		if calls := fake.Calls(); len(calls) != 0 {
+			t.Errorf("backend calls = %+v, want none", calls)
 		}
 	})
+}
+
+func TestListCommand_DoesNotNeedTheZmxBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	withListDeps(t, ListDeps{IsTTY: func() bool { return false }})
+
+	stdout, _, err := runRootCmd(t, "list")
+	if err != nil {
+		t.Fatalf("list with no zmx on PATH: %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing from the poisoned, missing zmx dir", stdout.String())
+	}
 }

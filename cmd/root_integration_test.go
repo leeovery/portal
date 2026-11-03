@@ -23,7 +23,7 @@ func buildPortalBinary(t *testing.T) string {
 	return filepath.Join(dir, "portal")
 }
 
-func TestPortalBinaryTmuxMissing(t *testing.T) {
+func TestPortalBinaryZmxMissing(t *testing.T) {
 	binary := buildPortalBinary(t)
 
 	tests := []struct {
@@ -37,35 +37,26 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 			name:     "open prints error to stderr and exits 1",
 			args:     []string{"open"},
 			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
+			wantMsg:  "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx",
 			wantCode: 1,
 		},
 		{
-			name:     "list prints error to stderr and exits 1",
-			args:     []string{"list"},
-			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
-			wantCode: 1,
+			name:    "list works without zmx",
+			args:    []string{"list"},
+			wantErr: false,
 		},
 		{
-			name:     "kill prints error to stderr and exits 1",
-			args:     []string{"kill", "test"},
-			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
-			wantCode: 1,
-		},
-		{
-			name:    "version works without tmux",
+			name:    "version works without zmx",
 			args:    []string{"version"},
 			wantErr: false,
 		},
 		{
-			name:    "init works without tmux",
+			name:    "init works without zmx",
 			args:    []string{"init", "zsh"},
 			wantErr: false,
 		},
 		{
-			name:    "help works without tmux",
+			name:    "help works without zmx",
 			args:    []string{"help"},
 			wantErr: false,
 		},
@@ -74,7 +65,8 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(binary, tt.args...)
-			cmd.Env = []string{"PATH=/nonexistent/path", "HOME=" + t.TempDir()}
+			// A zmx dir of the test's own, never there: list reads it as no sessions.
+			cmd.Env = []string{"PATH=/nonexistent/path", "HOME=" + t.TempDir(), "ZMX_DIR=" + filepath.Join(t.TempDir(), "zmx")}
 
 			output, err := cmd.CombinedOutput()
 

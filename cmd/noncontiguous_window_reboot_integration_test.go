@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -257,38 +256,6 @@ func TestNonContiguousWindowReboot_KeepsTokenKeyedHooks(t *testing.T) {
 		if _, ok := swept[fx.staleKey]; ok {
 			t.Errorf("stale key %q survived the sweep; survival must come from liveness, not from shape retention. keys=%v",
 				fx.staleKey, keysOf(swept))
-		}
-	})
-
-	t.Run("it registers a hook in the pane saved with no token under the token restore gave it, stamping nothing", func(t *testing.T) {
-		const command = "echo sibling"
-		stamper := &recordingPaneStamper{err: errors.New("hook set must not stamp a pane restore gave a token")}
-		withHooksDeps(t, HooksDeps{
-			KeyResolver: fx.client,
-			PaneLister:  fx.client,
-			PaneStamper: stamper,
-			TokenMinter: func() (string, error) {
-				return "", errors.New("hook set must not mint for a pane restore gave a token")
-			},
-		})
-		t.Setenv("TMUX_PANE", siblingRow.paneID)
-
-		if out, err := runHookSet(t, command); err != nil {
-			t.Fatalf("hook set: %v (output %q)", err, out)
-		}
-
-		if len(stamper.calls) != 0 {
-			t.Errorf("hook set stamped %v; want nothing", stamper.calls)
-		}
-		registered, err := fx.store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load: %v", err)
-		}
-		if got := registered[siblingRow.token]["on-resume"].Command; got != command {
-			t.Errorf("hook under the restored token %q = %q; want %q (keys=%v)", siblingRow.token, got, command, keysOf(registered))
-		}
-		if got := fx.siblingRow(t, fx.livePaneRows(t)).token; got != siblingRow.token {
-			t.Errorf("pane token after hook set = %q; want the one restore gave it %q", got, siblingRow.token)
 		}
 	})
 }

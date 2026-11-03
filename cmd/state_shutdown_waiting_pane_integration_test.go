@@ -184,7 +184,7 @@ func (rt *waitingPaneRuntime) bootstrap(t *testing.T) {
 	t.Helper()
 	rt.sock.Run(t, "new-session", "-d", "-s", tmux.PortalBootstrapName)
 	rt.sock.WaitForSession(t, tmux.PortalBootstrapName, 5*time.Second)
-	runPortalList(t, rt.binary, rt.symptomFixture)
+	runTmuxBootstrap(t, rt.symptomFixture)
 
 	pid, present, err := tmux.SaverPanePIDOrAbsent(rt.sock.Client(), tmux.PortalSaverName)
 	if err != nil || !present {

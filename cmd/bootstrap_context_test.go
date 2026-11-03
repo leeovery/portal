@@ -4,30 +4,46 @@ import (
 	"context"
 	"testing"
 
+	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
 func TestTmuxClient(t *testing.T) {
-	t.Run("panics when no client in context", func(t *testing.T) {
+	t.Run("it falls back to the default client with none staged", func(t *testing.T) {
+		fallback := tmux.NewClient(commandertest.Quiet())
+		withFuncSeam(t, &defaultTmuxClient, func() *tmux.Client { return fallback })
+		cmd := &cobra.Command{}
+		cmd.SetContext(context.Background())
+
+		if got := tmuxClient(cmd); got != fallback {
+			t.Errorf("tmuxClient = %p, want the default %p", got, fallback)
+		}
+	})
+
+	t.Run("it fails loudly under the test poison rather than reach the real server", func(t *testing.T) {
+		t.Setenv("TMUX", "")
 		cmd := &cobra.Command{}
 		cmd.SetContext(context.Background())
 
 		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("expected panic, got none")
-			}
-			msg, ok := r.(string)
-			if !ok {
-				t.Fatalf("expected string panic, got %T: %v", r, r)
-			}
-			want := "tmuxClient: no client in context — PersistentPreRunE must run before any command that uses tmux"
-			if msg != want {
-				t.Errorf("panic message = %q, want %q", msg, want)
+			if r := recover(); r != refusedDefaultTmuxClient {
+				t.Errorf("recovered %v, want the poison's panic %q", r, refusedDefaultTmuxClient)
 			}
 		}()
-
 		tmuxClient(cmd)
+	})
+
+	t.Run("it returns the client staged in the context", func(t *testing.T) {
+		rec := commandertest.Quiet()
+		staged := tmux.NewClient(rec)
+
+		if got := tmuxClient(cmdWithClient(staged)); got != staged {
+			t.Errorf("tmuxClient = %p, want the staged %p", got, staged)
+		}
+		if len(rec.Calls()) != 0 {
+			t.Errorf("tmuxClient ran %v, want nothing", rec.Calls())
+		}
 	})
 }
 

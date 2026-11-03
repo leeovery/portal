@@ -10,7 +10,6 @@ var (
 	notifyLogger    = log.For("notify")
 	hooksLogger     = log.For("hooks")
 	bootstrapLogger = log.For("bootstrap")
-	restoreLogger   = log.For("restore")
 	previewLogger   = log.For("preview")
 	// The component (subsystem) is orthogonal to process_role (binary): the
 	// signal-hydrate command's role stays `hydrate` while the subsystem it

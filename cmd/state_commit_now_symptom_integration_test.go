@@ -55,7 +55,7 @@ func TestCommitNowSymptom(t *testing.T) {
 			)
 		}
 
-		runPortalList(t, binary, fixture)
+		runTmuxBootstrap(t, fixture)
 
 		live := liveSessionNames(t, fixture.sock)
 		if _, present := live["B"]; present {
@@ -193,7 +193,7 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 		binDir:   binDir,
 	}
 
-	runPortalList(t, binary, fixture)
+	runTmuxBootstrap(t, fixture)
 
 	// Bootstrap does not write sessions.json and the daemon's first commit can
 	// lag on a slow host, so drive commit-now directly for a stable pre-kill
@@ -248,14 +248,6 @@ func runPortalSubprocess(t *testing.T, binary string, f symptomFixture, args ...
 func runPortalCommitNow(t *testing.T, binary string, f symptomFixture) {
 	t.Helper()
 	runPortalSubprocess(t, binary, f, "state", "commit-now")
-}
-
-// runPortalList triggers the full bootstrap orchestrator from outside the test
-// process. `list` has no TUI path, so it exits deterministically without a
-// controlling terminal and touches no session state.
-func runPortalList(t *testing.T, binary string, f symptomFixture) {
-	t.Helper()
-	runPortalSubprocess(t, binary, f, "list")
 }
 
 // pollSessionsJSON waits for consecutive reads of sessions.json to agree on the

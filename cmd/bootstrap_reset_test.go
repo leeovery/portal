@@ -24,3 +24,11 @@ func resetBootstrapOnce(t *testing.T) {
 		bootstrapWarnings = &BootstrapWarningsSink{}
 	})
 }
+
+// The sink is package-global and other cmd tests write to it, so clear it on
+// both sides of the body.
+func resetBootstrapWarnings(t *testing.T) {
+	t.Helper()
+	bootstrapWarnings.Drain()
+	t.Cleanup(func() { bootstrapWarnings.Drain() })
+}
