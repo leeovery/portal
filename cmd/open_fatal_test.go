@@ -6,14 +6,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 	fatal := bootstrap.NewFatal("Portal failed to set @portal-restoring marker: permission denied", errors.New("permission denied"))
 
-	lister := &mockSessionLister{}
+	lister := asPickerLister(&mockSessionLister{})
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
@@ -41,7 +40,7 @@ func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 
 func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	t.Run("clean exit returns nil and does not connect", func(t *testing.T) {
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(asPickerLister(&mockSessionLister{}))
 		connector := &mockSessionConnector{}
 		if err := processTUIResult(m, connector); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -52,7 +51,7 @@ func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	})
 
 	t.Run("selection still connects", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{{Name: "dev", Windows: 1}})
+		m := tui.NewModelWithSessions([]tui.Session{{Name: "dev"}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

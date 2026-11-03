@@ -5,18 +5,18 @@
   Sessions 7 — by project                                                                                  / to filter
 
     atelier ··· 1
-    ▌ atelier-web-m4TzpD                                                                               2 windows
+    ▌ atelier-web-m4TzpD
     kiln ··· 1
-      kiln-relayx-explore                                                                              1 window
+      kiln-relayx-explore
     lumen ··· 1
-      lumen webhooks and watchers                                                                      4 windows
+      lumen webhooks and watchers
     orchard-pipeline ··· 2
-      orchard-pipeline-code-based                                                                      3 windows   ●
-      orchard-pipeline-codify                                                                          2 windows
+      orchard-pipeline-code-based                                                                                  ●
+      orchard-pipeline-codify
     tessera ··· 1
-      tessera-proxy-Vb3kQw                                                                             1 window
+      tessera-proxy-Vb3kQw
     Unknown ··· 1
-      orphan-explore                                                                                   1 window
+      orphan-explore
 
 
 

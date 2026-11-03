@@ -19,7 +19,7 @@ func coldCommandPendingModel(t *testing.T, terminal tea.Msg) tui.Model {
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           &mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}},
+		Lister:           asPickerLister(&mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}}),
 		Command:          []string{"npm", "run", "dev"},
 		ServerStarted:    true,
 		ProgressReceiver: receiver,

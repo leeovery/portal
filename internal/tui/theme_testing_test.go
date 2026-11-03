@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // Dimensions are assigned directly, not through a tea.WindowSizeMsg: a fixture
@@ -21,7 +20,7 @@ func openPanelForTest(t *testing.T, m Model, contentW, contentH int) Model {
 	return openPanelForTestWithSessions(t, m, contentW, contentH, closePanelSessions())
 }
 
-func openPanelForTestWithSessions(t *testing.T, m Model, contentW, contentH int, sessions []tmux.Session) Model {
+func openPanelForTestWithSessions(t *testing.T, m Model, contentW, contentH int, sessions []Session) Model {
 	t.Helper()
 
 	m.termWidth, m.termHeight = geometryTerm(contentW, contentH)

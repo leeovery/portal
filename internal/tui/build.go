@@ -62,10 +62,10 @@ type Deps struct {
 	// Search nil means the picker was not reached by a search form.
 	Search *SearchForm
 
-	InitialFilter  string
-	Command        []string
-	ServerStarted  bool
-	InsideTmux     bool
+	InitialFilter string
+	Command       []string
+	ServerStarted bool
+	// CurrentSession is the session the picker runs inside, empty outside one.
 	CurrentSession string
 	// ProgressReceiver non-nil selects the concurrent cold-boot path.
 	ProgressReceiver tea.Cmd
@@ -196,8 +196,8 @@ func Build(deps Deps) Model {
 	if deps.Search == nil && deps.InitialFilter != "" {
 		m = m.WithInitialFilter(deps.InitialFilter)
 	}
-	if deps.InsideTmux && deps.CurrentSession != "" {
-		m = m.WithInsideTmux(deps.CurrentSession)
+	if deps.CurrentSession != "" {
+		m = m.WithCurrentSession(deps.CurrentSession)
 	}
 	m.armAppearanceDetection()
 	return m

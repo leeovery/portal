@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // decisionCounter is the closure under test plus the call count every gate
@@ -23,7 +22,7 @@ func (d *decisionCounter) decide() (string, error) {
 
 func searchDecisionModel(t *testing.T, d *decisionCounter) tea.Model {
 	t.Helper()
-	lister := postloadStubLister{sessions: []tmux.Session{{Name: "portal", Windows: 1}}}
+	lister := postloadStubLister{sessions: []Session{{Name: "portal"}}}
 	receiver := func() tea.Msg { return nil }
 	m := New(lister,
 		WithServerStarted(true),
@@ -256,7 +255,7 @@ func TestSearchDecision_CtrlCBeforeDecisionSelectsNothing(t *testing.T) {
 
 func TestSearchDecision_AbsentClosureLeavesTransitionUnchanged(t *testing.T) {
 	warnings := []BootstrapWarning{{Lines: []string{"saver is down"}}}
-	model, _ := transitionWithWarnings(coldTUIModel(t, []tmux.Session{{Name: "portal", Windows: 1}}), warnings)
+	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "portal"}}), warnings)
 
 	m := model.(Model)
 	if m.ActivePage() != PageSessions {

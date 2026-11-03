@@ -71,7 +71,7 @@ func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) 
 	term := resolver.SearchTerm(toComplete)
 
 	var matches []string
-	for _, s := range tui.PickerSessions(completionSessions(), completionCurrentSession()) {
+	for _, s := range tui.PickerSessions(pickerSessions(completionSessions()), completionCurrentSession()) {
 		if !resolver.IsSearchSigil("/" + s.Name) {
 			continue
 		}

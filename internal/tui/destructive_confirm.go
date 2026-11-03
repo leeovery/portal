@@ -18,9 +18,8 @@ const (
 )
 
 type destructiveConfirmSpec struct {
-	title       string
-	targetName  string
-	nameTrailer string
+	title      string
+	targetName string
 	// Pre-rendered rows standing in for the single name row, for a target that
 	// does not fit one. Empty leaves the name row in place.
 	targetRows    []string
@@ -62,7 +61,7 @@ func destructiveBodyRows(spec destructiveConfirmSpec, wrapWidth int, th theme.Th
 	if len(spec.targetRows) > 0 {
 		rows = append(rows, spec.targetRows...)
 	} else {
-		rows = append(rows, destructiveNameRow(spec.targetName, spec.nameTrailer, th, colourless))
+		rows = append(rows, destructiveNameRow(spec.targetName, th, colourless))
 	}
 	rows = append(rows, spec.extraBodyRows...)
 	rows = append(rows, headerCanvasBg(th, colourless).Render(""))
@@ -70,14 +69,8 @@ func destructiveBodyRows(spec destructiveConfirmSpec, wrapWidth int, th theme.Th
 	return append(rows, spec.reportRows...)
 }
 
-func destructiveNameRow(name, trailer string, th theme.Theme, colourless bool) string {
-	nameSeg := headerStyle(th.StateDestructive, th, colourless).Bold(true).Render(name)
-	if trailer == "" {
-		return nameSeg
-	}
-	gap := headerCanvasBg(th, colourless).Render("  ")
-	trailerSeg := headerStyle(th.TextMuted, th, colourless).Render(trailer)
-	return lipgloss.JoinHorizontal(lipgloss.Top, nameSeg, gap, trailerSeg)
+func destructiveNameRow(name string, th theme.Theme, colourless bool) string {
+	return headerStyle(th.StateDestructive, th, colourless).Bold(true).Render(name)
 }
 
 func destructiveConsequenceRows(text string, wrapWidth int, th theme.Theme, colourless bool) []string {

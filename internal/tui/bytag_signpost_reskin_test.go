@@ -7,14 +7,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func signpostModel(t *testing.T) Model {
 	t.Helper()
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "portal-abc", Dir: dir},
 		{Name: "portal-def", Dir: dir},
 	}
@@ -88,7 +87,7 @@ func TestSignpostReskin_SpecExactWording(t *testing.T) {
 
 func TestSignpostReskin_OnlyByTagZeroTags(t *testing.T) {
 	dir := t.TempDir()
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	cases := []struct {
 		name     string
@@ -123,7 +122,7 @@ func TestSignpostReskin_OnlyByTagZeroTags(t *testing.T) {
 func TestSignpostReskin_ZeroPaneReads(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "portal-a", Dir: ""},
 		{Name: "portal-b", Dir: ""},
 	}
@@ -152,7 +151,7 @@ func TestSignpostReskin_ZeroPaneReads(t *testing.T) {
 func TestSignpostReskin_GroupingMachineryUntouched(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "portal-abc", Dir: dir},
 		{Name: "portal-def", Dir: dir},
 	}

@@ -7,7 +7,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // indicatorCombo is one of the four attached × pending states a row can be in.
@@ -26,7 +25,7 @@ var indicatorCombos = []indicatorCombo{
 
 func comboRow(t *testing.T, d SessionDelegate, w int, c indicatorCombo) string {
 	t.Helper()
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: c.attached})
+	items := flatItems(Session{Name: "alpha", Attached: c.attached})
 	d.Pending = markedSet()
 	if c.pending {
 		d.Pending = markedSet("alpha")
@@ -37,20 +36,20 @@ func comboRow(t *testing.T, d SessionDelegate, w int, c indicatorCombo) string {
 func TestSessionRow_RendersThePendingDotForASessionInThePendingSet(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 3},
-		tmux.Session{Name: "bravo", Windows: 3},
+		Session{Name: "alpha"},
+		Session{Name: "bravo"},
 	)
 	margin := strings.Repeat(" ", rowRightMargin)
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th, Pending: markedSet("alpha")}
 
 		pending := renderRow(d, w, items, 0, 0)
-		if vis := ansi.Strip(pending); !strings.HasSuffix(vis, "3 windows"+strings.Repeat(" ", 2+indicatorSlotWidth-1)+rowIndicatorGlyph+margin) {
+		if vis := ansi.Strip(pending); !strings.HasSuffix(vis, strings.Repeat(" ", nameGap+indicatorSlotWidth-1)+rowIndicatorGlyph+margin) {
 			t.Errorf("[%v] pending row missing the dot hard right: %q", themeLabel(th), vis)
 		}
 
 		plain := renderRow(d, w, items, 1, 0)
-		if vis := ansi.Strip(plain); !strings.HasSuffix(vis, "3 windows"+strings.Repeat(" ", 2+indicatorSlotWidth)+margin) {
+		if vis := ansi.Strip(plain); !strings.HasSuffix(vis, strings.Repeat(" ", nameGap+indicatorSlotWidth)+margin) {
 			t.Errorf("[%v] row outside the pending set must leave the indicator cells blank: %q", themeLabel(th), vis)
 		}
 		if seq := tokenFgSeq(t, th.AccentAttention); strings.Contains(plain, seq) {
@@ -108,17 +107,10 @@ func TestSessionRow_RendersTheSameRowWidthAcrossAllFourIndicatorCombinations(t *
 	for _, w := range []int{40, 60, 80, 120} {
 		for _, colourless := range []bool{false, true} {
 			d := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless}
-			countCol := -1
 			for _, c := range indicatorCombos {
 				out := comboRow(t, d, w, c)
 				if got := lipgloss.Width(out); got != w {
 					t.Errorf("[w=%d col=%v %s] row width = %d, want %d", w, colourless, c.label, got, w)
-				}
-				col := visibleColOf(out, "3 windows")
-				if countCol == -1 {
-					countCol = col
-				} else if col != countCol {
-					t.Errorf("[w=%d col=%v %s] count at col %d, want %d (slot must not move with its contents)", w, colourless, c.label, col, countCol)
 				}
 			}
 		}
@@ -128,7 +120,7 @@ func TestSessionRow_RendersTheSameRowWidthAcrossAllFourIndicatorCombinations(t *
 func TestSessionRow_RendersOneDotForASessionHoldingSeveralWaitingPanes(t *testing.T) {
 	// The set is keyed on the session: however many of its panes wait, the
 	// session contributes one member and the row one dot.
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3})
+	items := flatItems(Session{Name: "alpha"})
 	d := SessionDelegate{Theme: testDarkTheme(t), Pending: markedSet("alpha", "alpha", "alpha")}
 	vis := ansi.Strip(renderRow(d, 80, items, 0, 0))
 	if n := strings.Count(vis, rowIndicatorGlyph); n != 1 {
@@ -138,7 +130,7 @@ func TestSessionRow_RendersOneDotForASessionHoldingSeveralWaitingPanes(t *testin
 
 func TestSessionRow_ShowsNeitherIndicatorOnAGoneRow(t *testing.T) {
 	const w = 60
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, colourless := range []bool{false, true} {
 		base := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless, MultiSelect: true, GoneFlagged: markedSet("alpha")}
 		want := renderRow(base, w, items, 0, 0)
@@ -150,7 +142,7 @@ func TestSessionRow_ShowsNeitherIndicatorOnAGoneRow(t *testing.T) {
 			t.Errorf("[col=%v] pending set changed the gone row\n got: %q\nwant: %q", colourless, got, want)
 		}
 		vis := ansi.Strip(got)
-		if !strings.HasSuffix(vis, "2 windows  "+goneBadge) {
+		if !strings.HasSuffix(vis, strings.Repeat(" ", nameGap)+goneBadge) {
 			t.Errorf("[col=%v] gone badge must own the trailing region: %q", colourless, vis)
 		}
 		if strings.Contains(vis, rowIndicatorGlyph) || strings.Contains(vis, pendingIndicatorLetter+" ") {
@@ -172,7 +164,7 @@ func TestSessionRow_RendersAPAndAPUnderNoColor(t *testing.T) {
 		t.Run(c.label, func(t *testing.T) {
 			vis := ansi.Strip(comboRow(t, SessionDelegate{Theme: testDarkTheme(t), Colourless: true}, w, c))
 			cluster := wantCluster[c.label]
-			want := "3 windows" + strings.Repeat(" ", 2+indicatorSlotWidth-len(cluster)) + cluster + margin
+			want := strings.Repeat(" ", nameGap+indicatorSlotWidth-len(cluster)) + cluster + margin
 			if !strings.HasSuffix(vis, want) {
 				t.Errorf("colourless %s row = %q, want suffix %q", c.label, vis, want)
 			}
@@ -185,8 +177,8 @@ func TestSessionRow_RendersAPAndAPUnderNoColor(t *testing.T) {
 
 func TestSessionRow_MarksNothingForANilPendingSet(t *testing.T) {
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 3, Attached: true},
-		tmux.Session{Name: "bravo", Windows: 3},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo"},
 	)
 	for _, colourless := range []bool{false, true} {
 		nilSet := SessionDelegate{Theme: testDarkTheme(t), Colourless: colourless}
@@ -204,8 +196,8 @@ func TestSessionRow_MarksNothingForANilPendingSet(t *testing.T) {
 
 func TestSessionRow_RendersThePendingDotInTheAttentionToken(t *testing.T) {
 	items := flatItems(
-		tmux.Session{Name: "pending-selected", Windows: 1},
-		tmux.Session{Name: "pending-unselected", Windows: 1},
+		Session{Name: "pending-selected"},
+		Session{Name: "pending-unselected"},
 	)
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th, Pending: markedSet("pending-selected", "pending-unselected")}

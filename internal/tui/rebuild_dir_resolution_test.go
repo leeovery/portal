@@ -8,7 +8,6 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/session"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type fakeStamper struct {
@@ -51,7 +50,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.dirReader = &fakeStamper{path: dir}
@@ -84,7 +83,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("By Tag: an empty-Dir session resolving to a tagged project appears under its tags, not Untagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.dirReader = &fakeStamper{path: dir}
@@ -116,7 +115,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
@@ -139,7 +138,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("second rebuild reuses the cache and performs no further pane read", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
@@ -164,7 +163,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("it treats an empty current path as unresolved in the grouped render", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.dirReader = &fakeStamper{path: "", err: nil}
@@ -193,7 +192,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("it discards derived values when the session list is refreshed", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, nil, projects)
@@ -215,7 +214,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("nil seam does not panic and routes an empty-Dir session to Unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 
@@ -234,7 +233,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.dirReader = &fakeStamper{path: dir}

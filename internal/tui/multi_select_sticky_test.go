@@ -31,10 +31,10 @@ func markTwoFlatSessions(t *testing.T, m Model, idxA, idxB int) Model {
 }
 
 func TestMultiSelectMarksSurviveRegroup(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 	m = markTwoFlatSessions(t, m, 0, 2)
 	beforeMode := m.sessionListMode
@@ -58,9 +58,9 @@ func TestMultiSelectMarksSurviveRegroup(t *testing.T) {
 }
 
 func TestMultiSelectMarksSurvivePaging(t *testing.T) {
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: fmt.Sprintf("sess-%02d", i)})
+		sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i)})
 	}
 	m := NewModelWithSessions(sessions)
 	if m.sessionList.Paginator.TotalPages < 2 {
@@ -96,9 +96,9 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 	m := Build(Deps{Lister: fakeLister{}})
 	m.termWidth = filteringReskinWidth
 	m.termHeight = filteringReskinHeight
-	m.applySessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m.applySessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}, nil)
 	m.sessionList.Select(1)
 	m = enterMultiSelect(t, m)
@@ -143,10 +143,10 @@ func TestMultiSelectFilteredOutSessionStaysMarked(t *testing.T) {
 }
 
 func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 1},
-		{Name: "charlie", Windows: 1},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -154,7 +154,7 @@ func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
+	lister := &stepListerStub{steps: [][]Session{sessions}}
 	m := modelWithSeamsAndLister(t, sessions, enum, reader, lister)
 
 	m = markTwoFlatSessions(t, m, 0, 2)
@@ -180,14 +180,14 @@ func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
 }
 
 func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 1},
-		{Name: "charlie", Windows: 1},
+	first := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
-	postKill := []tmux.Session{
-		{Name: "bravo", Windows: 1},
-		{Name: "charlie", Windows: 1},
+	postKill := []Session{
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -195,7 +195,7 @@ func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 
 	m = markTwoFlatSessions(t, m, 0, 2)
@@ -225,7 +225,7 @@ func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
 func TestMultiSelectMarkedSessionSurvivesBucketMove(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newSwitchViewTestModel(t, prefs.ModeByProject, nil, sessions, projects)
 

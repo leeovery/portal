@@ -4,23 +4,22 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/prefs"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func multiSelectFixtureSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true},
-		{Name: "agentic-workflows-codify", Windows: 2},
-		{Name: "fab-flowx-explore", Windows: 1},
-		{Name: "evvi webhooks and watchers", Windows: 4},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1},
-		{Name: "designlab-web-r8suyU", Windows: 2},
-		{Name: "evvi-sync-engine", Windows: 1},
-		{Name: "fab-aws-migration", Windows: 5},
-		{Name: "flow-v1-api-XkkhTN", Windows: 1},
-		{Name: "flowx-7UKPZH", Windows: 2},
-		{Name: "fabric-lk26UG", Windows: 1},
-		{Name: "folio-Jiz4el", Windows: 1},
+func multiSelectFixtureSessions() []Session {
+	return []Session{
+		{Name: "agentic-workflows-code-based", Attached: true},
+		{Name: "agentic-workflows-codify"},
+		{Name: "fab-flowx-explore"},
+		{Name: "evvi webhooks and watchers"},
+		{Name: "aviva-proxy-qNyfEO"},
+		{Name: "designlab-web-r8suyU"},
+		{Name: "evvi-sync-engine"},
+		{Name: "fab-aws-migration"},
+		{Name: "flow-v1-api-XkkhTN"},
+		{Name: "flowx-7UKPZH"},
+		{Name: "fabric-lk26UG"},
+		{Name: "folio-Jiz4el"},
 	}
 }
 

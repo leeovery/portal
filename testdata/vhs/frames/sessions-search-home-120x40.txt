@@ -4,10 +4,10 @@
 
   / ~/code
 
-  ▌ portal-a1b2 ~/code/portal                                                                          3 windows   ●
-    api-work ~/code/portal-gateway                                                                     2 windows
-    portal-design-exports-review …/portal/internal/capture/testdata/reference/design-exports/frames    2 windows
-    lumen-sync-engine ~/code/lumen                                                                     1 window
+  ▌ portal-a1b2 ~/code/portal                                                                                      ●
+    api-work ~/code/portal-gateway
+    portal-design-exports-review …/internal/capture/testdata/reference/design-exports/frames/archive/2026-q3
+    lumen-sync-engine ~/code/lumen
 
 
 

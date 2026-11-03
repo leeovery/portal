@@ -30,8 +30,8 @@ const (
 	preflightAbortDismissHint = "esc dismiss"
 )
 
-func renderSectionHeader(mode prefs.SessionListMode, insideTmux bool, currentSession string, count, width int, th theme.Theme, colourless bool) string {
-	left := sectionLeftCluster(mode, insideTmux, currentSession, count, th, colourless)
+func renderSectionHeader(mode prefs.SessionListMode, currentSession string, count, width int, th theme.Theme, colourless bool) string {
+	left := sectionLeftCluster(mode, currentSession, count, th, colourless)
 	return renderSectionHeaderRow(left, width, th, colourless)
 }
 
@@ -111,7 +111,7 @@ func projectsLeftCluster(count int, th theme.Theme, colourless bool) string {
 
 // Flush at the content's left edge — the same column as the header wordmark and
 // the row cursor. Do not add a leading indent.
-func sectionLeftCluster(mode prefs.SessionListMode, insideTmux bool, currentSession string, count int, th theme.Theme, colourless bool) string {
+func sectionLeftCluster(mode prefs.SessionListMode, currentSession string, count int, th theme.Theme, colourless bool) string {
 	label := headerStyle(th.AccentMode, th, colourless).Render(sectionLabel)
 
 	gap := headerCanvasBg(th, colourless).Render(" ")
@@ -119,7 +119,7 @@ func sectionLeftCluster(mode prefs.SessionListMode, insideTmux bool, currentSess
 
 	cluster := lipgloss.JoinHorizontal(lipgloss.Top, label, gap, countRun)
 
-	if suffix := sectionModeSuffix(mode, insideTmux, currentSession); suffix != "" {
+	if suffix := sectionModeSuffix(mode, currentSession); suffix != "" {
 		suffixRun := headerStyle(th.TextMuted, th, colourless).Render(suffix)
 		cluster = lipgloss.JoinHorizontal(lipgloss.Top, cluster, suffixRun)
 	}
@@ -140,7 +140,7 @@ func renderFilterQueryHeader(query string, width int, th theme.Theme, colourless
 
 // Stripped from the title producer rather than re-derived, so the wording stays
 // byte-identical. The result carries a leading space, so it renders after the count.
-func sectionModeSuffix(mode prefs.SessionListMode, insideTmux bool, currentSession string) string {
-	title := sessionListTitleForMode(mode, insideTmux, currentSession)
+func sectionModeSuffix(mode prefs.SessionListMode, currentSession string) string {
+	title := sessionListTitleForMode(mode, currentSession)
 	return strings.TrimPrefix(title, sectionLabel)
 }

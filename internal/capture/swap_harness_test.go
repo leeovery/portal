@@ -65,6 +65,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-search-home", page: tui.PageSessions, present: []string{"portal-a1b2 ~/code/portal", "api-work ~/code/portal-gateway", "lumen-sync-engine ~/code/lumen"}, absent: []string{"legacy-port-shim", "portal-notes", "No sessions yet"}},
 		{fixture: "sessions-pending-resume", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-pending-resume-colourless", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet", "●"}},
+		{fixture: "sessions-not-answering", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "not answering", "orchard-pipeline-codify"}, absent: []string{"No sessions yet"}},
 		{fixture: "projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects"}},
 		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"relay-v1-api", "Pick a project to run", "npm run dev"}},
 		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "Window 1/1", "kubectl rollout"}},

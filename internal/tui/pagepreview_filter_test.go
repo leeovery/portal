@@ -41,9 +41,9 @@ func typeFilter(t *testing.T, m Model, s string) Model {
 }
 
 func TestSpaceDuringSettingFilterInsertsLiteralSpaceIntoFilterValue(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "pigeon-fly", Windows: 1, Attached: false},
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "pigeon-fly", Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -74,8 +74,8 @@ func TestSpaceDuringSettingFilterInsertsLiteralSpaceIntoFilterValue(t *testing.T
 }
 
 func TestSpaceDuringSettingFilterDoesNotChangeActivePage(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "pigeon-fly", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "pigeon-fly", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -100,8 +100,8 @@ func TestSpaceDuringSettingFilterDoesNotChangeActivePage(t *testing.T) {
 }
 
 func TestSpaceAtStartOfFilterInputPassesThroughAsLiteralSpace(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -131,9 +131,9 @@ func TestSpaceAtStartOfFilterInputPassesThroughAsLiteralSpace(t *testing.T) {
 }
 
 func TestSpaceAfterEnterCommitOpensPreviewOnHighlightedMatch(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "pigeon-fly", Windows: 1, Attached: false},
-		{Name: "alpha", Windows: 2, Attached: false},
+	sessions := []Session{
+		{Name: "pigeon-fly", Attached: false},
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

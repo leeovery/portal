@@ -75,14 +75,14 @@ func driveSearchColdBoot(t *testing.T, client *tmux.Client, stateDir, term strin
 		if err != nil {
 			return "", err
 		}
-		if matches := searchMatches(resolver.ProcessHome(), term, sessions); len(matches) == 1 {
+		if matches := searchMatches(resolver.ProcessHome(), term, pickerSessions(sessions)); len(matches) == 1 {
 			return matches[0].Name, nil
 		}
 		return "", nil
 	}
 
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           client,
+		Lister:           asPickerLister(client),
 		ServerStarted:    true,
 		ProgressReceiver: pipe.receiver(),
 		Search:           &tui.SearchForm{Term: term, Decide: decide},

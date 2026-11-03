@@ -7,13 +7,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func reskinFlashModel(names ...string) Model {
-	sessions := make([]tmux.Session, 0, len(names))
+	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, tmux.Session{Name: n, Windows: 1, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -141,7 +140,7 @@ func TestFlashReskin_NoColor(t *testing.T) {
 		{"success", func(m *Model) { m.setSuccessFlash("nocolor success") }, flashSuccessGlyph},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sessions := []tmux.Session{{Name: "alpha-row", Windows: 1}}
+			sessions := []Session{{Name: "alpha-row"}}
 			m := NewModelWithSessions(sessions)
 			m.termWidth = 80
 			m.termHeight = 24
@@ -213,12 +212,12 @@ func TestFlashReskin_AutoClearLifecyclePreserved(t *testing.T) {
 	})
 }
 
-type reskinStubLister struct{ sessions []tmux.Session }
+type reskinStubLister struct{ sessions []Session }
 
-func (l reskinStubLister) ListSessions() ([]tmux.Session, error) { return l.sessions, nil }
+func (l reskinStubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
 func TestBuild_InitialFlashSeedsWarningFlash(t *testing.T) {
-	lister := reskinStubLister{sessions: []tmux.Session{{Name: "dev", Windows: 2}}}
+	lister := reskinStubLister{sessions: []Session{{Name: "dev"}}}
 	const msg = "folio-Jiz4el closed externally — list updated"
 	m := Build(Deps{
 		Lister:  lister,
@@ -238,9 +237,9 @@ func TestBuild_InitialFlashSeedsWarningFlash(t *testing.T) {
 
 func TestBuild_InitialFlash_RendersWarningBand(t *testing.T) {
 	const msg = "folio-Jiz4el closed externally — list updated"
-	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 3, Attached: true},
-		{Name: "agentic-workflows-codify", Windows: 1},
+	sessions := []Session{
+		{Name: "fab-flowx-explore", Attached: true},
+		{Name: "agentic-workflows-codify"},
 	}
 	m := Build(Deps{
 		Lister:  reskinStubLister{sessions: sessions},

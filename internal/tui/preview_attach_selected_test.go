@@ -4,11 +4,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -25,7 +24,7 @@ func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
 }
 
 func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
+	sessions := []Session{{Name: "alpha", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)
@@ -41,7 +40,7 @@ func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
 }
 
 func TestPreviewAttachSelected_ParityWithSessionsPageEnterShape(t *testing.T) {
-	sessions := []tmux.Session{{Name: "bravo", Windows: 1, Attached: false}}
+	sessions := []Session{{Name: "bravo", Attached: false}}
 	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(t, sessions, enum, reader)

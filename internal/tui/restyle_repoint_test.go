@@ -38,9 +38,9 @@ func populateRestyleProbe(t *testing.T, m Model) Model {
 	t.Helper()
 	const w, h = 120, 24
 
-	sessions := make([]tmux.Session, 0, 60)
+	sessions := make([]Session, 0, 60)
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	projects := make([]project.Project, 0, 40)
 	for i := range 40 {

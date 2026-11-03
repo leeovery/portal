@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func midRestoreProgress() LoadingProgress {
@@ -558,7 +557,7 @@ func TestWarmPath_NoLoadingScreen(t *testing.T) {
 	}
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(SessionsMsg{Sessions: []tmux.Session{{Name: "a"}}})
+	model, _ = model.Update(SessionsMsg{Sessions: []Session{{Name: "a"}}})
 	if model.(Model).ActivePage() == PageLoading {
 		t.Error("warm path transitioned onto PageLoading; want never")
 	}
