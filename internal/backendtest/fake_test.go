@@ -273,6 +273,28 @@ func TestFake(t *testing.T) {
 		}
 	})
 
+	t.Run("it reports the clients and the reach it was given, a session's clients going with it", func(t *testing.T) {
+		f := backendtest.New(backend.Session{Name: "a"})
+		clients := []backend.ClientProcess{{PID: 501, Env: []string{"TERM=xterm"}}}
+		f.SetAttachClients("a", clients)
+		f.SetReachEnv([]string{"ZMX_DIR=/tmp/zx-fake"})
+
+		if got, err := f.AttachClients("a"); err != nil || !reflect.DeepEqual(got, clients) {
+			t.Errorf("AttachClients(a) = %+v, %v; want %+v", got, err, clients)
+		}
+		if got := f.ReachEnv(); !reflect.DeepEqual(got, []string{"ZMX_DIR=/tmp/zx-fake"}) {
+			t.Errorf("ReachEnv = %q, want what it was given", got)
+		}
+		_ = f.Kill(t.Context(), "a")
+		if got, err := f.AttachClients("a"); err != nil || len(got) != 0 {
+			t.Errorf("AttachClients(a) after its kill = %+v, %v; want none", got, err)
+		}
+		f.Fail(backendtest.OpAttachClients, backend.ErrUnreadableClient)
+		if _, err := f.AttachClients("a"); !errors.Is(err, backend.ErrUnreadableClient) {
+			t.Errorf("AttachClients with a failure injected = %v, want it", err)
+		}
+	})
+
 	t.Run("it records every call in order", func(t *testing.T) {
 		f := backendtest.New(backend.Session{Name: "a"})
 		ctx := t.Context()

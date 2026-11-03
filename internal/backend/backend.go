@@ -215,6 +215,14 @@ type Backend interface {
 	// session: the one that last sent it keyboard input, or one that attached
 	// while no client led it. It is empty when no client leads.
 	LeaderEnv(ctx context.Context, name string) (ClientEnv, error)
+	// AttachClients is the processes attached to the session as its clients,
+	// as the process table shows them, with the environment each was exec'd
+	// with. A process that might be one and can't be read fails the search
+	// with ErrUnreadableClient.
+	AttachClients(name string) ([]ClientProcess, error)
+	// ReachEnv is what another process needs in its environment, as NAME=value
+	// entries, to reach the sessions this backend reaches.
+	ReachEnv() []string
 	// Kill ends the session. On ErrTimeout the kill may still land later.
 	Kill(ctx context.Context, name string) error
 	// Detach detaches every client of the session. On ErrTimeout the detach

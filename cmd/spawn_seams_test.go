@@ -72,18 +72,19 @@ func TestBuildProductionSpawnSeams(t *testing.T) {
 		}
 	})
 
-	t.Run("a backend with no process-table search finds no raw client, so detection refuses", func(t *testing.T) {
+	t.Run("detection finds a session's raw clients through the backend", func(t *testing.T) {
 		fake.SetCurrent("api-x7Kd9a")
 		fake.SetLeaderEnv("api-x7Kd9a", backend.ClientEnv{{Name: "DISPLAY", Unset: true}})
+		fake.SetAttachClients("api-x7Kd9a", []backend.ClientProcess{{PID: 501, Env: []string{"DISPLAY=:0"}}})
 		t.Cleanup(func() { fake.SetCurrent("") })
 
 		if id := seams.Detector.Detect(); !id.IsNull() {
 			t.Errorf("Detect = %+v, want NULL", id)
 		}
 		rec := sink.Records().Matching("spawn", "detection could not tell the host terminal").Only(t, "detection record")
-		want := `inside-session raw client walk: no one terminal leads the session: 0 of 0 zmx attach processes on session "api-x7Kd9a" can be its leader, want 1`
+		want := `inside-session raw client walk: no one terminal leads the session: 0 of 1 zmx attach processes on session "api-x7Kd9a" can be its leader, want 1`
 		if detail := rec.AttrString(t, "detail"); detail != want {
-			t.Errorf("detail = %q, want no raw client found", detail)
+			t.Errorf("detail = %q, want the backend's one client, which can't lead", detail)
 		}
 	})
 }
@@ -210,17 +211,24 @@ func TestWindowEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("a backend that can't say how to reach its sessions adds nothing for them", func(t *testing.T) {
+	t.Run("it carries what the backend says reaches its sessions, never this process's own", func(t *testing.T) {
+		unsetAll(t)
 		t.Setenv("ZMX_DIR", "/elsewhere")
+		fake := backendtest.New()
+		fake.SetReachEnv([]string{"ZMX_DIR=/the/backends/dir"})
 
-		env, err := windowEnv(backendtest.New())()
+		env, err := windowEnv(fake)()
 		if err != nil {
 			t.Fatalf("windowEnv: %v", err)
 		}
+		var reach []string
 		for _, kv := range env.Set {
 			if strings.HasPrefix(kv, "ZMX_") {
-				t.Errorf("windowEnv carries %q for a backend with no reach", kv)
+				reach = append(reach, kv)
 			}
+		}
+		if !slices.Equal(reach, []string{"ZMX_DIR=/the/backends/dir"}) {
+			t.Errorf("windowEnv carries %q, want the backend's reach alone", reach)
 		}
 	})
 }

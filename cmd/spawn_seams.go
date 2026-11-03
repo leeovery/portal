@@ -34,15 +34,10 @@ type productionSpawnSeams struct {
 }
 
 // buildProductionSpawnSeams detects the terminal through b, runners and, for
-// a session no runner leads, b's own process-table search for its zmx
-// clients, which only the zmx driver has.
+// a session no runner leads, b's own search for the session's clients.
 func buildProductionSpawnSeams(ctx context.Context, b backend.Backend, runners spawn.RunnerLocator) productionSpawnSeams {
-	clients, ok := b.(spawn.ClientLister)
-	if !ok {
-		clients = noClients{}
-	}
 	return productionSpawnSeams{
-		Detector: spawn.NewDetector(b, runners, clients),
+		Detector: spawn.NewDetector(b, runners, b),
 		Resolve:  buildResolver().Resolve,
 		Ack:      stateAcks{},
 		Exe:      os.Executable,
@@ -53,12 +48,6 @@ func buildProductionSpawnSeams(ctx context.Context, b backend.Backend, runners s
 		},
 		Logger: spawnLogger,
 	}
-}
-
-// sessionReach is a backend that can say what another process needs to reach
-// its sessions; the zmx driver can.
-type sessionReach interface {
-	ReachEnv() []string
 }
 
 // windowEnv is what a spawned window's portal resolves by, so that it finds
@@ -78,10 +67,7 @@ func windowEnv(b backend.Backend) spawn.WindowEnv {
 		if err != nil {
 			return env, err
 		}
-		env.Set = []string{"PATH=" + os.Getenv("PATH"), xdg.StateDir.EnvVar + "=" + stateDir}
-		if r, ok := b.(sessionReach); ok {
-			env.Set = append(env.Set, r.ReachEnv()...)
-		}
+		env.Set = append([]string{"PATH=" + os.Getenv("PATH"), xdg.StateDir.EnvVar + "=" + stateDir}, b.ReachEnv()...)
 		for _, name := range xdg.Variables() {
 			if name == xdg.StateDir.EnvVar {
 				continue
@@ -125,12 +111,6 @@ func absolutePath(path string) (string, error) {
 }
 
 func verbatim(value string) (string, error) { return value, nil }
-
-// noClients finds no zmx client of any session, so detection inside a
-// session no runner leads refuses.
-type noClients struct{}
-
-func (noClients) AttachClients(string) ([]backend.ClientProcess, error) { return nil, nil }
 
 // Fails safe: an unresolvable config path degrades to an empty config —
 // native-only resolution — rather than disabling the feature outright.

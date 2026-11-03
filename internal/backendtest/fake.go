@@ -29,6 +29,7 @@ const (
 	OpDetach        Op = "Detach"
 	OpHistory       Op = "History"
 	OpLeaderEnv     Op = "LeaderEnv"
+	OpAttachClients Op = "AttachClients"
 )
 
 // AttachProgram is Argv[0] of every command AttachCommand returns.
@@ -63,6 +64,8 @@ type Fake struct {
 	sessions map[string]backend.Session
 	history  map[string][]byte
 	leaders  map[string]backend.ClientEnv
+	clients  map[string][]backend.ClientProcess
+	reach    []string
 	current  string
 	failures map[Op]error
 	calls    []Call
@@ -77,6 +80,7 @@ func New(sessions ...backend.Session) *Fake {
 		sessions: map[string]backend.Session{},
 		history:  map[string][]byte{},
 		leaders:  map[string]backend.ClientEnv{},
+		clients:  map[string][]backend.ClientProcess{},
 		failures: map[Op]error{},
 		lastPID:  1000,
 	}
@@ -161,6 +165,21 @@ func (f *Fake) SetLeaderEnv(name string, env backend.ClientEnv) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.leaders[name] = slices.Clone(env)
+}
+
+// SetAttachClients sets what AttachClients returns for a session: the
+// processes attached to it as its clients.
+func (f *Fake) SetAttachClients(name string, clients []backend.ClientProcess) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clients[name] = slices.Clone(clients)
+}
+
+// SetReachEnv sets what ReachEnv returns.
+func (f *Fake) SetReachEnv(env []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reach = slices.Clone(env)
 }
 
 // Calls returns every recorded call in order.
@@ -335,6 +354,25 @@ func (f *Fake) LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, e
 	return slices.Clone(f.leaders[name]), nil
 }
 
+// AttachClients returns what SetAttachClients gave the session, none when it
+// gave nothing. As the driver's process-table search does, it asks no
+// session, so it finds none for a session the Fake doesn't hold.
+func (f *Fake) AttachClients(name string) ([]backend.ClientProcess, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.record(Call{Op: OpAttachClients, Name: name}); err != nil {
+		return nil, err
+	}
+	return slices.Clone(f.clients[name]), nil
+}
+
+// ReachEnv returns what SetReachEnv gave it, nothing until then.
+func (f *Fake) ReachEnv() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.reach)
+}
+
 func (f *Fake) Current() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -353,6 +391,7 @@ func (f *Fake) forget(name string) {
 	delete(f.sessions, name)
 	delete(f.history, name)
 	delete(f.leaders, name)
+	delete(f.clients, name)
 }
 
 // record records the call and returns the failure injected for its op. The
