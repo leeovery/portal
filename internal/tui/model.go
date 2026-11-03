@@ -2978,15 +2978,22 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// Terminal modes are set declaratively here so page composers stay string builders.
+// Alt-screen is set declaratively here so page composers stay string builders.
 func (m Model) View() tea.View {
 	// First-paint gate: under an adaptive pair, hold the real paint until the gate
 	// resolves — painting first risks a visible flip of the whole theme. It holds
 	// every owned-canvas surface, including the cold-path loading page.
 	if !m.modeResolved() {
-		return withTerminalModes(tea.NewView(m.blankFrame()))
+		v := tea.NewView(m.blankFrame())
+		v.AltScreen = true
+		return v
 	}
-	v := withTerminalModes(tea.NewView(m.fillCanvas(m.viewString())))
+	v := tea.NewView(m.fillCanvas(m.viewString()))
+	v.AltScreen = true
+	// Pointer input (pointer.go). Without it a terminal keeps a swipe for its own
+	// scrollback, which the alt screen has none of, and tmux drops the wheel for
+	// a pane that never asked for the mouse.
+	v.MouseMode = tea.MouseModeCellMotion
 	// Under NO_COLOR the terminal keeps its native bg: leaving BackgroundColor
 	// nil completes the canvas suppression.
 	if m.colourless {
@@ -2996,21 +3003,6 @@ func (m Model) View() tea.View {
 	// the rendered grid on terminals that honour OSC 11. In-grid correctness does
 	// not depend on it; fillCanvas paints every interior cell explicitly.
 	v.BackgroundColor = m.themeState.active.Canvas.Color()
-	return v
-}
-
-// The modes every frame carries, the gate's blank frame included, so the
-// terminal is told about all of them in the one write that enters the alt
-// screen. A terminal that re-reads its mouse state only when the screen changes
-// (Rootshell on iOS) otherwise reads it before the mouse is asked for and drops
-// the first swipe.
-//
-// Pointer input (pointer.go): without it a terminal keeps a swipe for its own
-// scrollback, which the alt screen has none of, and tmux drops the wheel for a
-// pane that never asked for the mouse.
-func withTerminalModes(v tea.View) tea.View {
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
