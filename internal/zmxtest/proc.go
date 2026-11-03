@@ -57,12 +57,35 @@ func parseProcArgs(raw []byte) (procArgs, error) {
 }
 
 // ownedBy reports whether pid is a process started for dir: its environment
-// sets ZMX_DIR to exactly dir. The Backend sets ZMX_DIR on every zmx run, a
-// daemon keeps the environment of the run it forked from, and a session's
-// processes inherit the daemon's.
+// sets ZMX_DIR to exactly dir, or its parent chain reaches one whose does. The
+// Backend sets ZMX_DIR on every zmx run, a daemon keeps the environment of the
+// run it forked from, and a session's processes inherit the daemon's, but
+// macOS hides a platform binary's environment, /bin/sh's among them, from
+// kern.procargs2.
 func ownedBy(pid int, dir string) bool {
-	args, err := processArgs(pid)
-	return err == nil && slices.Contains(args.env, "ZMX_DIR="+dir)
+	return ownedThrough(pid, dir, processArgs, parentOf)
+}
+
+// ownedThrough walks from pid up its parents, read afresh, to one whose
+// environment proves dir. A walk that reaches pid 1, fails a read or repeats
+// a pid proves nothing, so an orphan reparented to launchd is never owned: it
+// leaks rather than risk a wrong kill.
+func ownedThrough(pid int, dir string, args func(int) (procArgs, error), parent func(int) (int, error)) bool {
+	seen := map[int]bool{}
+	for pid > 1 && !seen[pid] {
+		seen[pid] = true
+		a, err := args(pid)
+		if err != nil {
+			return false
+		}
+		if slices.Contains(a.env, "ZMX_DIR="+dir) {
+			return true
+		}
+		if pid, err = parent(pid); err != nil {
+			return false
+		}
+	}
+	return false
 }
 
 // owned lists the processes started for dir.

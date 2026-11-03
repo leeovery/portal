@@ -62,6 +62,72 @@ func FuzzParseProcArgs(f *testing.F) {
 	})
 }
 
+// procTree fakes the process reader: each pid's ZMX_DIR, or "" for an
+// environment the reader can't see, and its parent. A pid missing from either
+// map fails that read.
+type procTree struct {
+	dirs    map[int]string
+	parents map[int]int
+}
+
+func (p procTree) args(pid int) (procArgs, error) {
+	dir, ok := p.dirs[pid]
+	if !ok {
+		return procArgs{}, errors.New("no such process")
+	}
+	if dir == "" {
+		return procArgs{argv: []string{"/bin/sh"}}, nil
+	}
+	return procArgs{argv: []string{"zmx"}, env: []string{"HOME=/h", "ZMX_DIR=" + dir}}, nil
+}
+
+func (p procTree) parent(pid int) (int, error) {
+	ppid, ok := p.parents[pid]
+	if !ok {
+		return 0, errors.New("no such process")
+	}
+	return ppid, nil
+}
+
+func TestOwnedThrough(t *testing.T) {
+	const dir = "/tmp/zx-1"
+	for name, c := range map[string]struct {
+		tree procTree
+		want bool
+	}{
+		"its own environment proves it": {
+			procTree{dirs: map[int]string{10: dir}}, true,
+		},
+		"a parent's environment proves it, through hidden ones": {
+			procTree{dirs: map[int]string{10: "", 11: "", 12: dir}, parents: map[int]int{10: 11, 11: 12}}, true,
+		},
+		"another directory's environment does not": {
+			procTree{dirs: map[int]string{10: "", 12: "/tmp/zx-2"}, parents: map[int]int{10: 12}}, false,
+		},
+		"a chain ending at pid 1 does not, whatever pid 1 holds": {
+			procTree{dirs: map[int]string{1: dir, 10: ""}, parents: map[int]int{10: 1}}, false,
+		},
+		"a chain ending at pid 0 does not": {
+			procTree{dirs: map[int]string{10: ""}, parents: map[int]int{10: 0}}, false,
+		},
+		"a cycle does not": {
+			procTree{dirs: map[int]string{10: "", 11: ""}, parents: map[int]int{10: 11, 11: 10}}, false,
+		},
+		"a failed environment read does not, even under a proven parent": {
+			procTree{dirs: map[int]string{12: dir}, parents: map[int]int{10: 12}}, false,
+		},
+		"a failed parent read does not": {
+			procTree{dirs: map[int]string{10: ""}}, false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := ownedThrough(10, dir, c.tree.args, c.tree.parent); got != c.want {
+				t.Errorf("ownedThrough(10) over %+v = %v, want %v", c.tree, got, c.want)
+			}
+		})
+	}
+}
+
 func TestProcessReader(t *testing.T) {
 	t.Run("it reads this process's own argv", func(t *testing.T) {
 		if runtime.GOOS != "darwin" {

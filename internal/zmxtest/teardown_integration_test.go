@@ -16,7 +16,12 @@ import (
 
 func mustCreate(t *testing.T, b *zmx.Backend, name string) {
 	t.Helper()
-	if _, err := b.Create(t.Context(), name, t.TempDir(), []string{"sleep", "1000"}); err != nil {
+	mustCreateRunning(t, b, name, "sleep", "1000")
+}
+
+func mustCreateRunning(t *testing.T, b *zmx.Backend, name string, command ...string) {
+	t.Helper()
+	if _, err := b.Create(t.Context(), name, t.TempDir(), command); err != nil {
 		t.Fatalf("Create(%s): %v", name, err)
 	}
 }
@@ -132,6 +137,27 @@ func TestOwned(t *testing.T) {
 		}
 		if other := Daemon(t, b, "same-name"); slices.Contains(got, other) {
 			t.Errorf("owned(%s) = %v takes in %d, the daemon of %s", a.Dir(), got, other, b.Dir())
+		}
+	})
+
+	t.Run("it finds a platform binary, whose environment macOS hides, through its daemon", func(t *testing.T) {
+		b := New(t)
+		mustCreateRunning(t, b, "platform", "/bin/sleep", "1000")
+		sessions, err := b.List(t.Context())
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("List = %+v, %v", sessions, err)
+		}
+		daemon, command := Daemon(t, b, "platform"), sessions[0].PID
+
+		var got []int
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+			got, err = owned(b.Dir())
+			return err == nil && len(got) == 2
+		}) {
+			t.Fatalf("owned(%s) = %v, %v; want the daemon and the command", b.Dir(), got, err)
+		}
+		if !slices.Contains(got, daemon) || !slices.Contains(got, command) {
+			t.Errorf("owned(%s) = %v, want daemon %d and command %d", b.Dir(), got, daemon, command)
 		}
 	})
 }
