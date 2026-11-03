@@ -2,9 +2,10 @@ name: zmx check
 
 # Portal's formula depends on official zmx, which Homebrew upgrades freely, so
 # this runs the zmx-backed tests against zmx's latest release and its main
-# branch: every test that runs a real zmx, as internal/zmxtest's
-# weekly_check_guard_test.go holds it to. A failed run is the alert: GitHub
-# emails it.
+# branch: every test that runs a real zmx. zmxtest.Binary fails a test these
+# lines don't run, and reads them strictly (internal/zmxtest/weeklycheck.go),
+# so keep each to -tags integration, -p 1, -timeout, one single-quoted -run
+# and ./ packages. A failed run is the alert: GitHub emails it.
 on:
   schedule:
     - cron: '0 6 * * 1'

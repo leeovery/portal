@@ -86,9 +86,11 @@ const BinaryEnv = "PORTAL_TEST_ZMX_BINARY"
 
 // Binary is the path of the zmx build the tests drive: the one BinaryEnv
 // names, or else the pinned build. It fails the test when that build is
-// missing or cannot run.
+// missing or cannot run, and when the weekly zmx check doesn't run the test.
+// Every real zmx a test runs comes from here, New's included.
 func Binary(t *testing.T) string {
 	t.Helper()
+	requireWeeklyCheck(t)
 	binary, err := resolveBinary(os.Getenv, portalbintest.ProjectRoot)
 	if err != nil {
 		t.Fatal(err)
