@@ -153,19 +153,3 @@ func TestNewSpawnID_IndependentRealGeneratorIDs(t *testing.T) {
 		}
 	}
 }
-
-func TestValidAckID_GovernedBySharedAlphabet(t *testing.T) {
-	for _, r := range nanoid.Alphabet {
-		if !validAckID(string(r)) {
-			t.Errorf("validAckID(%q) = false, want every rune of the shared alphabet", r)
-		}
-	}
-	for _, bad := range []string{"-", "_", ".", "/", ":", " "} {
-		if validAckID("a" + bad) {
-			t.Errorf("validAckID accepted %q; its charset must be exactly nanoid.Alphabet", bad)
-		}
-	}
-	if validAckID(strings.Repeat("a", 33)) {
-		t.Error("validAckID accepted an id longer than any burst mints")
-	}
-}

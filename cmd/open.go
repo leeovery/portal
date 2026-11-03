@@ -134,7 +134,7 @@ in host-terminal windows.`,
 
 		// Ahead of resolution, so a malformed --ack is a usage error rather than
 		// an open that acks nothing.
-		if _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
+		if _, _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
 			return NewUsageError("open: --ack must be <batch>:<token>")
 		}
 

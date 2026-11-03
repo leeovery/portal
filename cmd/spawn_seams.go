@@ -132,32 +132,24 @@ var (
 	_ spawn.AckChannelFull = stateAcks{}
 )
 
-func (stateAcks) channel() (*spawn.FileAckChannel, error) {
-	dir, err := state.Dir()
-	if err != nil {
-		return nil, err
-	}
-	return spawn.NewFileAckChannel(dir), nil
-}
-
-func (a stateAcks) Write(batch, token string) error {
-	c, err := a.channel()
+func (stateAcks) Write(batch, token string) error {
+	c, err := inStateDir(spawn.NewFileAckChannel)
 	if err != nil {
 		return err
 	}
 	return c.Write(batch, token)
 }
 
-func (a stateAcks) Collect(batch string) (map[string]struct{}, error) {
-	c, err := a.channel()
+func (stateAcks) Collect(batch string) (map[string]struct{}, error) {
+	c, err := inStateDir(spawn.NewFileAckChannel)
 	if err != nil {
 		return nil, err
 	}
 	return c.Collect(batch)
 }
 
-func (a stateAcks) Clean(batch string) error {
-	c, err := a.channel()
+func (stateAcks) Clean(batch string) error {
+	c, err := inStateDir(spawn.NewFileAckChannel)
 	if err != nil {
 		return err
 	}

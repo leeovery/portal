@@ -28,35 +28,47 @@ type runnerListing interface {
 	Close()
 }
 
+// inStateDir is what open makes of Portal's state directory, resolved at each
+// use, so a directory that won't resolve fails the use rather than the
+// command.
+func inStateDir[T any](open func(stateDir string) T) (T, error) {
+	dir, err := state.Dir()
+	if err != nil {
+		var none T
+		return none, err
+	}
+	return open(dir), nil
+}
+
 // stateRunners is the registry under Portal's state directory.
 type stateRunners struct{}
 
 func (stateRunners) Listing(b runnerreg.Backend) runnerListing {
-	dir, err := state.Dir()
+	r, err := inStateDir(runnerreg.New)
 	if err != nil {
 		attachLogger.Warn("register failed", "error", err)
 		return unlisted{}
 	}
-	return runnerreg.New(dir).Listing(b)
+	return r.Listing(b)
 }
 
 func (stateRunners) Switch(ctx context.Context, token, current, target string) error {
-	dir, err := state.Dir()
+	r, err := inStateDir(runnerreg.New)
 	if err != nil {
 		return err
 	}
-	return runnerreg.New(dir).Switch(ctx, token, current, target)
+	return r.Switch(ctx, token, current, target)
 }
 
 // ConfirmSession is the pid of the runner registered under token once it
 // confirms it shows session: what spawn detection walks from to the
 // terminal.
 func (stateRunners) ConfirmSession(ctx context.Context, token, session string) (int, error) {
-	dir, err := state.Dir()
+	r, err := inStateDir(runnerreg.New)
 	if err != nil {
 		return 0, err
 	}
-	return runnerreg.New(dir).ConfirmSession(ctx, token, session)
+	return r.ConfirmSession(ctx, token, session)
 }
 
 // readOnlyRunners is the registry under Portal's state directory for a
@@ -65,11 +77,11 @@ func (stateRunners) ConfirmSession(ctx context.Context, token, session string) (
 type readOnlyRunners struct{}
 
 func (readOnlyRunners) ConfirmSession(ctx context.Context, token, session string) (int, error) {
-	dir, err := state.Dir()
+	r, err := inStateDir(runnerreg.New)
 	if err != nil {
 		return 0, err
 	}
-	return runnerreg.New(dir).ReadOnly().ConfirmSession(ctx, token, session)
+	return r.ReadOnly().ConfirmSession(ctx, token, session)
 }
 
 // unlisted lists nothing, for a state directory that won't resolve: the

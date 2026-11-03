@@ -171,7 +171,7 @@ func resultOf(err error) string {
 // lookup reads the entry token names. A token no runner could hold, as one
 // another program set, names none.
 func (r Registry) lookup(token string) (registered, error) {
-	if !validToken(token) {
+	if !nanoid.IsIDShaped(token) {
 		return registered{}, runnertoken.ErrNoRunner
 	}
 	e, err := r.read(token)
@@ -338,18 +338,4 @@ func (r Registry) removeOrphan(token string) {
 func running(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-// validToken reports whether token could have been minted for a runner, and
-// so names a path in the registry and no other.
-func validToken(token string) bool {
-	if token == "" || len(token) > 32 {
-		return false
-	}
-	for i := range len(token) {
-		if strings.IndexByte(nanoid.Alphabet, token[i]) < 0 {
-			return false
-		}
-	}
-	return true
 }

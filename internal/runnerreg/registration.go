@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/runner"
 )
 
@@ -76,7 +77,7 @@ type Registration struct {
 // been minted for a runner is refused, and a socket path too long for a unix
 // socket's address with ErrSocketPathTooLong, making nothing.
 func (r Registry) Register(token, session string, h Handler) (*Registration, error) {
-	if !validToken(token) {
+	if !nanoid.IsIDShaped(token) {
 		return nil, fmt.Errorf("register runner: token %q is no runner's", token)
 	}
 	r.sweep()

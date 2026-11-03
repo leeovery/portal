@@ -221,32 +221,25 @@ func loadAttachKeys() (json.RawMessage, error) {
 	return store.LoadKeys()
 }
 
-// spawnReceipt is the ack a window the burst spawned writes, telling the burst
-// its attach has begun.
-type spawnReceipt struct {
-	batch, token string
-}
-
-// spawnAck is the receipt the line's --ack names, and whether it names one a
-// burst could have minted.
-func spawnAck(cmd *cobra.Command) (spawnReceipt, bool) {
+// spawnAck is the batch and token of the receipt the line's --ack names, and
+// whether they are ones a burst could have minted.
+func spawnAck(cmd *cobra.Command) (batch, token string, ok bool) {
 	value, _ := cmd.Flags().GetString("ack")
-	batch, token, ok := spawn.ParseSpawnAckFlag(value)
-	return spawnReceipt{batch: batch, token: token}, ok
+	return spawn.ParseSpawnAckFlag(value)
 }
 
 // ackOnce writes the line's --ack receipt the first time it is called, and
 // does nothing for a line with none. A failed write still attaches, which the
 // burst counts as a window that failed rather than one left unaccounted for.
 func ackOnce(cmd *cobra.Command) func() {
-	receipt, ok := spawnAck(cmd)
+	batch, token, ok := spawnAck(cmd)
 	if !ok {
 		return func() {}
 	}
 	writer := buildAckWriter()
 	return sync.OnceFunc(func() {
-		if err := writer.Write(receipt.batch, receipt.token); err != nil {
-			spawnLogger.Warn("spawn ack write failed", "batch", receipt.batch, "error", err)
+		if err := writer.Write(batch, token); err != nil {
+			spawnLogger.Warn("spawn ack write failed", "batch", batch, "error", err)
 		}
 	})
 }
