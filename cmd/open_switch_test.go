@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,11 +16,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/tui"
+	"github.com/spf13/cobra"
 )
 
 // leading is a leader's tracked environment carrying the runner token.
@@ -199,46 +203,70 @@ func TestAttach_ASwitchAttachesTheSessionItNames(t *testing.T) {
 		}
 	})
 
-	t.Run("a switch to a session gone meanwhile brings the picker, showing why, and its pick attaches", func(t *testing.T) {
-		_, rec := stageAttach(t, "api-x7Kd9a", "docs-e5f6")
-		rec.answer(runResult{out: runner.Outcome{Switch: "gone-a1b2c3"}})
-		picker := stagePicker(t, "docs-e5f6")
+	t.Run("a switch to a session that can't be attached for a fault of its own brings the picker, worded as kill words it, and its pick attaches", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, target string
+			stage        func(*backendtest.Fake)
+			flash        string
+		}{
+			{"gone", "gone-a1b2c3", func(*backendtest.Fake) {}, "No session found: gone-a1b2c3"},
+			{"held under another spelling", "BLOG-c3d4", func(*backendtest.Fake) {}, "No session found: BLOG-c3d4; did you mean blog-c3d4?"},
+			{"refusing connections", "blog-c3d4", func(fake *backendtest.Fake) {
+				fake.Fail(backendtest.OpAttachCommand, fmt.Errorf("attach session %q: %w", "blog-c3d4", zmx.ErrRefusing))
+			}, "session blog-c3d4 refuses connections: " + crashedDaemon},
+			{"not answering", "blog-c3d4", func(fake *backendtest.Fake) { fake.StopAnswering("blog-c3d4") }, "session blog-c3d4 is not answering; nothing was opened"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4", "docs-e5f6")
+				rec.answer(runResult{out: runner.Outcome{Switch: tc.target}, ended: func() { tc.stage(fake) }})
+				picker := stagePicker(t, "docs-e5f6")
+				// A staged failure fails every attach command, the pick's too.
+				picker.onOpen = func() { fake.Fail(backendtest.OpAttachCommand, nil) }
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession = %v, want the picker's pick attached", err)
-		}
-		if len(picker.flashes) != 1 || !strings.Contains(picker.flashes[0], "gone-a1b2c3") || !strings.Contains(picker.flashes[0], backend.ErrNoSuchSession.Error()) {
-			t.Errorf("the picker's flashes = %q, want one saying gone-a1b2c3 is no session", picker.flashes)
-		}
-		if want := []string{"api-x7Kd9a", "docs-e5f6"}; !slices.Equal(ranSessions(rec), want) {
-			t.Errorf("attached %q, want %q", ranSessions(rec), want)
-		}
-		if want := []string{"listed api-x7Kd9a", "ended", "unlisted", "listed docs-e5f6", "ended", "unlisted"}; !slices.Equal(rec.runners.events, want) {
-			t.Errorf("listing = %q, want %q: unlisted while the picker shows", rec.runners.events, want)
+				if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+					t.Fatalf("openSession = %v, want the picker's pick attached", err)
+				}
+				if want := []string{tc.flash}; !slices.Equal(picker.flashes, want) {
+					t.Errorf("the picker's flashes = %q, want %q", picker.flashes, want)
+				}
+				if want := []string{"api-x7Kd9a", "docs-e5f6"}; !slices.Equal(ranSessions(rec), want) {
+					t.Errorf("attached %q, want %q", ranSessions(rec), want)
+				}
+				if want := []string{"listed api-x7Kd9a", "ended", "unlisted", "listed docs-e5f6", "ended", "unlisted"}; !slices.Equal(rec.runners.events, want) {
+					t.Errorf("listing = %q, want %q: unlisted while the picker shows", rec.runners.events, want)
+				}
+			})
 		}
 	})
 
-	t.Run("a switched attach that fails other than by its session being gone returns the error, as a first attach does", func(t *testing.T) {
+	t.Run("a switched attach that fails other than for a fault of its session's returns the error, as a first attach does", func(t *testing.T) {
 		boom := errors.New("the attach broke")
+		notStarted := &exec.Error{Name: "zmx", Err: exec.ErrNotFound}
+		signalled := fmt.Errorf("interrupted while %w", backend.ErrTimeout)
 		for _, tc := range []struct {
 			name  string
-			stage func(*backendtest.Fake, *attachRecorder)
+			stage func(*backendtest.Fake, *attachRecorder, *cobra.Command)
 			want  error
 		}{
-			{"the runner fails", func(_ *backendtest.Fake, rec *attachRecorder) {
+			{"the runner fails", func(_ *backendtest.Fake, rec *attachRecorder, _ *cobra.Command) {
 				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: boom})
 			}, boom},
-			{"the session doesn't answer", func(fake *backendtest.Fake, rec *attachRecorder) {
-				fake.StopAnswering("blog-c3d4")
-				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}})
-			}, backend.ErrTimeout},
+			{"the zmx binary fails to start", func(_ *backendtest.Fake, rec *attachRecorder, _ *cobra.Command) {
+				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: notStarted})
+			}, notStarted},
+			{"Portal's context ends, with a cause that reads as not answering", func(_ *backendtest.Fake, rec *attachRecorder, cmd *cobra.Command) {
+				ctx, end := context.WithCancelCause(cmd.Context())
+				cmd.SetContext(ctx)
+				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}, ended: func() { end(signalled) }})
+			}, signalled},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
-				tc.stage(fake, rec)
+				cmd := contextCommand()
+				tc.stage(fake, rec, cmd)
 				picker := stagePicker(t)
 
-				if err := openSession(contextCommand(), "api-x7Kd9a"); !errors.Is(err, tc.want) {
+				if err := openSession(cmd, "api-x7Kd9a"); !errors.Is(err, tc.want) {
 					t.Errorf("openSession = %v, want the switched attach's own %v", err, tc.want)
 				}
 				if len(picker.flashes) != 0 {

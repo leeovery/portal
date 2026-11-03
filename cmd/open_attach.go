@@ -68,13 +68,18 @@ func (c attachConnector) Connect(name string) error {
 	return err
 }
 
-// attachSwitched attaches the session a switch named. One gone by then ends
-// as a failed kill does: the picker follows, showing why. Any other failure
-// is returned, as a first attach's is.
+// attachSwitched attaches the session a switch named. One that can't be
+// attached for a fault of its own, as kill words them, ends as a failed kill
+// does: the picker follows, showing why. Any other failure is returned, as a
+// first attach's is, and so is every failure once Portal's context has ended,
+// whose cause may read as a session not answering.
 func (c attachConnector) attachSwitched(name string, listing runnerListing) (runner.Outcome, error) {
 	out, err := c.attach(name, listing)
-	if errors.Is(err, backend.ErrNoSuchSession) {
-		return runner.Outcome{Action: attachkeys.Detach, Err: err}, nil
+	if err == nil || c.cmd.Context().Err() != nil {
+		return out, err
+	}
+	if fault, ok := sessionFault(name, err, "nothing was opened"); ok {
+		return runner.Outcome{Action: attachkeys.Detach, Err: fault}, nil
 	}
 	return out, err
 }

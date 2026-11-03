@@ -3,12 +3,14 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -149,6 +151,21 @@ func TestRenameCommand(t *testing.T) {
 		_, _, err := runRootCmd(t, "rename", "api work")
 
 		want := "session " + currentSessionName + " is not answering; its label is unchanged"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
+	t.Run("it says the current session refuses connections in kill's words, writing nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		fake.Fail(backendtest.OpSession, fmt.Errorf("session %q: %w", currentSessionName, zmx.ErrRefusing))
+
+		_, _, err := runRootCmd(t, "rename", "api work")
+
+		want := "session " + currentSessionName + " refuses connections: " + crashedDaemon
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v, want %q", err, want)
 		}

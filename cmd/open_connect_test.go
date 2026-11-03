@@ -48,6 +48,8 @@ type attachRecorder struct {
 type runResult struct {
 	out runner.Outcome
 	err error
+	// ended, if set, runs as the run returns.
+	ended func()
 }
 
 type execCall struct {
@@ -66,6 +68,9 @@ func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outco
 	}
 	if res.err == nil && cfg.Began != nil {
 		cfg.Began()
+	}
+	if res.ended != nil {
+		res.ended()
 	}
 	return res.out, res.err
 }

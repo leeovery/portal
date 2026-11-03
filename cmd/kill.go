@@ -50,17 +50,28 @@ func killSession(ctx context.Context, b backend.Backend, name, via string) error
 // killError words the backend's refusals for the user; any other failure is
 // returned as the backend gave it.
 func killError(name string, err error) error {
-	if gone, ok := sessionGoneError(name, err); ok {
-		return gone
-	}
-	// Before the timeout it wraps: a crashed daemon's kill never lands.
-	if errors.Is(err, zmx.ErrRefusing) {
-		return fmt.Errorf("session %s refuses connections: %s", name, crashedDaemon)
-	}
-	if errors.Is(err, backend.ErrTimeout) {
-		return fmt.Errorf("session %s is not answering; the kill may still land", name)
+	if fault, ok := sessionFault(name, err, "the kill may still land"); ok {
+		return fault
 	}
 	return err
+}
+
+// sessionFault words err as a failure of the session name itself, for the
+// user: gone, held under another spelling, refusing connections, or not
+// answering, where unanswered says what that leaves. It reports whether err
+// was one; any other failure is not the session's.
+func sessionFault(name string, err error, unanswered string) (error, bool) {
+	if gone, ok := sessionGoneError(name, err); ok {
+		return gone, true
+	}
+	switch {
+	// Before the timeout it wraps: a crashed daemon never answers.
+	case errors.Is(err, zmx.ErrRefusing):
+		return fmt.Errorf("session %s refuses connections: %s", name, crashedDaemon), true
+	case errors.Is(err, backend.ErrTimeout):
+		return fmt.Errorf("session %s is not answering; %s", name, unanswered), true
+	}
+	return nil, false
 }
 
 // crashedDaemon words a session whose daemon refuses connections, for kill
