@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"fmt"
 	"go/ast"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -61,12 +64,17 @@ const (
 	hooksweepPkgPath = "github.com/leeovery/portal/internal/hooksweep"
 )
 
-// hookSweepReferences reports each "<file>: <reference>" a cmd source outside
-// the tmux state commands makes to the hook sweep or its staleness rule: the
-// sweep's package, hooks.StaleKeys, or a hooks store's CleanStale, which runs
-// it. StaleKeys reaps a token-shaped key absent from tmux's live pane tokens,
-// and a six-character alphanumeric zmx name such as notes1 is token-shaped, so
-// every hook keyed by one would be deleted.
+// hookSweepReferences reports each "<file>:<line>: <reach>" a cmd source
+// outside the tmux state commands makes for the hook sweep: an import of its
+// package, hooks.StaleKeys, the (*hooks.Store).CleanStale method in any form
+// (a call, a method value or expression, or promoted through an embedded
+// store), or an interface's CleanStale taking a func(hooks.Snapshot), the
+// shape of a seam over it. Each is judged by the object an identifier names,
+// not by how the source spelled it. StaleKeys reaps a token-shaped key absent
+// from tmux's live pane tokens, and a six-character alphanumeric zmx name such
+// as notes1 is token-shaped, so every hook keyed by one would be deleted.
+// Reflection, and a state_*.go helper called from another cmd file, are
+// outside its bound, accepted.
 func hookSweepReferences(pkg sourceguardtest.TypedPackage) []string {
 	var found []string
 	for _, source := range pkg.Sources {
@@ -74,22 +82,61 @@ func hookSweepReferences(pkg sourceguardtest.TypedPackage) []string {
 		if strings.HasPrefix(name, "state_") {
 			continue
 		}
-		if _, ok := importNames(source.File)[hooksweepPkgPath]; ok {
-			found = append(found, name+": "+hooksweepPkgPath)
+		at := func(n ast.Node, reach string) {
+			found = append(found, fmt.Sprintf("%s:%d: %s", name, source.Position(n.Pos()).Line, reach))
+		}
+		for _, spec := range source.File.Imports {
+			if path, err := strconv.Unquote(spec.Path.Value); err == nil && path == hooksweepPkgPath {
+				at(spec, hooksweepPkgPath)
+			}
 		}
 		ast.Inspect(source.File, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			switch {
-			case !ok:
-			case pkg.IsPackageFunc(sel.Sel, hooksPkgPath, "StaleKeys"):
-				found = append(found, name+": hooks.StaleKeys")
-			case pkg.IsMethodOf(sel, hooksPkgPath, "Store", "CleanStale"):
-				found = append(found, name+": (*hooks.Store).CleanStale")
+			if ident, ok := n.(*ast.Ident); ok {
+				if reach := hookSweepReach(pkg.Object(ident)); reach != "" {
+					at(ident, reach)
+				}
 			}
 			return true
 		})
 	}
 	return found
+}
+
+// hookSweepReach names what obj reaches of the hook sweep, empty for nothing.
+func hookSweepReach(obj types.Object) string {
+	fn, ok := obj.(*types.Func)
+	switch {
+	case !ok:
+		return ""
+	case fn.FullName() == hooksPkgPath+".StaleKeys":
+		return "hooks.StaleKeys"
+	case fn.FullName() == "(*"+hooksPkgPath+".Store).CleanStale":
+		return "(*hooks.Store).CleanStale"
+	case fn.Name() == "CleanStale" && isInterfaceMethod(fn) && takesSnapshotFunc(fn.Signature()):
+		return "a CleanStale seam taking func(hooks.Snapshot)"
+	}
+	return ""
+}
+
+func isInterfaceMethod(fn *types.Func) bool {
+	recv := fn.Signature().Recv()
+	return recv != nil && types.IsInterface(recv.Type())
+}
+
+// takesSnapshotFunc reports whether sig has a parameter that is a func taking
+// a hooks.Snapshot first, as (*hooks.Store).CleanStale's enumerator is.
+func takesSnapshotFunc(sig *types.Signature) bool {
+	for param := range sig.Params().Variables() {
+		fn, ok := param.Type().Underlying().(*types.Signature)
+		if !ok || fn.Params().Len() == 0 {
+			continue
+		}
+		if named, ok := fn.Params().At(0).Type().(*types.Named); ok && named.Obj().Pkg() != nil &&
+			named.Obj().Pkg().Path() == hooksPkgPath && named.Obj().Name() == "Snapshot" {
+			return true
+		}
+	}
+	return false
 }
 
 // runHookSweepGuard fails on each reference hookSweepReferences finds, and
@@ -100,7 +147,7 @@ func runHookSweepGuard(t harnesstest.TestingT, pkg sourceguardtest.TypedPackage)
 		t.Fatalf("the hook sweep guard scanned no sources")
 	}
 	for _, found := range hookSweepReferences(pkg) {
-		t.Errorf("%s; only the tmux state commands may judge a hook key stale", found)
+		t.Errorf("%s; in cmd, only the tmux state commands may judge a hook key stale", found)
 	}
 }
 
@@ -119,34 +166,59 @@ func TestOnlyTheTmuxStateCommandsReachTheHookSweep(t *testing.T) {
 		}
 	})
 
-	const reachesTheSweep = `package cmd
+	for _, tc := range []struct {
+		name, body string
+		want       []string
+	}{
+		{"an import of the sweep", `import _ "github.com/leeovery/portal/internal/hooksweep"`,
+			[]string{"hooks.go:3: " + hooksweepPkgPath}},
+		{"StaleKeys under an alias", `import h "github.com/leeovery/portal/internal/hooks"
 
-import (
-	_ "github.com/leeovery/portal/internal/hooksweep"
-	h "github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/project"
-)
+var stale = h.StaleKeys`,
+			[]string{"hooks.go:5: hooks.StaleKeys"}},
+		{"a call", `import "github.com/leeovery/portal/internal/hooks"
 
-var stale = h.StaleKeys
+func prune(s *hooks.Store) { _, _ = s.CleanStale(nil) }`,
+			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+		{"a method value", `import "github.com/leeovery/portal/internal/hooks"
 
-func prune(hooks *h.Store, projects *project.Store) {
-	_, _ = hooks.CleanStale(nil)
-	_, _ = projects.CleanStale()
+func prune(s *hooks.Store) { clean := s.CleanStale; _ = clean }`,
+			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+		{"a method expression", `import "github.com/leeovery/portal/internal/hooks"
+
+var clean = (*hooks.Store).CleanStale`,
+			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+		{"a method promoted through an embedded store", `import "github.com/leeovery/portal/internal/hooks"
+
+type store struct{ *hooks.Store }
+
+func prune(s store) { _, _ = s.CleanStale(nil) }`,
+			[]string{"hooks.go:7: (*hooks.Store).CleanStale"}},
+		{"a seam typed as an interface", `import "github.com/leeovery/portal/internal/hooks"
+
+type cleaner interface {
+	CleanStale(func(hooks.Snapshot) ([]string, error)) ([]string, error)
 }
-`
 
-	t.Run("it reports the sweep, StaleKeys and a hooks store's CleanStale, under any alias", func(t *testing.T) {
-		got := hookSweepReferences(checker.Sources(t, map[string]string{"hooks.go": reachesTheSweep}))
-		want := []string{"hooks.go: " + hooksweepPkgPath, "hooks.go: hooks.StaleKeys", "hooks.go: (*hooks.Store).CleanStale"}
-		if !slices.Equal(got, want) {
-			t.Errorf("hookSweepReferences = %v, want %v: a project store's CleanStale passes", got, want)
-		}
-	})
+func prune(c cleaner) { _, _ = c.CleanStale(nil) }`,
+			[]string{"hooks.go:6: a CleanStale seam taking func(hooks.Snapshot)", "hooks.go:9: a CleanStale seam taking func(hooks.Snapshot)"}},
+		{"a project store's CleanStale", `import "github.com/leeovery/portal/internal/project"
 
-	t.Run("it lets a state command reach them", func(t *testing.T) {
-		got := hookSweepReferences(checker.Sources(t, map[string]string{"state_daemon.go": reachesTheSweep}))
-		if len(got) != 0 {
-			t.Errorf("hookSweepReferences = %v, want none for a state command", got)
-		}
-	})
+type cleaner interface{ CleanStale() ([]project.Project, error) }
+
+func prune(s *project.Store, c cleaner) { _, _ = s.CleanStale(); _, _ = c.CleanStale() }`,
+			nil},
+	} {
+		src := "package cmd\n\n" + tc.body + "\n"
+		t.Run("it judges "+tc.name, func(t *testing.T) {
+			if got := hookSweepReferences(checker.Sources(t, map[string]string{"hooks.go": src})); !slices.Equal(got, tc.want) {
+				t.Errorf("hookSweepReferences = %q, want %q", got, tc.want)
+			}
+		})
+		t.Run("it lets a state command reach "+tc.name, func(t *testing.T) {
+			if got := hookSweepReferences(checker.Sources(t, map[string]string{"state_daemon.go": src})); len(got) != 0 {
+				t.Errorf("hookSweepReferences = %q, want none for a state command", got)
+			}
+		})
+	}
 }

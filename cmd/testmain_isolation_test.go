@@ -6,9 +6,8 @@ package cmd
 // default config path lands there instead of reading or mutating the developer's
 // real config; subprocesses inherit the poison via os.Environ().
 //
-// A missed backend injection under the ZMX_DIR poison lists no sessions rather
-// than failing, since a missing zmx directory holds none, so a test asserts on
-// the fake's calls, never on an empty result alone.
+// A missed backend injection under the ZMX_DIR poison fails with ENOTDIR: the
+// poison sits under /dev/null, so no read of it can pass for an empty listing.
 
 import (
 	"fmt"

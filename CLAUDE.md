@@ -69,12 +69,12 @@ For load generators, match the exact command (`ps -eo ppid,command | awk '$1==1 
 ## Architecture
 
 Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2; all tmux access goes through `internal/tmux`. `main.go` → `cmd/root.go` → subcommands. Mid-move to zmx (see `docs/design/zmx-backend.md`), `PersistentPreRunE` runs:
-1. the `sessions.json` stop, refusing a version 1, corrupt or newer index (every command but `version`, `doctor` and the `state` tree);
+1. the `sessions.json` stop, refusing a version 1, corrupt or newer index (every command but `version`, `doctor`, `current` and the `state` tree);
 2. the `bootstrapExempt` check;
 3. for `open`, the zmx binary lookup;
 4. `bootstrapFor`.
 
-No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Terminal detection, for `open`'s burst and doctor's host-terminal line, reaches tmux through the `defaultTmuxClient` seam (`cmd/spawn_seams.go`), which cmd's `TestMain` replaces with one that panics. Only the production sources allow-listed in `internal/tmux/import_allowlist_guard_test.go` import `internal/tmux`, each entry naming the phase that removes it. Only `cmd/state_*.go` may reach `hooksweep`, `hooks.StaleKeys` or a hooks store's `CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, type-checked): a six-character alphanumeric zmx name such as `notes1` is token-shaped, so the sweep would reap its hooks. Generated names never are.
+No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Terminal detection, for `open`'s burst and doctor's host-terminal line, reaches tmux through the `defaultTmuxClient` seam (`cmd/spawn_seams.go`), which cmd's `TestMain` replaces with one that panics. Only the production sources allow-listed in `internal/tmux/import_allowlist_guard_test.go` import `internal/tmux`, each entry naming the phase that removes it. In cmd, only `cmd/state_*.go` may reach `hooksweep`, `hooks.StaleKeys`, `(*hooks.Store).CleanStale` in any form, or an interface seam over it (`cmd/hook_sweep_caller_guard_test.go`, judged by type-checked object): a six-character alphanumeric zmx name such as `notes1` is token-shaped, so the sweep would reap its hooks. Generated names never are.
 
 ### Commands
 

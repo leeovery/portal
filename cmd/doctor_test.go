@@ -858,3 +858,35 @@ func TestDoctorFix(t *testing.T) {
 		}
 	})
 }
+
+// detectorReads are the tmux commands host-terminal detection sends: the
+// current session's name, then that session's clients.
+var detectorReads = [][]string{
+	{"display-message", "-p", "#{session_name}"},
+	{"list-clients", "-t"},
+}
+
+// Doctor and doctor --fix send tmux nothing but detection's reads, so a path
+// that starts a server or writes to tmux fails here.
+func TestDoctorSendsTmuxOnlyTheDetectorsReads(t *testing.T) {
+	for _, args := range [][]string{{"doctor"}, {"doctor", "--fix"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			isolateTerminalsFile(t)
+			deps := healthyDoctorDeps(t)
+			deps.Detector, deps.Resolve = nil, nil
+			tmuxCalls := withDoctorDeps(t, *deps)
+
+			_, _, _ = runRootCmd(t, args...)
+
+			calls := tmuxCalls.Calls()
+			if len(calls) == 0 {
+				t.Fatal("doctor sent tmux nothing; the host-terminal detection this test watches did not run")
+			}
+			for _, call := range calls {
+				if !slices.ContainsFunc(detectorReads, func(read []string) bool { return slices.Equal(call[:min(len(read), len(call))], read) }) {
+					t.Errorf("doctor sent tmux %q, which is not one of detection's reads %q", call, detectorReads)
+				}
+			}
+		})
+	}
+}

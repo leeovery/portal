@@ -40,15 +40,14 @@ var currentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Print the current session's label",
 	Args:  cobra.NoArgs,
+	// Outside a session it decides before binding anything, so a footer
+	// refreshing outside one never prints a binding's failure.
 	RunE: func(cmd *cobra.Command, args []string) error {
-		b, err := sessionBackend()
-		if err != nil {
-			return err
-		}
-		name, err := currentSessionIn(b)
-		if errors.Is(err, errNotInSession) {
+		name := currentName()
+		if name == "" {
 			return errNoCurrentSession
 		}
+		b, err := sessionBackend()
 		if err != nil {
 			return err
 		}

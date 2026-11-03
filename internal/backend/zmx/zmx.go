@@ -265,7 +265,13 @@ func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, e
 
 // Current reads ZMX_SESSION, which zmx sets in every session's processes.
 func (b *Backend) Current() string {
-	return lookup(b.environ(), envSession)
+	return CurrentFor(b.environ())
+}
+
+// CurrentFor is the session the environment environ runs in, empty outside
+// one: what Current reads, with no Backend to bind.
+func CurrentFor(environ []string) string {
+	return lookup(environ, envSession)
 }
 
 // ProtocolVersion is the socket protocol version that the daemon of the live

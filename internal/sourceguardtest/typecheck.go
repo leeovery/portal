@@ -20,9 +20,9 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 )
 
-// TypedPackage is a package's sources with what their expressions resolve to,
-// for a rule a name alone cannot decide: a method call, judged by the type of
-// its receiver.
+// TypedPackage is a package's sources with what their identifiers resolve to,
+// for a rule a name alone cannot decide: a method, judged by the object it is
+// rather than by how a source spelled the reach for it.
 type TypedPackage struct {
 	Sources []ParsedSource
 	Info    *types.Info
@@ -127,8 +127,8 @@ func (tc *TypeChecker) check(t harnesstest.TestingT, fset *token.FileSet, source
 		files[i] = source.File
 	}
 	info := &types.Info{
-		Uses:       map[*ast.Ident]types.Object{},
-		Selections: map[*ast.SelectorExpr]*types.Selection{},
+		Uses: map[*ast.Ident]types.Object{},
+		Defs: map[*ast.Ident]types.Object{},
 	}
 	config := types.Config{Importer: importer.ForCompiler(fset, "gc", tc.lookup)}
 	if _, err := config.Check(files[0].Name.Name, fset, files, info); err != nil {
@@ -146,19 +146,13 @@ func (tc *TypeChecker) lookup(path string) (io.ReadCloser, error) {
 	return os.Open(export)
 }
 
-// IsMethodOf reports whether sel selects the method named method of the named
-// type typeName in the package at pkgPath, on a value or a pointer.
-func (p TypedPackage) IsMethodOf(sel *ast.SelectorExpr, pkgPath, typeName, method string) bool {
-	selection, ok := p.Info.Selections[sel]
-	if !ok || selection.Kind() != types.MethodVal || selection.Obj().Name() != method {
-		return false
+// Object is what ident names, as a use or as a declaration; nil for an ident
+// that names nothing, such as a package name.
+func (p TypedPackage) Object(ident *ast.Ident) types.Object {
+	if obj := p.Info.Uses[ident]; obj != nil {
+		return obj
 	}
-	recv := selection.Recv()
-	if ptr, isPtr := recv.(*types.Pointer); isPtr {
-		recv = ptr.Elem()
-	}
-	named, ok := recv.(*types.Named)
-	return ok && named.Obj().Name() == typeName && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == pkgPath
+	return p.Info.Defs[ident]
 }
 
 // IsPackageFunc reports whether ident names the function name of the package

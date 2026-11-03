@@ -6,7 +6,6 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
-	"github.com/leeovery/portal/internal/sessionindex"
 )
 
 // Where the current suite runs on the production backend, whose current session
@@ -105,13 +104,50 @@ func TestCurrentCommand(t *testing.T) {
 	t.Run("it prints nothing and fails silently outside a session", func(t *testing.T) {
 		isolateStateDir(t)
 
-		stdout, stderr, err := runRootCmd(t, "current")
+		assertSilentOutside(t)
+	})
 
-		if !errors.Is(err, errNoCurrentSession) || !IsSilentExitError(err) {
-			t.Errorf("error = %v, want the silent %v", err, errNoCurrentSession)
+	t.Run("it stays silent outside a session on a version 1 sessions.json", func(t *testing.T) {
+		seedSessionsJSON(t, legacyIndexBody)
+
+		assertSilentOutside(t)
+	})
+
+	t.Run("it prints the name inside a session on a version 1 sessions.json", func(t *testing.T) {
+		seedSessionsJSON(t, legacyIndexBody)
+		fake := backendtest.New(backend.Session{Name: currentSessionName, Created: joinCreated})
+		fake.SetCurrent(currentSessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		stdout, _, err := runRootCmd(t, "current")
+
+		if err != nil {
+			t.Fatalf("current: %v", err)
 		}
-		if stdout.Len() != 0 || stderr.Len() != 0 {
-			t.Errorf("stdout = %q, stderr = %q, want both empty", stdout, stderr)
+		if got, want := stdout.String(), currentSessionName+"\n"; got != want {
+			t.Errorf("stdout = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it stays silent outside a session with a zmx dir it cannot bind", func(t *testing.T) {
+		isolateStateDir(t)
+		t.Setenv("ZMX_DIR", "rel/zmx")
+
+		assertSilentOutside(t)
+	})
+
+	t.Run("it reports a zmx dir it cannot bind inside a session", func(t *testing.T) {
+		isolateStateDir(t)
+		t.Setenv("ZMX_DIR", "rel/zmx")
+		t.Setenv("ZMX_SESSION", currentSessionName)
+
+		stdout, _, err := runRootCmd(t, "current")
+
+		if err == nil || IsSilentExitError(err) {
+			t.Errorf("error = %v, want the bind's failure, printed", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want empty", stdout)
 		}
 	})
 
@@ -124,20 +160,22 @@ func TestCurrentCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it stops on a version 1 index", func(t *testing.T) {
-		seedSessionsJSON(t, legacyIndexBody)
-		t.Setenv("ZMX_SESSION", currentSessionName)
-
-		stdout, _, err := runRootCmd(t, "current")
-
-		if !errors.Is(err, sessionindex.ErrLegacyIndex) || stdout.Len() != 0 {
-			t.Errorf("current = %q, %v; want the version 1 stop and no output", stdout, err)
-		}
-	})
-
 	t.Run("it is exempt from the zmx binary lookup", func(t *testing.T) {
 		if !bootstrapExempt["current"] {
 			t.Error(`bootstrapExempt["current"] = false; want true`)
 		}
 	})
+}
+
+// assertSilentOutside runs current outside a session and holds it to its
+// answer there: nothing printed, and an error main exits 1 on without a word.
+func assertSilentOutside(t *testing.T) {
+	t.Helper()
+	stdout, stderr, err := runRootCmd(t, "current")
+	if !errors.Is(err, errNoCurrentSession) || !IsSilentExitError(err) {
+		t.Errorf("error = %v, want the silent %v", err, errNoCurrentSession)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Errorf("stdout = %q, stderr = %q, want both empty", stdout, stderr)
+	}
 }

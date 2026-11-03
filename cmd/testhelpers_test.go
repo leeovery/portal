@@ -60,13 +60,15 @@ func withOpenBurstDeps(t *testing.T, deps OpenBurstDeps) {
 // withDoctorDeps installs deps as the package-level doctor seam for the rest of
 // the test and registers the restore in the same breath.
 // Doctor reaches tmux only to detect the host terminal, so its tests answer
-// that detection as a machine running no tmux server would.
-func withDoctorDeps(t *testing.T, deps DoctorDeps) {
+// that detection as a machine running no tmux server would. The returned fake
+// records every tmux command doctor sent.
+func withDoctorDeps(t *testing.T, deps DoctorDeps) *commandertest.Scripted {
 	t.Helper()
 	doctorDeps = &deps
 	t.Cleanup(func() { doctorDeps = nil })
 	noServer := commandertest.Quiet().AllowingUnmatched("", errors.New("no server running"))
 	withFuncSeam(t, &defaultTmuxClient, func() *tmux.Client { return tmux.NewClient(noServer) })
+	return noServer
 }
 
 // withListDeps installs deps as the package-level list seam for the rest of the

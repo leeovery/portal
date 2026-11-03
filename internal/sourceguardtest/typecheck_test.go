@@ -2,6 +2,8 @@ package sourceguardtest_test
 
 import (
 	"go/ast"
+	"go/types"
+	"slices"
 	"testing"
 
 	"github.com/leeovery/portal/internal/sourceguardtest"
@@ -20,7 +22,7 @@ func TestTypeChecker_ChecksThePackagesOwnSources(t *testing.T) {
 	}
 }
 
-func TestTypeChecker_ResolvesSelectionsByType(t *testing.T) {
+func TestTypeChecker_ResolvesIdentifiersToTheirObjects(t *testing.T) {
 	pkg := sourceguardtest.NewTypeChecker(t, ".").Sources(t, map[string]string{"fixture.go": `package fixture
 
 import (
@@ -28,44 +30,47 @@ import (
 	s "strings"
 )
 
-func f(fs *token.FileSet, file token.File, b *s.Builder) {
-	fs.Base()
+type wrapped struct{ *token.FileSet }
+
+func f(w wrapped, file token.File) {
+	w.Base()
 	file.Base()
-	b.Len()
+	_ = (*token.FileSet).Base
 	_ = s.ToUpper
 }
 `})
-	selections := map[string]*ast.SelectorExpr{}
+	objects := map[string][]string{}
 	for _, source := range pkg.Sources {
 		ast.Inspect(source.File, func(n ast.Node) bool {
-			if sel, ok := n.(*ast.SelectorExpr); ok {
-				if x, ok := sel.X.(*ast.Ident); ok {
-					selections[x.Name+"."+sel.Sel.Name] = sel
+			if ident, ok := n.(*ast.Ident); ok {
+				if fn, ok := pkg.Object(ident).(*types.Func); ok {
+					objects[ident.Name] = append(objects[ident.Name], fn.FullName())
 				}
 			}
 			return true
 		})
 	}
 
-	for _, tc := range []struct {
-		sel                     string
-		pkgPath, typeName, name string
-		want                    bool
-	}{
-		{"fs.Base", "go/token", "FileSet", "Base", true},
-		{"file.Base", "go/token", "File", "Base", true},
-		{"file.Base", "go/token", "FileSet", "Base", false},
-		{"b.Len", "go/token", "FileSet", "Len", false},
-	} {
-		if got := pkg.IsMethodOf(selections[tc.sel], tc.pkgPath, tc.typeName, tc.name); got != tc.want {
-			t.Errorf("IsMethodOf(%s, %s.%s.%s) = %v, want %v", tc.sel, tc.pkgPath, tc.typeName, tc.name, got, tc.want)
+	want := map[string][]string{
+		"f":       {"fixture.f"},
+		"Base":    {"(*go/token.FileSet).Base", "(*go/token.File).Base", "(*go/token.FileSet).Base"},
+		"ToUpper": {"strings.ToUpper"},
+	}
+	for name, fullNames := range want {
+		if got := objects[name]; !slices.Equal(got, fullNames) {
+			t.Errorf("objects named %s = %v, want %v: a promoted method and a method expression resolve to the method itself", name, got, fullNames)
 		}
 	}
-	if !pkg.IsPackageFunc(selections["s.ToUpper"].Sel, "strings", "ToUpper") {
-		t.Error("IsPackageFunc missed strings.ToUpper imported as s")
-	}
-	if pkg.IsPackageFunc(selections["fs.Base"].Sel, "go/token", "Base") {
-		t.Error("IsPackageFunc took a method for a package function")
+	for _, source := range pkg.Sources {
+		ast.Inspect(source.File, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "ToUpper" && !pkg.IsPackageFunc(sel.Sel, "strings", "ToUpper") {
+				t.Error("IsPackageFunc missed strings.ToUpper imported as s")
+			}
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Base" && pkg.IsPackageFunc(sel.Sel, "go/token", "Base") {
+				t.Error("IsPackageFunc took a method for a package function")
+			}
+			return true
+		})
 	}
 }
 

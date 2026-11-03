@@ -33,6 +33,15 @@ func sessionBackend() (backend.Backend, error) {
 	return bindZmx(zmxProgram)
 }
 
+// currentName is the session this process runs in, empty outside one. It
+// binds nothing: zmx names the session in the environment.
+func currentName() string {
+	if backendDeps != nil {
+		return backendDeps.Backend.Current()
+	}
+	return zmx.CurrentFor(os.Environ())
+}
+
 // attachingBackend is the backend for creating and attaching a session, which
 // run the zmx binary: one missing from PATH is fatal here and only here.
 func attachingBackend() (backend.Backend, error) {
