@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/spf13/cobra"
 )
@@ -16,12 +19,23 @@ var renameCmd = &cobra.Command{
 	Example: `  portal rename api work
   portal rename -- -wip    a label starting with - goes after --`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name, err := currentSession()
+		b, err := sessionBackend()
+		if err != nil {
+			return err
+		}
+		name, err := currentSessionIn(b)
+		if err != nil {
+			return err
+		}
+		live, err := liveSession(cmd.Context(), b, name)
 		if err != nil {
 			return err
 		}
 		label := strings.Join(args, " ")
+		// The claim ties the label to this creation of the session, so a later
+		// session under the same name starts without it.
 		err = updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+			idx.Claim(name, live.Dir, live.Created)
 			return idx.SetLabel(name, label)
 		})
 		if errors.Is(err, sessionindex.ErrLabelUnprintable) {
@@ -29,6 +43,17 @@ var renameCmd = &cobra.Command{
 		}
 		return err
 	},
+}
+
+// liveSession reads the session rename labels. One that does not answer is
+// refused: a label written without its creation time would pass to whatever
+// session next takes the name.
+func liveSession(ctx context.Context, b backend.Backend, name string) (backend.Session, error) {
+	s, err := b.Session(ctx, name)
+	if errors.Is(err, backend.ErrTimeout) {
+		return backend.Session{}, fmt.Errorf("session %s is not answering; its label is unchanged", name)
+	}
+	return s, err
 }
 
 func init() {

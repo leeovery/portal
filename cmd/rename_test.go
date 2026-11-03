@@ -2,26 +2,63 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
+
+// The live session the rename suite runs inside.
+var (
+	renameCreated = time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+	renameDir     = "/work/dotfiles"
+)
+
+// stageRename stages a backend running this process inside the session
+// currentSessionName, created at renameCreated in renameDir, in a state
+// directory of the test's own, and returns the directory.
+func stageRename(t *testing.T) (*backendtest.Fake, string) {
+	t.Helper()
+	fake := inSession(t, "", backend.Session{Name: currentSessionName, Dir: renameDir, Created: renameCreated})
+	fake.SetCurrent(currentSessionName)
+	return fake, os.Getenv("PORTAL_STATE_DIR")
+}
+
+// labelLive gives the live session's own entry a label, as an earlier rename
+// would have.
+func labelLive(t *testing.T, dir, label string) {
+	t.Helper()
+	if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(currentSessionName, renameDir, renameCreated)
+		return idx.SetLabel(currentSessionName, label)
+	}); err != nil {
+		t.Fatalf("label %s as %q: %v", currentSessionName, label, err)
+	}
+}
+
+// entryOf is name's index entry, the zero Entry for none.
+func entryOf(t *testing.T, dir, name string) sessionindex.Entry {
+	t.Helper()
+	idx := readIndex(t, dir)
+	e, _ := idx.Lookup(name)
+	return e
+}
 
 // assertLabel holds name's index entry to want, "" for no entry.
 func assertLabel(t *testing.T, dir, name, want string) {
 	t.Helper()
-	idx := readIndex(t, dir)
-	e, _ := idx.Lookup(name)
-	if e.Label != want {
-		t.Errorf("label of %s = %q, want %q: %+v", name, e.Label, want, idx.Sessions)
+	if e := entryOf(t, dir, name); e.Label != want {
+		t.Errorf("label of %s = %q, want %q: %+v", name, e.Label, want, e)
 	}
 }
 
 func TestRenameCommand(t *testing.T) {
 	t.Run("it sets the current session's label from its arguments joined with spaces", func(t *testing.T) {
-		dir := isolateStateDir(t)
-		t.Setenv("ZMX_SESSION", currentSessionName)
+		_, dir := stageRename(t)
 
 		if _, _, err := runRootCmd(t, "rename", "dotfiles", "·", "user", "search"); err != nil {
 			t.Fatalf("rename: %v", err)
@@ -30,9 +67,72 @@ func TestRenameCommand(t *testing.T) {
 		assertLabel(t, dir, currentSessionName, "dotfiles · user search")
 	})
 
+	t.Run("it records the live session's created time and dir on a session with no entry", func(t *testing.T) {
+		fake, dir := stageRename(t)
+
+		if _, _, err := runRootCmd(t, "rename", "api work"); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", Dir: renameDir, CreatedAt: renameCreated}
+		if e := entryOf(t, dir, currentSessionName); e != want {
+			t.Errorf("entry = %+v, want %+v", e, want)
+		}
+		if calls := fake.CallsTo(backendtest.OpList); len(calls) != 0 {
+			t.Errorf("backend List calls = %d, want none: rename reads its one session", len(calls))
+		}
+		if calls := fake.CallsTo(backendtest.OpSession); len(calls) != 1 || calls[0].Name != currentSessionName {
+			t.Errorf("backend Session calls = %+v, want one for %s", calls, currentSessionName)
+		}
+	})
+
+	t.Run("it keeps the entry of the same creation, scrollback and all", func(t *testing.T) {
+		stageRename(t)
+		dir := seedSessionsJSON(t, `{"version": 2, "saved_at": "2026-10-31T00:00:00Z", "sessions": [`+
+			`{"name": "`+currentSessionName+`", "label": "old", "dir": "`+renameDir+`", "created_at": "2026-10-30T09:00:00Z", "scrollback_file": "scrollback/`+currentSessionName+`.bin"}]}`)
+
+		if _, _, err := runRootCmd(t, "rename", "new"); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+
+		want := sessionindex.Entry{Name: currentSessionName, Label: "new", Dir: renameDir, CreatedAt: renameCreated, ScrollbackFile: "scrollback/" + currentSessionName + ".bin"}
+		if e := entryOf(t, dir, currentSessionName); e != want {
+			t.Errorf("entry = %+v, want %+v", e, want)
+		}
+	})
+
+	t.Run("it drops an earlier session's label and scrollback after the name was recreated", func(t *testing.T) {
+		stageRename(t)
+		dir := seedSessionsJSON(t, `{"version": 2, "saved_at": "2026-10-29T00:00:00Z", "sessions": [`+
+			`{"name": "`+currentSessionName+`", "label": "old", "dir": "/work/old", "created_at": "2026-10-28T09:00:00Z", "scrollback_file": "scrollback/`+currentSessionName+`.bin"}]}`)
+
+		if _, _, err := runRootCmd(t, "rename", "new"); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+
+		want := sessionindex.Entry{Name: currentSessionName, Label: "new", Dir: renameDir, CreatedAt: renameCreated}
+		if e := entryOf(t, dir, currentSessionName); e != want {
+			t.Errorf("entry = %+v, want %+v", e, want)
+		}
+	})
+
+	t.Run("it refuses in one line when the current session does not answer, writing nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		fake.StopAnswering(currentSessionName)
+
+		_, _, err := runRootCmd(t, "rename", "api work")
+
+		want := "session " + currentSessionName + " is not answering; its label is unchanged"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
 	t.Run("it takes one quoted argument as the whole label", func(t *testing.T) {
-		dir := isolateStateDir(t)
-		t.Setenv("ZMX_SESSION", currentSessionName)
+		_, dir := stageRename(t)
 
 		if _, _, err := runRootCmd(t, "rename", "api  work"); err != nil {
 			t.Fatalf("rename: %v", err)
@@ -42,8 +142,7 @@ func TestRenameCommand(t *testing.T) {
 	})
 
 	t.Run("it takes a label starting with - after --, as its help shows", func(t *testing.T) {
-		dir := isolateStateDir(t)
-		t.Setenv("ZMX_SESSION", currentSessionName)
+		_, dir := stageRename(t)
 
 		if _, _, err := runRootCmd(t, "rename", "--", "-wip"); err != nil {
 			t.Fatalf("rename -- -wip: %v", err)
@@ -60,9 +159,8 @@ func TestRenameCommand(t *testing.T) {
 	})
 
 	t.Run("it leaves other sessions' labels alone", func(t *testing.T) {
-		dir := isolateStateDir(t)
+		_, dir := stageRename(t)
 		setLabel(t, dir, "web-Qm3pLz", "web · checkout")
-		t.Setenv("ZMX_SESSION", currentSessionName)
 
 		if _, _, err := runRootCmd(t, "rename", "dotfiles"); err != nil {
 			t.Fatalf("rename: %v", err)
@@ -74,9 +172,8 @@ func TestRenameCommand(t *testing.T) {
 
 	t.Run("it resets the label to the name given no text", func(t *testing.T) {
 		for _, args := range [][]string{{"rename"}, {"rename", ""}, {"rename", "  "}, {"rename", currentSessionName}} {
-			dir := isolateStateDir(t)
-			setLabel(t, dir, currentSessionName, "dotfiles · user search")
-			t.Setenv("ZMX_SESSION", currentSessionName)
+			_, dir := stageRename(t)
+			labelLive(t, dir, "dotfiles · user search")
 
 			if _, _, err := runRootCmd(t, args...); err != nil {
 				t.Fatalf("%q: %v", args, err)
@@ -91,9 +188,8 @@ func TestRenameCommand(t *testing.T) {
 	})
 
 	t.Run("it refuses an unprintable label and changes nothing", func(t *testing.T) {
-		dir := isolateStateDir(t)
-		setLabel(t, dir, currentSessionName, "dotfiles")
-		t.Setenv("ZMX_SESSION", currentSessionName)
+		_, dir := stageRename(t)
+		labelLive(t, dir, "dotfiles")
 
 		_, _, err := runRootCmd(t, "rename", "api\nwork")
 
@@ -105,7 +201,8 @@ func TestRenameCommand(t *testing.T) {
 	})
 
 	t.Run("it fails in one line outside a session and writes nothing", func(t *testing.T) {
-		dir := isolateStateDir(t)
+		fake, dir := stageRename(t)
+		fake.SetCurrent("")
 
 		_, _, err := runRootCmd(t, "rename", "api work")
 
@@ -118,8 +215,8 @@ func TestRenameCommand(t *testing.T) {
 	})
 
 	t.Run("it stops on a version 1 index and leaves it as it was", func(t *testing.T) {
+		stageRename(t)
 		dir := seedSessionsJSON(t, legacyIndexBody)
-		t.Setenv("ZMX_SESSION", currentSessionName)
 
 		_, _, err := runRootCmd(t, "rename", "api work")
 

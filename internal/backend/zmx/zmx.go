@@ -101,6 +101,19 @@ func New(cfg Config) (*Backend, error) {
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
+// Session asks the session held under exactly name for its Info record, within
+// the probe ceiling, on a connection of its own.
+func (b *Backend) Session(ctx context.Context, name string) (backend.Session, error) {
+	i, err := b.askWithin(ctx, name)
+	if err != nil {
+		return backend.Session{}, fmt.Errorf("read session %q: %w", name, err)
+	}
+	// Without a hostname only a cwd with no host, or localhost, reads as
+	// local, as in List.
+	hostname, _ := b.hostname()
+	return sessionOf(name, i, hostname), nil
+}
+
 // Exists reports whether a session that answers is held under exactly name.
 // A stale socket, a name held only under another spelling, or one no session
 // can have, does not count. A session that gives no well-formed answer is
