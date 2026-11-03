@@ -290,22 +290,6 @@ func (c *Client) KillSession(name string) error {
 	return nil
 }
 
-// The exact-match prefix goes on the target only: newName is a literal
-// positional argument, and prefixing it would name the session "=...".
-func (c *Client) RenameSession(oldName, newName string) error {
-	// Refused before the argv is composed: the new name goes on as a bare
-	// positional, and one Portal's target form cannot address afterwards is a
-	// session it can no longer read.
-	if err := ValidateSessionName(newName); err != nil {
-		return fmt.Errorf("failed to rename tmux session %q to %q: %w", oldName, newName, err)
-	}
-	_, err := c.cmd.Run("rename-session", "-t", string(CoordTargetExact(oldName)), newName)
-	if err != nil {
-		return fmt.Errorf("failed to rename tmux session %q to %q: %w", oldName, newName, wrapSessionTargetErr(oldName, err))
-	}
-	return nil
-}
-
 func (c *Client) SwitchClient(name string) error {
 	_, err := c.cmd.Run("switch-client", "-t", string(CoordTargetExact(name)))
 	if err != nil {

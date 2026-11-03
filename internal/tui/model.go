@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"image/color"
@@ -113,6 +114,8 @@ type SessionsMsg struct {
 	Err      error
 
 	afterRestore bool
+	// actionErr is the failure of the row action this listing follows.
+	actionErr error
 }
 
 // The loading page is padded to this duration when bootstrap is faster, so it
@@ -1588,7 +1591,7 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
-// A pure read — it never mutates tmux or state.
+// A pure read — it never mutates state.
 func (m Model) fetchSessionsCmd() tea.Cmd {
 	return func() tea.Msg {
 		sessions, pending, err := m.readSessionList()
@@ -1603,14 +1606,39 @@ func (m Model) ListError() error {
 	return m.listErr
 }
 
-// applyListingFailure ends the picker on a listing that failed before any
-// answered. Once one has, the rows it gave stay and the failure flashes.
-func (m Model) applyListingFailure(err error) (tea.Model, tea.Cmd) {
-	if !m.listed {
-		m.listErr = err
+// applySessionsMsg takes in a listing. One that fails before any answered ends
+// the picker; once one has, a failed one keeps the rows it gave and settles the
+// page as a success would. A row action's failure flashes over the listing's,
+// being the more useful of the two.
+func (m Model) applySessionsMsg(msg SessionsMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil && !m.listed {
+		m.listErr = msg.Err
 		return m, tea.Quit
 	}
-	return m.flashError(err)
+	var cmd tea.Cmd
+	if msg.Err == nil {
+		m.listed = true
+		cmd = m.applySessions(msg.Sessions, msg.Pending)
+	}
+	if failure := cmp.Or(msg.actionErr, msg.Err); failure != nil {
+		(&m).setFlash(failure.Error())
+		cmd = tea.Batch(cmd, flashTickCmd(m.flashGen))
+	}
+
+	// While loading, ingest but leave sessionsLoaded alone —
+	// transitionFromLoading owns the flip.
+	if m.activePage == PageLoading {
+		return m, cmd
+	}
+
+	m.sessionsLoaded = true
+	m.evaluateDefaultPage()
+	detectCmd := m.maybeDispatchDetectionCmd()
+	var settleCmd tea.Cmd
+	if msg.afterRestore {
+		settleCmd = m.startPendingSettle()
+	}
+	return m, tea.Batch(cmd, detectCmd, settleCmd)
 }
 
 // The cold-boot route's snapshot is stale: the orchestrator runs in a goroutine,
@@ -1754,26 +1782,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 	case SessionsMsg:
-		if msg.Err != nil {
-			return m.applyListingFailure(msg.Err)
-		}
-		m.listed = true
-		cmd := m.applySessions(msg.Sessions, msg.Pending)
-
-		// While loading, ingest but leave sessionsLoaded alone —
-		// transitionFromLoading owns the flip.
-		if m.activePage == PageLoading {
-			return m, cmd
-		}
-
-		m.sessionsLoaded = true
-		m.evaluateDefaultPage()
-		detectCmd := m.maybeDispatchDetectionCmd()
-		var settleCmd tea.Cmd
-		if msg.afterRestore {
-			settleCmd = m.startPendingSettle()
-		}
-		return m, tea.Batch(cmd, detectCmd, settleCmd)
+		return m.applySessionsMsg(msg)
 	case pendingSettleTickMsg:
 		return m, m.pendingSettleTick()
 	case pendingSettleReadMsg:
@@ -1902,8 +1911,13 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		m.preview.setBody(msg.body)
 		return m, nil
 	case previewOpenMsg:
-		m.selected = msg.Session
-		return m, tea.Quit
+		if !m.answering(msg.Session) {
+			// The refusal flashes on the list, where it can be read.
+			refresh := m.exitPreviewToSessions(msg.Session)
+			updated, flash := m.openSession(msg.Session)
+			return updated, tea.Batch(refresh, flash)
+		}
+		return m.openSession(msg.Session)
 	case previewSessionsRefreshedMsg:
 		// Lister errors are non-fatal: the pre-refresh snapshot is the best
 		// information left, and the user expects to land on the list.
@@ -1913,8 +1927,6 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		cmd := m.applySessions(msg.Sessions, msg.Pending)
 		m.reanchorSessionCursor(msg.PreserveName)
 		return m, cmd
-	case sessionActionFailedMsg:
-		return m.flashError(msg.err)
 	case flashTickMsg:
 		if msg.Gen == m.flashGen {
 			m.clearFlash()
@@ -2887,8 +2899,7 @@ func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
 		// len == 1, so this ranges once, binding the sole key.
 		for name = range m.selectedSessions {
 		}
-		m.selected = name
-		return m, tea.Quit
+		return m.openSession(name)
 	default:
 		return m.beginBurst(m.orderedMarkedSessions())
 	}
@@ -2963,20 +2974,13 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// sessionActionFailedMsg is a kill or label change that did not land; the rows
-// stay as they were.
-type sessionActionFailedMsg struct {
-	err error
-}
-
-// actAndRefresh runs a row action, then re-reads the rows it changed.
+// actAndRefresh runs a row action, then re-reads the rows whatever its
+// outcome: a failed kill may still have ended the session, or found it gone.
 func (m Model) actAndRefresh(action func() error) tea.Cmd {
 	return func() tea.Msg {
-		if err := action(); err != nil {
-			return sessionActionFailedMsg{err: err}
-		}
+		actionErr := action()
 		sessions, pending, err := m.readSessionList()
-		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err, actionErr: actionErr}
 	}
 }
 
@@ -3044,17 +3048,24 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	return m.openSession(si.Session)
+	return m.openSession(si.Session.Name)
 }
 
-// openSession picks s to attach once the picker ends, refusing one that does
-// not answer.
-func (m Model) openSession(s Session) (tea.Model, tea.Cmd) {
-	if s.NotAnswering {
-		return m.flashError(fmt.Errorf("session %s is not answering; nothing was opened", s.Name))
+// openSession picks the session name to attach once the picker ends, refusing
+// one that does not answer. Every open of a listed session comes through here.
+func (m Model) openSession(name string) (tea.Model, tea.Cmd) {
+	if !m.answering(name) {
+		return m.flashError(fmt.Errorf("session %s is not answering; nothing was opened", name))
 	}
-	m.selected = s.Name
+	m.selected = name
 	return m, tea.Quit
+}
+
+// answering reports whether the listed session name answered its listing; one
+// not listed is taken as answering, there being nothing to say otherwise.
+func (m Model) answering(name string) bool {
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
+	return i < 0 || !m.sessions[i].NotAnswering
 }
 
 // Alt-screen is set declaratively here so page composers stay string builders.

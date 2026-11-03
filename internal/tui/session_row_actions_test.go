@@ -82,7 +82,7 @@ func assertFlashedAndOpen(t *testing.T, m Model, next tea.Cmd, want string, rows
 func TestRowActions_FailuresFlashAndKeepThePickerOpen(t *testing.T) {
 	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
 
-	t.Run("a failed kill flashes its words and keeps the rows", func(t *testing.T) {
+	t.Run("a failed kill flashes its words and still refreshes the rows", func(t *testing.T) {
 		lister := &rowActionLister{sessions: sessions}
 		killer := &killerStub{err: errors.New("No session found: alpha")}
 		m := rowActionModel(t, lister, killer, &recordingLabeller{})
@@ -91,10 +91,22 @@ func TestRowActions_FailuresFlashAndKeepThePickerOpen(t *testing.T) {
 		lister.sessions = []Session{{Name: "bravo"}}
 		m, next := land(t, m, cmd)
 
-		assertFlashedAndOpen(t, m, next, "No session found: alpha", []string{"alpha", "bravo"})
+		assertFlashedAndOpen(t, m, next, "No session found: alpha", []string{"bravo"})
 	})
 
-	t.Run("a refused label flashes its words and keeps the rows", func(t *testing.T) {
+	t.Run("a failed kill whose refresh fails too keeps its own flash and the last rows", func(t *testing.T) {
+		lister := &rowActionLister{sessions: sessions}
+		killer := &killerStub{err: errors.New("session alpha is not answering; the kill may still land")}
+		m := rowActionModel(t, lister, killer, &recordingLabeller{})
+
+		m, cmd := pressKeys(m, press('k'), press('y'))
+		lister.err = errors.New("zmx: listing timed out")
+		m, next := land(t, m, cmd)
+
+		assertFlashedAndOpen(t, m, next, "session alpha is not answering; the kill may still land", []string{"alpha", "bravo"})
+	})
+
+	t.Run("a refused label flashes its words over the refreshed rows", func(t *testing.T) {
 		lister := &rowActionLister{sessions: sessions}
 		refusal := errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
 		m := rowActionModel(t, lister, &killerStub{}, &recordingLabeller{err: refusal})
@@ -269,4 +281,56 @@ func TestRowActions_ASessionNotAnswering(t *testing.T) {
 
 		assertFlashedAndOpen(t, m, next, "session wedged-Lp4s is not answering; its label is unchanged", []string{"wedged-Lp4s", "zulu"})
 	})
+
+	t.Run("Enter from its preview flashes on the list and attaches nothing", func(t *testing.T) {
+		m := rowActionModel(t, &rowActionLister{sessions: sessions}, &killerStub{}, &recordingLabeller{})
+		m.activePage = pagePreview
+		m.preview = NewPreviewModel(sessions[0], previewNotAnswering, 120, 40)
+
+		updated, next := m.Update(previewOpenMsg{Session: "wedged-Lp4s"})
+		m = updated.(Model)
+
+		if m.ActivePage() != PageSessions {
+			t.Errorf("page = %v, want the list the refusal is read on", m.ActivePage())
+		}
+		assertFlashedAndOpen(t, m, next, "session wedged-Lp4s is not answering; nothing was opened", []string{"wedged-Lp4s", "zulu"})
+	})
+
+	t.Run("the one marked session of a multi-select flashes and attaches nothing", func(t *testing.T) {
+		m := rowActionModel(t, &rowActionLister{sessions: sessions}, &killerStub{}, &recordingLabeller{})
+		m.multiSelectMode = true
+		m.selectedSessions = map[string]struct{}{"wedged-Lp4s": {}}
+
+		updated, next := m.handleMultiSelectEnter()
+
+		assertFlashedAndOpen(t, updated.(Model), next, "session wedged-Lp4s is not answering; nothing was opened", []string{"wedged-Lp4s", "zulu"})
+	})
+}
+
+func TestRowActions_EveryOpenOfAnAnsweringSessionAttaches(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
+	opens := map[string]func(Model) (tea.Model, tea.Cmd){
+		"Enter": func(m Model) (tea.Model, tea.Cmd) { return m.Update(keyEnter) },
+		"preview Enter": func(m Model) (tea.Model, tea.Cmd) {
+			m.activePage = pagePreview
+			m.preview = NewPreviewModel(sessions[0], "", 120, 40)
+			return m.Update(previewOpenMsg{Session: "alpha"})
+		},
+		"multi-select Enter": func(m Model) (tea.Model, tea.Cmd) {
+			m.multiSelectMode = true
+			m.selectedSessions = map[string]struct{}{"alpha": {}}
+			return m.handleMultiSelectEnter()
+		},
+	}
+	for route, open := range opens {
+		t.Run(route, func(t *testing.T) {
+			m := rowActionModel(t, &rowActionLister{sessions: sessions}, &killerStub{}, &recordingLabeller{})
+
+			updated, cmd := open(m)
+
+			if !quits(cmd) || updated.(Model).Selected() != "alpha" {
+				t.Errorf("Selected() = %q, quits = %v; want alpha picked and the picker ended", updated.(Model).Selected(), quits(cmd))
+			}
+		})
+	}
 }

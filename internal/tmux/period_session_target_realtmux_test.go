@@ -96,35 +96,25 @@ func TestPeriodBearingSessionTargets(t *testing.T) {
 		}
 	})
 
-	t.Run("it renames and switches to a period-bearing session with a prefix sibling live", func(t *testing.T) {
-		const renamed = "my.other.app"
-
+	t.Run("it switches to a period-bearing session with a prefix sibling live", func(t *testing.T) {
 		ts, client, _ := seedRealTmuxServer(t, periodFixture)
 		attachClient(t, ts, periodSibling)
 
-		if err := client.RenameSession(periodSession, renamed); err != nil {
-			t.Fatalf("RenameSession(%q, %q): %v", periodSession, renamed, err)
-		}
-		live := liveSessionNames(t, ts)
-		if !slices.Contains(live, renamed) || !slices.Contains(live, periodSibling) {
-			t.Fatalf("after the rename the server holds %v, want %q beside an untouched %q", live, renamed, periodSibling)
-		}
-
-		if err := client.SwitchClient(renamed); err != nil {
-			t.Fatalf("SwitchClient(%q): %v", renamed, err)
+		if err := client.SwitchClient(periodSession); err != nil {
+			t.Fatalf("SwitchClient(%q): %v", periodSession, err)
 		}
 		if !harnesstest.PollUntil(t, sessionSettleTimeout, 20*time.Millisecond, func() bool {
-			return attachedSession(t, ts) == renamed
+			return attachedSession(t, ts) == periodSession
 		}) {
-			t.Errorf("the attached client is on %q, want %q", attachedSession(t, ts), renamed)
+			t.Errorf("the attached client is on %q, want %q", attachedSession(t, ts), periodSession)
 		}
 
 		// list-clients composes the same target kind, so the client the switch
-		// moved must be enumerable under the renamed session and absent from
+		// moved must be enumerable under the session it reached and absent from
 		// the sibling it left.
-		on, err := client.ListClients(renamed)
+		on, err := client.ListClients(periodSession)
 		if err != nil || len(on) != 1 {
-			t.Errorf("ListClients(%q) = %v, %v; want the one attached client", renamed, on, err)
+			t.Errorf("ListClients(%q) = %v, %v; want the one attached client", periodSession, on, err)
 		}
 		off, err := client.ListClients(periodSibling)
 		if err != nil || len(off) != 0 {

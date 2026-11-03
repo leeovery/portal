@@ -49,16 +49,26 @@ func killSession(ctx context.Context, b backend.Backend, name, via string) error
 // killError words the backend's refusals for the user; any other failure is
 // returned as the backend gave it.
 func killError(name string, err error) error {
-	if held, ok := errors.AsType[*backend.HeldAsError](err); ok {
-		return fmt.Errorf("No session found: %s; did you mean %s?", name, held.Held) //nolint:staticcheck // user-facing message per spec
+	if gone, ok := sessionGoneError(name, err); ok {
+		return gone
 	}
-	switch {
-	case errors.Is(err, backend.ErrNoSuchSession):
-		return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
-	case errors.Is(err, backend.ErrTimeout):
+	if errors.Is(err, backend.ErrTimeout) {
 		return fmt.Errorf("session %s is not answering; the kill may still land", name)
 	}
 	return err
+}
+
+// sessionGoneError words a refusal of name as one the backend does not hold,
+// naming the spelling it does hold where there is one, and reports whether
+// err was such a refusal.
+func sessionGoneError(name string, err error) (error, bool) {
+	if held, ok := errors.AsType[*backend.HeldAsError](err); ok {
+		return fmt.Errorf("No session found: %s; did you mean %s?", name, held.Held), true //nolint:staticcheck // user-facing message per spec
+	}
+	if errors.Is(err, backend.ErrNoSuchSession) {
+		return fmt.Errorf("No session found: %s", name), true //nolint:staticcheck // user-facing message per spec
+	}
+	return nil, false
 }
 
 // pickerKiller kills from the picker as portal kill does.

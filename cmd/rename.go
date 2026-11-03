@@ -45,11 +45,14 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 	})
 }
 
-// liveSession reads the session rename labels. One that does not answer is
-// refused: a label written without its creation time would pass to whatever
-// session next takes the name.
+// liveSession reads the session rename labels, wording a missing one as kill
+// does. One that does not answer is refused: a label written without its
+// creation time would pass to whatever session next takes the name.
 func liveSession(ctx context.Context, b backend.Backend, name string) (backend.Session, error) {
 	s, err := b.Session(ctx, name)
+	if gone, ok := sessionGoneError(name, err); ok {
+		return backend.Session{}, gone
+	}
 	if errors.Is(err, backend.ErrTimeout) {
 		return backend.Session{}, fmt.Errorf("session %s is not answering; its label is unchanged", name)
 	}

@@ -133,6 +133,21 @@ func TestRenameCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("it says the current session is gone in kill's words, writing nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		fake.Remove(currentSessionName)
+
+		_, _, err := runRootCmd(t, "rename", "api work")
+
+		want := "No session found: " + currentSessionName
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
 	t.Run("it takes one quoted argument as the whole label", func(t *testing.T) {
 		_, dir := stageRename(t)
 
@@ -289,6 +304,33 @@ func TestPickerLabeller(t *testing.T) {
 		}
 		if entries := dirListing(t, dir); len(entries) != 0 {
 			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
+	t.Run("it words a session gone since the listing as kill does, writing nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		fake.Remove(currentSessionName)
+
+		err := label(fake, "api work")
+
+		want := "No session found: " + currentSessionName
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
+	t.Run("it names the spelling a session is held under, as kill does", func(t *testing.T) {
+		fake, _ := stageRename(t)
+		other := strings.ToUpper(currentSessionName)
+
+		err := pickerLabeller{ctx: context.Background(), b: fake}.SetLabel(other, "api work")
+
+		want := "No session found: " + other + "; did you mean " + currentSessionName + "?"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
 		}
 	})
 

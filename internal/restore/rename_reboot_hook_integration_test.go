@@ -23,34 +23,18 @@ func TestRenameRebootHook_ExternalRename(t *testing.T) {
 	})
 }
 
-func TestRenameRebootHook_RenameSessionEquivalent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration test; -short")
-	}
-	tmuxtest.SkipIfNoTmux(t)
-
-	runRenameRebootFire(t, func(t *testing.T, _ *tmuxtest.Socket, client *tmux.Client) {
-		t.Helper()
-		if err := client.RenameSession(renameOldName, renameNewName); err != nil {
-			t.Fatalf("RenameSession(%q, %q): %v", renameOldName, renameNewName, err)
-		}
-	})
-}
-
 func TestRenameRebootHook_PaneProcessKeptRunning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
 	}
 	tmuxtest.SkipIfNoTmux(t)
 
-	runRenameRebootFire(t, func(t *testing.T, ts *tmuxtest.Socket, client *tmux.Client) {
+	runRenameRebootFire(t, func(t *testing.T, ts *tmuxtest.Socket, _ *tmux.Client) {
 		t.Helper()
 		pidBefore := strings.TrimSpace(ts.Run(t, "display-message", "-p",
 			"-t", tmux.PaneTarget(renameOldName, 0, 0), "#{pane_pid}"))
 
-		if err := client.RenameSession(renameOldName, renameNewName); err != nil {
-			t.Fatalf("RenameSession(%q, %q): %v", renameOldName, renameNewName, err)
-		}
+		ts.Run(t, "rename-session", "-t", renameOldName, renameNewName)
 
 		pidAfter := strings.TrimSpace(ts.Run(t, "display-message", "-p",
 			"-t", tmux.PaneTarget(renameNewName, 0, 0), "#{pane_pid}"))

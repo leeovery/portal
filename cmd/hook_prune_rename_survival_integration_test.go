@@ -39,9 +39,7 @@ func TestRenameRestoreCleanupSurvival_KeepsRestoredTokenKeyedHook(t *testing.T) 
 	// the pane unstamped and the entry unprotected.
 	ts.StampPaneToken(t, renameRestoreName+":0.0", hookstest.LiveSeedA)
 
-	if err := client.RenameSession(renameRestoreName, renameRestoreNewName); err != nil {
-		t.Fatalf("RenameSession: %v", err)
-	}
+	ts.Run(t, "rename-session", "-t", renameRestoreName, renameRestoreNewName)
 	ts.WaitForSession(t, renameRestoreNewName, 2*time.Second)
 
 	assertLiveTokenPresent(t, client, hookstest.LiveSeedA)

@@ -12,62 +12,6 @@ import (
 
 const colonSession = "a:b"
 
-func TestRenameSessionRefusesColon(t *testing.T) {
-	t.Run("it refuses a rename to a name containing a colon", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.New(t))
-
-		err := client.RenameSession("old-name", colonSession)
-
-		if err == nil {
-			t.Fatal("RenameSession to a colon-bearing name returned nil; want a refusal")
-		}
-		if !errors.Is(err, tmuxerr.ErrUnaddressableSessionName) {
-			t.Errorf("error = %v; want it to wrap tmuxerr.ErrUnaddressableSessionName", err)
-		}
-	})
-
-	t.Run("it names the offending character in the refusal message", func(t *testing.T) {
-		client := tmux.NewClient(commandertest.New(t))
-
-		err := client.RenameSession("old-name", colonSession)
-
-		if err == nil {
-			t.Fatal("expected a refusal, got nil")
-		}
-		if !strings.Contains(err.Error(), `":"`) {
-			t.Errorf("refusal message %q does not name the offending %q character", err.Error(), ":")
-		}
-	})
-
-	t.Run("it issues no tmux command for a refused rename", func(t *testing.T) {
-		mock := commandertest.New(t)
-		client := tmux.NewClient(mock)
-
-		_ = client.RenameSession("old-name", colonSession)
-
-		if len(mock.Calls()) != 0 {
-			t.Errorf("refused rename issued %d tmux calls (%v); want none", len(mock.Calls()), mock.Calls())
-		}
-	})
-
-	t.Run("it renames a colon-free name unchanged", func(t *testing.T) {
-		mock := commandertest.New(t, commandertest.Returns("", "rename-session"))
-		client := tmux.NewClient(mock)
-
-		if err := client.RenameSession("old-name", "new-name"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(mock.Calls()) != 1 {
-			t.Fatalf("expected 1 call, got %d: %v", len(mock.Calls()), mock.Calls())
-		}
-		const wantArgs = "rename-session -t =old-name: new-name"
-		if got := strings.Join(mock.Calls()[0], " "); got != wantArgs {
-			t.Errorf("called with %q, want %q", got, wantArgs)
-		}
-	})
-}
-
 // noSuchSessionCommander answers every command the way tmux answers a target it
 // cannot resolve — the same stderr for a vanished session and for a live session
 // whose name the exact-target form cannot express.
@@ -93,7 +37,6 @@ type perSessionOp struct {
 var perSessionOps = []perSessionOp{
 	{"HasSessionProbe", func(c *tmux.Client, s string) error { _, err := c.HasSessionProbe(s); return err }},
 	{"KillSession", func(c *tmux.Client, s string) error { return c.KillSession(s) }},
-	{"RenameSession", func(c *tmux.Client, s string) error { return c.RenameSession(s, "new-name") }},
 	{"SwitchClient", func(c *tmux.Client, s string) error { return c.SwitchClient(s) }},
 	{"SetSessionEnvironment", func(c *tmux.Client, s string) error { return c.SetSessionEnvironment(s, "K", "v") }},
 	{"ShowEnvironment", func(c *tmux.Client, s string) error { _, err := c.ShowEnvironment(s); return err }},
@@ -216,23 +159,6 @@ func TestValidateSessionNameFlagPrefix(t *testing.T) {
 	t.Run("it accepts a hyphen that is not the first character", func(t *testing.T) {
 		if err := tmux.ValidateSessionName("my-cool-app-abc123"); err != nil {
 			t.Errorf(`ValidateSessionName("my-cool-app-abc123") = %v; want nil`, err)
-		}
-	})
-
-	t.Run("it refuses the rename before composing the tmux argv", func(t *testing.T) {
-		mock := commandertest.New(t)
-		client := tmux.NewClient(mock)
-
-		err := client.RenameSession("old-name", "-bar")
-
-		if err == nil {
-			t.Fatal("RenameSession to a hyphen-leading name returned nil; want a refusal")
-		}
-		if !errors.Is(err, tmux.ErrSessionNameFlagPrefix) {
-			t.Errorf("error = %v; want it to wrap tmux.ErrSessionNameFlagPrefix", err)
-		}
-		if len(mock.Calls()) != 0 {
-			t.Errorf("refused rename issued %d tmux calls (%v); want none", len(mock.Calls()), mock.Calls())
 		}
 	})
 }

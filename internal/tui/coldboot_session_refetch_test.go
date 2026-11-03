@@ -464,13 +464,11 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 		fmt.Sprintf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave", len(want)))
 }
 
-// The interim list was shown, so a refetch that fails keeps it and flashes,
-// as any later listing does.
-func TestColdBoot_RefetchError_FlashesAndKeepsTheInterim(t *testing.T) {
-	stale := []Session{}
-	lister := &coldBootStepLister{steps: [][]Session{{}}}
-
-	m := New(lister,
+// coldBootInterim is a cold-boot picker past its loading page, showing stale
+// rows ahead of the post-restore refetch, with the landing page still owed.
+func coldBootInterim(t *testing.T, stale []Session) Model {
+	t.Helper()
+	m := New(&coldBootStepLister{steps: [][]Session{stale}},
 		WithServerStarted(true),
 		WithProgressReceiver(func() tea.Msg { return nil }),
 		WithProjectStore(stubProjectStore{}),
@@ -478,33 +476,35 @@ func TestColdBoot_RefetchError_FlashesAndKeepsTheInterim(t *testing.T) {
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
 	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
 	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
 	model, _ = model.Update(LoadingMinElapsedMsg{})
 	model, _ = model.Update(BootstrapCompleteMsg{})
 
 	interim := model.(Model)
-	if interim.ActivePage() != PageSessions {
-		t.Fatalf("setup invariant: interim page after transition must be PageSessions, got %v", interim.ActivePage())
+	if interim.ActivePage() != PageSessions || interim.sessionsLoaded {
+		t.Fatalf("setup invariant: interim page = %v, sessionsLoaded = %v; want PageSessions with the landing owed", interim.ActivePage(), interim.sessionsLoaded)
 	}
+	return interim
+}
 
-	updated, cmd := interim.Update(SessionsMsg{Err: errors.New("zmx: listing timed out"), afterRestore: true})
-	got := updated.(Model)
+// The interim list was shown, so a refetch that fails keeps it, flashes, and
+// settles the landing exactly as a refetch answering with the same rows would.
+func TestColdBoot_RefetchError_FlashesAndSettlesOnTheInterim(t *testing.T) {
+	stale := []Session{}
+
+	answered, _ := coldBootInterim(t, stale).Update(SessionsMsg{Sessions: stale, afterRestore: true})
+	updated, cmd := coldBootInterim(t, stale).Update(SessionsMsg{Err: errors.New("zmx: listing timed out"), afterRestore: true})
+	got, want := updated.(Model), answered.(Model)
 
 	if quits(cmd) {
 		t.Error("a failing refetch quit the picker after the interim list was shown")
 	}
-	if got.ActivePage() != PageSessions {
-		t.Errorf("page = %v, want PageSessions", got.ActivePage())
+	if !got.sessionsLoaded || !got.defaultPageEvaluated {
+		t.Errorf("sessionsLoaded = %v, defaultPageEvaluated = %v; want the landing settled", got.sessionsLoaded, got.defaultPageEvaluated)
+	}
+	if got.ActivePage() != want.ActivePage() || got.ActivePage() != PageProjects {
+		t.Errorf("page = %v, want %v as an answered refetch lands: an empty list lands on Projects", got.ActivePage(), want.ActivePage())
 	}
 	if got.flashText != "zmx: listing timed out" {
 		t.Errorf("flash = %q, want the listing's own words", got.flashText)
