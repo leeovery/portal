@@ -212,9 +212,15 @@ type Model struct {
 	listed  bool
 	listErr error
 	// currentSession is the session the picker runs inside, empty outside one.
-	currentSession    string
-	modal             modalState
-	pendingKill       Session
+	currentSession string
+	modal          modalState
+	pendingKill    Session
+	// killOffersAttach is set while the kill prompt is the one the kill key
+	// asked for from inside the session, which Enter attaches again.
+	killOffersAttach bool
+	// killAsk is the session the kill key asked to kill, whose prompt opens
+	// once the rows are known; empty once it has.
+	killAsk           string
 	renameInput       textinput.Model
 	renameTarget      Session
 	pendingDeletePath string
@@ -726,6 +732,14 @@ func WithInitialFlash(text string) Option {
 		}
 		m.flashText = text
 		m.flashKind = flashWarning
+	}
+}
+
+// WithKillAsk opens the picker on the kill prompt for the session the kill
+// key asked to kill from inside it, once its row is listed.
+func WithKillAsk(name string) Option {
+	return func(m *Model) {
+		m.killAsk = name
 	}
 }
 
@@ -1381,6 +1395,7 @@ func (m *Model) evaluateDefaultPage() {
 	m.applyInitialFilter()
 	m.applySearchLanding()
 	m.applyInitialCursor()
+	m.applyKillAsk()
 }
 
 // Build wires no initial filter alongside a search form, so exactly one of the
@@ -1426,6 +1441,21 @@ func (m *Model) applyInitialCursor() {
 		m.reanchorSessionCursor(m.initialCursor)
 	}
 	m.initialCursor = ""
+}
+
+// Runs after applyInitialCursor so the asked session's row wins the cursor. A
+// session no longer listed is gone, and nothing is asked about it.
+func (m *Model) applyKillAsk() {
+	name := m.killAsk
+	m.killAsk = ""
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
+	if i < 0 || m.activePage != PageSessions {
+		return
+	}
+	m.reanchorSessionCursor(name)
+	m.modal = modalKillConfirm
+	m.pendingKill = m.sessions[i]
+	m.killOffersAttach = true
 }
 
 // Re-fetched on preview dismissal so an externally killed session disappears.
@@ -2966,19 +2996,25 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	name, offersAttach := m.pendingKill.Name, m.killOffersAttach
 	switch {
 	case isRuneKey(keyMsg, "y"):
-		name := m.pendingKill.Name
-		m.modal = modalNone
-		m.pendingKill = Session{}
+		m = m.closeKillConfirm()
 		return m, m.actAndRefresh(func() error { return m.sessionKiller.KillSession(name) })
 	case keyIsCode(keyMsg, tea.KeyEscape):
 		// Cancel is Esc only; `n` falls through to the ignore-all tail.
-		m.modal = modalNone
-		m.pendingKill = Session{}
-		return m, nil
+		return m.closeKillConfirm(), nil
+	case offersAttach && keyIsCode(keyMsg, tea.KeyEnter):
+		return m.closeKillConfirm().openSession(name)
 	}
 	return m, nil
+}
+
+func (m Model) closeKillConfirm() Model {
+	m.modal = modalNone
+	m.pendingKill = Session{}
+	m.killOffersAttach = false
+	return m
 }
 
 // actAndRefresh runs a row action, then re-reads the rows whatever its
@@ -3582,7 +3618,7 @@ func (m Model) renderProjectsFooterForFilterState() string {
 func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
-		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.killOffersAttach, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:

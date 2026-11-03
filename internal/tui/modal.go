@@ -27,8 +27,8 @@ func renderHelpModalOnClearedCanvas(entries []keymapEntry, legend []helpLegendEn
 	return placeModalOnClearedCanvas(panel, width, height)
 }
 
-func renderKillModalOnClearedCanvas(name string, width, height int, th theme.Theme, colourless bool) string {
-	panel := renderKillModalContent(name, th, colourless)
+func renderKillModalOnClearedCanvas(name string, offersAttach bool, width, height int, th theme.Theme, colourless bool) string {
+	panel := renderKillModalContent(name, offersAttach, th, colourless)
 	return placeModalOnClearedCanvas(panel, width, height)
 }
 

@@ -47,6 +47,10 @@ type Deps struct {
 	// Flash is a warning the picker opens on, such as why the attach before it
 	// failed to do what was asked.
 	Flash string
+	// KillAsk is the session the kill key asked to kill from inside it: the
+	// picker opens on its kill prompt, which Enter answers by attaching it
+	// again.
+	KillAsk string
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -168,6 +172,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithSpawnEnv(deps.SpawnEnv))
 	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
 	opts = append(opts, WithOpeningFlash(deps.Flash))
+	opts = append(opts, WithKillAsk(deps.KillAsk))
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.

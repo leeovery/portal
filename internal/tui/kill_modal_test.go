@@ -14,7 +14,7 @@ func killModalContains(content, s string) bool {
 
 func TestKillModal_Header(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		content := renderKillModalContent("aviva-proxy-qNyfEO", th, false)
+		content := renderKillModalContent("aviva-proxy-qNyfEO", false, th, false)
 		if !killModalContains(content, "▲ Kill session?") {
 			t.Errorf("[%v] header must read '▲ Kill session?'; got:\n%s", themeLabel(th), content)
 		}
@@ -26,7 +26,7 @@ func TestKillModal_Header(t *testing.T) {
 
 func TestKillModal_BodyNameStandsAlone(t *testing.T) {
 	const name = "folio-Jiz4el"
-	content := renderKillModalContent(name, testDarkTheme(t), false)
+	content := renderKillModalContent(name, false, testDarkTheme(t), false)
 	for raw := range strings.SplitSeq(content, "\n") {
 		line := ansi.Strip(raw)
 		if !strings.Contains(line, name) {
@@ -43,7 +43,7 @@ func TestKillModal_BodyNameStandsAlone(t *testing.T) {
 
 func TestKillModal_BodyColourRoles(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		content := renderKillModalContent("aviva-proxy-qNyfEO", th, false)
+		content := renderKillModalContent("aviva-proxy-qNyfEO", false, th, false)
 		if seq := tokenFgSeq(t, th.StateDestructive); !strings.Contains(content, seq) {
 			t.Errorf("[%v] session name must render in state.destructive SGR core %q; missing in:\n%s", themeLabel(th), seq, content)
 		}
@@ -54,7 +54,7 @@ func TestKillModal_BodyColourRoles(t *testing.T) {
 }
 
 func TestKillModal_ConsequenceLine(t *testing.T) {
-	content := renderKillModalContent("aviva-proxy-qNyfEO", testDarkTheme(t), false)
+	content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false)
 	for _, fragment := range []string{"Ends the session.", "Can't be undone."} {
 		if !killModalContains(content, fragment) {
 			t.Errorf("consequence line must contain %q; got:\n%s", fragment, content)
@@ -64,7 +64,7 @@ func TestKillModal_ConsequenceLine(t *testing.T) {
 
 func TestKillModal_Footer(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		content := renderKillModalContent("aviva-proxy-qNyfEO", th, false)
+		content := renderKillModalContent("aviva-proxy-qNyfEO", false, th, false)
 		for _, frag := range []string{"y kill", "esc cancel"} {
 			if !killModalContains(content, frag) {
 				t.Errorf("[%v] footer must contain %q; got:\n%s", themeLabel(th), frag, content)
@@ -77,7 +77,7 @@ func TestKillModal_Footer(t *testing.T) {
 }
 
 func TestKillModal_SingleToneJoinedPanel(t *testing.T) {
-	content := renderKillModalContent("aviva-proxy-qNyfEO", testDarkTheme(t), false)
+	content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false)
 
 	dividerCount := 0
 	for raw := range strings.SplitSeq(content, "\n") {
@@ -99,7 +99,7 @@ func TestKillModal_SingleToneJoinedPanel(t *testing.T) {
 }
 
 func TestKillModal_BodyRowLayout(t *testing.T) {
-	content := renderKillModalContent("aviva-proxy-qNyfEO", testDarkTheme(t), false)
+	content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false)
 	lines := strings.Split(content, "\n")
 
 	nameIdx, consequenceIdx := -1, -1
@@ -121,7 +121,7 @@ func TestKillModal_BodyRowLayout(t *testing.T) {
 }
 
 func TestKillModal_Colourless(t *testing.T) {
-	content := renderKillModalContent("aviva-proxy-qNyfEO", testDarkTheme(t), true)
+	content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), true)
 	if !killModalContains(content, "▲ Kill session?") {
 		t.Errorf("colourless kill modal must keep the ▲ destructive glyph + title; got:\n%s", content)
 	}
@@ -134,4 +134,53 @@ func TestKillModal_Colourless(t *testing.T) {
 	if !strings.ContainsAny(content, "╭╮╰╯├┤") {
 		t.Errorf("colourless kill modal must keep the frame glyphs; got:\n%s", content)
 	}
+}
+
+func TestKillModal_AskOffersAttach(t *testing.T) {
+	footerOf := func(t *testing.T, content string) string {
+		t.Helper()
+		lines := strings.Split(content, "\n")
+		if len(lines) < 2 {
+			t.Fatalf("the modal has no footer row:\n%s", content)
+		}
+		return lines[len(lines)-2]
+	}
+
+	t.Run("its footer offers Enter between the kill and the cancel", func(t *testing.T) {
+		footer := ansi.Strip(footerOf(t, renderKillModalContent("aviva-proxy-qNyfEO", true, testDarkTheme(t), false)))
+
+		kill, attach, cancel := strings.Index(footer, "y kill"), strings.Index(footer, "⏎ attach"), strings.Index(footer, "esc cancel")
+		if kill < 0 || attach < kill || cancel < attach {
+			t.Errorf("footer = %q, want y kill, then ⏎ attach, then esc cancel", footer)
+		}
+	})
+
+	t.Run("Enter reads as a key like the others, never as destructive", func(t *testing.T) {
+		for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
+			footer := footerOf(t, renderKillModalContent("aviva-proxy-qNyfEO", true, th, false))
+			if want := headerStyle(th.AccentKey, th, false).Render(killKeyAttach); !strings.Contains(footer, want) {
+				t.Errorf("[%v] ⏎ is not drawn as accent.key draws a key:\n%q", themeLabel(th), footer)
+			}
+			if seq := tokenFgSeq(t, th.StateDestructive); strings.Contains(footer, seq) {
+				t.Errorf("[%v] the footer carries state.destructive %q:\n%q", themeLabel(th), seq, footer)
+			}
+		}
+	})
+
+	t.Run("colourless, Enter keeps its glyph and its word", func(t *testing.T) {
+		content := renderKillModalContent("aviva-proxy-qNyfEO", true, testDarkTheme(t), true)
+
+		if !killModalContains(content, "⏎ attach") {
+			t.Errorf("the colourless footer lost ⏎ attach:\n%s", content)
+		}
+		if seq := tokenFgSeq(t, testDarkTheme(t).AccentKey); strings.Contains(content, seq) {
+			t.Errorf("the colourless modal paints accent.key %q", seq)
+		}
+	})
+
+	t.Run("k's own prompt offers no Enter", func(t *testing.T) {
+		if content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false); killModalContains(content, "attach") {
+			t.Errorf("k's prompt offers to attach:\n%s", content)
+		}
+	})
 }

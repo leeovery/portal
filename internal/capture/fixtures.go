@@ -38,7 +38,10 @@ type Fixture struct {
 	initialMode   prefs.SessionListMode
 	// search non-nil opens the picker as a session search did, with the term
 	// committed as the list's filter.
-	search             *tui.SearchForm
+	search *tui.SearchForm
+	// killAsk opens the picker as the kill key does from inside the session it
+	// names: on that session's kill prompt.
+	killAsk            string
 	initialMultiSelect []string
 	initialCursor      string
 	// Independent of the `--theme` palette: the union is what the panel lists —
@@ -98,6 +101,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
 		InitialMode:   f.initialMode,
 		Search:        f.search,
+		KillAsk:       f.killAsk,
 		Command:       f.command,
 		CWD:           fixtureHome,
 		Home:          fixtureHome,
@@ -163,6 +167,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsInlineFlashFixture,
 		sessionsRenameRefusedLabelFixture,
 		sessionsKillConfirmFixture,
+		sessionsKillAskFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -414,6 +419,15 @@ func sessionsKillConfirmFixture() *Fixture {
 	fx.name = "sessions-kill-confirm"
 	fx.initialCursor = "orchard-pipeline-Hq7wNe"
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('k')}
+	return fx
+}
+
+// The prompt the kill key asks for from inside a session: k's own, offering
+// Enter to attach the session again.
+func sessionsKillAskFixture() *Fixture {
+	fx := sessionsByProjectLabelledFixture()
+	fx.name = "sessions-kill-ask"
+	fx.killAsk = "orchard-pipeline-Hq7wNe"
 	return fx
 }
 

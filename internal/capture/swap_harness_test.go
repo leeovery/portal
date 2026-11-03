@@ -43,6 +43,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-rename-refused-label", page: tui.PageSessions, present: []string{sessionRow, "label refused: it holds a control or formatting character"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-kill-confirm", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone."}, absent: []string{"tmux", "No sessions yet"}},
+		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "⏎ attach"}, absent: []string{"tmux", "No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-terminal", page: tui.PageSessions, present: []string{sessionRow, "unsupported terminal", "com.apple.Terminal"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-null", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet", "unsupported terminal"}},

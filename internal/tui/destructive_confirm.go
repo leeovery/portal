@@ -30,6 +30,9 @@ type destructiveConfirmSpec struct {
 	reportRows   []string
 	confirmKey   string
 	confirmLabel string
+	// keep is a choice beside the cancel that also keeps the target, its hint
+	// between the confirmation's and the cancel's. Its zero value offers none.
+	keep footerHintGroup
 }
 
 func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
@@ -43,7 +46,7 @@ func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colou
 func destructiveConfirmCompartments(spec destructiveConfirmSpec, wrapWidth int, th theme.Theme, colourless bool) [][]string {
 	header := []string{destructiveHeaderRow(spec.title, th, colourless)}
 	body := destructiveBodyRows(spec, wrapWidth, th, colourless)
-	footer := []string{destructiveFooterRow(spec.confirmKey, spec.confirmLabel, th, colourless)}
+	footer := []string{destructiveFooterRow(spec, th, colourless)}
 	return [][]string{header, body, footer}
 }
 
@@ -84,6 +87,11 @@ func destructiveConsequenceRows(text string, wrapWidth int, th theme.Theme, colo
 	return rows
 }
 
-func destructiveFooterRow(confirmKey, confirmLabel string, th theme.Theme, colourless bool) string {
-	return renderConfirmCancelFooter(confirmKey, confirmLabel, destructiveKeyCancel, destructiveLabelCancel, th, colourless)
+func destructiveFooterRow(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
+	groups := []footerHintGroup{{spec.confirmKey, spec.confirmLabel}}
+	if spec.keep.key != "" {
+		groups = append(groups, spec.keep)
+	}
+	groups = append(groups, footerHintGroup{destructiveKeyCancel, destructiveLabelCancel})
+	return renderModalFooter(groups, th, colourless)
 }
