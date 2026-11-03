@@ -99,8 +99,11 @@ func resolveDoctorDeps() *DoctorDeps {
 			deps.ProtocolVersion = protocolVersion
 		}
 	}
-	if deps.Detector == nil || deps.Resolve == nil {
-		seams := buildProductionSpawnSeams(defaultTmuxClient())
+	// Detection runs through the driver bound on the dir doctor judges. A dir
+	// it refuses to bind leaves the host-terminal check out; the dir check
+	// reports why.
+	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
+		seams := buildProductionSpawnSeams(context.Background(), driver)
 		if deps.Detector == nil {
 			deps.Detector = seams.Detector
 		}

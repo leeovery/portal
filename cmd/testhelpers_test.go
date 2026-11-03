@@ -7,18 +7,15 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/warning"
 )
@@ -59,16 +56,10 @@ func withOpenBurstDeps(t *testing.T, deps OpenBurstDeps) {
 
 // withDoctorDeps installs deps as the package-level doctor seam for the rest of
 // the test and registers the restore in the same breath.
-// Doctor reaches tmux only to detect the host terminal, so its tests answer
-// that detection as a machine running no tmux server would. The returned fake
-// records every tmux command doctor sent.
-func withDoctorDeps(t *testing.T, deps DoctorDeps) *commandertest.Scripted {
+func withDoctorDeps(t *testing.T, deps DoctorDeps) {
 	t.Helper()
 	doctorDeps = &deps
 	t.Cleanup(func() { doctorDeps = nil })
-	noServer := commandertest.Quiet().AllowingUnmatched("", errors.New("no server running"))
-	withFuncSeam(t, &defaultTmuxClient, func() *tmux.Client { return tmux.NewClient(noServer) })
-	return noServer
 }
 
 // withListDeps installs deps as the package-level list seam for the rest of the

@@ -71,6 +71,8 @@ type Backend struct {
 	hostname func() (string, error)
 	booted   func() (time.Time, error)
 	limits   ceilings
+	// processes is the process table AttachClients reads.
+	processes processTable
 }
 
 var _ backend.Backend = (*Backend)(nil)
@@ -81,12 +83,13 @@ func New(cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("bind zmx backend: directory %q is not absolute", cfg.Dir)
 	}
 	b := &Backend{
-		binary:   cfg.Binary,
-		dir:      filepath.Clean(cfg.Dir),
-		environ:  cfg.Environ,
-		hostname: cfg.Hostname,
-		booted:   cfg.BootTime,
-		limits:   defaultCeilings,
+		binary:    cfg.Binary,
+		dir:       filepath.Clean(cfg.Dir),
+		environ:   cfg.Environ,
+		hostname:  cfg.Hostname,
+		booted:    cfg.BootTime,
+		limits:    defaultCeilings,
+		processes: systemProcesses,
 	}
 	if b.environ == nil {
 		b.environ = os.Environ

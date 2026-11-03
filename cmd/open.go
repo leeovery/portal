@@ -59,6 +59,8 @@ type OpenDeps struct {
 	Runner func(context.Context, runner.Config) (runner.Outcome, error)
 	// Runners replaces the runner registry under the state directory.
 	Runners runnerRegistry
+	// AckWriter replaces the spawn-ack channel under the state directory.
+	AckWriter spawn.AckWriter
 }
 
 // SessionConnector connects the caller's terminal to a session.
@@ -120,8 +122,9 @@ interactive form.
 A command to run in a freshly minted session is scoped with -e/--exec or after a
 -- separator; command scoping applies to mint outcomes only, never to an attach.
 
-Opening two or more targets at once, each in a window of its own (or one glob that
-expands to several sessions), isn't available yet, and is refused.`,
+Passing two or more targets (or one glob that expands to several sessions) opens a
+portal to each: this terminal becomes the first surface and the remaining N−1 open
+in host-terminal windows.`,
 	Args: validateOpenArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, destination, err := parseCommandArgs(cmd, args)
@@ -129,10 +132,10 @@ expands to several sessions), isn't available yet, and is refused.`,
 			return err
 		}
 
-		// --ack is the receipt a window the burst spawned writes, and nothing
-		// spawns one until the attach runner, so it is refused as the burst is.
-		if cmd.Flags().Changed("ack") {
-			return errSeveralSessions
+		// Ahead of resolution, so a malformed --ack is a usage error rather than
+		// an open that acks nothing.
+		if _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
+			return NewUsageError("open: --ack must be <batch>:<token>")
 		}
 
 		// Ahead of the multi-target gate as much as of resolution: a term carrying
@@ -359,35 +362,33 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 }
 
 type tuiConfig struct {
-	lister         tui.SessionLister
-	killer         tui.SessionKiller
-	labeller       tui.SessionLabeller
-	projectStore   tui.ProjectStore
-	projectEditor  tui.ProjectEditor
-	aliasEditor    tui.AliasEditor
-	sessionCreator tui.SessionCreator
-	history        tui.HistoryReader
-	dirRunner      resolver.CommandRunner
-	initialMode    prefs.SessionListMode
-	theme          theme.Nomination
-	themeKeys      theme.RawKeys
-	themeSource    tui.ThemeSource
-	modePersister  tui.ModePersister
-	themePersister tui.ThemePersister
-	detector       tui.TerminalDetector
-	resolve        spawn.AdapterResolver
-	sessionExists  func(string) bool
-	ackChannel     spawn.AckChannelFull
-	spawnExe       spawn.ExecutableResolver
-	spawnGetenv    func(string) string
-	spawnLogger    *slog.Logger
-	// multiWindowRefusal turns the picker's multi-select off with this flash.
-	multiWindowRefusal string
-	cwd                string
-	currentSession     string
-	serverStarted      bool
-	progressReceiver   tea.Cmd
-	noColor            bool
+	lister           tui.SessionLister
+	killer           tui.SessionKiller
+	labeller         tui.SessionLabeller
+	projectStore     tui.ProjectStore
+	projectEditor    tui.ProjectEditor
+	aliasEditor      tui.AliasEditor
+	sessionCreator   tui.SessionCreator
+	history          tui.HistoryReader
+	dirRunner        resolver.CommandRunner
+	initialMode      prefs.SessionListMode
+	theme            theme.Nomination
+	themeKeys        theme.RawKeys
+	themeSource      tui.ThemeSource
+	modePersister    tui.ModePersister
+	themePersister   tui.ThemePersister
+	detector         tui.TerminalDetector
+	resolve          spawn.AdapterResolver
+	sessionExists    func(string) bool
+	ackChannel       spawn.AckChannelFull
+	spawnExe         spawn.ExecutableResolver
+	spawnGetenv      func(string) string
+	spawnLogger      *slog.Logger
+	cwd              string
+	currentSession   string
+	serverStarted    bool
+	progressReceiver tea.Cmd
+	noColor          bool
 }
 
 // noColorEnabled honours the NO_COLOR convention: the variable must be present
@@ -430,36 +431,35 @@ func themeResolution(keys prefs.ThemeKeys, loader theme.Loader) (theme.Resolutio
 
 func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
 	deps := tui.Deps{
-		Lister:             cfg.lister,
-		Killer:             cfg.killer,
-		Labeller:           cfg.labeller,
-		Creator:            cfg.sessionCreator,
-		ProjectStore:       cfg.projectStore,
-		ProjectEditor:      cfg.projectEditor,
-		AliasEditor:        cfg.aliasEditor,
-		History:            cfg.history,
-		DirRunner:          cfg.dirRunner,
-		ModePersister:      cfg.modePersister,
-		ThemePersister:     cfg.themePersister,
-		CWD:                cfg.cwd,
-		InitialMode:        cfg.initialMode,
-		Theme:              cfg.theme,
-		ThemeKeys:          cfg.themeKeys,
-		ThemeSource:        cfg.themeSource,
-		Command:            command,
-		ServerStarted:      cfg.serverStarted,
-		CurrentSession:     cfg.currentSession,
-		NoColor:            cfg.noColor,
-		ProgressReceiver:   cfg.progressReceiver,
-		Detector:           cfg.detector,
-		Resolve:            cfg.resolve,
-		SessionExists:      cfg.sessionExists,
-		AckChannel:         cfg.ackChannel,
-		SpawnExe:           cfg.spawnExe,
-		SpawnGetenv:        cfg.spawnGetenv,
-		SpawnLogger:        cfg.spawnLogger,
-		MultiWindowRefusal: cfg.multiWindowRefusal,
-		Flash:              landing.flash,
+		Lister:           cfg.lister,
+		Killer:           cfg.killer,
+		Labeller:         cfg.labeller,
+		Creator:          cfg.sessionCreator,
+		ProjectStore:     cfg.projectStore,
+		ProjectEditor:    cfg.projectEditor,
+		AliasEditor:      cfg.aliasEditor,
+		History:          cfg.history,
+		DirRunner:        cfg.dirRunner,
+		ModePersister:    cfg.modePersister,
+		ThemePersister:   cfg.themePersister,
+		CWD:              cfg.cwd,
+		InitialMode:      cfg.initialMode,
+		Theme:            cfg.theme,
+		ThemeKeys:        cfg.themeKeys,
+		ThemeSource:      cfg.themeSource,
+		Command:          command,
+		ServerStarted:    cfg.serverStarted,
+		CurrentSession:   cfg.currentSession,
+		NoColor:          cfg.noColor,
+		ProgressReceiver: cfg.progressReceiver,
+		Detector:         cfg.detector,
+		Resolve:          cfg.resolve,
+		SessionExists:    cfg.sessionExists,
+		AckChannel:       cfg.ackChannel,
+		SpawnExe:         cfg.spawnExe,
+		SpawnGetenv:      cfg.spawnGetenv,
+		SpawnLogger:      cfg.spawnLogger,
+		Flash:            landing.flash,
 	}
 	if landing.search != nil {
 		deps.Search = landing.search
@@ -573,6 +573,8 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		return err
 	}
 
+	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b)
+
 	// No pending-resume or skeleton-marker reader: nothing is saved or restored
 	// yet, so no session is waiting.
 	cfg := tuiConfig{
@@ -591,10 +593,14 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		themeSource:    newThemeSource(themeLoader),
 		cwd:            cwd,
 		serverStarted:  serverStarted,
-		// No spawn seams: multi-select refuses until the attach runner, as
-		// the CLI burst does, so nothing detects a terminal or opens windows.
-		multiWindowRefusal: errSeveralSessions.Error(),
-		noColor:            noColorEnabled(),
+		detector:       spawnSeams.Detector,
+		resolve:        spawnSeams.Resolve,
+		sessionExists:  spawnSeams.Exists,
+		ackChannel:     spawnSeams.Ack,
+		spawnExe:       spawnSeams.Exe,
+		spawnGetenv:    spawnSeams.Getenv,
+		spawnLogger:    spawnSeams.Logger,
+		noColor:        noColorEnabled(),
 	}
 	// On the concurrent route the channel owns the terminal BootstrapCompleteMsg;
 	// Init does not synthesize one.
@@ -674,7 +680,7 @@ func init() {
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
-	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — a spawned window's receipt; refused until the attach runner")
+	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — a spawned window's receipt, written once its attach begins")
 	_ = openCmd.Flags().MarkHidden("ack")
 
 	// -p/--path and -z/--zoxide deliberately register no completer, so cobra emits

@@ -1,69 +1,68 @@
 package spawn
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/runnerreg"
 )
 
-// ClientActivity mirrors tmux.ClientInfo so inside-tmux resolution carries no
-// tmux dependency.
-type ClientActivity struct {
-	PID      int
-	Activity int64
+// errUncertain is detection inside a session that can't tell which terminal
+// leads it, and so opens nothing: spawning on a guess could put windows on
+// the wrong machine.
+var errUncertain = errors.New("no one terminal leads the session")
+
+func uncertain(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{errUncertain}, args...)...)
 }
 
-type clientLister interface {
-	ListClients(session string) ([]ClientActivity, error)
-}
-
-type tmuxClientLister struct {
-	c *tmux.Client
-}
-
-var _ clientLister = tmuxClientLister{}
-
-func (l tmuxClientLister) ListClients(session string) ([]ClientActivity, error) {
-	infos, err := l.c.ListClients(session)
+// leaderPID is the process to walk from to the terminal the user types into
+// session in, and the route that found it. zmx names the session's leader,
+// the client that last sent it keyboard input. A leader carrying a runner's
+// token is that runner's terminal, once the runner confirms it shows session
+// and has seen no switch. A leader carrying none is a raw zmx client, found in
+// the process table when it is the session's only one. Anything less certain
+// finds none.
+func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, error) {
+	env, err := d.sessions.LeaderEnv(ctx, session)
 	if err != nil {
-		return nil, err
+		return 0, routeInside, transient("find the session's leader", err)
 	}
-	clients := make([]ClientActivity, 0, len(infos))
-	for _, info := range infos {
-		clients = append(clients, ClientActivity{PID: info.PID, Activity: info.Activity})
+	if len(env) == 0 {
+		return 0, routeInside, uncertain("no client leads session %q", session)
 	}
-	return clients, nil
+	if token, ok := env.Lookup(runnerreg.TokenVar); ok {
+		pid, err := d.runnerPID(ctx, token, session)
+		return pid, routeInsideRunner, err
+	}
+	pid, err := d.rawClientPID(session)
+	return pid, routeInsideRaw, err
 }
 
-// Inside tmux, Portal's own ancestry leads to the tmux server, so locality is
-// gated on the client that triggered the burst — the most-active one, since
-// client_activity tracks sent input. Selecting the winner before checking
-// locality is load-bearing: filtering to local clients first drives windows onto
-// the wrong machine when a remote trigger shares a session with a local one.
-func detectInsideTmux(session string, lister clientLister, walker ProcessWalker, reader BundleReader) (Identity, error) {
-	clients, err := lister.ListClients(session)
+// runnerPID is the pid of the runner registered under token. A runner the
+// registry doesn't hold, one on another session, and one that refuses, being
+// unsure or between attaches, are uncertain; one that can't be asked is
+// transient.
+func (d *Detector) runnerPID(ctx context.Context, token, session string) (int, error) {
+	pid, err := d.runners.ConfirmSession(ctx, token, session)
+	switch {
+	case errors.Is(err, runnerreg.ErrNoRunner), errors.Is(err, runnerreg.ErrRefused):
+		return 0, uncertain("the leading runner: %w", err)
+	case err != nil:
+		return 0, transient(fmt.Sprintf("ask the runner leading session %q", session), err)
+	}
+	return pid, nil
+}
+
+// rawClientPID is the pid of session's one zmx attach process.
+func (d *Detector) rawClientPID(session string) (int, error) {
+	pids, err := d.clients.AttachClients(session)
 	if err != nil {
-		return Identity{}, transient(fmt.Sprintf("list tmux clients for session %q", session), err)
+		return 0, transient(fmt.Sprintf("find the clients of session %q", session), err)
 	}
-
-	if len(clients) == 0 {
-		// No winner to select — the honest no-op, not a transient error.
-		return Identity{}, nil
+	if len(pids) != 1 {
+		return 0, uncertain("%d zmx attach processes on session %q, want 1", len(pids), session)
 	}
-
-	winner := selectTriggeringClient(clients)
-
-	// Only the winner is walked: a transient walk failure fails safe to NULL
-	// rather than falling back to a lower-activity local client.
-	return walkToBundle(winner.PID, walker, reader)
-}
-
-func selectTriggeringClient(clients []ClientActivity) ClientActivity {
-	winner := clients[0]
-	for _, client := range clients[1:] {
-		if client.Activity > winner.Activity {
-			winner = client
-		}
-	}
-	return winner
+	return pids[0], nil
 }

@@ -705,6 +705,34 @@ func TestRunOpenBurst_TriggerConnectFails_EmitsCorrectiveWarn(t *testing.T) {
 	_ = summaries.Only(t, "opened batch summary")
 }
 
+// An exit status is an attach that landed and has since ended, as a signal
+// ends one: the trigger did attach, so no correction follows the summary.
+func TestRunOpenBurst_TriggerAttachThatEndsWithAStatus_EmitsNoCorrection(t *testing.T) {
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	ended := &ExitCodeError{Code: 129}
+	conn := &recordingConnector{events: events, err: ended}
+	mint := &recordingMint{events: events}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, &spawntest.FakeAckChannel{}, &manualClock{})
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+	if !errors.Is(err, ended) {
+		t.Fatalf("error = %v, want the attach's exit status", err)
+	}
+	if warns := sink.Records().WithMessage("trigger did not attach"); len(warns) != 0 {
+		t.Errorf("corrective WARN emitted for an attach that landed: %+v", warns)
+	}
+}
+
 func TestRunOpenBurst_TriggerMintOwnConnectFails_PropagatesError(t *testing.T) {
 	events := &openBurstEvents{}
 	inner := &spawntest.FakeAdapter{}

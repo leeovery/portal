@@ -1,11 +1,14 @@
 package spawn
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
+	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var spawnLogger = log.For("spawn")
@@ -17,43 +20,72 @@ const (
 )
 
 const (
-	routeInsideTmux  = "inside-tmux client walk"
-	routeOutsideTmux = "outside-tmux env/self walk"
+	routeInside       = "inside-session"
+	routeInsideRunner = "inside-session runner walk"
+	routeInsideRaw    = "inside-session raw client walk"
+	routeOutside      = "outside-session env/self walk"
 )
 
-type Detector struct {
-	insideTmux     func() bool
-	getenv         func(string) string
-	selfPID        int
-	walker         ProcessWalker
-	reader         BundleReader
-	lister         clientLister
-	currentSession func() (string, error)
-	logger         *slog.Logger
+// detectCeiling bounds what detection inside a session asks of zmx and of
+// the runner registry, each of which has its own, shorter, ceilings beneath.
+const detectCeiling = 5 * time.Second
+
+// SessionReader is what detection reads of the backend: the session this
+// process runs in, and the tracked environment of the client leading it.
+type SessionReader interface {
+	Current() string
+	LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error)
 }
 
-func NewDetector(client *tmux.Client) *Detector {
+// RunnerLocator finds a session's leading attach runner by the token its
+// client carries: runnerreg.Registry.
+type RunnerLocator interface {
+	ConfirmSession(ctx context.Context, token, session string) (pid int, err error)
+}
+
+// ClientLister finds the zmx attach processes of a session no runner leads:
+// the zmx driver.
+type ClientLister interface {
+	AttachClients(session string) ([]int, error)
+}
+
+type Detector struct {
+	sessions SessionReader
+	runners  RunnerLocator
+	clients  ClientLister
+	getenv   func(string) string
+	selfPID  int
+	walker   ProcessWalker
+	reader   BundleReader
+	logger   *slog.Logger
+}
+
+func NewDetector(sessions SessionReader, runners RunnerLocator, clients ClientLister) *Detector {
 	return &Detector{
-		insideTmux:     tmux.InsideTmux,
-		getenv:         os.Getenv,
-		selfPID:        os.Getpid(),
-		walker:         realProcessWalker{},
-		reader:         realBundleReader{},
-		lister:         tmuxClientLister{c: client},
-		currentSession: client.CurrentSessionName,
-		logger:         spawnLogger,
+		sessions: sessions,
+		runners:  runners,
+		clients:  clients,
+		getenv:   os.Getenv,
+		selfPID:  os.Getpid(),
+		walker:   realProcessWalker{},
+		reader:   realBundleReader{},
+		logger:   spawnLogger,
 	}
 }
 
-// Detect emits exactly one spawn-component record. A transient failure folds to
-// the NULL identity — the same unsupported no-op path as a clean NULL — but
-// WARNs rather than INFOs.
+// Detect emits exactly one spawn-component record. A transient failure, and a
+// session whose leading terminal can't be told, fold to the NULL identity —
+// the same unsupported no-op path as a clean NULL — the first with a WARN,
+// the second with the INFO a clean NULL gets, saying why.
 func (d *Detector) Detect() Identity {
 	id, route, err := d.resolve()
 
 	switch {
-	case err != nil:
+	case errors.Is(err, ErrDetectTransient):
 		d.logger.Warn(msgDetectionTransient, "detail", err.Error())
+		return Identity{}
+	case err != nil:
+		d.logger.Info(msgDetectionNullBundle, "detail", route+": "+err.Error())
 		return Identity{}
 	case !id.IsNull():
 		d.logger.Info(msgDetectionResolved, "terminal", id.Name, "bundle_id", id.BundleID, "detail", route)
@@ -64,18 +96,21 @@ func (d *Detector) Detect() Identity {
 	}
 }
 
-// Every non-nil error returned here satisfies errors.Is(err,
-// ErrDetectTransient), including the normalised current-session read failure.
+// resolve's errors either satisfy errors.Is(err, ErrDetectTransient) or
+// errors.Is(err, errUncertain).
 func (d *Detector) resolve() (Identity, string, error) {
-	if d.insideTmux() {
-		session, err := d.currentSession()
-		if err != nil {
-			return Identity{}, routeInsideTmux, transient("resolve current tmux session", err)
-		}
-		id, derr := detectInsideTmux(session, d.lister, d.walker, d.reader)
-		return id, routeInsideTmux, derr
+	session := d.sessions.Current()
+	if session == "" {
+		id, err := detectOutsideSession(d.getenv, d.selfPID, d.walker, d.reader)
+		return id, routeOutside, err
 	}
 
-	id, derr := detectOutsideTmux(d.getenv, d.selfPID, d.walker, d.reader)
-	return id, routeOutsideTmux, derr
+	ctx, cancel := context.WithTimeout(context.Background(), detectCeiling)
+	defer cancel()
+	pid, route, err := d.leaderPID(ctx, session)
+	if err != nil {
+		return Identity{}, route, err
+	}
+	id, err := walkToBundle(pid, d.walker, d.reader)
+	return id, route, err
 }

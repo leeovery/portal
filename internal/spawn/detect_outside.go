@@ -15,9 +15,10 @@ var ghosttyEnvKeys = []string{
 }
 
 // macOS stamps the launching app's bundle id into __CFBundleIdentifier and
-// Ghostty stamps its own vars, so outside tmux the env usually answers without a
-// process walk.
-func detectOutsideTmux(getenv func(string) string, selfPID int, walker ProcessWalker, reader BundleReader) (Identity, error) {
+// Ghostty stamps its own vars, so outside a session the env usually answers
+// without a process walk. Inside one it is the environment of whoever made
+// the session, so detection there never reads it.
+func detectOutsideSession(getenv func(string) string, selfPID int, walker ProcessWalker, reader BundleReader) (Identity, error) {
 	if bundleID := strings.TrimSpace(getenv("__CFBundleIdentifier")); plausibleBundleID(bundleID) {
 		return NewIdentity(bundleID, ""), nil
 	}

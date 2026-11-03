@@ -88,21 +88,40 @@ func (r Registry) Switch(ctx context.Context, token, current, target string) err
 	rn, err := r.lookup(token)
 	if err == nil {
 		attrs = append(attrs, "target_pid", rn.PID)
-		err = r.askSwitch(ctx, rn, current, target)
+		err = r.askOn(ctx, rn, current, request{Request: reqSwitch, Session: target})
 	}
 	report("switch", err, attrs...)
 	return err
 }
 
-// askSwitch asks rn to switch to target only if its entry says it shows
-// current. A token leading current that names a runner on another session is
-// in some other client's environment: the shells of a session zmx made
-// through a runner's client inherit it.
-func (r Registry) askSwitch(ctx context.Context, rn registered, current, target string) error {
-	if rn.Session != current {
-		return fmt.Errorf("%w: runner %d is on %s, not %s", ErrNoRunner, rn.PID, rn.Session, current)
+// ConfirmSession returns the pid of the runner registered under token, whose
+// terminal leads session, once the runner confirms its attach under way shows
+// session and it has seen no switch since it began, so it is sure of it.
+// Otherwise it returns ErrNoRunner, the runner's refusal, wrapping
+// ErrRefused, or the failure to ask it.
+func (r Registry) ConfirmSession(ctx context.Context, token, session string) (int, error) {
+	attrs := []any{"session", session}
+	rn, err := r.lookup(token)
+	if err == nil {
+		attrs = append(attrs, "target_pid", rn.PID)
+		err = r.askOn(ctx, rn, session, request{Request: reqConfirmSession, Session: session})
 	}
-	return r.ask(ctx, rn, request{Request: reqSwitch, Session: target})
+	report("confirm session", err, attrs...)
+	if err != nil {
+		return 0, err
+	}
+	return rn.PID, nil
+}
+
+// askOn sends rn req only if its entry says it shows session, the one the
+// caller found rn's token leading. A token leading session that names a
+// runner on another session is in some other client's environment: the
+// shells of a session zmx made through a runner's client inherit it.
+func (r Registry) askOn(ctx context.Context, rn registered, session string, req request) error {
+	if rn.Session != session {
+		return fmt.Errorf("%w: runner %d is on %s, not %s", ErrNoRunner, rn.PID, rn.Session, session)
+	}
+	return r.ask(ctx, rn, req)
 }
 
 // DetachToPicker asks every runner registered on session to detach to the

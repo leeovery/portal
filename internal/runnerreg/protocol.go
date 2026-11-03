@@ -20,6 +20,7 @@ const Version = 1
 const (
 	reqSwitch         = "switch"
 	reqDetachToPicker = "detach-to-picker"
+	reqConfirmSession = "confirm-session"
 )
 
 // namesSession is whether each request names a session. A request missing
@@ -27,6 +28,7 @@ const (
 var namesSession = map[string]bool{
 	reqSwitch:         true,
 	reqDetachToPicker: false,
+	reqConfirmSession: true,
 }
 
 // maxMessage bounds a request and an answer.

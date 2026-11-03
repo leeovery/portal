@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/nanoid"
@@ -62,9 +63,11 @@ func (l *Listing) Attach(cfg *runner.Config) {
 	cfg.Command = l.backend.Track(cfg.Command, TokenVar, token)
 	requests := make(chan runner.Request)
 	cfg.Requests = requests
+	unsure := new(atomic.Bool)
+	cfg.Unsure = func() { unsure.Store(true) }
 	cfg.Began = func() {
 		if l.list(session) {
-			l.relay.open(requests)
+			l.relay.open(&gate{requests: requests, session: session, unsure: unsure})
 		}
 	}
 	cfg.Confirm = func(ctx context.Context) error { return l.leads(ctx, session, token) }
@@ -132,16 +135,26 @@ type relay struct {
 	attach *gate
 }
 
-// gate is one attach's way in: its requests, until closed.
+// gate is one attach's way in: its requests, until closed, and what it
+// shows: its session, and whether the runner has become unsure of it.
 type gate struct {
 	requests chan<- runner.Request
 	closed   chan struct{}
+	session  string
+	unsure   *atomic.Bool
 }
 
-func (r *relay) open(requests chan<- runner.Request) {
+func (r *relay) open(g *gate) {
+	g.closed = make(chan struct{})
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.attach = &gate{requests: requests, closed: make(chan struct{})}
+	r.attach = g
+}
+
+func (r *relay) current() *gate {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.attach
 }
 
 func (r *relay) close() {
@@ -161,13 +174,25 @@ func (r *relay) DetachToPicker(ctx context.Context) error {
 	return r.deliver(ctx, runner.Request{})
 }
 
+// ConfirmSession answers from the attach under way, which it asks nothing.
+func (r *relay) ConfirmSession(_ context.Context, session string) error {
+	g := r.current()
+	switch {
+	case g == nil:
+		return errNotAttached
+	case g.session != session:
+		return fmt.Errorf("the attach shows %s, not %s", g.session, session)
+	case g.unsure.Load():
+		return runner.ErrUnconfirmed
+	}
+	return nil
+}
+
 // deliver hands req to the attach under way, carrying ctx's deadline, and
 // returns the attach's answer: nil once it has taken the request, which is
 // its acceptance.
 func (r *relay) deliver(ctx context.Context, req runner.Request) error {
-	r.mu.Lock()
-	g := r.attach
-	r.mu.Unlock()
+	g := r.current()
 	if g == nil {
 		return errNotAttached
 	}

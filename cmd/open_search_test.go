@@ -798,7 +798,7 @@ func TestValidateOpenArgs_StillAnswersHelpOnAMalformedFilterLine(t *testing.T) {
 	}
 }
 
-func TestOpenCommand_AckRefusedFromTheCommandBody(t *testing.T) {
+func TestOpenCommand_MalformedAckRefusedFromTheCommandBody(t *testing.T) {
 	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
@@ -811,9 +811,7 @@ func TestOpenCommand_AckRefusedFromTheCommandBody(t *testing.T) {
 		DirValidator:  seams,
 	})
 
-	if _, _, err := runRootCmd(t, "open", "dev", "--ack", "notcolon"); !errors.Is(err, errSeveralSessions) {
-		t.Errorf("error = %v, want the burst's refusal %v", err, errSeveralSessions)
-	}
+	executeOpenExpectingUsage(t, "open: --ack must be <batch>:<token>", "dev", "--ack", "notcolon")
 
 	if runner.calls != 1 {
 		t.Errorf("bootstrap ran %d times, want 1: --ack is refused from the command body, downstream of bootstrap", runner.calls)

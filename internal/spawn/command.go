@@ -4,18 +4,18 @@ package spawn
 // pass os.Executable.
 type ExecutableResolver func() (string, error)
 
-// The TMUX/TMUX_PANE strip is load-bearing: a window inheriting them would take
-// `open`'s switch-client path instead of a clean out-of-tmux exec-attach.
-// exePath is the running binary rather than a PATH lookup, so the version-gated
-// warm-command latch stays satisfied and each spawned open takes the abridged
-// fast-path.
+// The ZMX_SESSION strip is load-bearing: a window inheriting it would switch
+// the session its opener runs in rather than attach in a terminal of its own.
+// TMUX and TMUX_PANE go too, so nothing in the window takes itself to be
+// inside a tmux. exePath is the running binary rather than a PATH lookup, so
+// each window runs the same version of Portal as its opener.
 func composeOpenArgv(exePath, path string, surface Surface, batch, token string, command []string) []string {
 	targetFlag := "--session"
 	if surface.Kind == SurfaceMint {
 		targetFlag = "--path"
 	}
 	argv := []string{
-		"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+		"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 		"PATH=" + path,
 		exePath, "open", targetFlag, surface.Value,
 		"--ack", FormatSpawnAckFlag(batch, token),

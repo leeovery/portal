@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -12,13 +11,12 @@ import (
 
 var runOpenBurstFunc = runOpenBurst
 
-var errSeveralSessions = errors.New("opening several sessions at once isn't available yet")
-
-// runOpenBurst refuses until the attach runner lands: spawn detection still
-// walks tmux's clients, and the runner registry replaces them. The burst
-// itself, runOpenBurstWithDeps, comes back then.
-func runOpenBurst(*cobra.Command, []spawn.Surface, []string) error {
-	return errSeveralSessions
+func runOpenBurst(cmd *cobra.Command, surfaces []spawn.Surface, command []string) error {
+	deps, err := buildOpenBurstDeps(cmd)
+	if err != nil {
+		return err
+	}
+	return runOpenBurstWithDeps(cmd, surfaces, command, deps)
 }
 
 var openRawArgs = func() []string { return os.Args }

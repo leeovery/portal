@@ -62,7 +62,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 - Flags that were tmux server options become files:
   - `restoring`
   - `bootstrapped`: holds the boot id and the version, replacing the per-server latch.
-  - `spawn-acks/`
+  - `spawn-acks/`: one empty file, `<batch>-<token>`, per window a burst opened, written by that window once its attach has begun. The burst removes its own, and any an hour old, as a burst that died leaves them. The directory is 0700 and each file 0600.
   - `runners/` (see Attach runner)
 - `hooks.json` stays where it is, keyed by session name. `prefs.json`, projects and aliases are unchanged.
 - Before switch-over, a dev build runs beside the installed tmux Portal with `PORTAL_STATE_DIR` and `PORTAL_HOOKS_FILE` pointed at scratch paths.
@@ -145,13 +145,14 @@ zmx doesn't list its clients, so the runners list themselves, taking the part tm
 - **Control protocol.** A connection carries one request, a JSON line such as `{"version":1,"request":"switch","session":"<x>","deadline":…}`, and one answer, `{"version":1,"ok":true,"pid":…}` or a refusal saying why. Keys match exactly and nothing may follow the line: the caller half-closes after it. A runner refuses another version, an unknown request or field, and a session given to a request that takes none or missing from one that needs it, so a Portal upgraded while attached never acts on a request it doesn't understand. A runner takes a request only while its attach waits to end, and refuses one sent between attaches, once the attach is ending, or past the caller's deadline, so it never takes a request its caller has given up on.
   - `switch`: answered once the runner has taken it, not once the new attach is up. The runner ends its attach as the detach key does, by `ctrl+\` to its child, and attaches `<x>`, as the picker's pick is attached. A target gone by then brings the picker, with why.
   - `detach-to-picker`: ends the attach as the detach key does; the picker follows.
+  - `confirm-session`: accepted when the runner's attach under way is on the session named and the runner has seen no switch since it began. It ends nothing. New windows ask it (see below).
 - **Switching.** `portal open <x>` inside a session, a mint there (created first) and a pick in a picker running there ask zmx for the session's leader. A runner leading is asked to switch, if its entry names the session typed in, and Portal exits 0 once it accepts. Otherwise (a raw client leading, no leader, a token naming a runner on another session, or a runner that can't be reached or refuses) Portal execs `zmx attach <x>`, which zmx routes to the leader. Opening the session typed in does nothing and exits 0: a switch would detach and re-attach it.
 - **Switched outside Portal.** zmx can switch a runner's child under it: a `zmx attach <x>` typed by hand in a Portal attach, or the fallback above when the leading runner didn't answer. zmx's client re-attaches in the same process, so the runner sees only its output: zmx's terminal reset followed by its screen clear. A zmx inside the session switching its own client writes the same bytes, as one reached over ssh does, since zmx sends a session's output to every client. So on that signature the runner becomes unsure, and stays listed.
   - Kill key: confirmed through zmx when it is pressed, not when the signature was seen, so zmx has long since seen a client that left. The kill goes ahead only if the session's leader carries the runner's token; otherwise it is refused, flashing why in the picker, so the runner never kills a session the user has left. This is sound because a client that has left a session can't lead it: zmx clears the leader as its client disconnects, and zmx's client closes the old socket before it writes the reset. When another terminal on the session has typed more recently, a real attach that is unsure has its kill refused: narrow, and failing safe.
   - A switch request is taken: it reaches a runner only when zmx says its token leads the session typed in and its entry names that session, which proves it still shows it. A detach to the picker is refused. The detach keys still detach.
-- **New windows (`m`).** Portal walks the leading runner's process tree up to the terminal app, as it walks the tmux client's today.
+- **New windows (`m`).** Portal asks zmx for the session's leader. A leader carrying a token is that runner's terminal, once its entry names the session and the runner accepts `confirm-session`: Portal walks the runner's process tree up to the terminal app. A token the registry doesn't hold or naming a runner on another session, a runner that refuses (unsure, or between attaches), no leader, or any read that fails opens nothing.
 - **Detach to the picker.** The resume panel's Esc asks every runner on the session.
-- **No runner** (a raw `zmx attach`, or rootshell's own zmx picker). `m` looks for the session's `zmx attach` process in the process table, and refuses unless there is exactly one.
+- **No runner** (a raw `zmx attach`, or rootshell's own zmx picker). When the leader carries no token, `m` looks for the session's `zmx attach` processes in the process table: this user's, on a terminal, running `zmx attach <name>` (or `a`, after any `--labels`) for the session as zmx reads the name, after `ZMX_SESSION_PREFIX`, with `ZMX_DIR` resolving to the backend's dir, each checked when the process's environment is readable. zmx's daemon keeps the argv it forked from but has no terminal, so it is never one. It refuses unless there is exactly one.
 
 ## Commands
 
@@ -162,7 +163,7 @@ zmx doesn't list its clients, so the runners list themselves, taking the part tm
 - **doctor:** zmx present, the sessions whose daemons speak a protocol other than 1 named, saver up, daemon alive, state dir, stale hooks and projects, pending resumes, key config.
 - **current (new):** prints the current session's label. Works however the session was attached. Outside a session it prints nothing and exits 1.
 - **rename (new):** `portal rename <text>` sets the current session's label, its arguments joined with spaces; empty text resets it to the session name.
-- **spawn:** spawned windows run with `ZMX_SESSION` removed. Detection inside a session uses the registry.
+- **spawn:** spawned windows run with `ZMX_SESSION` removed, so each attaches in its own terminal. Detection inside a session uses the registry. Each window acks in `spawn-acks/`.
 - **migrate (new):** see Migration.
 
 ## Migration

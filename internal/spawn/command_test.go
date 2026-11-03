@@ -11,11 +11,11 @@ func fixedExe(path string) ExecutableResolver {
 }
 
 func TestComposeOpenArgv(t *testing.T) {
-	t.Run("an attach surface composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> open --session <name> --ack <batch>:<token>", func(t *testing.T) {
+	t.Run("an attach surface composes env -u ZMX_SESSION -u TMUX -u TMUX_PANE PATH=<full> <exe> open --session <name> --ack <batch>:<token>", func(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",
 			"/abs/portal", "open", "--session", "proj-abc123",
 			"--ack", "b1:t1",
@@ -25,11 +25,11 @@ func TestComposeOpenArgv(t *testing.T) {
 		}
 	})
 
-	t.Run("a mint surface composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> open --path <literal-dir> --ack <batch>:<token>", func(t *testing.T) {
+	t.Run("a mint surface composes env -u ZMX_SESSION -u TMUX -u TMUX_PANE PATH=<full> <exe> open --path <literal-dir> --ack <batch>:<token>", func(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", nil)
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",
 			"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 			"--ack", "b1:t1",
@@ -39,31 +39,27 @@ func TestComposeOpenArgv(t *testing.T) {
 		}
 	})
 
-	t.Run("it injects only PATH and strips TMUX/TMUX_PANE via explicit -u unsets", func(t *testing.T) {
+	t.Run("it injects only PATH and strips ZMX_SESSION, TMUX and TMUX_PANE via explicit -u unsets", func(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
 
-		var pathAssignments, tmuxAssignments, tmuxPaneAssignments int
+		var pathAssignments int
 		for _, elem := range got {
-			switch {
-			case strings.HasPrefix(elem, "PATH="):
+			if strings.HasPrefix(elem, "PATH=") {
 				pathAssignments++
-			case strings.HasPrefix(elem, "TMUX="):
-				tmuxAssignments++
-			case strings.HasPrefix(elem, "TMUX_PANE="):
-				tmuxPaneAssignments++
+			}
+			for _, stripped := range []string{"ZMX_SESSION=", "TMUX=", "TMUX_PANE="} {
+				if strings.HasPrefix(elem, stripped) {
+					t.Errorf("argv assigns %s; want only its -u unset; argv = %#v", stripped, got)
+				}
 			}
 		}
 		if pathAssignments != 1 {
 			t.Errorf("PATH= assignment count = %d, want exactly 1; argv = %#v", pathAssignments, got)
 		}
-		if tmuxAssignments != 0 {
-			t.Errorf("TMUX= assignment count = %d, want 0 (only the -u unset); argv = %#v", tmuxAssignments, got)
-		}
-		if tmuxPaneAssignments != 0 {
-			t.Errorf("TMUX_PANE= assignment count = %d, want 0 (only the -u unset); argv = %#v", tmuxPaneAssignments, got)
-		}
-		if !slices.Contains(got, "-u") {
-			t.Errorf("argv missing the -u unset flag; argv = %#v", got)
+		for _, name := range []string{"ZMX_SESSION", "TMUX", "TMUX_PANE"} {
+			if i := slices.Index(got, name); i < 1 || got[i-1] != "-u" {
+				t.Errorf("argv does not unset %s with -u; argv = %#v", name, got)
+			}
 		}
 	})
 
@@ -137,7 +133,7 @@ func TestComposeOpenArgv(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", []string{"claude", "--resume"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",
 			"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 			"--ack", "b1:t1",
@@ -152,7 +148,7 @@ func TestComposeOpenArgv(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", []string{"claude"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/usr/bin",
 			"/abs/portal", "open", "--session", "proj-abc123",
 			"--ack", "b1:t1",
@@ -170,7 +166,7 @@ func TestComposeOpenArgv(t *testing.T) {
 			got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", cmd)
 
 			want := []string{
-				"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+				"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 				"PATH=/usr/bin",
 				"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 				"--ack", "b1:t1",
@@ -188,7 +184,7 @@ func TestComposeOpenArgv(t *testing.T) {
 		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceMint, Value: "/repo/api"}, "b1", "t1", []string{"npm run dev"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE",
 			"PATH=/usr/bin",
 			"/abs/portal", "open", "--path", "/repo/api",
 			"--ack", "b1:t1",

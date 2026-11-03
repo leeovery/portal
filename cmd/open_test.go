@@ -2255,16 +2255,12 @@ func (c *countingSessionLister) ListSessionNames() ([]string, error) {
 	return c.names, nil
 }
 
-// Nothing spawns a window until the attach runner, so --ack, the receipt one
-// writes, is refused as the burst is, ahead of resolution, any connect and any
-// tmux write: cmd's TestMain makes the default tmux client panic.
-func TestOpenCommand_Ack_RefusedAsTheBurstIs(t *testing.T) {
-	for _, args := range [][]string{
-		{"open", "-s", "dev", "--ack", "b:t"},
-		{"open", "-p", "/tmp", "--ack", "b:t"},
-		{"open", "dev", "--ack", "notcolon"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
+// A malformed --ack is a usage error ahead of resolution and any connect: a
+// window that can't write its receipt must not open a session the burst then
+// counts as failed.
+func TestOpenCommand_Ack_MalformedIsAUsageError(t *testing.T) {
+	for _, value := range []string{"notcolon", "b1:", ":t1", "", "../b1:t1", "b1:t1/x", "b-1:t1"} {
+		t.Run(value, func(t *testing.T) {
 			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 			lister := &countingSessionLister{names: []string{"dev"}}
 			withOpenDeps(t, OpenDeps{
@@ -2274,18 +2270,16 @@ func TestOpenCommand_Ack_RefusedAsTheBurstIs(t *testing.T) {
 				DirValidator:  &testDirValidator{existing: map[string]bool{"/tmp": true}},
 			})
 			withFuncSeam(t, &openSessionFunc, func(*cobra.Command, string) error {
-				t.Error("open attached a session for --ack")
-				return nil
-			})
-			withFuncSeam(t, &openPathFunc, func(*cobra.Command, string, []string) error {
-				t.Error("open minted a session for --ack")
+				t.Error("open attached a session for a malformed --ack")
 				return nil
 			})
 
 			resetRootCmd()
-			rootCmd.SetArgs(args)
-			if err := rootCmd.Execute(); !errors.Is(err, errSeveralSessions) {
-				t.Errorf("error = %v, want the burst's refusal %v", err, errSeveralSessions)
+			rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", value})
+			err := rootCmd.Execute()
+
+			if usage, ok := errors.AsType[*UsageError](err); !ok || usage.Error() != "open: --ack must be <batch>:<token>" {
+				t.Errorf("error = %v, want the --ack usage error", err)
 			}
 			if lister.calls != 0 {
 				t.Errorf("sessions listed %d times, want none: --ack is refused before resolution", lister.calls)

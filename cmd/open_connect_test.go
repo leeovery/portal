@@ -21,6 +21,8 @@ import (
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -557,15 +559,22 @@ func TestOpenCommand_ResolvesSessionNamesFromTheBackend(t *testing.T) {
 	})
 }
 
-func TestOpenCommand_SeveralSessionsAtOnceRefuse(t *testing.T) {
-	for name, args := range map[string][]string{
-		"two targets":                  {"api-x7Kd9a", "blog-c3d4"},
-		"two session pins":             {"-s", "api-x7Kd9a", "-s", "blog-c3d4"},
-		"a glob expanding to two":      {"*-*"},
-		"a session and a path to mint": {"api-x7Kd9a", "-p", "/tmp"},
+// Several targets on one line burst: the invoking terminal takes the first,
+// and each of the N−1 others opens in a window of its own, net N windows.
+func TestOpenCommand_SeveralSessionsAtOnceBurst(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args         []string
+		wantTrigger  string
+		wantMint     string
+		wantExternal [][]string
+	}{
+		"two targets":                  {args: []string{"api-x7Kd9a", "blog-c3d4"}, wantTrigger: "api-x7Kd9a", wantExternal: [][]string{{"--session", "blog-c3d4"}}},
+		"two session pins":             {args: []string{"-s", "api-x7Kd9a", "-s", "blog-c3d4"}, wantTrigger: "api-x7Kd9a", wantExternal: [][]string{{"--session", "blog-c3d4"}}},
+		"a glob expanding to two":      {args: []string{"*-*"}, wantTrigger: "api-x7Kd9a", wantExternal: [][]string{{"--session", "blog-c3d4"}}},
+		"a path to mint and a session": {args: []string{"-p", "/tmp", "api-x7Kd9a"}, wantMint: "/tmp", wantExternal: [][]string{{"--session", "api-x7Kd9a"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+			_, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 			withOpenDeps(t, OpenDeps{
 				AliasLookup:  &testAliasLookup{aliases: map[string]string{}},
 				Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
@@ -574,17 +583,40 @@ func TestOpenCommand_SeveralSessionsAtOnceRefuse(t *testing.T) {
 				Runner:       rec.Run,
 				Runners:      &rec.runners,
 			})
-			argv := append([]string{"open"}, args...)
+			events := &openBurstEvents{}
+			ack := &spawntest.FakeAckChannel{}
+			adapter := &spawntest.FakeAdapter{Ack: ack}
+			conn := &recordingConnector{events: events}
+			mint := &recordingMint{events: events}
+			deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+			deps.Ack = ack
+			withOpenBurstDeps(t, *deps)
+			argv := append([]string{"open"}, tc.args...)
 			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal"}, argv...) })
 
-			_, _, err := runRootCmd(t, argv...)
-			if err == nil || err.Error() != "opening several sessions at once isn't available yet" {
-				t.Fatalf("open %v = %v, want the one-line refusal", args, err)
+			if _, _, err := runRootCmd(t, argv...); err != nil {
+				t.Fatalf("open %v = %v, want the burst", tc.args, err)
+			}
+
+			if len(adapter.Calls) != len(tc.wantExternal) {
+				t.Fatalf("windows opened = %d, want %d: net N windows", len(adapter.Calls), len(tc.wantExternal))
+			}
+			for i, target := range tc.wantExternal {
+				if got := adapter.Calls[i]; !slices.Contains(got, target[0]) || !slices.Contains(got, target[1]) || !slices.Contains(got, "ZMX_SESSION") {
+					t.Errorf("window %d runs %q, want open %s %s with ZMX_SESSION unset", i, got, target[0], target[1])
+				}
+			}
+			wantSeq := []string{"connect:" + tc.wantTrigger}
+			if tc.wantMint != "" {
+				wantSeq = []string{"mint:" + tc.wantMint}
+			}
+			if !slices.Equal(events.seq, wantSeq) {
+				t.Errorf("this terminal = %q, want %q", events.seq, wantSeq)
+			}
+			if len(ack.Cleaned) != 1 {
+				t.Errorf("batches cleaned = %q, want the burst's one", ack.Cleaned)
 			}
 			rec.assertNone(t)
-			if creates := fake.CallsTo(backendtest.OpCreate); len(creates) != 0 {
-				t.Errorf("creates = %+v, want none", creates)
-			}
 		})
 	}
 }

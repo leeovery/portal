@@ -20,7 +20,7 @@ func queuedGenerator(ids ...string) func() (string, error) {
 	}
 }
 
-func TestNewSpawnID_GeneratesOptionSafeIDAndPropagatesError(t *testing.T) {
+func TestNewSpawnID_GeneratesPathSafeIDAndPropagatesError(t *testing.T) {
 	id, err := NewSpawnID(queuedGenerator("b1abcd"))
 	if err != nil {
 		t.Fatalf("NewSpawnID(ok) returned error %v, want nil", err)
@@ -42,12 +42,12 @@ func TestNewSpawnID_GeneratesOptionSafeIDAndPropagatesError(t *testing.T) {
 	}
 }
 
-func TestNewSpawnID_RejectsNonOptionSafeGeneratedID(t *testing.T) {
+func TestNewSpawnID_RejectsNonPathSafeGeneratedID(t *testing.T) {
 	for _, bad := range []string{"has-hyphen", "has.dot", "has:colon", "has space"} {
 		t.Run(bad, func(t *testing.T) {
 			id, err := NewSpawnID(queuedGenerator(bad))
 			if err == nil {
-				t.Fatalf("NewSpawnID(%q) returned nil error, want a not-option-safe error", bad)
+				t.Fatalf("NewSpawnID(%q) returned nil error, want a not-path-safe error", bad)
 			}
 			if id != "" {
 				t.Errorf("NewSpawnID(%q) id = %q, want empty", bad, id)
@@ -58,7 +58,7 @@ func TestNewSpawnID_RejectsNonOptionSafeGeneratedID(t *testing.T) {
 	t.Run("empty id from generator", func(t *testing.T) {
 		id, err := NewSpawnID(queuedGenerator(""))
 		if err == nil {
-			t.Fatalf("NewSpawnID(\"\") returned nil error, want a not-option-safe error")
+			t.Fatalf("NewSpawnID(\"\") returned nil error, want a not-path-safe error")
 		}
 		if id != "" {
 			t.Errorf("NewSpawnID(\"\") id = %q, want empty", id)
@@ -66,41 +66,34 @@ func TestNewSpawnID_RejectsNonOptionSafeGeneratedID(t *testing.T) {
 	})
 }
 
-func TestSpawnMarkerName_FormatsAndRoundTrips(t *testing.T) {
-	name := SpawnMarkerName("b1abcd", "t2wxyz")
-	if want := "@portal-spawn-b1abcd-t2wxyz"; name != want {
-		t.Fatalf("SpawnMarkerName = %q, want %q", name, want)
+func TestAckFileName_FormatsAndRoundTrips(t *testing.T) {
+	name, err := ackFileName("b1abcd", "t2wxyz")
+	if want := "b1abcd-t2wxyz"; err != nil || name != want {
+		t.Fatalf("ackFileName = %q, %v; want %q", name, err, want)
 	}
 
-	batch, token, ok := ParseSpawnMarkerName(name)
-	if !ok {
-		t.Fatalf("ParseSpawnMarkerName(%q) ok = false, want true", name)
-	}
-	if batch != "b1abcd" || token != "t2wxyz" {
-		t.Errorf("ParseSpawnMarkerName(%q) = (%q, %q), want (%q, %q)", name, batch, token, "b1abcd", "t2wxyz")
+	batch, token, ok := parseAckFileName(name)
+	if !ok || batch != "b1abcd" || token != "t2wxyz" {
+		t.Errorf("parseAckFileName(%q) = (%q, %q, %v), want (b1abcd, t2wxyz, true)", name, batch, token, ok)
 	}
 }
 
-func TestParseSpawnMarkerName_RejectsForeignOrDelimiterless(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{name: "foreign skeleton prefix", input: "@portal-skeleton-foo"},
-		{name: "no delimiter after prefix", input: "@portal-spawn-onlyonepart"},
-		{name: "empty batch (leading delimiter)", input: "@portal-spawn--t2wxyz"},
-		{name: "empty token (trailing delimiter)", input: "@portal-spawn-b1abcd-"},
-		{name: "bare prefix", input: "@portal-spawn-"},
-		{name: "unrelated name", input: "@portal-restoring"},
+func TestAckFileName_RefusesWhatNoBurstMinted(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"", "t1"}, {"b1", ""}, {"../b1", "t1"}, {"b1", "t1/x"}, {"b-1", "t1"}, {"b1", "t.1"},
+		{strings.Repeat("b", 33), "t1"},
+	} {
+		if name, err := ackFileName(pair[0], pair[1]); err == nil {
+			t.Errorf("ackFileName(%q, %q) = %q, want a refusal", pair[0], pair[1], name)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			batch, token, ok := ParseSpawnMarkerName(tt.input)
-			if ok {
-				t.Errorf("ParseSpawnMarkerName(%q) ok = true, want false", tt.input)
-			}
-			if batch != "" || token != "" {
-				t.Errorf("ParseSpawnMarkerName(%q) = (%q, %q), want empty strings on reject", tt.input, batch, token)
+}
+
+func TestParseAckFileName_RejectsForeignOrDelimiterless(t *testing.T) {
+	for _, input := range []string{"onlyonepart", "-t2wxyz", "b1abcd-", "-", "b1-t2-t3", ".b1-t2", "b1-t2.tmp", ""} {
+		t.Run(input, func(t *testing.T) {
+			if batch, token, ok := parseAckFileName(input); ok || batch != "" || token != "" {
+				t.Errorf("parseAckFileName(%q) = (%q, %q, %v), want a reject", input, batch, token, ok)
 			}
 		})
 	}
@@ -121,8 +114,8 @@ func TestFormatSpawnAckFlag_FormatsAndRoundTrips(t *testing.T) {
 	}
 }
 
-func TestParseSpawnAckFlag_RejectsMissingColonOrEmptyPart(t *testing.T) {
-	for _, bad := range []string{"nocolon", ":t1", "b1:", ":", ""} {
+func TestParseSpawnAckFlag_RejectsMissingColonOrWhatNoBurstMinted(t *testing.T) {
+	for _, bad := range []string{"nocolon", ":t1", "b1:", ":", "", "../b1:t1", "b1:t1/x", "b-1:t1", "b1:t1:t2"} {
 		t.Run(bad, func(t *testing.T) {
 			batch, token, ok := ParseSpawnAckFlag(bad)
 			if ok {
@@ -156,16 +149,23 @@ func TestNewSpawnID_IndependentRealGeneratorIDs(t *testing.T) {
 			t.Fatalf("NewSpawnID(real) produced an empty id")
 		}
 		if strings.IndexFunc(id, func(r rune) bool { return !strings.ContainsRune(nanoid.Alphabet, r) }) >= 0 {
-			t.Errorf("NewSpawnID(real) produced a non-option-safe id %q", id)
+			t.Errorf("NewSpawnID(real) produced a non-path-safe id %q", id)
 		}
 	}
 }
 
-func TestIsOptionSafeID_GovernedBySharedAlphabet(t *testing.T) {
-	if !isOptionSafeID(nanoid.Alphabet) {
-		t.Errorf("isOptionSafeID(Alphabet) = false, want true (the whole shared alphabet must be option-safe)")
+func TestValidAckID_GovernedBySharedAlphabet(t *testing.T) {
+	for _, r := range nanoid.Alphabet {
+		if !validAckID(string(r)) {
+			t.Errorf("validAckID(%q) = false, want every rune of the shared alphabet", r)
+		}
 	}
-	if isOptionSafeID(nanoid.Alphabet + "-") {
-		t.Errorf("isOptionSafeID accepted a hyphen; its charset must be exactly nanoid.Alphabet, which excludes %q", "-")
+	for _, bad := range []string{"-", "_", ".", "/", ":", " "} {
+		if validAckID("a" + bad) {
+			t.Errorf("validAckID accepted %q; its charset must be exactly nanoid.Alphabet", bad)
+		}
+	}
+	if validAckID(strings.Repeat("a", 33)) {
+		t.Error("validAckID accepted an id longer than any burst mints")
 	}
 }

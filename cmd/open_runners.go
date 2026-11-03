@@ -48,6 +48,17 @@ func (stateRunners) Switch(ctx context.Context, token, current, target string) e
 	return runnerreg.New(dir).Switch(ctx, token, current, target)
 }
 
+// ConfirmSession is the pid of the runner registered under token once it
+// confirms it shows session, sure of it: what spawn detection walks from to
+// the terminal.
+func (stateRunners) ConfirmSession(ctx context.Context, token, session string) (int, error) {
+	dir, err := state.Dir()
+	if err != nil {
+		return 0, err
+	}
+	return runnerreg.New(dir).ConfirmSession(ctx, token, session)
+}
+
 // unlisted lists nothing, for a state directory that won't resolve: the
 // runner attaches unlisted, and with no token to confirm its attach by.
 type unlisted struct{}

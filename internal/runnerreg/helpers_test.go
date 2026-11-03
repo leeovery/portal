@@ -37,6 +37,7 @@ type handler struct {
 	refuse    error
 	switches  []string
 	detaches  int
+	confirms  []string
 	deadlines []time.Time
 }
 
@@ -46,6 +47,17 @@ func (h *handler) Switch(ctx context.Context, session string) error {
 
 func (h *handler) DetachToPicker(ctx context.Context) error {
 	return h.take(ctx, func() { h.detaches++ })
+}
+
+func (h *handler) ConfirmSession(ctx context.Context, session string) error {
+	return h.take(ctx, func() { h.confirms = append(h.confirms, session) })
+}
+
+// askedConfirms is each session the handler was asked whether it shows.
+func (h *handler) askedConfirms() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.confirms)
 }
 
 func (h *handler) take(ctx context.Context, record func()) error {

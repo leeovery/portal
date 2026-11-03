@@ -171,6 +171,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"portalbintest":    {},
 		"portaltest":       {},
 		"prefs":            {},
+		"proctable":        {},
 		"project":          {},
 		"resolver":         {},
 		"restore":          {},

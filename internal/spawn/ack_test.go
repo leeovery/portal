@@ -2,54 +2,17 @@ package spawn
 
 import (
 	"errors"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
-	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/logtest"
 )
-
-const optionDump = "@portal-spawn-b1-t1 1\n" +
-	"@portal-spawn-b1-t2 1\n" +
-	"@portal-spawn-b2-t9 1\n" +
-	"@portal-skeleton-foo 1\n" +
-	"@portal-skeleton-bar 1\n" +
-	"default-terminal \"tmux-256color\"\n" +
-	"\n" +
-	"escape-time 10"
-
-// Structurally satisfies both spawn.serverOptionLister and
-// state.ServerOptionLister, so one fixture drives both enumerators.
-type fakeOptionLister struct {
-	out string
-	err error
-}
-
-func (f fakeOptionLister) ShowAllServerOptions() (string, error) { return f.out, f.err }
-
-type setCall struct {
-	name  string
-	value string
-}
-
-type fakeOptionWriter struct {
-	sets     []setCall
-	unsets   []string
-	unsetErr func(name string) error
-}
-
-func (f *fakeOptionWriter) SetServerOption(name, value string) error {
-	f.sets = append(f.sets, setCall{name: name, value: value})
-	return nil
-}
-
-func (f *fakeOptionWriter) UnsetServerOption(name string) error {
-	f.unsets = append(f.unsets, name)
-	if f.unsetErr != nil {
-		return f.unsetErr(name)
-	}
-	return nil
-}
 
 func sortedKeys(m map[string]struct{}) []string {
 	keys := make([]string, 0, len(m))
@@ -60,110 +23,191 @@ func sortedKeys(m map[string]struct{}) []string {
 	return keys
 }
 
-func TestServerOptionAckChannel_CollectIgnoresForeignBatchesAndSkeletonMarkers(t *testing.T) {
-	ch := NewServerOptionAckChannel(&fakeOptionWriter{}, fakeOptionLister{out: optionDump})
+// ackChannel is a channel in a state directory of the test's own.
+func ackChannel(t *testing.T) *FileAckChannel {
+	t.Helper()
+	return NewFileAckChannel(t.TempDir())
+}
 
-	got, err := ch.Collect("b1")
-	if err != nil {
-		t.Fatalf("Collect(b1) error = %v, want nil", err)
-	}
-	if want := []string{"t1", "t2"}; !slices.Equal(sortedKeys(got), want) {
-		t.Errorf("Collect(b1) tokens = %v, want %v (foreign-batch and skeleton markers must be excluded)", sortedKeys(got), want)
-	}
-
-	none, err := ch.Collect("nope")
-	if err != nil {
-		t.Fatalf("Collect(nope) error = %v, want nil", err)
-	}
-	if none == nil {
-		t.Errorf("Collect(nope) = nil map, want non-nil empty set")
-	}
-	if len(none) != 0 {
-		t.Errorf("Collect(nope) = %v, want empty", sortedKeys(none))
+func mustWrite(t *testing.T, c *FileAckChannel, batch, token string) {
+	t.Helper()
+	if err := c.Write(batch, token); err != nil {
+		t.Fatalf("Write(%s, %s): %v", batch, token, err)
 	}
 }
 
-func TestListSkeletonMarkers_IgnoresSpawnMarkersOnSameDump(t *testing.T) {
-	got, err := state.ListSkeletonMarkers(fakeOptionLister{out: optionDump})
-	if err != nil {
-		t.Fatalf("ListSkeletonMarkers error = %v, want nil", err)
+// ackFiles lists the names in the channel's directory.
+func ackFiles(t *testing.T, c *FileAckChannel) []string {
+	t.Helper()
+	entries, err := os.ReadDir(c.Dir())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
 	}
-	if want := []string{"bar", "foo"}; !slices.Equal(sortedKeys(got), want) {
-		t.Errorf("ListSkeletonMarkers paneKeys = %v, want %v (must be blind to @portal-spawn- markers)", sortedKeys(got), want)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
 	}
-	for _, spawnLeak := range []string{"t1", "t2", "t9", "b1-t1", "b1-t2", "b2-t9"} {
-		if _, ok := got[spawnLeak]; ok {
-			t.Errorf("ListSkeletonMarkers leaked spawn-derived key %q", spawnLeak)
+	return names
+}
+
+// backdate makes the ack old enough to be stale.
+func backdate(t *testing.T, c *FileAckChannel, name string) {
+	t.Helper()
+	old := time.Now().Add(-staleAckAge - time.Minute)
+	if err := os.Chtimes(filepath.Join(c.Dir(), name), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFileAckChannel_Write(t *testing.T) {
+	t.Run("it writes one file per ack in the state directory's spawn-acks, only its owner able to read it", func(t *testing.T) {
+		stateDir := t.TempDir()
+		c := NewFileAckChannel(stateDir)
+
+		mustWrite(t, c, "b1", "t1")
+		mustWrite(t, c, "b1", "t1")
+
+		if c.Dir() != filepath.Join(stateDir, "spawn-acks") {
+			t.Errorf("Dir = %s, want spawn-acks in the state directory", c.Dir())
 		}
-	}
-}
-
-func TestServerOptionAckChannel_WriteSetsMarkerToOne(t *testing.T) {
-	w := &fakeOptionWriter{}
-	ch := NewServerOptionAckChannel(w, fakeOptionLister{})
-
-	if err := ch.Write("b1", "t1"); err != nil {
-		t.Fatalf("Write(b1, t1) error = %v, want nil", err)
-	}
-	want := []setCall{{name: "@portal-spawn-b1-t1", value: "1"}}
-	if !slices.Equal(w.sets, want) {
-		t.Errorf("Write recorded sets = %v, want %v", w.sets, want)
-	}
-}
-
-func TestServerOptionAckChannel_CleanUnsetsOnlyBatchMarkersIdempotently(t *testing.T) {
-	w := &fakeOptionWriter{}
-	ch := NewServerOptionAckChannel(w, fakeOptionLister{out: optionDump})
-
-	if err := ch.Clean("b1"); err != nil {
-		t.Fatalf("Clean(b1) error = %v, want nil", err)
-	}
-	want := []string{"@portal-spawn-b1-t1", "@portal-spawn-b1-t2"}
-	if !slices.Equal(w.unsets, want) {
-		t.Errorf("Clean(b1) unset = %v, want %v (must not touch b2 or skeleton markers)", w.unsets, want)
-	}
-
-	w2 := &fakeOptionWriter{}
-	ch2 := NewServerOptionAckChannel(w2, fakeOptionLister{out: optionDump})
-	if err := ch2.Clean("absent"); err != nil {
-		t.Fatalf("Clean(absent) error = %v, want nil", err)
-	}
-	if len(w2.unsets) != 0 {
-		t.Errorf("Clean(absent) unset = %v, want none (zero-marker batch is a no-op)", w2.unsets)
-	}
-}
-
-func TestServerOptionAckChannel_CleanContinuesAfterUnsetErrorReturnsFirst(t *testing.T) {
-	boom := errors.New("unset boom")
-	w := &fakeOptionWriter{
-		unsetErr: func(name string) error {
-			if name == "@portal-spawn-b1-t1" {
-				return boom
+		if names := ackFiles(t, c); !slices.Equal(names, []string{"b1-t1"}) {
+			t.Errorf("acks = %q, want b1-t1 once", names)
+		}
+		for path, want := range map[string]fs.FileMode{c.Dir(): 0o700, filepath.Join(c.Dir(), "b1-t1"): 0o600} {
+			if info, err := os.Stat(path); err != nil || info.Mode().Perm() != want {
+				t.Errorf("%s mode = %v, %v; want %v", path, info.Mode().Perm(), err, want)
 			}
-			return nil
-		},
-	}
-	ch := NewServerOptionAckChannel(w, fakeOptionLister{out: optionDump})
+		}
+	})
 
-	err := ch.Clean("b1")
-	if !errors.Is(err, boom) {
-		t.Fatalf("Clean(b1) error = %v, want it to be %v (first unset error)", err, boom)
-	}
-	want := []string{"@portal-spawn-b1-t1", "@portal-spawn-b1-t2"}
-	if !slices.Equal(w.unsets, want) {
-		t.Errorf("Clean(b1) unset = %v, want %v (must continue past an unset error)", w.unsets, want)
-	}
+	t.Run("it tightens a directory that already exists", func(t *testing.T) {
+		c := ackChannel(t)
+		if err := os.MkdirAll(c.Dir(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		mustWrite(t, c, "b1", "t1")
+
+		if info, err := os.Stat(c.Dir()); err != nil || info.Mode().Perm() != 0o700 {
+			t.Errorf("dir mode = %v, %v; want 0700", info.Mode().Perm(), err)
+		}
+	})
+
+	t.Run("it refuses a batch or token no burst minted, making nothing", func(t *testing.T) {
+		for _, pair := range [][2]string{{"../b1", "t1"}, {"b1", "../../t1"}, {"b1", "t1/x"}, {"", "t1"}, {"b-1", "t1"}} {
+			c := ackChannel(t)
+
+			if err := c.Write(pair[0], pair[1]); err == nil {
+				t.Errorf("Write(%q, %q) = nil, want a refusal", pair[0], pair[1])
+			}
+			if _, err := os.Stat(c.Dir()); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Write(%q, %q) made the directory: %v", pair[0], pair[1], err)
+			}
+		}
+	})
 }
 
-func TestServerOptionAckChannel_CollectReturnsErrorNotFalseEmpty(t *testing.T) {
-	boom := errors.New("show-options boom")
-	ch := NewServerOptionAckChannel(&fakeOptionWriter{}, fakeOptionLister{err: boom})
+func TestFileAckChannel_Collect(t *testing.T) {
+	t.Run("it returns the batch's tokens and nothing of any other batch or file", func(t *testing.T) {
+		c := ackChannel(t)
+		mustWrite(t, c, "b1", "t1")
+		mustWrite(t, c, "b1", "t2")
+		mustWrite(t, c, "b2", "t9")
+		for _, name := range []string{"b1-x.tmp", "README"} {
+			if err := os.WriteFile(filepath.Join(c.Dir(), name), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Mkdir(filepath.Join(c.Dir(), "b1-t3"), 0o700); err != nil {
+			t.Fatal(err)
+		}
 
-	got, err := ch.Collect("b1")
-	if !errors.Is(err, boom) {
-		t.Fatalf("Collect error = %v, want it to be %v", err, boom)
-	}
-	if got != nil {
-		t.Errorf("Collect on enumeration failure = %v, want nil (never a false-empty success set)", got)
-	}
+		got, err := c.Collect("b1")
+
+		if want := []string{"t1", "t2"}; err != nil || !slices.Equal(sortedKeys(got), want) {
+			t.Errorf("Collect(b1) = %v, %v; want %v", sortedKeys(got), err, want)
+		}
+	})
+
+	t.Run("a batch with no acks, or a directory never made, is an empty set", func(t *testing.T) {
+		c := ackChannel(t)
+		if got, err := c.Collect("b1"); err != nil || got == nil || len(got) != 0 {
+			t.Errorf("Collect before any ack = %v, %v; want a non-nil empty set", got, err)
+		}
+		mustWrite(t, c, "b2", "t1")
+		if got, err := c.Collect("b1"); err != nil || got == nil || len(got) != 0 {
+			t.Errorf("Collect(b1) = %v, %v; want a non-nil empty set", got, err)
+		}
+	})
+
+	t.Run("a directory it can't read is an error, never an empty set", func(t *testing.T) {
+		c := ackChannel(t)
+		if err := os.WriteFile(c.Dir(), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, err := c.Collect("b1"); err == nil || got != nil {
+			t.Errorf("Collect = %v, %v; want (nil, the read's error)", got, err)
+		}
+	})
+}
+
+func TestFileAckChannel_Clean(t *testing.T) {
+	t.Run("it removes the batch's acks and leaves another burst's fresh ones, idempotently", func(t *testing.T) {
+		c := ackChannel(t)
+		mustWrite(t, c, "b1", "t1")
+		mustWrite(t, c, "b1", "t2")
+		mustWrite(t, c, "b2", "t9")
+
+		for range 2 {
+			if err := c.Clean("b1"); err != nil {
+				t.Fatalf("Clean(b1) = %v", err)
+			}
+		}
+
+		if names := ackFiles(t, c); !slices.Equal(names, []string{"b2-t9"}) {
+			t.Errorf("acks = %q, want only the other burst's", names)
+		}
+	})
+
+	t.Run("it sweeps any burst's stale acks, as one that ended before cleaning leaves them", func(t *testing.T) {
+		sink := logtest.Install(t)
+		c := ackChannel(t)
+		mustWrite(t, c, "b1", "t1")
+		mustWrite(t, c, "crashd", "t1")
+		mustWrite(t, c, "live", "t1")
+		backdate(t, c, "crashd-t1")
+
+		if err := c.Clean("b1"); err != nil {
+			t.Fatalf("Clean(b1) = %v", err)
+		}
+
+		if names := ackFiles(t, c); !slices.Equal(names, []string{"live-t1"}) {
+			t.Errorf("acks = %q, want only the live burst's", names)
+		}
+		rec := sink.Records().Matching("spawn", "stale spawn ack removed").AtExactLevel(slog.LevelDebug).Only(t, "stale ack record")
+		if got := rec.AttrString(t, "path"); got != filepath.Join(c.Dir(), "crashd-t1") {
+			t.Errorf("path = %q, want the stale ack's", got)
+		}
+	})
+
+	t.Run("a directory never made is clean", func(t *testing.T) {
+		if err := ackChannel(t).Clean("b1"); err != nil {
+			t.Errorf("Clean = %v, want nil", err)
+		}
+	})
+
+	t.Run("a removal that fails is returned", func(t *testing.T) {
+		c := ackChannel(t)
+		mustWrite(t, c, "b1", "t1")
+		mustWrite(t, c, "b1", "t2")
+		if err := os.Chmod(c.Dir(), 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(c.Dir(), 0o700) })
+
+		if err := c.Clean("b1"); err == nil {
+			t.Error("Clean = nil, want the failed removal")
+		}
+	})
 }

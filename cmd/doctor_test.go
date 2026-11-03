@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -860,33 +861,32 @@ func TestDoctorFix(t *testing.T) {
 	})
 }
 
-// detectorReads are the tmux commands host-terminal detection sends: the
-// current session's name, then that session's clients.
-var detectorReads = [][]string{
-	{"display-message", "-p", "#{session_name}"},
-	{"list-clients", "-t"},
-}
-
-// Doctor and doctor --fix send tmux nothing but detection's reads, so a path
-// that starts a server or writes to tmux fails here.
-func TestDoctorSendsTmuxOnlyTheDetectorsReads(t *testing.T) {
-	for _, args := range [][]string{{"doctor"}, {"doctor", "--fix"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			isolateTerminalsFile(t)
+// Doctor's own host-terminal detection runs through the driver bound on the
+// zmx dir doctor judges, and only reads it: inside a session the dir doesn't
+// hold, it asks for the session's leader, finds none, and leaves the dir as
+// it was.
+func TestDoctorDetectsThroughTheZmxDirItJudges(t *testing.T) {
+	for _, args := range [][]string{nil, {"--fix"}} {
+		t.Run(strings.Join(append([]string{"doctor"}, args...), " "), func(t *testing.T) {
+			sink := logtest.Install(t)
+			t.Setenv("ZMX_SESSION", "dev")
 			deps := healthyDoctorDeps(t)
 			deps.Detector, deps.Resolve = nil, nil
-			tmuxCalls := withDoctorDeps(t, *deps)
 
-			_, _, _ = runRootCmd(t, args...)
+			_, _, _ = runDoctorWith(t, deps, args...)
 
-			calls := tmuxCalls.Calls()
-			if len(calls) == 0 {
-				t.Fatal("doctor sent tmux nothing; the host-terminal detection this test watches did not run")
+			// --fix diagnoses twice, detecting each time.
+			recs := sink.Records().Matching("spawn", "detection transient failure")
+			if len(recs) == 0 {
+				t.Fatal("doctor did not detect the host terminal")
 			}
-			for _, call := range calls {
-				if !slices.ContainsFunc(detectorReads, func(read []string) bool { return slices.Equal(call[:min(len(read), len(call))], read) }) {
-					t.Errorf("doctor sent tmux %q, which is not one of detection's reads %q", call, detectorReads)
+			for _, rec := range recs {
+				if detail := rec.AttrString(t, "detail"); !strings.Contains(detail, `read the leader of session "dev"`) {
+					t.Errorf("detection detail = %q, want the leader read of dev", detail)
 				}
+			}
+			if entries, err := os.ReadDir(deps.ZmxDir); err != nil || len(entries) != 0 {
+				t.Errorf("zmx dir holds %v, %v after doctor; want it untouched", entries, err)
 			}
 		})
 	}

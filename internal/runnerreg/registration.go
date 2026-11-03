@@ -47,6 +47,9 @@ type Handler interface {
 	// DetachToPicker asks the runner to end its attach for the picker. It
 	// returns once the runner has accepted, or with why it won't.
 	DetachToPicker(ctx context.Context) error
+	// ConfirmSession asks the runner whether its attach under way shows
+	// session, sure of it, ending nothing. It returns nil if so, or why not.
+	ConfirmSession(ctx context.Context, session string) error
 }
 
 // Registration is this process's entry in the registry, its socket served
@@ -223,8 +226,11 @@ func (g *Registration) carryOut(q request) error {
 	}
 	ctx, cancel := context.WithDeadline(g.ctx, q.Deadline)
 	defer cancel()
-	if q.Request == reqSwitch {
+	switch q.Request {
+	case reqSwitch:
 		return g.handler.Switch(ctx, q.Session)
+	case reqConfirmSession:
+		return g.handler.ConfirmSession(ctx, q.Session)
 	}
 	return g.handler.DetachToPicker(ctx)
 }

@@ -21,9 +21,6 @@ const tmuxPkgPath = "github.com/leeovery/portal/internal/tmux"
 // list by deleting its lines. In cmd, which mixes zmx and tmux code, an entry
 // names a file; elsewhere it names a package directory.
 var tmuxImportAllowList = map[string]int{
-	"cmd/spawn_seams.go": 2,
-	"internal/spawn":     2,
-
 	"cmd/state_commit_now.go":       3,
 	"cmd/state_daemon.go":           3,
 	"cmd/state_hydrate.go":          3,

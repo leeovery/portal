@@ -73,6 +73,9 @@ type Config struct {
 	// Began, when set, is called once the attach has begun, before Run reads
 	// any request.
 	Began func()
+	// Unsure, when set, is called once Run becomes unsure, as below, on the
+	// goroutine copying the child's output to the terminal.
+	Unsure func()
 	// Confirm confirms through the backend that the terminal still shows
 	// Session, returning why not otherwise. Once the child's output shows a
 	// switch, zmx's reset then its screen clear, Run is unsure: zmx may have

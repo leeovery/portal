@@ -34,9 +34,9 @@ const shellFallbackSuffix = `; exec "$SHELL" -il`
 
 // Hand-authored golden bytes: nothing here recomputes them from the production
 // escaping helpers, so a symmetric encode/decode bug cannot pass falsely.
-const wantAttachCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--session'\\'' '\\''proj-abc123'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\''; exec \"$SHELL\" -il'`
+const wantAttachCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''ZMX_SESSION'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--session'\\'' '\\''proj-abc123'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\''; exec \"$SHELL\" -il'`
 
-const wantMintCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--path'\\'' '\\''/abs/dir'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\'' '\\''--'\\'' '\\''echo '\\''\\'\\'''\\''a'\\''\\'\\'''\\'';$x\"b\"'\\''; exec \"$SHELL\" -il'`
+const wantMintCommandBody = `'bash' '-lc' ''\\''/usr/bin/env'\\'' '\\''-u'\\'' '\\''ZMX_SESSION'\\'' '\\''-u'\\'' '\\''TMUX'\\'' '\\''-u'\\'' '\\''TMUX_PANE'\\'' '\\''PATH=/opt/homebrew/bin:/usr/bin'\\'' '\\''/abs/portal'\\'' '\\''open'\\'' '\\''--path'\\'' '\\''/abs/dir'\\'' '\\''--ack'\\'' '\\''batch1:tok1'\\'' '\\''--'\\'' '\\''echo '\\''\\'\\'''\\''a'\\''\\'\\'''\\'';$x\"b\"'\\''; exec \"$SHELL\" -il'`
 
 // Undoes the two escape passes in reverse order. In the data ghosttyEmbed
 // produces a backslash and a double quote are never adjacent pre-escape, so the
@@ -259,12 +259,13 @@ func TestGhosttyEmbed(t *testing.T) {
 		}
 	})
 
-	t.Run("it preserves the composed argv's PATH / -u TMUX prefix inside the wrapper", func(t *testing.T) {
+	t.Run("it preserves the composed argv's PATH / -u ZMX_SESSION / -u TMUX prefix inside the wrapper", func(t *testing.T) {
 		embed := ghosttyEmbed(mintArgvWithSpecials())
 
 		for _, frag := range []string{
 			"/usr/bin/env",
 			"-u",
+			"ZMX_SESSION",
 			"TMUX",
 			"TMUX_PANE",
 			"PATH=/opt/homebrew/bin:/usr/bin",

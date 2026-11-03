@@ -45,8 +45,8 @@ func LogBatchSummary(logger *slog.Logger, id Identity, resolution Resolution, re
 }
 
 // LogTriggerConnectFailed corrects the batch summary, which has to precede the
-// self-connect — a successful outside-tmux attach exec-replaces the process and
-// never returns — and so counts the trigger optimistically.
+// self-connect — a successful attach holds the terminal until it ends, or
+// exec-replaces the process — and so counts the trigger optimistically.
 func LogTriggerConnectFailed(logger *slog.Logger, session, detail string) {
 	log.OrDiscard(logger).Warn("trigger did not attach", "session", session, "detail", detail)
 }

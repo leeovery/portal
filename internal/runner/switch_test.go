@@ -90,6 +90,19 @@ func TestRun_Unsure(t *testing.T) {
 		}
 	})
 
+	t.Run("Unsure is called once, for the first switch seen", func(t *testing.T) {
+		calls := new(atomic.Int32)
+		h := unsure(t, func(_ *harness, cfg *runner.Config) {
+			cfg.Unsure = func() { calls.Add(1) }
+		})
+
+		h.detach(t)
+
+		if n := calls.Load(); n != 1 {
+			t.Errorf("Unsure was called %d times for two switches, want once", n)
+		}
+	})
+
 	t.Run("the kill key asks Confirm as it is pressed, and kills once it confirms", func(t *testing.T) {
 		calls := new(atomic.Int32)
 		h := unsure(t, confirming(calls, nil), func(h *harness, cfg *runner.Config) {
@@ -208,6 +221,7 @@ func TestRun_KillWithNoSwitchSeenNeverAsksConfirm(t *testing.T) {
 			t.Error("Confirm was asked with no switch seen")
 			return nil
 		}
+		cfg.Unsure = func() { t.Error("Unsure was called with no switch seen") }
 		cfg.Kill = func(context.Context, string) error { return syscall.Kill(h.child(), syscall.SIGUSR1) }
 	})
 	h.ready(t)

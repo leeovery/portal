@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/spf13/cobra"
 )
 
@@ -30,10 +32,13 @@ type attachConnector struct {
 	execer  execer
 	run     func(context.Context, runner.Config) (runner.Outcome, error)
 	runners runnerRegistry
+	// acked writes the receipt --ack asks for, once: as the first attach
+	// begins, or just before an exec takes the attach's place.
+	acked func()
 }
 
 func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector {
-	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}}
+	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd)}
 	if openDeps != nil && openDeps.Execer != nil {
 		c.execer = openDeps.Execer
 	}
@@ -110,6 +115,13 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 		Kill:    c.kill,
 	}
 	listing.Attach(&cfg)
+	listed := cfg.Began
+	cfg.Began = func() {
+		if listed != nil {
+			listed()
+		}
+		c.acked()
+	}
 	defer listing.Ended()
 	out, err := c.run(ctx, cfg)
 	if errors.Is(err, runner.ErrNoTerminal) {
@@ -147,6 +159,7 @@ func (c attachConnector) leader(ctx context.Context, session string) string {
 }
 
 func (c attachConnector) exec(command backend.Command) error {
+	c.acked()
 	logExecHandoff(command.Argv)
 	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }
@@ -209,4 +222,41 @@ func loadAttachKeys() (json.RawMessage, error) {
 		return nil, err
 	}
 	return store.LoadKeys()
+}
+
+// spawnReceipt is the ack a window the burst spawned writes, telling the burst
+// its attach has begun.
+type spawnReceipt struct {
+	batch, token string
+}
+
+// spawnAck is the receipt the line's --ack names, and whether it names one a
+// burst could have minted.
+func spawnAck(cmd *cobra.Command) (spawnReceipt, bool) {
+	value, _ := cmd.Flags().GetString("ack")
+	batch, token, ok := spawn.ParseSpawnAckFlag(value)
+	return spawnReceipt{batch: batch, token: token}, ok
+}
+
+// ackOnce writes the line's --ack receipt the first time it is called, and
+// does nothing for a line with none. A failed write still attaches, which the
+// burst counts as a window that failed rather than one left unaccounted for.
+func ackOnce(cmd *cobra.Command) func() {
+	receipt, ok := spawnAck(cmd)
+	if !ok {
+		return func() {}
+	}
+	writer := buildAckWriter()
+	return sync.OnceFunc(func() {
+		if err := writer.Write(receipt.batch, receipt.token); err != nil {
+			spawnLogger.Debug("spawn ack write failed", "batch", receipt.batch, "error", err)
+		}
+	})
+}
+
+func buildAckWriter() spawn.AckWriter {
+	if openDeps != nil && openDeps.AckWriter != nil {
+		return openDeps.AckWriter
+	}
+	return stateAcks{}
 }
