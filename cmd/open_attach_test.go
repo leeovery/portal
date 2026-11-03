@@ -6,10 +6,13 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
@@ -17,6 +20,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -241,6 +245,126 @@ func TestAttach_KillKeyKillsAsPortalKillDoes(t *testing.T) {
 		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
 		if want := "session api-x7Kd9a is not answering; the kill may still land"; err == nil || err.Error() != want {
 			t.Errorf("Kill = %v, want %q", err, want)
+		}
+	})
+
+	t.Run("a session already gone counts as killed: its entry goes, and nothing flashes", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		stateDir := seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"api-x7Kd9a","label":"work"}]}`)
+		stagePicker(t)
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		// Ended elsewhere between the key and the kill.
+		if err := fake.Kill(context.Background(), "api-x7Kd9a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a"); err != nil {
+			t.Errorf("Kill = %v, want nil: the key's intent is met", err)
+		}
+		idx, err := sessionindex.Read(stateDir)
+		if err != nil {
+			t.Fatalf("read index: %v", err)
+		}
+		if _, ok := idx.Lookup("api-x7Kd9a"); ok {
+			t.Errorf("index = %+v, want the gone session's entry removed", idx.Sessions)
+		}
+	})
+
+	t.Run("a gone session whose entry can't be removed says so", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		stagePicker(t)
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if err := fake.Kill(context.Background(), "api-x7Kd9a"); err != nil {
+			t.Fatal(err)
+		}
+		blockStateDir(t)
+
+		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
+		if want := "killed api-x7Kd9a, but could not remove it from the session index"; err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("Kill = %v, want %q", err, want)
+		}
+	})
+
+	t.Run("a name held under another spelling is still refused", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		isolateStateDir(t)
+		fake.Fail(backendtest.OpKill, &backend.HeldAsError{Held: "API-x7Kd9a"})
+		stagePicker(t)
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
+		if want := "No session found: api-x7Kd9a; did you mean API-x7Kd9a?"; err == nil || err.Error() != want {
+			t.Errorf("Kill = %v, want %q", err, want)
+		}
+	})
+}
+
+// The picker an attach's end asks for, run for real but for the terminal.
+func TestReopenPicker(t *testing.T) {
+	const why = "session api-x7Kd9a is not answering; the kill may still land"
+
+	reopen := func(t *testing.T) (opened tui.Model, picked string) {
+		t.Helper()
+		t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(t.TempDir(), "projects.json"))
+		t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "aliases"))
+		// A pinned theme paints from the first frame, with no terminal to
+		// answer the light/dark query.
+		setPrefsFile(t, `{"theme":"nord"}`)
+		fake := backendtest.New()
+		fake.Add(backend.Session{Name: "api-x7Kd9a"})
+		// A deferred bootstrap the first picker ran, which a reopened one
+		// must not run again.
+		cmd := contextCommand()
+		cmd.SetContext(context.WithValue(cmd.Context(), deferredBootstrapKey, &deferredBootstrap{runner: nopRunner{}}))
+
+		withFuncSeam(t, &runProgramFunc, func(m tui.Model) (tea.Model, error) {
+			opened = m
+			var model tea.Model = m
+			model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+			model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "api-x7Kd9a"}}})
+			model, _ = model.Update(tui.ProjectsLoadedMsg{})
+			opened = model.(tui.Model)
+			model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			return model, nil
+		})
+		name, err := reopenPicker(cmd, fake, why)
+		if err != nil {
+			t.Fatalf("reopenPicker: %v", err)
+		}
+		return opened, name
+	}
+
+	t.Run("it opens on the flash it is handed", func(t *testing.T) {
+		opened, _ := reopen(t)
+
+		if view := ansi.Strip(opened.View().Content); !strings.Contains(view, why) {
+			t.Errorf("the picker shows no %q:\n%s", why, view)
+		}
+	})
+
+	t.Run("it is the plain picker: no filter, search, command or bootstrap", func(t *testing.T) {
+		opened, _ := reopen(t)
+
+		if state := opened.SessionListFilterState(); state != list.Unfiltered {
+			t.Errorf("filter state = %v, want unfiltered: a filter or a search reached it", state)
+		}
+		if opened.CommandPending() {
+			t.Error("a command is pending")
+		}
+		if opened.ServerStarted() || opened.ActivePage() != tui.PageSessions {
+			t.Errorf("server started %v, page %v; want the sessions page with no bootstrap behind it", opened.ServerStarted(), opened.ActivePage())
+		}
+	})
+
+	t.Run("it returns the pick", func(t *testing.T) {
+		if _, picked := reopen(t); picked != "api-x7Kd9a" {
+			t.Errorf("pick = %q, want api-x7Kd9a", picked)
 		}
 	})
 }

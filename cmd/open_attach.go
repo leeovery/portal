@@ -88,10 +88,10 @@ func (c attachConnector) exec(command backend.Command) error {
 	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }
 
-// kill is the kill key's: the session goes as `portal kill` takes it, its
-// index entry with it.
+// kill is the kill key's: the session goes as the picker's kill takes it, its
+// index entry with it, though it is already gone.
 func (c attachConnector) kill(ctx context.Context, name string) error {
-	return killSession(ctx, c.backend, name, "tui")
+	return pickerKiller{ctx: ctx, b: goneCountsKilled{c.backend}}.KillSession(name)
 }
 
 func flashOf(err error) string {

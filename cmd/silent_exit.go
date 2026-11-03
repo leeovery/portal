@@ -9,8 +9,8 @@ import (
 // stderr emission: the command has said all it has to say, or has nowhere to
 // say it, and the exit code alone answers.
 func IsSilentExitError(err error) bool {
-	_, exitCode := errors.AsType[*ExitCodeError](err)
-	return exitCode ||
+	_, isExitCode := errors.AsType[*ExitCodeError](err)
+	return isExitCode ||
 		errors.Is(err, errCommitNowFailed) ||
 		errors.Is(err, ErrDoctorUnhealthy) ||
 		errors.Is(err, errNoCurrentSession)

@@ -33,6 +33,13 @@ var openPathFunc = openPath
 
 var openSessionFunc = openSession
 
+var runProgramFunc = runProgram
+
+// runProgram runs the picker on the terminal until it quits.
+func runProgram(m tui.Model) (tea.Model, error) {
+	return tea.NewProgram(m).Run()
+}
+
 var openDeps *OpenDeps
 
 // OpenDeps overrides production dependencies. Once it is staged, the
@@ -606,9 +613,8 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	// Staged rather than written: a direct write while the TUI holds the screen
 	// corrupts the rendered frame.
 	stageBootstrapWarningsOnModel(&m)
-	p := tea.NewProgram(m)
 
-	finalModel, err := p.Run()
+	finalModel, err := runProgramFunc(m)
 	if err != nil {
 		return err
 	}

@@ -431,8 +431,10 @@ an empty list turns it off, and an action you leave out keeps its default:
 A key is `ctrl`, `alt` or `shift` plus a letter, digit, punctuation mark or `f1`–`f12`, and needs
 `ctrl` or `alt`, so a binding never swallows plain typing. Refused: `ctrl+shift+<letter>`, which
 sends the same bytes as `ctrl+<letter>`; `ctrl+\`, zmx's; shift on a digit or punctuation mark, or
-a mark typed with Shift such as `!`, whose bytes depend on the keyboard layout; and the few keys
-that send another key's bytes or begin an escape sequence (`ctrl+i` is Tab, `alt+[` begins one).
+a mark typed with Shift such as `!`, whose bytes depend on the keyboard layout; `f3` with any
+modifiers, which reads as a cursor-position report; `ctrl+g` (BEL) and `alt+\` (ST), which end a
+terminal's replies; and the few keys that send another key's bytes or begin an escape sequence
+(`ctrl+i` is Tab, `alt+[` begins one).
 A refused or unparseable binding, or a key bound to two actions, keeps that action's default, and
 the log and `xctl doctor` say why. Changes apply from the next attach.
 

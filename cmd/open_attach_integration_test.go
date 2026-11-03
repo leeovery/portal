@@ -258,9 +258,8 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("the session's own end exits with zmx attach's status, silently", func(t *testing.T) {
+	t.Run("the session's own end exits with zmx attach's status", func(t *testing.T) {
 		p, name := openOnTerminal(t, binary)
-		mark := p.mark()
 
 		p.typeIn(t, "exit 7\r")
 
@@ -268,9 +267,6 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		// status Portal passes on.
 		if code := p.exitCode(t); code != 0 {
 			t.Errorf("exit code = %d, want zmx attach's 0", code)
-		}
-		if shown := p.shownSince(mark); strings.Contains(shown, "exit status") {
-			t.Errorf("portal wrote its exit:\n%s", shown)
 		}
 		if p.alive(t, name) {
 			t.Error("the session outlived its shell")

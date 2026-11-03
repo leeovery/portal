@@ -205,7 +205,7 @@ This list is the **single source of truth** for the component count.
 | `op` | state-mutation breadcrumbs — `set` / `modify` / `rm` / `clean-stale` / `migrate` / `set-noop` |
 | `alias` | aliases-store key |
 | `value` | state-mutation — verbatim new value for `set` / `modify` |
-| `via` | state-mutation origin — `cli` / `internal` / `migrate` |
+| `via` | state-mutation origin — `cli` / `tui` / `internal` / `migrate` |
 | `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
 **Cycle-summary** (set per summary line as relevant) — 14: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`. (`step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count.)
@@ -734,7 +734,7 @@ The line's component (prefix) is the store's owning component: `hooks` / `aliase
 
 **Optional attrs:**
 - `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`.
-- `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
+- `via` — `cli` for user-facing commands, `tui` for Portal's interactive surfaces (the picker and the attach keys), `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
 
 **Closed `op` value space:**
 
