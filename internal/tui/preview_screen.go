@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -40,8 +41,9 @@ func renderHistory(vt []byte) string {
 	return s.String()
 }
 
-// historyMaxColumns bounds how far a CUF or ECH count can reach: wider than any
-// terminal a session runs in, so a corrupt count costs a row no wider than it.
+// historyMaxColumns is the screen's width as far as CUF and ECH go, which stop
+// at its last column as a terminal's do: wider than any terminal a session
+// runs in, so a corrupt count costs a row no wider than it.
 const historyMaxColumns = 1024
 
 // historyScreen is the grid renderHistory draws into. A row is as wide as what
@@ -89,10 +91,10 @@ func (s *historyScreen) csi(p *ansi.Parser) bool {
 	case 'm':
 		uv.ReadStyle(p.Params(), &s.pen)
 	case 'C':
-		s.x += s.csiCount(p)
+		s.x = max(s.x, min(s.x+csiCount(p), historyMaxColumns-1))
 	case 'X':
 		erased := uv.Cell{Content: " ", Width: 1, Style: uv.Style{Bg: s.pen.Bg}}
-		for i := range s.csiCount(p) {
+		for i := range max(0, min(csiCount(p), historyMaxColumns-s.x)) {
 			s.set(s.x+i, erased)
 		}
 	case 'H', 'f':
@@ -101,20 +103,24 @@ func (s *historyScreen) csi(p *ansi.Parser) bool {
 	return true
 }
 
-// csiCount is a CUF or ECH count, where 0 and absent both mean 1, clamped so
-// it reaches no further right than historyMaxColumns.
-func (s *historyScreen) csiCount(p *ansi.Parser) int {
+// csiCount is a CUF or ECH count, where 0 and absent both mean 1, held to the
+// screen's width so adding it to a column cannot overflow.
+func csiCount(p *ansi.Parser) int {
 	n, _ := p.Param(0, 1)
-	return max(0, min(max(1, n), historyMaxColumns-s.x))
+	return min(max(1, n), historyMaxColumns)
 }
 
-// isMark reports whether seq is text that draws no cell of its own, such as a
-// combining accent or the variation selector and keycap of 1️⃣. C1 controls
-// sit below U+00A0, and a stray byte decodes as utf8.RuneError.
+// isMark reports whether seq extends the cluster before it rather than
+// drawing a cell of its own: a combining mark, which takes in the variation
+// selectors and the keycap U+20E3, a zero-width joiner or an emoji modifier.
+// Other zero-width text, such as a soft hyphen, some terminals draw, so it is
+// joined to nothing.
 func isMark(seq []byte) bool {
 	r, _ := utf8.DecodeRune(seq)
-	return r >= 0xa0 && r != utf8.RuneError
+	return unicode.Is(unicode.M, r) || r == zeroWidthJoiner || r >= 0x1f3fb && r <= 0x1f3ff
 }
+
+const zeroWidthJoiner = '\u200d'
 
 // join adds mark to the cell at x, measuring the cluster afresh as the
 // viewport will measure the row: a variation selector can widen it.

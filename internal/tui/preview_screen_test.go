@@ -277,12 +277,31 @@ func TestRenderHistory_DropsAMarkWithNothingToJoin(t *testing.T) {
 	}
 }
 
-func TestRenderHistory_BoundsAStepOrEraseCount(t *testing.T) {
-	for _, vt := range []string{"a\x1b[100000Cb", "a\x1b[100000Xb"} {
-		rows := historyRows(vt)
+func TestRenderHistory_StopsAStepOrEraseAtTheLastColumn(t *testing.T) {
+	for vt, want := range map[string]string{
+		// CUF stops on the last column, so the b is drawn there.
+		"a\x1b[100000Cb": "a" + strings.Repeat(" ", historyMaxColumns-2) + "b",
+		// ECH erases through the last column, in the pen's background so the
+		// erased cells show, and leaves the cursor.
+		"\x1b[44ma\x1b[100000Xb": "ab" + strings.Repeat(" ", historyMaxColumns-2),
+	} {
+		if got := plainRows(vt); len(got) != 1 || got[0] != want {
+			t.Errorf("renderHistory(%q) = a row of %d cells, want %d with the b at column %d",
+				vt, ansi.StringWidth(got[0]), historyMaxColumns, strings.IndexByte(want, 'b')+1)
+		}
+	}
+}
 
-		if w := ansi.StringWidth(rows[0]); w > historyMaxColumns+1 {
-			t.Errorf("renderHistory(%q) drew a row %d cells wide, want at most %d", vt, w, historyMaxColumns+1)
+func TestRenderHistory_JoinsNoZeroWidthTextButAMark(t *testing.T) {
+	// A soft hyphen some terminals draw; none of these extends the a's cluster.
+	for _, r := range []string{"\u00ad", "\u200b", "\ufeff"} {
+		if rows := historyRows("a" + r + "b"); rows[0] != "ab" {
+			t.Errorf("renderHistory(a %U b) = %q, want ab with nothing joined to the a", []rune(r)[0], rows[0])
+		}
+	}
+	for _, r := range []string{"\u200d", "\ufe0f", "\U000E0100", "\u0903", "\U0001F3FB"} {
+		if rows := historyRows("a" + r + "b"); rows[0] != "a"+r+"b" {
+			t.Errorf("renderHistory(a %U b) = %q, want the %U joined to the a", []rune(r)[0], rows[0], []rune(r)[0])
 		}
 	}
 }

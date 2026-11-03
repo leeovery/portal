@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"slices"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
@@ -200,19 +202,42 @@ func TestSpaceOnASessionListedNotAnsweringSaysSoWithoutDialling(t *testing.T) {
 	}
 }
 
-func TestPreviewRead_DroppedOnceTheUserHasSteppedOn(t *testing.T) {
+// deliver hands m the message a read already returned, as the runtime does
+// with one that finished before the user moved on.
+func deliver(t *testing.T, m Model, msg tea.Msg) Model {
+	t.Helper()
+	if msg == nil {
+		t.Fatalf("setup: the read returned no message to deliver")
+	}
+	return asModel(t, dropCmd(m.Update(msg)))
+}
+
+// pressStep presses ↓ on the preview and applies the step it emits, returning
+// the read the step starts.
+func pressStep(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	updated, stepCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, read := asModel(t, updated).Update(drainCmd(t, stepCmd))
+	return asModel(t, updated), read
+}
+
+// dismissPreview presses Esc on the preview and applies the dismiss it emits.
+func dismissPreview(t *testing.T, m Model) Model {
+	t.Helper()
+	updated, dismiss := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	return asModel(t, dropCmd(asModel(t, updated).Update(drainCmd(t, dismiss))))
+}
+
+func TestPreviewRead_InFlightOnceTheUserHasSteppedOnIsDropped(t *testing.T) {
 	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
 	history := historyFor(t, "hi", sessions)
 	history.SetHistory("alpha", []byte("alpha's history"))
 	m := modelWithSeams(t, sessions, history)
 	updated, alphaRead := m.Update(keySpaceMsg())
-	m = asModel(t, updated)
-	updated, stepCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	m = asModel(t, updated)
-	updated, bravoRead := m.Update(drainCmd(t, stepCmd))
-	m = asModel(t, updated)
+	alphaBody := alphaRead()
+	m, bravoRead := pressStep(t, asModel(t, updated))
 
-	m = landRead(t, m, alphaRead)
+	m = deliver(t, m, alphaBody)
 
 	if m.preview.session != "bravo" {
 		t.Fatalf("setup: preview on %q, want bravo", m.preview.session)
@@ -228,21 +253,119 @@ func TestPreviewRead_DroppedOnceTheUserHasSteppedOn(t *testing.T) {
 	}
 }
 
-func TestPreviewRead_DroppedOnceThePreviewHasClosed(t *testing.T) {
+func TestPreviewRead_InFlightOnceThePreviewHasClosedIsDropped(t *testing.T) {
 	sessions := []Session{{Name: "alpha"}}
 	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 	updated, read := m.Update(keySpaceMsg())
-	m = asModel(t, updated)
-	updated, dismiss := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = asModel(t, dropCmd(asModel(t, updated).Update(drainCmd(t, dismiss))))
+	body := read()
+	m = dismissPreview(t, asModel(t, updated))
 
-	m = landRead(t, m, read)
+	m = deliver(t, m, body)
 
 	if m.activePage != PageSessions {
 		t.Errorf("a late read reopened the preview: page %v", m.activePage)
 	}
 	if m.preview.session != "" {
 		t.Errorf("a late read drew into the closed preview: session %q", m.preview.session)
+	}
+}
+
+// The page is the preview again, so only the generation tells the first
+// open's read from the reopen's.
+func TestPreviewRead_InFlightAcrossADismissAndReopenOfTheSameSessionIsDropped(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}}
+	history := historyFor(t, "first", sessions)
+	m := modelWithSeams(t, sessions, history)
+	updated, firstRead := m.Update(keySpaceMsg())
+	firstBody := firstRead()
+	m = dismissPreview(t, asModel(t, updated))
+	history.SetHistory("alpha", []byte("second"))
+	updated, secondRead := m.Update(keySpaceMsg())
+	m = asModel(t, updated)
+
+	m = deliver(t, m, firstBody)
+
+	if m.activePage != pagePreview || m.preview.session != "alpha" {
+		t.Fatalf("setup: page %v on %q, want the reopened alpha", m.activePage, m.preview.session)
+	}
+	if body := lastBodyRow(m.preview); body != previewLoading {
+		t.Errorf("reopened body = %q after the first open's read, want it still %q", body, previewLoading)
+	}
+
+	m = landRead(t, m, secondRead)
+
+	if body := lastBodyRow(m.preview); body != "second" {
+		t.Errorf("reopened body = %q once its own read lands, want the history as it is now", body)
+	}
+}
+
+// With ↓ held, each step supersedes the last before its read runs: only the
+// session the steps end on is dialled.
+func TestPreviewRead_SupersededBeforeItRunsNeitherDialsNorDraws(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}, {Name: "charlie"}, {Name: "delta"}}
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
+	updated, alphaRead := m.Update(keySpaceMsg())
+	m, bravoRead := pressStep(t, asModel(t, updated))
+	m, charlieRead := pressStep(t, m)
+	m, deltaRead := pressStep(t, m)
+
+	for name, read := range map[string]tea.Cmd{"alpha": alphaRead, "bravo": bravoRead, "charlie": charlieRead} {
+		if msg := read(); msg != nil {
+			t.Errorf("%s's superseded read returned %#v, want no message", name, msg)
+		}
+	}
+	m = landRead(t, m, deltaRead)
+
+	if calls := historyCalls(history); !slices.Equal(calls, []string{"delta"}) {
+		t.Errorf("History read %v, want delta alone", calls)
+	}
+	if body := lastBodyRow(m.preview); body != "hi" {
+		t.Errorf("delta's body = %q, want its history", body)
+	}
+}
+
+func TestPreviewRead_EndedByTheDismissNeitherDialsNorDraws(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}}
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
+	updated, read := m.Update(keySpaceMsg())
+	dismissPreview(t, asModel(t, updated))
+
+	if msg := read(); msg != nil {
+		t.Errorf("read after the dismiss returned %#v, want no message", msg)
+	}
+	if calls := historyCalls(history); len(calls) != 0 {
+		t.Errorf("History read %v after the dismiss, want none", calls)
+	}
+}
+
+// gatedHistory holds its answer until released, signalling once it is asked.
+type gatedHistory struct {
+	asked, release chan struct{}
+}
+
+func (g gatedHistory) History(context.Context, string, int) ([]byte, error) {
+	close(g.asked)
+	<-g.release
+	return []byte("superseded history"), nil
+}
+
+func TestPreviewRead_SupersededMidReadDrawsNothing(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
+	gate := gatedHistory{asked: make(chan struct{}), release: make(chan struct{})}
+	m := modelWithSeams(t, sessions, gate)
+	updated, alphaRead := m.Update(keySpaceMsg())
+	result := make(chan tea.Msg, 1)
+	go func() { result <- alphaRead() }()
+	<-gate.asked
+
+	updated, stepCmd := asModel(t, updated).Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	asModel(t, updated).Update(drainCmd(t, stepCmd))
+	close(gate.release)
+
+	if msg := <-result; msg != nil {
+		t.Errorf("read superseded mid-read returned %#v, want no message", msg)
 	}
 }
 

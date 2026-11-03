@@ -71,6 +71,7 @@ type Fixture struct {
 	captureKeys []tea.KeyPressMsg
 	// landsLastKeyRead runs the last capture key's command and delivers what it
 	// returns, as a running program would: the preview's body arrives that way.
+	// It delivers only that command's own message, not any it leads to.
 	landsLastKeyRead bool
 	noColor          bool
 }

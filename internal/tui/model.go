@@ -258,6 +258,9 @@ type Model struct {
 	// previewGen counts preview opens, so a read that lands after its preview
 	// has stepped on or closed is told apart from the one now showing.
 	previewGen uint64
+	// endPreviewRead ends the current open's read, so a superseded one neither
+	// dials nor draws; nil when no read is under way.
+	endPreviewRead context.CancelFunc
 
 	// The derived directory is never stamped back to tmux — a pane's cwd can drift
 	// from the origin dir, and freezing that drift would permanently mis-group the
@@ -1400,12 +1403,15 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	if m.history.reader == nil {
 		return nil, false
 	}
+	m.endRead()
 	m.previewGen++
 	body := previewLoading
 	if s.NotAnswering {
 		body = previewNotAnswering
 	} else {
-		cmd = m.history.read(s.Name, m.previewGen)
+		var open context.Context
+		open, m.endPreviewRead = context.WithCancel(context.Background())
+		cmd = m.history.read(open, s.Name, m.previewGen)
 	}
 	m.preview = NewPreviewModel(s.Name, body, m.contentWidth(), m.contentHeight())
 	m.preview.th = m.themeState.active
@@ -1446,9 +1452,18 @@ func (m *Model) stepPreviewSession(delta int) tea.Cmd {
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
 // m.preview.session afterwards yields an empty string.
 func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
+	m.endRead()
 	m.activePage = PageSessions
 	m.preview = previewModel{}
 	return m.refreshSessionsAfterPreviewCmd(preserveName)
+}
+
+// endRead ends the preview's read under way, if any.
+func (m *Model) endRead() {
+	if m.endPreviewRead != nil {
+		m.endPreviewRead()
+		m.endPreviewRead = nil
+	}
 }
 
 // Clamps to the last index when the name is gone, and operates on filtered
@@ -1707,7 +1722,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case pendingSettleTickMsg:
 		return m, m.pendingSettleTick()
 	case pendingSettleReadMsg:
-		return m, m.applyPendingSettleRead(msg)
+		cmd := m.applyPendingSettleRead(msg)
+		return m, cmd
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// A fatal parks the model in the error state — never dismiss into the
@@ -1822,7 +1838,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.activePage != pagePreview {
 			return m, nil
 		}
-		return m, m.stepPreviewSession(msg.delta)
+		cmd := m.stepPreviewSession(msg.delta)
+		return m, cmd
 	case previewBodyMsg:
 		if m.activePage != pagePreview || msg.gen != m.previewGen {
 			return m, nil

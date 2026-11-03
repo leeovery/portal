@@ -48,28 +48,40 @@ type previewBodyMsg struct {
 
 // read is the command that reads and draws session's body off the update
 // loop, where a 10,000-line history or a wedged session would hold every key.
-func (h previewHistory) read(session string, gen uint64) tea.Cmd {
+// It returns no message once open ends, as the next open or the preview's
+// close ends it.
+func (h previewHistory) read(open context.Context, session string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		return previewBodyMsg{gen: gen, body: h.body(session)}
+		body, ok := h.body(open, session)
+		if !ok {
+			return nil
+		}
+		return previewBodyMsg{gen: gen, body: body}
 	}
 }
 
 // body is the preview body for session: its whole history, drawn, or a line
-// saying why there is none.
-func (h previewHistory) body(session string) string {
-	ctx, cancel := context.WithTimeoutCause(context.Background(), h.ceiling,
+// saying why there is none. ok is false once open has ended, before the
+// history is dialled or, if it ends during the read, drawn.
+func (h previewHistory) body(open context.Context, session string) (body string, ok bool) {
+	if open.Err() != nil {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeoutCause(open, h.ceiling,
 		fmt.Errorf("preview read got no answer in %s: %w", h.ceiling, backend.ErrTimeout))
 	defer cancel()
 
 	vt, err := h.reader.History(ctx, session, 0)
 	switch {
+	case open.Err() != nil:
+		return "", false
 	case err == nil:
-		return renderHistory(vt)
+		return renderHistory(vt), true
 	case errors.Is(err, backend.ErrNoSuchSession):
-		return previewSessionGone
+		return previewSessionGone, true
 	case errors.Is(err, backend.ErrTimeout):
-		return previewNotAnswering
+		return previewNotAnswering, true
 	default:
-		return previewHistoryUnavailable
+		return previewHistoryUnavailable, true
 	}
 }

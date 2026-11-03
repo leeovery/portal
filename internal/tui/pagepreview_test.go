@@ -27,7 +27,17 @@ func historyFake(t *testing.T, vt string, names ...string) *backendtest.Fake {
 // landed, as the picker shows it a moment after Space.
 func openedPreview(t *testing.T, session string, history HistoryReader, width, height int) previewModel {
 	t.Helper()
-	return NewPreviewModel(session, newPreviewHistory(history).body(session), width, height)
+	return NewPreviewModel(session, bodyOf(t, newPreviewHistory(history), session), width, height)
+}
+
+// bodyOf is h's body for session, read for an open that never ends.
+func bodyOf(t *testing.T, h previewHistory, session string) string {
+	t.Helper()
+	body, ok := h.body(context.Background(), session)
+	if !ok {
+		t.Fatalf("body(%q) ok=false for an open that never ended", session)
+	}
+	return body
 }
 
 // newTestPreview is the opened preview of session "work" whose history is vt.
@@ -70,7 +80,7 @@ func (s *stallingHistory) History(ctx context.Context, _ string, _ int) ([]byte,
 func TestPreviewHistoryBody_IsTheSessionsWholeHistory(t *testing.T) {
 	fake := historyFake(t, "first\r\nsecond", "work")
 
-	body := newPreviewHistory(fake).body("work")
+	body := bodyOf(t, newPreviewHistory(fake), "work")
 
 	calls := fake.CallsTo(backendtest.OpHistory)
 	if len(calls) != 1 || calls[0].Name != "work" || calls[0].Rows != 0 {
@@ -109,7 +119,7 @@ func TestPreviewHistoryBody_SaysWhyThereIsNone(t *testing.T) {
 			fake := historyFake(t, "unread", "work")
 			tc.stage(fake)
 
-			if got := newPreviewHistory(fake).body("work"); got != tc.want {
+			if got := bodyOf(t, newPreviewHistory(fake), "work"); got != tc.want {
 				t.Errorf("body = %q, want %q", got, tc.want)
 			}
 		})
@@ -121,7 +131,7 @@ func TestPreviewHistoryBody_AWedgedSessionHoldsTheReadOnlyToTheCeiling(t *testin
 	stall := &stallingHistory{}
 	start := time.Now()
 
-	body := previewHistory{reader: stall, ceiling: ceiling}.body("work")
+	body := bodyOf(t, previewHistory{reader: stall, ceiling: ceiling}, "work")
 
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("the read took %s against a %s ceiling", elapsed, ceiling)
@@ -135,11 +145,45 @@ func TestPreviewHistoryBody_AWedgedSessionHoldsTheReadOnlyToTheCeiling(t *testin
 }
 
 func TestPreviewHistoryRead_CarriesItsGeneration(t *testing.T) {
-	msg := newPreviewHistory(historyFake(t, "x", "work")).read("work", 7)()
+	msg := newPreviewHistory(historyFake(t, "x", "work")).read(context.Background(), "work", 7)()
 
 	got, ok := msg.(previewBodyMsg)
 	if !ok || got.gen != 7 || got.body != "x" {
 		t.Errorf("read's message = %#v, want the body for generation 7", msg)
+	}
+}
+
+func TestPreviewHistoryRead_OfAnEndedOpenNeitherDialsNorDraws(t *testing.T) {
+	fake := historyFake(t, "x", "work")
+	open, end := context.WithCancel(context.Background())
+	end()
+
+	msg := newPreviewHistory(fake).read(open, "work", 1)()
+
+	if msg != nil {
+		t.Errorf("read of an ended open returned %#v, want no message", msg)
+	}
+	if n := len(fake.CallsTo(backendtest.OpHistory)); n != 0 {
+		t.Errorf("History dialled %d times for an ended open, want none", n)
+	}
+}
+
+// endingHistory answers with history, but ends the open it is read for first,
+// as the next open does while a read is under way.
+type endingHistory struct {
+	end context.CancelFunc
+}
+
+func (h endingHistory) History(context.Context, string, int) ([]byte, error) {
+	h.end()
+	return []byte("drawn only if the read was still wanted"), nil
+}
+
+func TestPreviewHistoryRead_AnOpenEndedDuringTheReadDrawsNothing(t *testing.T) {
+	open, end := context.WithCancel(context.Background())
+
+	if msg := newPreviewHistory(endingHistory{end: end}).read(open, "work", 1)(); msg != nil {
+		t.Errorf("read whose open ended mid-read returned %#v, want no message", msg)
 	}
 }
 

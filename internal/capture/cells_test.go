@@ -121,8 +121,10 @@ func (g grid) text() []string {
 // covers the cell after it too. A newline ends a row, and the frame's last may
 // end in one or not. Anything else, an escape that is neither SGR nor a
 // hyperlink, an SGR attribute but bold, a colour neither 24-bit nor a palette
-// index, a control character or a glyph neither one cell wide nor two, is an
-// error, rather than read otherwise than a terminal shows it.
+// index, a control character, a glyph neither one cell wide nor two, or one of
+// a cluster of code points, whose width a terminal takes from the cluster
+// rather than from each, is an error, rather than read otherwise than a
+// terminal shows it.
 func parse(frame string) (grid, error) {
 	g := grid{nil}
 	var p pen
@@ -138,6 +140,9 @@ func parse(frame string) (grid, error) {
 			err = errors.New("not UTF-8")
 		case r < ' ' || r == '\x7f':
 			err = fmt.Errorf("control character %q", r)
+		case clusterOfMany(frame[i:]):
+			cluster, _ := ansi.FirstGraphemeCluster(frame[i:], ansi.GraphemeWidth)
+			err = fmt.Errorf("%q is a cluster of %d code points, where a glyph is read as one", cluster, utf8.RuneCountInString(cluster))
 		case ansi.StringWidth(string(r)) == 1:
 			g[len(g)-1] = append(g[len(g)-1], cell{glyph: r, pen: p})
 		case ansi.StringWidth(string(r)) == 2:
@@ -154,6 +159,13 @@ func parse(frame string) (grid, error) {
 		g = g[:len(g)-1]
 	}
 	return g, nil
+}
+
+// clusterOfMany reports whether the grapheme cluster s starts with holds more
+// than one code point.
+func clusterOfMany(s string) bool {
+	cluster, _ := ansi.FirstGraphemeCluster(s, ansi.GraphemeWidth)
+	return utf8.RuneCountInString(cluster) > 1
 }
 
 // apply sets the pen as the SGR or hyperlink sequence s starts with says, and
@@ -457,7 +469,11 @@ func TestParseRefusesWhatItWouldReadOtherwiseThanATerminal(t *testing.T) {
 		{name: "an escape never ended", frame: "A\x1b[1", want: "never ends"},
 		{name: "a tab", frame: "A\tB", want: `row 1, column 2: control character '\t'`},
 		{name: "a carriage return", frame: "A\r\nB", want: `control character '\r'`},
-		{name: "a combining mark", frame: "e\u0301", want: "row 1, column 2: '\u0301' is 0 cells wide, where a glyph takes one or two"},
+		{name: "a combining mark", frame: "e\u0301", want: "row 1, column 1: \"e\u0301\" is a cluster of 2 code points, where a glyph is read as one"},
+		{name: "an emoji with its modifier", frame: "A\U0001F44D\U0001F3FD", want: "row 1, column 2: \"\U0001F44D\U0001F3FD\" is a cluster of 2 code points"},
+		{name: "a flag", frame: "\U0001F1EC\U0001F1E7", want: "is a cluster of 2 code points"},
+		{name: "a modifier after a letter", frame: "a\U0001F3FD", want: "is a cluster of 2 code points"},
+		{name: "a mark with no glyph before it", frame: "\u0301", want: "is 0 cells wide, where a glyph takes one or two"},
 		{name: "bytes that aren't UTF-8", frame: "A\xff", want: "not UTF-8"},
 	}
 	for _, tt := range tests {
