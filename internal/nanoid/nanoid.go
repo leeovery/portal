@@ -1,8 +1,9 @@
 // Package nanoid holds the vocabulary of Portal's generated ids: the charset,
 // the widths, the generators that mint them and the predicates that recognise
-// an id and a pane token. It depends on the standard library alone, so packages that
-// must not import each other — the hooks store and the session tree among
-// them — can each reach the vocabulary without an edge between them.
+// an id and a pane token. It depends on the standard library alone, so
+// packages that must not import each other — the hooks store and the session
+// tree among them — can each reach the vocabulary without an edge between
+// them.
 package nanoid
 
 import (

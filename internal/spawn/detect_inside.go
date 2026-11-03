@@ -43,9 +43,9 @@ func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, 
 }
 
 // runnerPID is the pid of the runner registered under token. A runner the
-// registry doesn't hold, one on another session, and one that refuses, as
-// one between attaches or unsure and unconfirmed does, are uncertain; one that can't be asked is
-// transient.
+// registry doesn't hold, one on another session, and one that refuses, as one
+// between attaches or unsure and unconfirmed does, are uncertain; one that
+// can't be asked is transient.
 func (d *Detector) runnerPID(ctx context.Context, token, session string) (int, error) {
 	pid, err := d.runners.ConfirmSession(ctx, token, session)
 	switch {

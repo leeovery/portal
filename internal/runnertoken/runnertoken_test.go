@@ -35,15 +35,15 @@ func TestReadLeader(t *testing.T) {
 		})
 	}
 
-	t.Run("a backend that can't say who leads is an error naming the session, never a leader", func(t *testing.T) {
+	t.Run("a backend that can't say who leads is its error, naming the session once, never a leader", func(t *testing.T) {
 		b := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
 		b.SetLeaderEnv("api-x7Kd9a", backend.ClientEnv{{Name: runnertoken.Var, Value: "tok123"}})
-		b.Fail(backendtest.OpLeaderEnv, backend.ErrTimeout)
+		b.StopAnswering("api-x7Kd9a")
 
 		got, err := runnertoken.ReadLeader(t.Context(), b, "api-x7Kd9a")
 
-		if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), "api-x7Kd9a") || got.Token != "" || got.Env != nil {
-			t.Errorf("ReadLeader = %+v, %v; want the backend's ErrTimeout naming api-x7Kd9a, and no leader", got, err)
+		if !errors.Is(err, backend.ErrTimeout) || strings.Count(err.Error(), "api-x7Kd9a") != 1 || got.Token != "" || got.Env != nil {
+			t.Errorf("ReadLeader = %+v, %v; want the backend's ErrTimeout naming api-x7Kd9a once, and no leader", got, err)
 		}
 	})
 }

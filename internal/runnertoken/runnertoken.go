@@ -8,7 +8,6 @@ package runnertoken
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/leeovery/portal/internal/backend"
 )
@@ -43,11 +42,12 @@ type Leader struct {
 
 // ReadLeader reads the client leading session through b. A backend that
 // can't say who leads is an error, never a leader with no token: an unread
-// leader is not a raw client.
+// leader is not a raw client. The error is the backend's own, which names the
+// session.
 func ReadLeader(ctx context.Context, b LeaderReader, session string) (Leader, error) {
 	env, err := b.LeaderEnv(ctx, session)
 	if err != nil {
-		return Leader{}, fmt.Errorf("ask for the leader of %s: %w", session, err)
+		return Leader{}, err
 	}
 	token, _ := env.Lookup(Var)
 	return Leader{Env: env, Token: token}, nil
