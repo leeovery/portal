@@ -327,6 +327,9 @@ func (f *Fake) beginHeld(ctx context.Context, c Call, check func(string) error) 
 	s, ok := f.sessions[c.Name]
 	switch {
 	case !ok:
+		if held, folded := f.heldUnder(c.Name); folded {
+			return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, &backend.HeldAsError{Held: held})
+		}
 		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, backend.ErrNoSuchSession)
 	case ctx.Err() != nil:
 		return context.Cause(ctx)

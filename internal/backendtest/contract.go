@@ -243,6 +243,7 @@ func spellingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			b, ctx := s.Backend(), t.Context()
 
 			assertGone(t, ctx, b, spelling.asked)
+			assertHeldAs(t, ctx, b, spelling.asked, spelling.held)
 			assertExists(t, b.Create(ctx, spelling.asked, t.TempDir(), nil), spelling.held)
 			if exists, err := b.Exists(ctx, spelling.held); err != nil || !exists {
 				t.Errorf("Exists(%q) after the calls = %v, %v; want it still answering", spelling.held, exists, err)
@@ -540,6 +541,18 @@ func assertInvalid(t *testing.T, ctx context.Context, b backend.Backend, names .
 		}
 		if err := b.Create(ctx, name, "/", nil); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)
+		}
+	}
+}
+
+// assertHeldAs asserts that every call naming asked refuses it as held only
+// under held.
+func assertHeldAs(t *testing.T, ctx context.Context, b backend.Backend, asked, held string) {
+	t.Helper()
+	for _, op := range perSession {
+		err := op.call(ctx, b, asked)
+		if got, ok := errors.AsType[*backend.HeldAsError](err); !ok || got.Held != held {
+			t.Errorf("%s(%q) = %v, want a HeldAsError held as %q", op.name, asked, err, held)
 		}
 	}
 }

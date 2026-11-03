@@ -4,22 +4,19 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/backendtest"
 )
 
-// The live-pane set must be non-empty: an empty one trips the mass-deletion
-// hazard guard and the stale-hooks check reports not-evaluable instead of passing.
+// healthyDoctorDeps is an install on which every check passes.
 func healthyDoctorDeps(t *testing.T) *DoctorDeps {
 	t.Helper()
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-	hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody()})
 	projectStore, _ := seedProjectsJSON(t, t.TempDir())
-	return staleDeps(dir, &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedA)}, hookStore, projectStore)
+	return staleDeps(t, projectStore)
 }
 
 func TestDoctorSummary_AllChecksPassed(t *testing.T) {
@@ -28,7 +25,7 @@ func TestDoctorSummary_AllChecksPassed(t *testing.T) {
 		t.Fatalf("Execute err = %v; want nil when every check passes", err)
 	}
 
-	const want = "\n  7 checks passed\n"
+	const want = "\n  6 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -36,14 +33,14 @@ func TestDoctorSummary_AllChecksPassed(t *testing.T) {
 
 func TestDoctorSummary_PartialForm(t *testing.T) {
 	deps := healthyDoctorDeps(t)
-	deps.SaverPresent = func() (bool, error) { return false, nil }
+	deps.LookPath = zmxMissing
 
 	outBuf, _, err := runDoctorWith(t, deps)
 	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with a failing saver check", err)
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)
 	}
 
-	const want = "\n  6 of 7 checks passed\n"
+	const want = "\n  5 of 6 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -67,15 +64,17 @@ func TestDoctorSummary_InfoLineOutsideCounts(t *testing.T) {
 }
 
 func TestDoctorSummary_NotEvaluableOutsideCounts(t *testing.T) {
+	fake := backendtest.New()
+	fake.Fail(backendtest.OpList, errors.New("transient"))
 	deps := healthyDoctorDeps(t)
-	deps.SaverPresent = func() (bool, error) { return false, errors.New("tmux transient") }
+	deps.ListSessions = fake.List
 
 	outBuf, _, err := runDoctorWith(t, deps)
 	if err != nil {
 		t.Fatalf("Execute err = %v; want nil — a not-evaluable check must not drive the exit code", err)
 	}
 
-	const want = "\n  6 checks passed\n"
+	const want = "\n  5 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -168,11 +167,8 @@ func TestDoctorSummary_IsTheLastLine(t *testing.T) {
 }
 
 func TestDoctorSummary_FixPathRendersTwo(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-	hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-	projectStore, _ := seedProjectsJSON(t, t.TempDir())
-	deps := staleDeps(dir, &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}, hookStore, projectStore)
+	projectStore, _ := seedProjectsJSON(t, filepath.Join(t.TempDir(), "gone"))
+	deps := staleDeps(t, projectStore)
 
 	outBuf, _, err := runDoctorWith(t, deps, "--fix")
 	if err != nil {
@@ -183,10 +179,10 @@ func TestDoctorSummary_FixPathRendersTwo(t *testing.T) {
 	if n := strings.Count(out, " checks passed\n"); n != 2 {
 		t.Errorf("summary line count = %d; want 2 (one per renderDoctorReport call):\n%s", n, out)
 	}
-	if n := strings.Count(out, "\n  6 of 7 checks passed\n"); n != 1 {
-		t.Errorf("pre-repair summary missing or repeated (want exactly one \"6 of 7 checks passed\"):\n%s", out)
+	if n := strings.Count(out, "\n  5 of 6 checks passed\n"); n != 1 {
+		t.Errorf("pre-repair summary missing or repeated (want exactly one \"5 of 6 checks passed\"):\n%s", out)
 	}
-	if !strings.HasSuffix(out, "\n  7 checks passed\n") {
+	if !strings.HasSuffix(out, "\n  6 checks passed\n") {
 		t.Errorf("post-repair report does not end with the all-passed summary:\n%s", out)
 	}
 }

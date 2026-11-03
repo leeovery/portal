@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"log/slog"
 	"testing"
 	"time"
@@ -30,17 +29,6 @@ func TestHookSweepReportsAStoreReadStandDownOnce(t *testing.T) {
 		if got := len(injectedSink.Records()); got != 0 {
 			t.Errorf("daemon-logger record count = %d, want 0; entries=%+v", got, injectedSink.Records())
 		}
-	})
-
-	t.Run("it emits one WARN for an unreadable hooks.json on the doctor --fix path", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-		deps := staleDeps(t.TempDir(), staleHookLister(), store, nil)
-
-		sink := logtest.Install(t)
-
-		pruneDoctorStaleHooks(new(bytes.Buffer), deps)
-
-		assertStandDown(t, sink, slog.LevelWarn, hooksweep.ReasonStoreReadFailed)
 	})
 
 	// The daemon's throttled sweep under a held lock: one WARN for the cycle,

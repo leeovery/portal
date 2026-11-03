@@ -1,50 +1,63 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/spf13/cobra"
 )
 
-var killDeps *KillDeps
-
-type SessionKiller interface {
-	KillSession(name string) error
-}
-
-type SessionValidator interface {
-	HasSession(name string) bool
-}
-
-type KillDeps struct {
-	Killer    SessionKiller
-	Validator SessionValidator
-}
-
 var killCmd = &cobra.Command{
 	Use:   "kill [name]",
-	Short: "Kill a tmux session",
+	Short: "Kill a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-
-		killer, validator := buildKillDeps(cmd)
-
-		if !validator.HasSession(name) {
-			return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
+		b, err := sessionBackend()
+		if err != nil {
+			return err
 		}
-
-		return killer.KillSession(name)
+		return killSession(cmd.Context(), b, args[0])
 	},
 }
 
-func buildKillDeps(cmd *cobra.Command) (SessionKiller, SessionValidator) {
-	if killDeps != nil {
-		return killDeps.Killer, killDeps.Validator
+// killSession kills the session and removes its index entry. A session already
+// gone keeps no entry either; one that may still be running keeps its own.
+func killSession(ctx context.Context, b backend.Backend, name string) error {
+	killed := b.Kill(ctx, name)
+	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {
+		return killError(name, killed)
 	}
+	removed := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+		idx.Remove(name)
+		return nil
+	})
+	switch {
+	case killed != nil && removed != nil:
+		return fmt.Errorf("%w, and its session index entry could not be removed: %w", killError(name, killed), removed)
+	case killed != nil:
+		return killError(name, killed)
+	case removed != nil:
+		return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, removed)
+	}
+	return nil
+}
 
-	client := tmuxClient(cmd)
-	return client, client
+// killError words the backend's refusals for the user; any other failure is
+// returned as the backend gave it.
+func killError(name string, err error) error {
+	if held, ok := errors.AsType[*backend.HeldAsError](err); ok {
+		return fmt.Errorf("No session found: %s; did you mean %s?", name, held.Held) //nolint:staticcheck // user-facing message per spec
+	}
+	switch {
+	case errors.Is(err, backend.ErrNoSuchSession):
+		return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
+	case errors.Is(err, backend.ErrTimeout):
+		return fmt.Errorf("session %s is not answering; the kill may still land", name)
+	}
+	return err
 }
 
 func init() {

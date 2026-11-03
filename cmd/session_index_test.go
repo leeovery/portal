@@ -52,7 +52,6 @@ func TestLegacyIndexStop(t *testing.T) {
 		{"init", "zsh"},
 		{"__complete", "open", ""},
 		{"hook", "list"},
-		{"doctor"},
 		{"uninstall"},
 	} {
 		t.Run("it stops "+strings.Join(args, " ")+" with one line pointing at portal migrate", func(t *testing.T) {
@@ -134,7 +133,7 @@ func TestLegacyIndexStop(t *testing.T) {
 	})
 
 	for name, tc := range map[string]struct{ body, want string }{
-		"corrupt sessions.json": {body: `{"version": 2,`, want: "decode sessions.json"},
+		"corrupt sessions.json":             {body: `{"version": 2,`, want: "decode sessions.json"},
 		"sessions.json from a newer Portal": {body: `{"version": 3, "sessions": []}`, want: "unsupported sessions.json version: 3"},
 	} {
 		t.Run("it stops on a "+name+", saying what is wrong", func(t *testing.T) {

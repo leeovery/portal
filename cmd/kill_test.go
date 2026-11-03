@@ -1,157 +1,182 @@
 package cmd
 
 import (
-	"fmt"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/sessionindex"
 )
 
-type mockSessionKiller struct {
-	killedName string
-	err        error
+// stageKill stages fake as the backend in a state directory of the test's own
+// whose index labels every session fake holds, and returns the directory.
+func stageKill(t *testing.T, fake *backendtest.Fake, names ...string) string {
+	t.Helper()
+	withBackendDeps(t, BackendDeps{Backend: fake})
+	dir := isolateStateDir(t)
+	for _, name := range names {
+		setLabel(t, dir, name, name+" · work")
+	}
+	return dir
 }
 
-func (m *mockSessionKiller) KillSession(name string) error {
-	m.killedName = name
-	return m.err
+func readIndex(t *testing.T, dir string) sessionindex.Index {
+	t.Helper()
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	return idx
+}
+
+func assertIndexed(t *testing.T, dir, name string, want bool) {
+	t.Helper()
+	idx := readIndex(t, dir)
+	if _, got := idx.Lookup(name); got != want {
+		t.Errorf("index entry for %s present = %v, want %v: %+v", name, got, want, idx.Sessions)
+	}
 }
 
 func TestKillCommand(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+	t.Run("it kills the session and removes its index entry", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"}, backend.Session{Name: "web-Qm3pLz"})
+		dir := stageKill(t, fake, "api-x7Kd9a", "web-Qm3pLz")
 
-	t.Run("existing session calls kill-session and exits 0", func(t *testing.T) {
-		killer := &mockSessionKiller{}
-		validator := &mockSessionValidator{sessions: map[string]bool{"my-session": true}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "my-session"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, stderr, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil {
+			t.Fatalf("kill: %v\nstderr: %s", err, stderr)
 		}
-		if killer.killedName != "my-session" {
-			t.Errorf("KillSession called with %q, want %q", killer.killedName, "my-session")
+
+		if _, held := fake.Session("api-x7Kd9a"); held {
+			t.Error("the backend still holds the killed session")
+		}
+		if calls := fake.CallsTo(backendtest.OpKill); len(calls) != 1 || calls[0].Name != "api-x7Kd9a" {
+			t.Errorf("Kill calls = %+v, want one for api-x7Kd9a", calls)
+		}
+		assertIndexed(t, dir, "api-x7Kd9a", false)
+		assertIndexed(t, dir, "web-Qm3pLz", true)
+	})
+
+	t.Run("it kills a session with no index entry", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		stageKill(t, fake)
+
+		if _, _, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil {
+			t.Fatalf("kill: %v", err)
+		}
+		if _, held := fake.Session("api-x7Kd9a"); held {
+			t.Error("the backend still holds the killed session")
 		}
 	})
 
-	t.Run("non-existent session prints error and exits 1", func(t *testing.T) {
-		killer := &mockSessionKiller{}
-		validator := &mockSessionValidator{sessions: map[string]bool{}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
+	t.Run("it says a missing session is missing, matching names exactly", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "my-session-abc123"})
+		dir := stageKill(t, fake, "my-session-abc123")
 
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "nonexistent"})
+		_, _, err := runRootCmd(t, "kill", "my-session")
 
-		err := rootCmd.Execute()
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
+		if err == nil || err.Error() != "No session found: my-session" {
+			t.Errorf("error = %v, want %q", err, "No session found: my-session")
 		}
-
-		want := "No session found: nonexistent"
-		if err.Error() != want {
-			t.Errorf("error = %q, want %q", err.Error(), want)
+		if _, held := fake.Session("my-session-abc123"); !held {
+			t.Error("a kill of a prefix of its name ended my-session-abc123")
 		}
+		assertIndexed(t, dir, "my-session-abc123", true)
+	})
 
-		if killer.killedName != "" {
-			t.Errorf("KillSession should not be called for non-existent session, but was called with %q", killer.killedName)
+	t.Run("it removes the entry of a session that ended on its own", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "web-Qm3pLz"})
+		dir := stageKill(t, fake, "api-x7Kd9a", "web-Qm3pLz")
+
+		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+
+		if err == nil || err.Error() != "No session found: api-x7Kd9a" {
+			t.Errorf("error = %v, want %q", err, "No session found: api-x7Kd9a")
+		}
+		assertIndexed(t, dir, "api-x7Kd9a", false)
+		assertIndexed(t, dir, "web-Qm3pLz", true)
+	})
+
+	t.Run("it names the spelling a session is held under", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "dotfiles-PpaTER"})
+		dir := stageKill(t, fake, "dotfiles-PpaTER")
+
+		_, _, err := runRootCmd(t, "kill", "DOTFILES-ppater")
+
+		want := "No session found: DOTFILES-ppater; did you mean dotfiles-PpaTER?"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if _, held := fake.Session("dotfiles-PpaTER"); !held {
+			t.Error("a kill under another spelling ended dotfiles-PpaTER")
+		}
+		assertIndexed(t, dir, "dotfiles-PpaTER", true)
+	})
+
+	t.Run("it reports a missing session whose index entry could not be removed", func(t *testing.T) {
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		blockStateDir(t)
+
+		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "No session found: api-x7Kd9a, and its session index entry could not be removed: ") {
+			t.Errorf("error = %v, want the missing session reported alongside the index failure", err)
 		}
 	})
 
-	t.Run("uses exact name match", func(t *testing.T) {
-		killer := &mockSessionKiller{}
-		validator := &mockSessionValidator{sessions: map[string]bool{"my-session-abc123": true}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
+	t.Run("it says a session that does not answer may still be killed, keeping its entry", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "wedged-Lp4s"})
+		fake.StopAnswering("wedged-Lp4s")
+		dir := stageKill(t, fake, "wedged-Lp4s")
 
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "my-session"})
+		_, _, err := runRootCmd(t, "kill", "wedged-Lp4s")
 
-		err := rootCmd.Execute()
-
-		if err == nil {
-			t.Fatal("expected error for partial name, got nil")
+		want := "session wedged-Lp4s is not answering; the kill may still land"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
 		}
+		assertIndexed(t, dir, "wedged-Lp4s", true)
+	})
 
-		want := "No session found: my-session"
-		if err.Error() != want {
-			t.Errorf("error = %q, want %q", err.Error(), want)
+	t.Run("it returns any other backend failure as given, keeping the entry", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		injected := errors.New("kill api-x7Kd9a: socket write failed")
+		fake.Fail(backendtest.OpKill, injected)
+		dir := stageKill(t, fake, "api-x7Kd9a")
+
+		if _, _, err := runRootCmd(t, "kill", "api-x7Kd9a"); !errors.Is(err, injected) || err.Error() != injected.Error() {
+			t.Errorf("error = %v, want %v unwrapped", err, injected)
 		}
+		assertIndexed(t, dir, "api-x7Kd9a", true)
+	})
 
-		if killer.killedName != "" {
-			t.Errorf("KillSession should not be called for partial name match, but was called with %q", killer.killedName)
+	t.Run("it reports a killed session whose index entry could not be removed", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		blockStateDir(t)
+
+		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "killed api-x7Kd9a, but could not remove it from the session index: ") {
+			t.Errorf("error = %v, want the kill reported alongside the index failure", err)
+		}
+		if _, held := fake.Session("api-x7Kd9a"); held {
+			t.Error("the backend still holds the killed session")
 		}
 	})
 
-	t.Run("no confirmation prompt in CLI mode", func(t *testing.T) {
-		killer := &mockSessionKiller{}
-		validator := &mockSessionValidator{sessions: map[string]bool{"target": true}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
+	t.Run("it asks for exactly one name", func(t *testing.T) {
+		fake := backendtest.New()
+		stageKill(t, fake)
 
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "target"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		for _, args := range [][]string{{"kill"}, {"kill", "a", "b"}} {
+			if _, _, err := runRootCmd(t, args...); err == nil {
+				t.Errorf("%v ran", args)
+			}
 		}
-		if killer.killedName != "target" {
-			t.Errorf("KillSession called with %q, want %q", killer.killedName, "target")
-		}
-	})
-
-	t.Run("killing session inside tmux works", func(t *testing.T) {
-		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
-
-		killer := &mockSessionKiller{}
-		validator := &mockSessionValidator{sessions: map[string]bool{"current-session": true}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "current-session"})
-
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if killer.killedName != "current-session" {
-			t.Errorf("KillSession called with %q, want %q", killer.killedName, "current-session")
-		}
-	})
-
-	t.Run("kill-session failure returns error", func(t *testing.T) {
-		killer := &mockSessionKiller{err: fmt.Errorf("failed to kill tmux session \"my-session\": exit status 1")}
-		validator := &mockSessionValidator{sessions: map[string]bool{"my-session": true}}
-		withKillDeps(t, KillDeps{
-			Killer:    killer,
-			Validator: validator,
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"kill", "my-session"})
-
-		err := rootCmd.Execute()
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
+		if calls := fake.Calls(); len(calls) != 0 {
+			t.Errorf("backend calls = %+v, want none", calls)
 		}
 	})
 }
