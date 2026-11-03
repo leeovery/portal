@@ -9,7 +9,9 @@ import (
 
 // resolveDoctorDeps must source its Detector/Resolve from the shared
 // buildProductionSpawnSeams bundle rather than hand-rebuilding them: the
-// compiler cannot catch a seam added or swapped on only one side.
+// compiler cannot catch a seam added or swapped on only one side. It builds
+// the bundle over the read-only registry, since doctor's read-only path heals
+// nothing, and detection would otherwise remove a dead runner's entry.
 func TestResolveDoctorDepsUsesSharedSpawnSeams(t *testing.T) {
 	source := sourceguardtest.PackageSource(t, ".", "doctor.go")
 
@@ -29,6 +31,10 @@ func TestResolveDoctorDepsUsesSharedSpawnSeams(t *testing.T) {
 				t.Errorf("doctor.go:%d resolveDoctorDeps calls buildResolver() directly; route the host-terminal Resolve seam through buildProductionSpawnSeams instead", pos.Line)
 			case "buildProductionSpawnSeams":
 				sawBundle = true
+				if !readOnlyRunnersArg(call) {
+					pos := source.Position(call.Pos())
+					t.Errorf("doctor.go:%d resolveDoctorDeps builds the spawn seams over a registry other than readOnlyRunners{}", pos.Line)
+				}
 			}
 		case *ast.SelectorExpr:
 			if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "spawn" && fun.Sel.Name == "NewDetector" {
@@ -42,6 +48,19 @@ func TestResolveDoctorDepsUsesSharedSpawnSeams(t *testing.T) {
 	if !sawBundle {
 		t.Error("resolveDoctorDeps does not call buildProductionSpawnSeams; its Detector/Resolve seams must originate from the shared bundle")
 	}
+}
+
+// readOnlyRunnersArg reports whether call's last argument is readOnlyRunners{}.
+func readOnlyRunnersArg(call *ast.CallExpr) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	lit, ok := call.Args[len(call.Args)-1].(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	typ, ok := lit.Type.(*ast.Ident)
+	return ok && typ.Name == "readOnlyRunners"
 }
 
 func findFuncDeclInFile(t *testing.T, file *ast.File, name string) *ast.FuncDecl {

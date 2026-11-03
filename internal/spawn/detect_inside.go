@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/runnerreg"
 )
 
@@ -22,8 +25,8 @@ func uncertain(format string, args ...any) error {
 // the client that last sent it keyboard input. A leader carrying a runner's
 // token is that runner's terminal, once the runner confirms it shows session
 // and has seen no switch. A leader carrying none is a raw zmx client, found in
-// the process table when it is the session's only one. Anything less certain
-// finds none.
+// the process table when it is the only one that can be. Anything less
+// certain finds none.
 func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, error) {
 	env, err := d.sessions.LeaderEnv(ctx, session)
 	if err != nil {
@@ -36,7 +39,7 @@ func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, 
 		pid, err := d.runnerPID(ctx, token, session)
 		return pid, routeInsideRunner, err
 	}
-	pid, err := d.rawClientPID(session)
+	pid, err := d.rawClientPID(session, env)
 	return pid, routeInsideRaw, err
 }
 
@@ -55,14 +58,35 @@ func (d *Detector) runnerPID(ctx context.Context, token, session string) (int, e
 	return pid, nil
 }
 
-// rawClientPID is the pid of session's one zmx attach process.
-func (d *Detector) rawClientPID(session string) (int, error) {
-	pids, err := d.clients.AttachClients(session)
-	if err != nil {
+// rawClientPID is the pid of the one zmx attach process on session that can
+// be its leader: one carrying each variable zmx tracks for the leader as the
+// leader has it, so a client over ssh never stands in for a local one, and no
+// runner's token, which only a runner's own client carries. The process table
+// shows a client zmx switched in-process under the session it attached, so a
+// leader that switched here while another raw client still names the session
+// is found only when their tracked variables differ. A process that can't be
+// read might be the leader, so it finds none.
+func (d *Detector) rawClientPID(session string, leader backend.ClientEnv) (int, error) {
+	clients, err := d.clients.AttachClients(session)
+	switch {
+	case errors.Is(err, backend.ErrUnreadableClient):
+		return 0, uncertain("%w", err)
+	case err != nil:
 		return 0, transient(fmt.Sprintf("find the clients of session %q", session), err)
 	}
+	var pids []int
+	for _, c := range clients {
+		if !carries(c.Env, runnerreg.TokenVar) && leader.Matches(c.Env) {
+			pids = append(pids, c.PID)
+		}
+	}
 	if len(pids) != 1 {
-		return 0, uncertain("%d zmx attach processes on session %q, want 1", len(pids), session)
+		return 0, uncertain("%d of %d zmx attach processes on session %q can be its leader, want 1", len(pids), len(clients), session)
 	}
 	return pids[0], nil
+}
+
+// carries reports whether environ sets name at all.
+func carries(environ []string, name string) bool {
+	return slices.ContainsFunc(environ, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
 }

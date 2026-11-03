@@ -59,6 +59,19 @@ func (stateRunners) ConfirmSession(ctx context.Context, token, session string) (
 	return runnerreg.New(dir).ConfirmSession(ctx, token, session)
 }
 
+// readOnlyRunners is the registry under Portal's state directory for a
+// caller that must change nothing, as doctor: it asks as stateRunners does,
+// but removes no entry it proves stale.
+type readOnlyRunners struct{}
+
+func (readOnlyRunners) ConfirmSession(ctx context.Context, token, session string) (int, error) {
+	dir, err := state.Dir()
+	if err != nil {
+		return 0, err
+	}
+	return runnerreg.New(dir).ReadOnly().ConfirmSession(ctx, token, session)
+}
+
 // unlisted lists nothing, for a state directory that won't resolve: the
 // runner attaches unlisted, and with no token to confirm its attach by.
 type unlisted struct{}

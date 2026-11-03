@@ -20,7 +20,7 @@ type execRecipeRunner struct{}
 var _ recipeRunner = execRecipeRunner{}
 
 func (execRecipeRunner) Run(argv []string) (string, int, error) {
-	return runArgvCombined(argv)
+	return runAdapterArgv(argv)
 }
 
 func substituteCommand(template []string, commandStr string) []string {

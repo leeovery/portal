@@ -19,7 +19,7 @@ type OpenBurstDeps struct {
 	Resolve    spawn.AdapterResolver
 	Connector  SessionConnector
 	ExePath    spawn.ExecutableResolver
-	Getenv     func(string) string
+	Env        spawn.WindowEnv
 	Ack        spawn.AckChannelFull
 	NewBurster func(adapter spawn.Adapter) *spawn.Burster
 	Logger     *slog.Logger
@@ -41,7 +41,7 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 		if err != nil {
 			return nil, err
 		}
-		fillOpenBurstSeams(deps, buildProductionSpawnSeams(cmd.Context(), b))
+		fillOpenBurstSeams(deps, buildProductionSpawnSeams(cmd.Context(), b, stateRunners{}))
 	}
 	if deps.Connector == nil {
 		deps.Connector = connectorFunc(func(name string) error {
@@ -51,7 +51,7 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 	if deps.NewBurster == nil {
 		// Reads the defaulted seams at burst time rather than here.
 		deps.NewBurster = func(adapter spawn.Adapter) *spawn.Burster {
-			return spawn.NewBurster(adapter, deps.Ack, deps.ExePath, deps.Getenv)
+			return spawn.NewBurster(adapter, deps.Ack, deps.ExePath, deps.Env)
 		}
 	}
 	if deps.LocalMint == nil {
@@ -64,7 +64,7 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 
 // missesSharedSeam reports whether a seam the shared bundle fills is unset.
 func (d *OpenBurstDeps) missesSharedSeam() bool {
-	return d.Detector == nil || d.Resolve == nil || d.ExePath == nil || d.Getenv == nil || d.Ack == nil || d.Logger == nil
+	return d.Detector == nil || d.Resolve == nil || d.ExePath == nil || d.Env == nil || d.Ack == nil || d.Logger == nil
 }
 
 // fillOpenBurstSeams fills each of deps' bundle-backed seams left unset.
@@ -78,8 +78,8 @@ func fillOpenBurstSeams(deps *OpenBurstDeps, seams productionSpawnSeams) {
 	if deps.ExePath == nil {
 		deps.ExePath = seams.Exe
 	}
-	if deps.Getenv == nil {
-		deps.Getenv = seams.Getenv
+	if deps.Env == nil {
+		deps.Env = seams.Env
 	}
 	if deps.Ack == nil {
 		deps.Ack = seams.Ack

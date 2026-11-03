@@ -14,14 +14,25 @@ import (
 // ErrUnsupported is every read on a system the package can't read.
 var ErrUnsupported = errors.New("the process table is read only on darwin")
 
+// ErrGone is a read of a process that has exited or is exiting, a zombie
+// among them.
+var ErrGone = errors.New("the process has exited")
+
 // errMalformed is a kern.procargs2 buffer that doesn't parse.
 var errMalformed = errors.New("malformed kern.procargs2")
+
+// pathAlign is what the kernel pads the executable path to, with NULs, before
+// argv: the pointer size.
+const pathAlign = 8
 
 // Process is one of this user's processes as the kernel lists it.
 type Process struct {
 	PID, PPID int
 	// Terminal reports whether the process has a controlling terminal.
 	Terminal bool
+	// Command is the name the kernel keeps for the file the process exec'd,
+	// cut to 16 bytes: zmx for zmx however argv[0] reads.
+	Command string
 }
 
 // Args is a process's argv and environment as the kernel keeps them from its
@@ -34,9 +45,10 @@ type Args struct {
 }
 
 // parseArgs reads kern.procargs2: argc as a native int32, the executable's
-// path, NUL padding, argc NUL-terminated arguments, then the environment's
-// NUL-terminated entries, up to an empty one or the end. What follows the
-// environment is the loader's.
+// path, NUL padding to a multiple of pathAlign, argc NUL-terminated
+// arguments, then the environment's NUL-terminated entries, up to an empty one
+// or the end. What follows the environment is the loader's. Only the padding
+// is skipped, so an empty argv[0] is read as one.
 func parseArgs(raw []byte) (Args, error) {
 	if len(raw) < 4 {
 		return Args{}, fmt.Errorf("%w: %d bytes", errMalformed, len(raw))
@@ -50,7 +62,11 @@ func parseArgs(raw []byte) (Args, error) {
 	if path < 0 {
 		return Args{}, fmt.Errorf("%w: unterminated executable path", errMalformed)
 	}
-	rest = bytes.TrimLeft(rest[path:], "\x00")
+	argv := (path + pathAlign) &^ (pathAlign - 1)
+	if argv > len(rest) || bytes.ContainsFunc(rest[path:argv], func(r rune) bool { return r != 0 }) {
+		return Args{}, fmt.Errorf("%w: executable path padding", errMalformed)
+	}
+	rest = rest[argv:]
 	var args Args
 	for range argc {
 		end := bytes.IndexByte(rest, 0)

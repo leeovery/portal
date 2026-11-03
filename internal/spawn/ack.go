@@ -1,6 +1,7 @@
 package spawn
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -114,7 +115,7 @@ func (c *FileAckChannel) Clean(batch string) error {
 		}
 		path := filepath.Join(c.dir, a.name)
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			firstErr = cmpErr(firstErr, err)
+			firstErr = cmp.Or(firstErr, err)
 			continue
 		}
 		if stale {
@@ -153,11 +154,4 @@ func (c *FileAckChannel) list() ([]ack, error) {
 		acks = append(acks, ack{name: e.Name(), batch: batch, token: token, modified: info.ModTime()})
 	}
 	return acks, nil
-}
-
-func cmpErr(first, next error) error {
-	if first != nil {
-		return first
-	}
-	return next
 }

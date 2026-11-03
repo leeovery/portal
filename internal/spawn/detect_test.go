@@ -71,13 +71,13 @@ func TestDetectorDetect(t *testing.T) {
 
 	t.Run("it emits a NULL-bundle INFO with no WARN for a remote leader", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
-		d, _, _ := insideDetector(leaderWith(), 601)
+		d, _, _ := insideDetector(leaderWith(), local(601))
 		d.logger = logger
 
 		got := d.Detect()
 
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL for a remote leader", got)
+		if !got.IsNull() || got.Unsure {
+			t.Fatalf("identity = %+v, want a plain NULL for a remote leader", got)
 		}
 		rec := sink.Records().Only(t, "log record")
 		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgNullBundle {
@@ -94,19 +94,19 @@ func TestDetectorDetect(t *testing.T) {
 
 	t.Run("it folds an uncertain leader to NULL with an INFO saying why", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
-		d, _, _ := insideDetector(leaderWith(), 501, 502)
+		d, _, _ := insideDetector(leaderWith(), local(501), local(502))
 		d.logger = logger
 
 		got := d.Detect()
 
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL for two raw clients", got)
+		if !got.IsNull() || !got.Unsure {
+			t.Fatalf("identity = %+v, want an unsure NULL for two raw clients", got)
 		}
 		rec := sink.Records().Only(t, "log record")
 		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgNullBundle {
 			t.Errorf("record = %v %q, want INFO %q", rec.Level, rec.Msg, wantMsgNullBundle)
 		}
-		want := `inside-session raw client walk: no one terminal leads the session: 2 zmx attach processes on session "dev", want 1`
+		want := `inside-session raw client walk: no one terminal leads the session: 2 of 2 zmx attach processes on session "dev" can be its leader, want 1`
 		if v := rec.AttrString(t, "detail"); v != want {
 			t.Errorf("detail = %q, want %q", v, want)
 		}
@@ -122,8 +122,8 @@ func TestDetectorDetect(t *testing.T) {
 
 		got := d.Detect()
 
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL folded from the transient error", got)
+		if !got.IsNull() || !got.Unsure {
+			t.Fatalf("identity = %+v, want an unsure NULL folded from the transient error", got)
 		}
 		rec := sink.Records().Only(t, "log record")
 		if rec.Level != slog.LevelWarn || rec.Msg != wantMsgTransient {
@@ -143,7 +143,7 @@ func TestDetectorDetect(t *testing.T) {
 				return outsideDetector(t, map[string]string{"__CFBundleIdentifier": "com.apple.Terminal"}, logger)
 			},
 			"clean NULL": func(logger *slog.Logger) *Detector {
-				d, _, _ := insideDetector(leaderWith(), 601)
+				d, _, _ := insideDetector(leaderWith(), local(601))
 				d.logger = logger
 				return d
 			},

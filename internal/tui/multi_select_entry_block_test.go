@@ -16,9 +16,14 @@ func TestMultiSelectBlockedFlashText(t *testing.T) {
 		want string
 	}{
 		{
-			name: "NULL identity (remote/mosh or transient error)",
+			name: "NULL identity (remote/mosh)",
 			id:   spawn.Identity{},
 			want: "multi-select isn't available over a remote connection",
+		},
+		{
+			name: "unsure NULL identity (detection couldn't tell)",
+			id:   spawn.Identity{Unsure: true},
+			want: "multi-select isn't available: can't tell which terminal Portal is running in",
 		},
 		{
 			name: "named undriven identity",

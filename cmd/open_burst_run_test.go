@@ -108,7 +108,7 @@ func openBurstDepsForTest(id spawn.Identity, resolution spawn.Resolution, adapte
 		Resolve:   func(spawn.Identity) (spawn.Adapter, spawn.Resolution) { return adapter, resolution },
 		Connector: conn,
 		ExePath:   func() (string, error) { return spawnPipelineExe, nil },
-		Getenv:    func(string) string { return spawnPipelinePATH },
+		Env:       func() ([]string, error) { return []string{"PATH=" + spawnPipelinePATH}, nil },
 		Ack:       &spawntest.FakeAckChannel{},
 		Logger:    nil, // spawn.LogUnsupported is nil-tolerant (log.OrDiscard).
 		LocalMint: mint,
@@ -123,7 +123,7 @@ func withOpenBurster(deps *OpenBurstDeps, inner *spawntest.FakeAdapter, ack *spa
 			Adapter: a,
 			Ack:     ack,
 			Exe:     deps.ExePath,
-			Getenv:  deps.Getenv,
+			Env:     deps.Env,
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second,
 			Poll:    75 * time.Millisecond,
@@ -478,6 +478,11 @@ func TestRunOpenBurst_UnsupportedTerminal_CopyIsPlainLanguage(t *testing.T) {
 			name: "null remote identity",
 			id:   spawn.Identity{}, // empty BundleID → IsNull() true
 			want: "can't open new windows over a remote connection — nothing opened",
+		},
+		{
+			name: "unsure null identity",
+			id:   spawn.Identity{Unsure: true},
+			want: "can't tell which terminal Portal is running in — nothing opened",
 		},
 	}
 
@@ -922,7 +927,7 @@ func TestRunOpenBurst_PerWindowAckTimeout_TimedFromOwnSpawn(t *testing.T) {
 			Adapter: a,
 			Ack:     dack,
 			Exe:     deps.ExePath,
-			Getenv:  deps.Getenv,
+			Env:     deps.Env,
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second,
 			Poll:    75 * time.Millisecond,

@@ -704,3 +704,22 @@ func TestDirFor(t *testing.T) {
 		})
 	}
 }
+
+func TestReachEnv(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct {
+		name    string
+		environ []string
+		want    []string
+	}{
+		{"the bound directory over the environment's own", []string{"ZMX_DIR=/elsewhere"}, []string{"ZMX_DIR=" + dir}},
+		{"the session prefix when set", []string{"ZMX_SESSION_PREFIX=work-"}, []string{"ZMX_DIR=" + dir, "ZMX_SESSION_PREFIX=work-"}},
+		{"the session prefix set empty", []string{"ZMX_SESSION_PREFIX="}, []string{"ZMX_DIR=" + dir, "ZMX_SESSION_PREFIX="}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := newBackend(t, dir, tt.environ...).ReachEnv(); !slices.Equal(got, tt.want) {
+				t.Errorf("ReachEnv = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -106,6 +106,17 @@ func New(cfg Config) (*Backend, error) {
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
+// ReachEnv is the environment another process needs to reach the sessions b
+// does: b's directory, and the session-name prefix when b's environment sets
+// one, set empty included.
+func (b *Backend) ReachEnv() []string {
+	env := []string{envDir + "=" + b.dir}
+	if prefix, ok := lookupSet(b.environ(), envPrefix); ok {
+		env = append(env, envPrefix+"="+prefix)
+	}
+	return env
+}
+
 // Session asks the session held under exactly name for its Info record, within
 // the probe ceiling, on a connection of its own.
 func (b *Backend) Session(ctx context.Context, name string) (backend.Session, error) {

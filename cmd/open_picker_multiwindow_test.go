@@ -12,7 +12,7 @@ import (
 )
 
 // pickerSpawnSeams are the tuiConfig fields multi-select bursts through.
-var pickerSpawnSeams = []string{"detector", "resolve", "sessionExists", "ackChannel", "spawnExe", "spawnGetenv", "spawnLogger"}
+var pickerSpawnSeams = []string{"detector", "resolve", "sessionExists", "ackChannel", "spawnExe", "spawnEnv", "spawnLogger"}
 
 // runPicker wires every spawn seam from the buildProductionSpawnSeams bundle
 // the CLI burst and doctor read, rather than hand-building one: the compiler

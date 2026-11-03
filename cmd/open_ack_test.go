@@ -15,7 +15,7 @@ import (
 )
 
 // ackRecorder records each receipt written, and how far the attach had got
-// as it was: the runs begun and the execs made.
+// as it was: the runs begun, those returned, and the execs made.
 type ackRecorder struct {
 	rec    *attachRecorder
 	err    error
@@ -23,12 +23,12 @@ type ackRecorder struct {
 }
 
 type ackWrite struct {
-	receipt     string
-	runs, execs int
+	receipt               string
+	runs, returned, execs int
 }
 
 func (a *ackRecorder) Write(batch, token string) error {
-	a.writes = append(a.writes, ackWrite{receipt: batch + ":" + token, runs: len(a.rec.runs), execs: len(a.rec.execs)})
+	a.writes = append(a.writes, ackWrite{receipt: batch + ":" + token, runs: len(a.rec.runs), returned: a.rec.returned, execs: len(a.rec.execs)})
 	return a.err
 }
 
@@ -51,15 +51,15 @@ func stageAck(t *testing.T, value string) (*cobra.Command, *backendtest.Fake, *a
 }
 
 func TestOpen_AckReceipt(t *testing.T) {
-	t.Run("it is written once the attach has begun", func(t *testing.T) {
+	t.Run("it is written once the attach has begun, while it is under way", func(t *testing.T) {
 		cmd, _, rec, acks := stageAck(t, "b1:t1")
 
 		if err := openSession(cmd, "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
 
-		if want := []ackWrite{{receipt: "b1:t1", runs: 1}}; !slices.Equal(acks.writes, want) {
-			t.Errorf("receipts = %+v, want %+v: one, as the run began", acks.writes, want)
+		if want := []ackWrite{{receipt: "b1:t1", runs: 1, returned: 0}}; !slices.Equal(acks.writes, want) {
+			t.Errorf("receipts = %+v, want %+v: one, as the run began and before it returned", acks.writes, want)
 		}
 		if !slices.Equal(rec.runners.events, []string{"listed api-x7Kd9a", "ended", "unlisted"}) {
 			t.Errorf("listing = %q, want the attach listed as ever", rec.runners.events)
@@ -85,7 +85,7 @@ func TestOpen_AckReceipt(t *testing.T) {
 			t.Fatalf("openSession: %v", err)
 		}
 
-		if want := []ackWrite{{receipt: "b1:t1", runs: 1}}; !slices.Equal(acks.writes, want) || len(rec.execs) != 1 {
+		if want := []ackWrite{{receipt: "b1:t1", runs: 1, returned: 1}}; !slices.Equal(acks.writes, want) || len(rec.execs) != 1 {
 			t.Errorf("receipts = %+v, execs %d; want %+v before the one exec", acks.writes, len(rec.execs), want)
 		}
 	})

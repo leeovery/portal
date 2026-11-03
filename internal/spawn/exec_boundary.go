@@ -3,14 +3,23 @@ package spawn
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/leeovery/portal/internal/log"
 )
 
+// runAdapterArgv runs the command an adapter hands a terminal app: the one
+// place a window is asked for. spawn's TestMain poisons it.
+var runAdapterArgv = runArgvCombined
+
+// runArgvCombined runs argv in Portal's environment without the variables no
+// window may inherit.
 func runArgvCombined(argv []string) (out string, exitCode int, err error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = withoutWindowStripped(os.Environ())
 	combined, runErr := log.CombinedOutputWithContext(cmd)
 	if runErr == nil {
 		return string(combined), 0, nil
@@ -20,6 +29,15 @@ func runArgvCombined(argv []string) (out string, exitCode int, err error) {
 		return combineOutput(combined, runErr), exitErr.ExitCode(), nil
 	}
 	return string(combined), 0, runErr
+}
+
+// withoutWindowStripped is environ without any entry for a variable in
+// windowStripped.
+func withoutWindowStripped(environ []string) []string {
+	return slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
+		key, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(windowStripped, key)
+	})
 }
 
 // CombinedOutputWithContext keeps stderr inside the wrapped error, so the runner

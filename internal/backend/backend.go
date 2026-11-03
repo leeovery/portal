@@ -33,6 +33,11 @@ var (
 	// ErrHistoryUnavailable is returned, wrapped, by History when the backend
 	// answered without the session's screen. It is never a blank transcript.
 	ErrHistoryUnavailable = errors.New("session history unavailable")
+
+	// ErrUnreadableClient is returned, wrapped, by a search for a session's
+	// client processes that met a process it could not read, which might have
+	// been one of them.
+	ErrUnreadableClient = errors.New("a process that may be a client can't be read")
 )
 
 // SessionExistsError is Create's refusal of a name the backend already holds.
@@ -137,6 +142,35 @@ func (e ClientEnv) Lookup(name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Matches reports whether a process exec'd with environ carries e: each
+// variable e has set, set to the same value in environ, and each e has unset,
+// absent from it. The last of a variable's entries in environ is its value.
+func (e ClientEnv) Matches(environ []string) bool {
+	for _, v := range e {
+		value, set := lookupLast(environ, v.Name)
+		if set == v.Unset || value != v.Value {
+			return false
+		}
+	}
+	return true
+}
+
+func lookupLast(environ []string, name string) (value string, set bool) {
+	for _, kv := range environ {
+		if k, v, _ := strings.Cut(kv, "="); k == name {
+			value, set = v, true
+		}
+	}
+	return value, set
+}
+
+// ClientProcess is a process attached to a session as one of its clients, as
+// the process table shows it: its pid, and the environment it was exec'd with.
+type ClientProcess struct {
+	PID int
+	Env []string
 }
 
 // Backend is the session backend. Every call that reaches the backend takes a

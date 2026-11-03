@@ -97,8 +97,14 @@ type portalTerm struct {
 // start runs argv on a terminal of its own, in the world's environment.
 func (w *portalWorld) start(t *testing.T, argv ...string) *portalTerm {
 	t.Helper()
+	return w.startIn(t, w.env, argv...)
+}
+
+// startIn runs argv on a terminal of its own, in env.
+func (w *portalWorld) startIn(t *testing.T, env []string, argv ...string) *portalTerm {
+	t.Helper()
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = w.env
+	cmd.Env = env
 	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
 		t.Fatalf("start %s on a terminal: %v", argv[0], err)

@@ -26,25 +26,25 @@ type productionSpawnSeams struct {
 	Resolve  spawn.AdapterResolver
 	Ack      spawn.AckChannelFull
 	Exe      spawn.ExecutableResolver
-	Getenv   func(string) string
+	Env      spawn.WindowEnv
 	Exists   func(string) bool
 	Logger   *slog.Logger
 }
 
-// buildProductionSpawnSeams detects the terminal through b, the runner
-// registry and, for a session no runner leads, b's own process-table search
-// for its zmx clients, which only the zmx driver has.
-func buildProductionSpawnSeams(ctx context.Context, b backend.Backend) productionSpawnSeams {
+// buildProductionSpawnSeams detects the terminal through b, runners and, for
+// a session no runner leads, b's own process-table search for its zmx
+// clients, which only the zmx driver has.
+func buildProductionSpawnSeams(ctx context.Context, b backend.Backend, runners spawn.RunnerLocator) productionSpawnSeams {
 	clients, ok := b.(spawn.ClientLister)
 	if !ok {
 		clients = noClients{}
 	}
 	return productionSpawnSeams{
-		Detector: spawn.NewDetector(b, stateRunners{}, clients),
-		Resolve:  buildResolver().Resolve,
+		Detector: spawn.NewDetector(b, runners, clients),
+		Resolve:  resolveThroughSeam(buildResolver()),
 		Ack:      stateAcks{},
 		Exe:      os.Executable,
-		Getenv:   os.Getenv,
+		Env:      windowEnv(b),
 		Exists: func(name string) bool {
 			exists, err := b.Exists(ctx, name)
 			return err == nil && exists
@@ -53,11 +53,58 @@ func buildProductionSpawnSeams(ctx context.Context, b backend.Backend) productio
 	}
 }
 
+// sessionReach is a backend that can say what another process needs to reach
+// its sessions; the zmx driver can.
+type sessionReach interface {
+	ReachEnv() []string
+}
+
+// windowEnv is what a spawned window's portal resolves by, so that it finds
+// the sessions, state and config its opener did whatever the window's shell
+// sets: this process's PATH, the state directory as resolved here, what b
+// needs to reach its sessions, and each of Portal's path variables this
+// process has set, set empty included.
+func windowEnv(b backend.Backend) spawn.WindowEnv {
+	return func() ([]string, error) {
+		stateDir, err := state.Dir()
+		if err != nil {
+			return nil, err
+		}
+		env := []string{"PATH=" + os.Getenv("PATH"), xdg.StateDir.EnvVar + "=" + stateDir}
+		if r, ok := b.(sessionReach); ok {
+			env = append(env, r.ReachEnv()...)
+		}
+		for _, name := range xdg.Variables() {
+			if value, set := os.LookupEnv(name); set && name != xdg.StateDir.EnvVar {
+				env = append(env, name+"="+value)
+			}
+		}
+		return env, nil
+	}
+}
+
 // noClients finds no zmx client of any session, so detection inside a
 // session no runner leads refuses.
 type noClients struct{}
 
-func (noClients) AttachClients(string) ([]int, error) { return nil, nil }
+func (noClients) AttachClients(string) ([]backend.ClientProcess, error) { return nil, nil }
+
+// spawnAdapter is what a resolved terminal opens its windows through: the
+// resolver's own adapter in production. cmd's TestMain poisons it, since
+// detection walks a test's ancestry to the developer's own terminal.
+var spawnAdapter = func(a spawn.Adapter) spawn.Adapter { return a }
+
+// resolveThroughSeam is r's resolution, its adapter passed through
+// spawnAdapter.
+func resolveThroughSeam(r *spawn.Resolver) spawn.AdapterResolver {
+	return func(id spawn.Identity) (spawn.Adapter, spawn.Resolution) {
+		adapter, resolution := r.Resolve(id)
+		if adapter == nil {
+			return nil, resolution
+		}
+		return spawnAdapter(adapter), resolution
+	}
+}
 
 // Fails safe: an unresolvable config path degrades to an empty config —
 // native-only resolution — rather than disabling the feature outright.

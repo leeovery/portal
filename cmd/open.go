@@ -382,7 +382,7 @@ type tuiConfig struct {
 	sessionExists    func(string) bool
 	ackChannel       spawn.AckChannelFull
 	spawnExe         spawn.ExecutableResolver
-	spawnGetenv      func(string) string
+	spawnEnv         spawn.WindowEnv
 	spawnLogger      *slog.Logger
 	cwd              string
 	currentSession   string
@@ -457,7 +457,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SessionExists:    cfg.sessionExists,
 		AckChannel:       cfg.ackChannel,
 		SpawnExe:         cfg.spawnExe,
-		SpawnGetenv:      cfg.spawnGetenv,
+		SpawnEnv:         cfg.spawnEnv,
 		SpawnLogger:      cfg.spawnLogger,
 		Flash:            landing.flash,
 	}
@@ -573,7 +573,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		return err
 	}
 
-	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b)
+	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b, stateRunners{})
 
 	// No pending-resume or skeleton-marker reader: nothing is saved or restored
 	// yet, so no session is waiting.
@@ -598,7 +598,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		sessionExists:  spawnSeams.Exists,
 		ackChannel:     spawnSeams.Ack,
 		spawnExe:       spawnSeams.Exe,
-		spawnGetenv:    spawnSeams.Getenv,
+		spawnEnv:       spawnSeams.Env,
 		spawnLogger:    spawnSeams.Logger,
 		noColor:        noColorEnabled(),
 	}

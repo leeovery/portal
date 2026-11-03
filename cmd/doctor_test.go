@@ -652,6 +652,11 @@ func TestDoctorHostTerminalLine(t *testing.T) {
 		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "unsupported (remote session)")
 	})
 
+	t.Run("an unsure identity reports that it can't tell, not a remote session", func(t *testing.T) {
+		deps := hostDeps(t, spawn.Identity{Unsure: true}, spawn.ResolutionNative)
+		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "unsupported (can't tell which terminal Portal is running in)")
+	})
+
 	t.Run("recognised but undriven terminal reports unsupported", func(t *testing.T) {
 		deps := hostDeps(t, spawn.Identity{Name: "SomeTerm", BundleID: "com.some.term"}, spawn.ResolutionUnsupported)
 		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "SomeTerm (unsupported)")

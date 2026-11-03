@@ -34,6 +34,8 @@ import (
 type attachRecorder struct {
 	sink *logtest.Sink
 	runs []runner.Config
+	// returned counts the runs that have returned.
+	returned int
 	// results answers each run in turn; a run past them ends as a session that
 	// exits 0 ends it.
 	results    []runResult
@@ -55,6 +57,7 @@ type execCall struct {
 // Run begins the attach, as runner.Run does, unless it answers with an error.
 func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outcome, error) {
 	r.runs = append(r.runs, cfg)
+	defer func() { r.returned++ }()
 	var res runResult
 	if len(r.results) > 0 {
 		res = r.results[0]

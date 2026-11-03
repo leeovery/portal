@@ -42,7 +42,7 @@ type Deps struct {
 	SessionExists func(string) bool
 	AckChannel    spawn.AckChannelFull
 	SpawnExe      spawn.ExecutableResolver
-	SpawnGetenv   func(string) string
+	SpawnEnv      spawn.WindowEnv
 	SpawnLogger   *slog.Logger
 	// Flash is a warning the picker opens on, such as why the attach before it
 	// failed to do what was asked.
@@ -165,7 +165,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithSessionExists(deps.SessionExists))
 	opts = append(opts, WithAckChannel(deps.AckChannel))
 	opts = append(opts, WithSpawnExe(deps.SpawnExe))
-	opts = append(opts, WithSpawnGetenv(deps.SpawnGetenv))
+	opts = append(opts, WithSpawnEnv(deps.SpawnEnv))
 	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
 	opts = append(opts, WithOpeningFlash(deps.Flash))
 

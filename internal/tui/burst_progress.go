@@ -140,8 +140,8 @@ func WithSpawnExe(exe spawn.ExecutableResolver) Option {
 	return func(m *Model) { m.spawnExe = exe }
 }
 
-func WithSpawnGetenv(fn func(string) string) Option {
-	return func(m *Model) { m.spawnGetenv = fn }
+func WithSpawnEnv(env spawn.WindowEnv) Option {
+	return func(m *Model) { m.spawnEnv = env }
 }
 
 func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
@@ -270,7 +270,7 @@ func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
 		m.setFlash(unsupportedFlashText(m.detectIdentity))
 		return m, nil
 	}
-	burster := spawn.NewBurster(adapter, m.ackChannel, m.spawnExe, m.spawnGetenv)
+	burster := spawn.NewBurster(adapter, m.ackChannel, m.spawnExe, m.spawnEnv)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	pipe := newBurstProgressPipe()

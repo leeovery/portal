@@ -1,9 +1,12 @@
 package zmx
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/proctable"
 )
 
@@ -15,61 +18,78 @@ type processTable struct {
 
 var systemProcesses = processTable{list: proctable.List, readArgs: proctable.ReadArgs}
 
+// program is the name the kernel keeps for zmx's executable.
+const program = "zmx"
+
 // attachVerbs are the spellings of zmx's attach command.
 var attachVerbs = map[string]bool{"attach": true, "a": true}
 
-// AttachClients is the pids of the processes in a terminal running zmx attach
-// on the session name in the Backend's directory, as the process table shows
-// them: zmx doesn't list a session's clients. A process's argv names its
+const labelsFlag = "--labels"
+
+// AttachClients is the processes on a terminal running zmx attach on the
+// session name in the Backend's directory, with the environment each was
+// exec'd with, as the process table shows them: zmx doesn't list a session's
+// clients. Only a process the kernel names zmx is read. Its argv names its
 // session as zmx reads it, after the ZMX_SESSION_PREFIX of its environment,
-// and its environment must resolve to the Backend's directory, each checked
-// only when the kernel shows the environment. zmx's daemon keeps the argv of
-// the attach it forked from, but has no terminal, so it is never one. A
-// client zmx switched to another session in the same process still names the
-// one it attached. A process that exits as it is read is skipped.
-func (b *Backend) AttachClients(name string) ([]int, error) {
+// and its environment must resolve to the Backend's directory. zmx's daemon
+// keeps the argv of the attach it forked from, but has no terminal, so it is
+// never one. A client zmx switched to another session in the same process
+// still names the one it attached. A process that exits as it is read is
+// skipped; one that can't be read otherwise, or a zmx attach whose
+// environment the kernel doesn't show, fails the search with
+// backend.ErrUnreadableClient, since it might be one.
+func (b *Backend) AttachClients(name string) ([]backend.ClientProcess, error) {
 	procs, err := b.processes.list()
 	if err != nil {
 		return nil, fmt.Errorf("list the clients of session %q: %w", name, err)
 	}
-	var pids []int
+	var clients []backend.ClientProcess
 	for _, p := range procs {
-		if !p.Terminal {
+		if !p.Terminal || p.Command != program {
 			continue
 		}
 		args, err := b.processes.readArgs(p.PID)
-		if err == nil && b.attaches(args, name) {
-			pids = append(pids, p.PID)
+		if errors.Is(err, proctable.ErrGone) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list the clients of session %q: %w: %w", name, backend.ErrUnreadableClient, err)
+		}
+		attached, ok := attachedName(args.Argv)
+		if !ok {
+			continue
+		}
+		if len(args.Env) == 0 {
+			return nil, fmt.Errorf("list the clients of session %q: %w: process %d runs zmx attach with no environment the kernel shows", name, backend.ErrUnreadableClient, p.PID)
+		}
+		if lookup(args.Env, envPrefix)+attached == name && filepath.Clean(DirFor(args.Env)) == b.dir {
+			clients = append(clients, backend.ClientProcess{PID: p.PID, Env: args.Env})
 		}
 	}
-	return pids, nil
+	return clients, nil
 }
 
-// attaches reports whether a process exec'd with args runs zmx attach on the
-// session name in the Backend's directory.
-func (b *Backend) attaches(args proctable.Args, name string) bool {
-	attached, ok := attachedName(args.Argv)
-	if !ok {
-		return false
-	}
-	if len(args.Env) == 0 {
-		return attached == name
-	}
-	return lookup(args.Env, envPrefix)+attached == name && filepath.Clean(DirFor(args.Env)) == b.dir
-}
-
-// attachedName is the session zmx attach names in argv, before any prefix:
-// zmx attach [--labels kv] <name> [command…], or its short verb a.
+// attachedName is the session zmx attach names in argv, before any prefix,
+// read as zmx's parseAttachArgs reads it: flags only before the name, each
+// --labels taking a value of its own or after =, the first other word the
+// name, and none at all naming the prefix alone. An argv zmx answers with help
+// or an error attaches nothing.
 func attachedName(argv []string) (string, bool) {
-	if len(argv) < 3 || filepath.Base(argv[0]) != "zmx" || !attachVerbs[argv[1]] {
+	if len(argv) < 2 || filepath.Base(argv[0]) != program || !attachVerbs[argv[1]] {
 		return "", false
 	}
-	rest := argv[2:]
-	if rest[0] == "--labels" {
-		rest = rest[min(2, len(rest)):]
+	for i := 2; i < len(argv); i++ {
+		switch arg := argv[i]; {
+		case arg == "--help" || arg == "-h":
+			return "", false
+		case strings.HasPrefix(arg, labelsFlag+"="):
+		case arg == labelsFlag:
+			if i++; i == len(argv) {
+				return "", false
+			}
+		default:
+			return arg, true
+		}
 	}
-	if len(rest) == 0 || rest[0] == "" {
-		return "", false
-	}
-	return rest[0], true
+	return "", true
 }

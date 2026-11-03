@@ -235,3 +235,18 @@ func TestLiveness_AnOrphanSocketThatRefusesGoesWhenTheDirectoryIsRead(t *testing
 		t.Errorf("stale runner path = %q, want the orphan socket", got)
 	}
 }
+
+func TestLiveness_AReadOnlyRegistryRemovesNothing(t *testing.T) {
+	r := runnerreg.New(stateDir(t))
+	writeEntry(t, r, "gone01", entryFor(deadPID(t), "api-x7Kd9a"))
+	refusingSocket(t, r.SocketPath("gone01"))
+	refusingSocket(t, r.SocketPath("orphan"))
+
+	if _, err := r.ReadOnly().DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil {
+		t.Fatalf("DetachToPicker: %v", err)
+	}
+
+	if got, want := files(t, r.Dir()), []string{"gone01.json", "gone01.sock", "orphan.sock"}; !slices.Equal(got, want) {
+		t.Errorf("the registry holds %q, want everything left, %q", got, want)
+	}
+}

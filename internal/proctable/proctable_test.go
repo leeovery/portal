@@ -11,7 +11,7 @@ import (
 func procArgsOf(path string, argv, env []string) []byte {
 	b := binary.NativeEndian.AppendUint32(nil, uint32(len(argv)))
 	b = append(b, path...)
-	b = append(b, 0, 0, 0, 0)
+	b = append(b, make([]byte, pathAlign-len(path)%pathAlign)...)
 	for _, s := range append(slices.Clone(argv), env...) {
 		b = append(append(b, s...), 0)
 	}
@@ -30,6 +30,18 @@ func TestParseArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("it reads an empty argv[0], whatever the executable path's length", func(t *testing.T) {
+		for _, path := range []string{"/opt/zmx", "/opt/zmx1", "/opt/zm"} {
+			argv := []string{"", "attach", "dev"}
+
+			got, err := parseArgs(procArgsOf(path, argv, nil))
+
+			if err != nil || !slices.Equal(got.Argv, argv) {
+				t.Errorf("parseArgs(path %q) = %+v, %v; want argv %q", path, got, err, argv)
+			}
+		}
+	})
+
 	t.Run("it refuses a buffer cut short or with a bad count", func(t *testing.T) {
 		whole := procArgsOf("/opt/zmx", []string{"zmx", "attach"}, nil)
 		negative := binary.NativeEndian.AppendUint32(nil, 0xffffffff)
@@ -38,6 +50,8 @@ func TestParseArgs(t *testing.T) {
 			"no executable path end": []byte{1, 0, 0, 0, '/', 'z'},
 			"arguments cut short":    whole[:len(whole)-20],
 			"negative count":         append(negative, "/x\x00a\x00"...),
+			"padding cut short":      []byte{1, 0, 0, 0, '/', 'z', 0, 0},
+			"argument in padding":    []byte{1, 0, 0, 0, '/', 'z', 0, 'a', 0, 0, 0, 0, 'b', 0},
 		} {
 			t.Run(name, func(t *testing.T) {
 				if got, err := parseArgs(raw); !errors.Is(err, errMalformed) {

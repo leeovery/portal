@@ -20,7 +20,7 @@ func wireTOCTOUResolveSeams(m *Model, detectAdapter spawn.Adapter, ack spawn.Ack
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() ([]string, error) { return []string{"PATH=/usr/bin"}, nil }
 	return calls
 }
 
@@ -109,7 +109,7 @@ func TestBurstDispatch_NilCachedAdapter_RoutesToUnsupportedNoOp(t *testing.T) {
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() ([]string, error) { return []string{"PATH=/usr/bin"}, nil }
 
 	m = resolveDetection(t, m, ghosttyIdentity())
 	if m.DetectUnsupported() {

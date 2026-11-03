@@ -479,8 +479,10 @@ func bandShippedCopy() []struct{ name, message string } {
 	return []struct{ name, message string }{
 		{"the by-tag signpost", byTagSignpostText},
 		{"the remote no-op", spawn.UnsupportedNoopMessage(spawn.Identity{})},
+		{"the unsure no-op", spawn.UnsupportedNoopMessage(spawn.Identity{Unsure: true})},
 		{"the named no-op", spawn.UnsupportedNoopMessage(named)},
 		{"the remote multi-select refusal", multiSelectBlockedRemoteFlash},
+		{"the unsure multi-select refusal", multiSelectBlockedUnsureFlash},
 		{"the named multi-select refusal", multiSelectBlockedNamedFlash},
 	}
 }

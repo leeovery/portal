@@ -104,6 +104,43 @@ func TestOpenBurst_AWindowAcksThroughTheStateDirectory(t *testing.T) {
 	}
 }
 
+// A window's shell starts from the terminal's environment, not its opener's:
+// a terminal app's login shell need not read the file that sets ZMX_DIR or
+// Portal's paths. The window here is given none of the opener's — its own
+// zmx and state directories are decoys, so a window that resolved by them
+// would touch nothing real — and still attaches the opener's session and
+// acks into the opener's state directory.
+func TestOpenBurst_AWindowResolvesWhatItsOpenerDid(t *testing.T) {
+	binary := buildPortalBinary(t)
+	w := newPortalWorld(t, binary)
+	requests := w.withRecipeTerminal(t)
+	w.create(t, "api-x7Kd9a")
+	w.create(t, "blog-c3d4")
+
+	opener := w.portal(t, "open", "-s", "api-x7Kd9a", "-s", "blog-c3d4")
+	command := awaitWindow(t, requests)
+	decoyZmx, decoyState := t.TempDir(), t.TempDir()
+	window := w.startIn(t, []string{
+		"HOME=" + t.TempDir(),
+		"PATH=/usr/bin:/bin",
+		"TERM=xterm-256color",
+		"ZMX_DIR=" + decoyZmx,
+		"PORTAL_STATE_DIR=" + decoyState,
+	}, "/bin/sh", "-c", command)
+
+	window.awaitRunner(t, "blog-c3d4")
+	opener.awaitRunner(t, "api-x7Kd9a")
+	w.awaitClients(t, "blog-c3d4", 1)
+	if log := portaltest.ReadPortalLogSafe(w.stateDir); !strings.Contains(log, "spawn: opened 2/2 ") {
+		t.Errorf("the opener did not count the window's ack; portal.log:\n%s", log)
+	}
+	for _, decoy := range []string{decoyZmx, decoyState} {
+		if entries, err := os.ReadDir(decoy); err != nil || len(entries) != 0 {
+			t.Errorf("the window resolved by its own environment: %s holds %v, %v", decoy, entries, err)
+		}
+	}
+}
+
 func TestPickerMultiSelect_OpensTheOthersInWindowsAndAttachesTheLast(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newPortalWorld(t, binary)

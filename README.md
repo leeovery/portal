@@ -392,9 +392,11 @@ a session killed elsewhere while you were in the mode drops out of the selection
 Spawning host windows needs a supported terminal. **Ghostty** works out of the box; other
 terminals are configured via [`terminals.json`](#configuration). On an unsupported terminal
 Portal shows a banner naming the detected terminal and its bundle id (the key to copy into
-`terminals.json`); a remote/mosh client has no local window to name, so its header stays as
-normal with no banner. On either, pressing **`m`** does **not** open multi-select — Portal
-shows a brief note that it isn't available (`over a remote connection`, or `on this terminal`)
+`terminals.json`); a remote/mosh client has no local window to name, and nor does a session
+when Portal can't tell which terminal it is shown in (several raw `zmx attach` windows on it,
+say), so the header stays as normal with no banner. On any of these, pressing **`m`** does
+**not** open multi-select — Portal shows a brief note that it isn't available (`over a remote
+connection`, `can't tell which terminal Portal is running in`, or `on this terminal`)
 rather than letting you mark sessions for a burst that can never run, and `m` drops out of the
 `?` help there. Opening a single session the normal way (`Enter` on a highlighted row) still
 works — it attaches in the current window and needs no host-window support. Run `xctl doctor`

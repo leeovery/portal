@@ -51,3 +51,35 @@ func TestSessionExistsError(t *testing.T) {
 		}
 	})
 }
+
+func TestClientEnvMatches(t *testing.T) {
+	leader := backend.ClientEnv{
+		{Name: "SSH_CONNECTION", Unset: true},
+		{Name: "DISPLAY", Value: ":0"},
+	}
+	for _, tt := range []struct {
+		name    string
+		environ []string
+		want    bool
+	}{
+		{"every variable as the leader has it", []string{"HOME=/h", "DISPLAY=:0"}, true},
+		{"the last of a variable's entries", []string{"DISPLAY=:1", "DISPLAY=:0"}, true},
+		{"a variable the leader lacks, set", []string{"DISPLAY=:0", "SSH_CONNECTION=10.0.0.2 52000 10.0.0.1 22"}, false},
+		{"a variable the leader lacks, set empty", []string{"DISPLAY=:0", "SSH_CONNECTION="}, false},
+		{"a variable the leader has, with another value", []string{"DISPLAY=:1"}, false},
+		{"a variable the leader has, absent", []string{"HOME=/h"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := leader.Matches(tt.environ); got != tt.want {
+				t.Errorf("Matches(%q) = %v, want %v", tt.environ, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("a remote leader never matches a local client", func(t *testing.T) {
+		remote := backend.ClientEnv{{Name: "SSH_CONNECTION", Value: "10.0.0.2 52000 10.0.0.1 22"}}
+		if remote.Matches([]string{"HOME=/h"}) {
+			t.Error("a leader over ssh matched a client with no SSH_CONNECTION")
+		}
+	})
+}

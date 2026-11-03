@@ -43,10 +43,11 @@ type RunnerLocator interface {
 	ConfirmSession(ctx context.Context, token, session string) (pid int, err error)
 }
 
-// ClientLister finds the zmx attach processes of a session no runner leads:
-// the zmx driver.
+// ClientLister finds the zmx attach processes of a session no runner leads,
+// failing with backend.ErrUnreadableClient when a process that might be one
+// can't be read: the zmx driver.
 type ClientLister interface {
-	AttachClients(session string) ([]int, error)
+	AttachClients(session string) ([]backend.ClientProcess, error)
 }
 
 type Detector struct {
@@ -74,19 +75,20 @@ func NewDetector(sessions SessionReader, runners RunnerLocator, clients ClientLi
 }
 
 // Detect emits exactly one spawn-component record. A transient failure, and a
-// session whose leading terminal can't be told, fold to the NULL identity —
-// the same unsupported no-op path as a clean NULL — the first with a WARN,
-// the second with the INFO a clean NULL gets, saying why.
+// session whose leading terminal can't be told, fold to the unsure NULL
+// identity — the same unsupported no-op path as a clean NULL, worded apart —
+// the first with a WARN, the second with the INFO a clean NULL gets, saying
+// why.
 func (d *Detector) Detect() Identity {
 	id, route, err := d.resolve()
 
 	switch {
 	case errors.Is(err, ErrDetectTransient):
 		d.logger.Warn(msgDetectionTransient, "detail", err.Error())
-		return Identity{}
+		return Identity{Unsure: true}
 	case err != nil:
 		d.logger.Info(msgDetectionNullBundle, "detail", route+": "+err.Error())
-		return Identity{}
+		return Identity{Unsure: true}
 	case !id.IsNull():
 		d.logger.Info(msgDetectionResolved, "terminal", id.Name, "bundle_id", id.BundleID, "detail", route)
 		return id

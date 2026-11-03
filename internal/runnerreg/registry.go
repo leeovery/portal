@@ -47,12 +47,20 @@ const (
 // Registry is the runners registered under one state directory, in its
 // runners/: for each, an entry <token>.json and its socket <token>.sock.
 type Registry struct {
-	dir string
+	dir      string
+	readOnly bool
 }
 
 // New is the registry under the state directory stateDir.
 func New(stateDir string) Registry {
 	return Registry{dir: filepath.Join(stateDir, "runners")}
+}
+
+// ReadOnly is r for a caller that must change nothing, as doctor: it reads
+// and asks as r does, but removes nothing it proves stale.
+func (r Registry) ReadOnly() Registry {
+	r.readOnly = true
+	return r
 }
 
 // Dir is the directory holding the entries and their sockets.
@@ -292,8 +300,11 @@ func leftReason(err error) string {
 }
 
 // remove removes the socket, then the entry, of a runner whose pid isn't
-// running.
+// running, unless r is read-only.
 func (r Registry) remove(rn registered) {
+	if r.readOnly {
+		return
+	}
 	_ = os.Remove(r.socketPath(rn.token))
 	_ = os.Remove(r.entryPath(rn.token))
 	logger.Debug("stale runner", "path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", "dead")
@@ -309,8 +320,11 @@ func (r Registry) leave(token string, pid int, reason string, cause error) {
 }
 
 // removeOrphan removes a socket with no entry once a connection to it is
-// refused, which proves no runner listens there.
+// refused, which proves no runner listens there, unless r is read-only.
 func (r Registry) removeOrphan(token string) {
+	if r.readOnly {
+		return
+	}
 	path := r.socketPath(token)
 	if checkSocketPath(path) != nil {
 		return

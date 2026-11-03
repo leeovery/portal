@@ -8,6 +8,24 @@ import (
 	"path/filepath"
 )
 
+// configBaseVar overrides the config base every config path resolves under.
+const configBaseVar = "XDG_CONFIG_HOME"
+
+// Variables names every environment variable a Portal path resolves from: the
+// config base and each config file's and directory's override. Another process
+// with the same home, set with the values this one sees, finds every file and
+// directory where this one does.
+func Variables() []string {
+	names := []string{configBaseVar}
+	for _, id := range []ConfigFileID{ProjectsFile, AliasesFile, HooksFile, PrefsFile, TerminalsFile} {
+		names = append(names, id.EnvVar)
+	}
+	for _, id := range []ConfigDirID{StateDir, ThemesDir} {
+		names = append(names, id.EnvVar)
+	}
+	return names
+}
+
 // OSEnv is the Lookup over the process's own environment — what production
 // resolution reads.
 func OSEnv(name string) string { return os.Getenv(name) }
@@ -22,7 +40,7 @@ func ConfigBase() (string, error) {
 // fallback reads the process's own home directory whatever the lookup is: a
 // lookup carrying neither layer has nothing to say about where home is.
 func ConfigBaseFrom(lookup Lookup) (string, error) {
-	if base := lookup("XDG_CONFIG_HOME"); base != "" {
+	if base := lookup(configBaseVar); base != "" {
 		return base, nil
 	}
 

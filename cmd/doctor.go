@@ -103,7 +103,9 @@ func resolveDoctorDeps() *DoctorDeps {
 	// it refuses to bind leaves the host-terminal check out; the dir check
 	// reports why.
 	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
-		seams := buildProductionSpawnSeams(context.Background(), driver)
+		// Read-only: detection asks the runner registry, which otherwise
+		// removes the entry of a runner it proves dead.
+		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
 		if deps.Detector == nil {
 			deps.Detector = seams.Detector
 		}
@@ -388,12 +390,16 @@ func checkKeyConfig(store *prefs.Store) checkResult {
 	return checkResult{name: name, status: checkInfo, detail: strings.Join(fallbacks, "; ")}
 }
 
-// An unsupported or remote host is an environmental state, not a Portal-health
-// defect, so this line never drives the exit code. A NULL identity short-circuits
-// before Resolve, so a config `*` catch-all cannot reclassify a remote client.
+// An unsupported, remote or unsettled host is an environmental state, not a
+// Portal-health defect, so this line never drives the exit code. A NULL identity
+// short-circuits before Resolve, so a config `*` catch-all cannot reclassify a
+// remote client.
 func checkHostTerminal(detector TerminalDetector, resolve spawn.AdapterResolver) checkResult {
 	const name = "host terminal"
 	id := detector.Detect()
+	if id.Unsure {
+		return checkResult{name: name, status: checkInfo, detail: "unsupported (" + spawn.UnsureTerminal + ")"}
+	}
 	if id.IsNull() {
 		return checkResult{name: name, status: checkInfo, detail: "unsupported (remote session)"}
 	}

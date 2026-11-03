@@ -19,7 +19,7 @@ func wireBurstSeams(m *Model, adapter spawn.Adapter, resolution spawn.Resolution
 	m.sessionExists = exists
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() ([]string, error) { return []string{"PATH=/usr/bin"}, nil }
 }
 
 func resolveDetection(t *testing.T, m Model, id spawn.Identity) Model {

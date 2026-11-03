@@ -334,7 +334,7 @@ type Model struct {
 	sessionExists func(string) bool
 	ackChannel    spawn.AckChannelFull
 	spawnExe      spawn.ExecutableResolver
-	spawnGetenv   func(string) string
+	spawnEnv      spawn.WindowEnv
 	// Wrapped in log.OrDiscard at emit time, so nil never panics.
 	spawnLogger *slog.Logger
 
@@ -2836,12 +2836,16 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 // block attempts nothing. It names neither the identity nor "see docs": on a named
 // terminal it co-renders with the banner, which supplies both.
 const (
+	multiSelectBlockedUnsureFlash = "multi-select isn't available: " + spawn.UnsureTerminal
 	multiSelectBlockedRemoteFlash = "multi-select isn't available over a remote connection"
 	multiSelectBlockedNamedFlash  = "multi-select isn't available on this terminal"
 )
 
 func multiSelectBlockedFlashText(id spawn.Identity) string {
-	if id.IsNull() {
+	switch {
+	case id.Unsure:
+		return multiSelectBlockedUnsureFlash
+	case id.IsNull():
 		return multiSelectBlockedRemoteFlash
 	}
 	return multiSelectBlockedNamedFlash

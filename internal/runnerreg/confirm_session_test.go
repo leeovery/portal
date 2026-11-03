@@ -68,6 +68,19 @@ func TestConfirmSession(t *testing.T) {
 			t.Error("the dead runner's entry is still there")
 		}
 	})
+
+	t.Run("a read-only registry finds a dead runner's entry no runner, and leaves it", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		writeEntry(t, r, "tok123", entryFor(deadPID(t), "api-x7Kd9a"))
+		refusingSocket(t, r.SocketPath("tok123"))
+
+		if _, err := r.ReadOnly().ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrNoRunner) {
+			t.Errorf("ConfirmSession = %v, want ErrNoRunner", err)
+		}
+		if got, want := files(t, r.Dir()), []string{"tok123.json", "tok123.sock"}; !slices.Equal(got, want) {
+			t.Errorf("the registry holds %q, want the dead runner's %q left", got, want)
+		}
+	})
 }
 
 func TestListing_ConfirmSession(t *testing.T) {

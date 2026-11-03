@@ -1,10 +1,11 @@
 package cmd
 
-// TestMain poisons the PORTAL_* config paths, TMUX and ZMX_DIR package-wide so a
-// test that forgets to isolate fails loudly, and HOME to a per-run temp directory
-// — with XDG_CONFIG_HOME emptied so HOME is what decides — so one that resolves a
-// default config path lands there instead of reading or mutating the developer's
-// real config; subprocesses inherit the poison via os.Environ().
+// TestMain poisons the PORTAL_* config paths, TMUX, ZMX_DIR and the terminal
+// adapters package-wide so a test that forgets to isolate fails loudly, and HOME
+// to a per-run temp directory — with XDG_CONFIG_HOME emptied so HOME is what
+// decides — so one that resolves a default config path lands there instead of
+// reading or mutating the developer's real config; subprocesses inherit the
+// poison via os.Environ().
 //
 // A missed backend injection under the ZMX_DIR poison fails with ENOTDIR: the
 // poison sits under /dev/null, so no read of it can pass for an empty listing.
@@ -18,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -96,9 +98,28 @@ func TestMain(m *testing.M) {
 	// a test reaching loadPrefsStore would leave a write racing its own teardown.
 	persistTranslation = func(*prefs.Store, string) {}
 
+	// Detection reads the terminal's identity from the environment, scrubbed
+	// here, and from this process's ancestry, which leads to the developer's own
+	// terminal whatever the environment says. So a test that reaches a
+	// production adapter panics rather than open a window there.
+	for _, name := range spawn.IdentityVars() {
+		if err := os.Unsetenv(name); err != nil {
+			fmt.Fprintf(os.Stderr, "cmd tests: scrubbing the terminal's identity: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	spawnAdapter = func(spawn.Adapter) spawn.Adapter { return poisonedAdapter{} }
+
 	code := m.Run()
 	if err := os.RemoveAll(homeDir); err != nil {
 		fmt.Fprintf(os.Stderr, "cmd tests: removing the package-wide temp HOME: %v\n", err)
 	}
 	os.Exit(code)
+}
+
+// poisonedAdapter stands in for every production terminal adapter.
+type poisonedAdapter struct{}
+
+func (poisonedAdapter) OpenWindow(command []string) spawn.Result {
+	panic(fmt.Sprintf("cmd tests: a production adapter asked the terminal for a window: %q", command))
 }

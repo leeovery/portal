@@ -16,7 +16,7 @@ func wireUnsupportedBurstSeams(m *Model, adapter spawn.Adapter, ack spawn.AckCha
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() ([]string, error) { return []string{"PATH=/usr/bin"}, nil }
 }
 
 func markTwo(t *testing.T, m Model) Model {
@@ -69,9 +69,14 @@ func TestUnsupportedFlashText(t *testing.T) {
 			want: "can't open new windows in Apple Terminal · com.apple.Terminal — nothing opened",
 		},
 		{
-			name: "NULL identity (remote/mosh or transient error)",
+			name: "NULL identity (remote/mosh)",
 			id:   spawn.Identity{},
 			want: "can't open new windows over a remote connection — nothing opened",
+		},
+		{
+			name: "unsure NULL identity (detection couldn't tell)",
+			id:   spawn.Identity{Unsure: true},
+			want: "can't tell which terminal Portal is running in — nothing opened",
 		},
 	}
 	for _, tc := range tests {

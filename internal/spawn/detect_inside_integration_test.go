@@ -198,8 +198,28 @@ func TestDetectInsideSession_OverZmx(t *testing.T) {
 		awaitResolved(t, w.detector("api-x7Kd9a", first), routeInsideRaw)
 		second, _ := w.onTerminal(t, zmxtest.Binary(t), "attach", "api-x7Kd9a")
 
-		if err := awaitUncertain(t, w.detector("api-x7Kd9a", first, second), routeInsideRaw); !strings.Contains(err.Error(), "2 zmx attach processes") {
+		if err := awaitUncertain(t, w.detector("api-x7Kd9a", first, second), routeInsideRaw); !strings.Contains(err.Error(), "2 of 2 zmx attach processes") {
 			t.Errorf("detection = %v, want two raw clients", err)
+		}
+	})
+
+	// zmx switches a raw client in-process, so the process table still shows
+	// it under the session it attached: the one zmx attach naming the session
+	// it now leads is the runner's own, which is never the leader.
+	t.Run("a raw client switched in to lead a runner's session refuses, never walking from the runner's client", func(t *testing.T) {
+		w := newZmxWorld(t)
+		w.create(t, "api-x7Kd9a")
+		w.create(t, "blog-c3d4")
+		runner, _ := w.onTerminal(t, binary, "open", "-s", "blog-c3d4")
+		awaitResolved(t, w.detector("blog-c3d4", runner), routeInsideRunner)
+		raw, tty := w.onTerminal(t, zmxtest.Binary(t), "attach", "api-x7Kd9a")
+		awaitResolved(t, w.detector("api-x7Kd9a", raw), routeInsideRaw)
+
+		typeZmx(t, tty, "attach blog-c3d4")
+		awaitRawLeader(t, w.b, tty, "blog-c3d4")
+
+		if err := awaitUncertain(t, w.detector("blog-c3d4", runner, raw), routeInsideRaw); !strings.Contains(err.Error(), "0 of 1 zmx attach processes") {
+			t.Errorf("detection = %v, want the runner's client alone, passed over", err)
 		}
 	})
 
@@ -232,5 +252,23 @@ func awaitLeader(t *testing.T, b *zmx.Backend, session string) {
 		return err == nil && len(env) > 0
 	}) {
 		t.Fatalf("no client leads %s: %v", session, env)
+	}
+}
+
+// awaitRawLeader types into tty until a client with no runner's token leads
+// session.
+func awaitRawLeader(t *testing.T, b *zmx.Backend, tty *os.File, session string) {
+	t.Helper()
+	var env backend.ClientEnv
+	if !harnesstest.PollUntil(t, settle, 100*time.Millisecond, func() bool {
+		if _, err := tty.WriteString(" "); err != nil {
+			t.Fatalf("type into the raw client: %v", err)
+		}
+		var err error
+		env, err = b.LeaderEnv(context.WithoutCancel(t.Context()), session)
+		_, runner := env.Lookup(runnerreg.TokenVar)
+		return err == nil && len(env) > 0 && !runner
+	}) {
+		t.Fatalf("no raw client leads %s: %v", session, env)
 	}
 }
