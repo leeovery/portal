@@ -71,7 +71,7 @@ func awaitWindow(t *testing.T, requests string) string {
 	return string(command)
 }
 
-func TestOpenBurst_AWindowAcksThroughTheStateDirectory(t *testing.T) {
+func TestOpenBurst_AWindowAcksThroughTheStateDirectoryAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newPortalWorld(t, binary)
 	requests := w.withRecipeTerminal(t)
@@ -112,7 +112,7 @@ func TestOpenBurst_AWindowAcksThroughTheStateDirectory(t *testing.T) {
 // zmx and state directories are decoys, so a window that resolved by them
 // would touch nothing real — and still attaches the opener's session and
 // acks into the opener's state directory.
-func TestOpenBurst_AWindowResolvesWhatItsOpenerDid(t *testing.T) {
+func TestOpenBurst_AWindowResolvesWhatItsOpenerDidAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newPortalWorld(t, binary)
 	requests := w.withRecipeTerminal(t)
@@ -145,7 +145,7 @@ func TestOpenBurst_AWindowResolvesWhatItsOpenerDid(t *testing.T) {
 
 // A portal binary a test builds walks to the developer's own terminal, so it
 // runs no adapter program the test hasn't allowed: here the recipe's own.
-func TestOpenBurst_ABinaryRunsNoAdapterProgramATestDidNotAllow(t *testing.T) {
+func TestOpenBurst_ABinaryRunsNoAdapterProgramATestDidNotAllowAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newPortalWorld(t, binary)
 	requests := w.withRecipeTerminal(t)
@@ -164,7 +164,7 @@ func TestOpenBurst_ABinaryRunsNoAdapterProgramATestDidNotAllow(t *testing.T) {
 	}
 }
 
-func TestPickerMultiSelect_OpensTheOthersInWindowsAndAttachesTheLast(t *testing.T) {
+func TestPickerMultiSelect_OpensTheOthersInWindowsAndAttachesTheLastAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newPortalWorld(t, binary)
 	requests := w.withRecipeTerminal(t)
