@@ -91,22 +91,20 @@ func sessionGoneError(name string, err error) (error, bool) {
 	return nil, false
 }
 
-// pickerKiller kills from the picker as portal kill does, but for the
-// session the kill key asked to kill, which counts as killed once gone (see
-// goneCountsKilled).
+// pickerKiller kills from the picker as portal kill does.
 type pickerKiller struct {
 	ctx context.Context
 	b   backend.Backend
-	// asked is the session the kill key asked to kill, empty for none.
-	asked string
 }
 
 func (k pickerKiller) KillSession(name string) error {
-	b := k.b
-	if name == k.asked {
-		b = goneCountsKilled{b}
-	}
-	return killSession(k.ctx, b, name, "tui")
+	return killSession(k.ctx, k.b, name, "tui")
+}
+
+// askedKiller kills on y at the prompt the kill key asked for, counting the
+// session already gone as killed.
+func askedKiller(ctx context.Context, b backend.Backend) pickerKiller {
+	return pickerKiller{ctx: ctx, b: goneCountsKilled{b}}
 }
 
 // goneCountsKilled is a backend whose Kill counts a session already gone as

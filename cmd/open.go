@@ -364,6 +364,7 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 type tuiConfig struct {
 	lister           tui.SessionLister
 	killer           tui.SessionKiller
+	askedKiller      tui.SessionKiller
 	labeller         tui.SessionLabeller
 	projectStore     tui.ProjectStore
 	projectEditor    tui.ProjectEditor
@@ -433,6 +434,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 	deps := tui.Deps{
 		Lister:           cfg.lister,
 		Killer:           cfg.killer,
+		AskedKiller:      cfg.askedKiller,
 		Labeller:         cfg.labeller,
 		Creator:          cfg.sessionCreator,
 		ProjectStore:     cfg.projectStore,
@@ -580,7 +582,8 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	// yet, so no session is waiting.
 	cfg := tuiConfig{
 		lister:         pickerLister{ctx: cmd.Context(), b: b},
-		killer:         pickerKiller{ctx: cmd.Context(), b: b, asked: launch.landing.kill},
+		killer:         pickerKiller{ctx: cmd.Context(), b: b},
+		askedKiller:    askedKiller(cmd.Context(), b),
 		labeller:       pickerLabeller{ctx: cmd.Context(), b: b},
 		projectStore:   store,
 		projectEditor:  store,

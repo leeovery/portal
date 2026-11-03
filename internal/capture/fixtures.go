@@ -90,6 +90,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		Lister:        f.Lister,
 		PendingReader: f.pendingReader(),
 		Killer:        fakeKiller{},
+		AskedKiller:   fakeKiller{},
 		Labeller:      fakeLabeller{},
 		Creator:       fakeCreator{},
 		ProjectStore:  f.projectStore,

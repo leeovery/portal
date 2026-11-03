@@ -251,11 +251,11 @@ func TestAttach_PickerLoop(t *testing.T) {
 	})
 }
 
-// The kill key's prompt kills as the picker's k does, but for the session
+// y at the kill key's prompt kills as the picker's k does, but for a session
 // already gone, which counts as killed.
-func TestPickerKiller_KillsTheAskedSessionAsTheKillKeyMeansIt(t *testing.T) {
+func TestAskedKiller_KillsAsTheKillKeyMeansIt(t *testing.T) {
 	asked := func(fake *backendtest.Fake) pickerKiller {
-		return pickerKiller{ctx: context.Background(), b: fake, asked: "api-x7Kd9a"}
+		return askedKiller(context.Background(), fake)
 	}
 
 	t.Run("the session goes, its index entry with it", func(t *testing.T) {
@@ -309,15 +309,6 @@ func TestPickerKiller_KillsTheAskedSessionAsTheKillKeyMeansIt(t *testing.T) {
 
 		err := asked(fake).KillSession("api-x7Kd9a")
 		if want := "No session found: api-x7Kd9a; did you mean API-x7Kd9a?"; err == nil || err.Error() != want {
-			t.Errorf("KillSession = %v, want %q", err, want)
-		}
-	})
-
-	t.Run("any other session gone is refused, as k's kill refuses it", func(t *testing.T) {
-		isolateStateDir(t)
-
-		err := asked(backendtest.New()).KillSession("blog-c3d4")
-		if want := "No session found: blog-c3d4"; err == nil || err.Error() != want {
 			t.Errorf("KillSession = %v, want %q", err, want)
 		}
 	})
@@ -465,6 +456,26 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		assertIndexLacks(t, stateDir, "blog-c3d4")
 		if afterY := pickers.shown[0][0]; strings.Contains(afterY, "No session found") || strings.Contains(afterY, prompt) {
 			t.Errorf("after y the picker shows, want its rows and no flash:\n%s", afterY)
+		}
+	})
+
+	t.Run("k's own y on it, once Esc has kept it and it has gone meanwhile, is refused as k's kill always is", func(t *testing.T) {
+		fake, _, _ := stage(t)
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typed('k'), typedAndLanded('y'), typed('q')})
+		pickers.landed = func() {
+			if err := fake.Kill(context.Background(), "blog-c3d4"); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if afterK := pickers.shown[0][1]; !strings.Contains(afterK, prompt) || strings.Contains(afterK, "⏎ attach") {
+			t.Fatalf("after Esc then k the picker shows, want k's own prompt:\n%s", afterK)
+		}
+		if afterY := pickers.shown[0][2]; !strings.Contains(afterY, "No session found: blog-c3d4") {
+			t.Errorf("after k's y the picker shows, want the gone session's refusal:\n%s", afterY)
 		}
 	})
 

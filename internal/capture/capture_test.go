@@ -885,6 +885,9 @@ func TestFakeSeamsAreInert(t *testing.T) {
 	if err := d.Killer.KillSession("anything"); err != nil {
 		t.Errorf("Killer.KillSession returned %v, want nil (no-op)", err)
 	}
+	if err := d.AskedKiller.KillSession("anything"); err != nil {
+		t.Errorf("AskedKiller.KillSession returned %v, want nil (no-op)", err)
+	}
 	if err := d.Labeller.SetLabel("a", "b"); err != nil {
 		t.Errorf("Labeller.SetLabel returned %v, want nil (no-op)", err)
 	}

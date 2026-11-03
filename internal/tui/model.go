@@ -219,8 +219,10 @@ type Model struct {
 	// asked for from inside the session, which Enter attaches again.
 	killOffersAttach bool
 	// killAsk is the session the kill key asked to kill, whose prompt opens
-	// once the rows are known; empty once it has.
-	killAsk           string
+	// as the first listing lands; empty once it has.
+	killAsk string
+	// askedKiller kills on y at the prompt the kill key asked for.
+	askedKiller       SessionKiller
 	renameInput       textinput.Model
 	renameTarget      Session
 	pendingDeletePath string
@@ -576,6 +578,14 @@ type Option func(*Model)
 func WithKiller(k SessionKiller) Option {
 	return func(m *Model) {
 		m.sessionKiller = k
+	}
+}
+
+// WithAskedKiller kills the session the kill key asked about, on y at its
+// prompt.
+func WithAskedKiller(k SessionKiller) Option {
+	return func(m *Model) {
+		m.askedKiller = k
 	}
 }
 
@@ -1395,7 +1405,6 @@ func (m *Model) evaluateDefaultPage() {
 	m.applyInitialFilter()
 	m.applySearchLanding()
 	m.applyInitialCursor()
-	m.applyKillAsk()
 }
 
 // Build wires no initial filter alongside a search form, so exactly one of the
@@ -1443,13 +1452,15 @@ func (m *Model) applyInitialCursor() {
 	m.initialCursor = ""
 }
 
-// Runs after applyInitialCursor so the asked session's row wins the cursor. A
-// session no longer listed is gone, and nothing is asked about it.
+// Runs as the first listing lands, not once the page is decided, so no key
+// waits on the projects: the asked session's row takes the cursor and the
+// prompt opens at once. A session no longer listed is gone, and nothing is
+// asked about it; nor is anything asked with nothing to kill it.
 func (m *Model) applyKillAsk() {
 	name := m.killAsk
 	m.killAsk = ""
 	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
-	if i < 0 || m.activePage != PageSessions {
+	if i < 0 || m.activePage != PageSessions || m.askedKiller == nil {
 		return
 	}
 	m.reanchorSessionCursor(name)
@@ -1673,6 +1684,7 @@ func (m Model) applySessionsMsg(msg SessionsMsg) (tea.Model, tea.Cmd) {
 
 	m.sessionsLoaded = true
 	m.evaluateDefaultPage()
+	m.applyKillAsk()
 	detectCmd := m.maybeDispatchDetectionCmd()
 	var settleCmd tea.Cmd
 	if msg.afterRestore {
@@ -2008,6 +2020,16 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m.handlePreflightAbort(msg), nil
 	case burstChannelClosedMsg:
 		// Post-terminal sentinel; the terminal event already cleared pending.
+		return m, nil
+	}
+
+	// Until the first listing opens the kill key's prompt, or finds its session
+	// gone, a key would act on rows the user hasn't seen, Enter on the wrong
+	// one: typed ahead of the prompt, it is dropped.
+	if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey && m.killAsk != "" {
+		if keyIsCtrlC(keyMsg) {
+			return m, tea.Quit
+		}
 		return m, nil
 	}
 
@@ -2999,8 +3021,12 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	name, offersAttach := m.pendingKill.Name, m.killOffersAttach
 	switch {
 	case isRuneKey(keyMsg, "y"):
+		killer := m.sessionKiller
+		if offersAttach {
+			killer = m.askedKiller
+		}
 		m = m.closeKillConfirm()
-		return m, m.actAndRefresh(func() error { return m.sessionKiller.KillSession(name) })
+		return m, m.actAndRefresh(func() error { return killer.KillSession(name) })
 	case keyIsCode(keyMsg, tea.KeyEscape):
 		// Cancel is Esc only; `n` falls through to the ignore-all tail.
 		return m.closeKillConfirm(), nil

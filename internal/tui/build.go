@@ -48,9 +48,12 @@ type Deps struct {
 	// failed to do what was asked.
 	Flash string
 	// KillAsk is the session the kill key asked to kill from inside it: the
-	// picker opens on its kill prompt, which Enter answers by attaching it
-	// again.
+	// picker opens on its kill prompt once its row is listed, which Enter
+	// answers by attaching it again. Keys typed before then are dropped.
 	KillAsk string
+	// AskedKiller kills on y at the prompt KillAsk opens; without one, no
+	// prompt opens.
+	AskedKiller SessionKiller
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -115,6 +118,7 @@ type CaptureSeeds struct {
 func Build(deps Deps) Model {
 	opts := []Option{
 		WithKiller(deps.Killer),
+		WithAskedKiller(deps.AskedKiller),
 		WithLabeller(deps.Labeller),
 		WithProjectStore(deps.ProjectStore),
 		WithSessionCreator(deps.Creator),
