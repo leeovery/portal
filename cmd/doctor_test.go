@@ -157,9 +157,10 @@ func TestDoctorAllChecksPassExitsZero(t *testing.T) {
 		"  ✓ state dir: " + dir + "\n" +
 		"  ✓ sessions.json: 1 session indexed\n" +
 		"  ✓ stale projects: no stale projects\n" +
+		defaultKeyConfigLine + "\n" +
 		"    host terminal: unsupported (remote session)\n" +
 		"    resume mode: " + installResumeModeOf(nil).String() + "\n" +
-		"  6 checks passed\n"
+		"  7 checks passed\n"
 	if got := outBuf.String(); got != want {
 		t.Errorf("report =\n%s\nwant\n%s", got, want)
 	}
@@ -576,7 +577,7 @@ func TestDoctorExitCode(t *testing.T) {
 		if errBuf.Len() != 0 {
 			t.Errorf("stderr = %q; want it silent on an unhealthy exit", errBuf.String())
 		}
-		if !strings.HasSuffix(outBuf.String(), "\n  5 of 6 checks passed\n") {
+		if !strings.HasSuffix(outBuf.String(), "\n  6 of 7 checks passed\n") {
 			t.Errorf("report does not close with the partial summary:\n%s", outBuf.String())
 		}
 	})
@@ -689,7 +690,7 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 
 func TestDoctorCheckOrder(t *testing.T) {
 	results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}))
-	want := []string{"zmx", "zmx dir", "sessions", "state dir", "sessions.json", "stale projects", "host terminal", "resume mode"}
+	want := []string{"zmx", "zmx dir", "sessions", "state dir", "sessions.json", "stale projects", "key config", "host terminal", "resume mode"}
 	var got []string
 	for _, r := range results {
 		got = append(got, r.name)
@@ -798,10 +799,10 @@ func TestDoctorFix(t *testing.T) {
 			t.Errorf("projects.json after the prune = %s; want %s gone and %s kept", after, goneDir, liveDir)
 		}
 		out := outBuf.String()
-		if !strings.Contains(out, "\n  5 of 6 checks passed\nPruned stale project: proj1 ("+goneDir+")\nPortal doctor:\n") {
+		if !strings.Contains(out, "\n  6 of 7 checks passed\nPruned stale project: proj1 ("+goneDir+")\nPortal doctor:\n") {
 			t.Errorf("want the failing report, the prune, then the re-diagnosis:\n%s", out)
 		}
-		if !strings.HasSuffix(out, "✓ stale projects: no stale projects\n    host terminal: unsupported (remote session)\n    resume mode: "+installResumeModeOf(nil).String()+"\n  6 checks passed\n") {
+		if !strings.HasSuffix(out, "✓ stale projects: no stale projects\n"+defaultKeyConfigLine+"\n    host terminal: unsupported (remote session)\n    resume mode: "+installResumeModeOf(nil).String()+"\n  7 checks passed\n") {
 			t.Errorf("post-repair report not clean:\n%s", out)
 		}
 	})
@@ -853,7 +854,7 @@ func TestDoctorFix(t *testing.T) {
 		if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
 			t.Errorf("stale rotated log not swept (stat err = %v)", statErr)
 		}
-		if n := strings.Count(outBuf.String(), "\n  6 checks passed\n"); n != 2 {
+		if n := strings.Count(outBuf.String(), "\n  7 checks passed\n"); n != 2 {
 			t.Errorf("all-passed summary count = %d; want 2:\n%s", n, outBuf.String())
 		}
 	})

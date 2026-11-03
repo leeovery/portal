@@ -152,6 +152,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 
 	preExistingPackages := map[string]struct{}{
 		"alias":            {},
+		"attachkeys":       {},
 		"backend":          {},
 		"backendtest":      {},
 		"bootstrapadapter": {},

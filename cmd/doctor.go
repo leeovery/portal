@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/log"
@@ -241,6 +242,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleProjects(deps.ProjectStore),
+		checkKeyConfig(deps.PrefsStore),
 	}
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
@@ -350,6 +352,37 @@ func unansweredReason(ctx context.Context, protocolVersion func(context.Context,
 func checkResumeMode(store *prefs.Store) checkResult {
 	const name = "resume mode"
 	return checkResult{name: name, status: checkInfo, detail: installResumeModeOf(store).String()}
+}
+
+// prefsReadStandDownPhrase words a prefs.json the key-config check could not
+// read.
+const prefsReadStandDownPhrase = "could not read prefs.json"
+
+// checkKeyConfig reads the attach runner's keys as an attach does. A fallback
+// is reported, never failed: the runner still binds the action, to its default.
+func checkKeyConfig(store *prefs.Store) checkResult {
+	const name = "key config"
+	if store == nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
+	}
+	raw, err := store.LoadKeys()
+	switch {
+	case errors.Is(err, prefs.ErrInvalidJSON):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not valid JSON; keys keep their defaults"}
+	case errors.Is(err, prefs.ErrNotObject):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not a JSON object; keys keep their defaults"}
+	case err != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
+	}
+	bindings, warnings := attachkeys.Parse(raw)
+	if len(warnings) == 0 {
+		return checkResult{name: name, status: checkPass, detail: bindings.String()}
+	}
+	fallbacks := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		fallbacks = append(fallbacks, w.String())
+	}
+	return checkResult{name: name, status: checkInfo, detail: strings.Join(fallbacks, "; ")}
 }
 
 // An unsupported or remote host is an environmental state, not a Portal-health
