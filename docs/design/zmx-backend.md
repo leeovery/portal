@@ -129,6 +129,7 @@ In `prefs.json`; a missing entry keeps its default:
 - A key is `ctrl`, `alt` or `shift` modifiers plus a letter, digit, punctuation mark or `f1`–`f12`. It needs `ctrl` or `alt`, so a binding never swallows plain typing. `ctrl+shift+<letter>` is refused: without the newer encoding it sends the same bytes as `ctrl+<letter>`. `ctrl+\` is refused: it's zmx's.
 - A binding that doesn't parse, or a key bound to two actions, falls back to that action's default with a WARN; doctor reports it.
 - Read at each attach.
+- On macOS the terminal must send Option as Alt for these keys (Ghostty `macos-option-as-alt`, kitty `macos_option_as_alt`, iTerm2's Esc+, Terminal's "Use Option as Meta key", Blink's Option-as-Meta); otherwise Option+D types `∂`, which no binding matches, as it depends on the layout. The README says so.
 
 ### Runner registry
 
