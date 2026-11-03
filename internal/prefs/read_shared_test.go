@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/leeovery/portal/internal/themetest"
@@ -60,6 +61,11 @@ func TestReadBytes_SharedReadPolicy(t *testing.T) {
 	})
 }
 
+// The raw keys field leaves prefsFile uncomparable with ==.
+func isZeroRecord(f prefsFile) bool {
+	return reflect.ValueOf(f).IsZero()
+}
+
 func TestDecodePaths_ShareTheReadAndSplitOnTheDecode(t *testing.T) {
 	t.Run("an absent file is absent to both", func(t *testing.T) {
 		store := NewStore(filepath.Join(t.TempDir(), "nested", "prefs.json"))
@@ -73,7 +79,7 @@ func TestDecodePaths_ShareTheReadAndSplitOnTheDecode(t *testing.T) {
 		if tolerantOK || strictOK {
 			t.Errorf("absent-file presence: tolerant = %v, strict = %v, want false from both", tolerantOK, strictOK)
 		}
-		if tolerant != (prefsFile{}) || strict != (prefsFile{}) {
+		if !isZeroRecord(tolerant) || !isZeroRecord(strict) {
 			t.Errorf("absent-file records: tolerant = %+v, strict = %+v, want the zero record from both", tolerant, strict)
 		}
 	})
@@ -92,7 +98,7 @@ func TestDecodePaths_ShareTheReadAndSplitOnTheDecode(t *testing.T) {
 		if tolerantOK || strictOK {
 			t.Errorf("unreadable-file presence: tolerant = %v, strict = %v, want false from both", tolerantOK, strictOK)
 		}
-		if tolerant != (prefsFile{}) || strict != (prefsFile{}) {
+		if !isZeroRecord(tolerant) || !isZeroRecord(strict) {
 			t.Errorf("unreadable-file records: tolerant = %+v, strict = %+v, want the zero record from both", tolerant, strict)
 		}
 	})
@@ -104,7 +110,7 @@ func TestDecodePaths_ShareTheReadAndSplitOnTheDecode(t *testing.T) {
 		if tolerantErr != nil {
 			t.Errorf("the tolerant decode returned %v for a corrupt file, want it absorbed", tolerantErr)
 		}
-		if tolerantOK || tolerant != (prefsFile{}) {
+		if tolerantOK || !isZeroRecord(tolerant) {
 			t.Errorf("the tolerant decode returned (%+v, %v), want the zero record reported as not cleanly decoded", tolerant, tolerantOK)
 		}
 

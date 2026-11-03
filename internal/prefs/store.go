@@ -94,6 +94,9 @@ type prefsFile struct {
 	ThemeMigrated migrationMarker `json:"theme_migrated,omitempty"`
 	// Must stay declared for the same re-encode reason as Appearance.
 	ResumeMode resumeModeValue `json:"resume_mode,omitempty"`
+	// Kept raw, never decoded here: a value the attach runner can't parse
+	// survives every other write as it was.
+	Keys json.RawMessage `json:"keys,omitempty"`
 }
 
 // ThemeKeys carries the raw theme slugs from prefs.json verbatim — validation,
@@ -219,6 +222,16 @@ func (s *Store) LoadResumeMode() (resumemode.Mode, error) {
 		return mode, nil
 	}
 	return resumemode.Default, nil
+}
+
+// LoadKeys reads the attach runner's keys object verbatim, under the same
+// tolerant policy as Load; nil when prefs.json sets none.
+func (s *Store) LoadKeys() (json.RawMessage, error) {
+	f, _, err := s.readFile()
+	if err != nil {
+		return nil, err
+	}
+	return f.Keys, nil
 }
 
 // LoadThemeKeys reads the raw theme slugs verbatim, under the same tolerant
@@ -348,11 +361,16 @@ func (s *Store) SaveTranslation(slug string) (persisted bool, err error) {
 // production never reassigns it.
 var atomicWrite = fileutil.AtomicWrite
 
+// HTML escaping stays off so a raw value keeps its bytes: it would rewrite a
+// "<" or "&" inside one as a \u escape.
 func (s *Store) write(f prefsFile) error {
-	data, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(f); err != nil {
 		return fmt.Errorf("failed to marshal prefs: %w", err)
 	}
 
-	return atomicWrite(s.path, data)
+	return atomicWrite(s.path, buf.Bytes())
 }
