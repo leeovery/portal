@@ -19,7 +19,7 @@ scripts/zmx-build [ref]                     # build the zmx commit pinned in scr
 - **`-timeout 30m` too.** `./cmd` alone takes about 10 minutes under load, and a package timeout kills the test binary before its cleanups run, leaking `tmuxtest` servers and their daemons.
 - **No `t.Parallel()`.** `cmd` injects mocks through package-level mutable state. Stage `*Deps` structs with the `withXDeps(t, …)` helpers and function-var seams with `withFuncSeam(t, &seam, fn)` (both in `cmd/testhelpers_test.go`, both self-restoring). `cmd/seam_guard_test.go` fails any test that assigns a seam directly.
 - `golangci-lint` cannot see files gated `//go:build !integration`. It is not wired into CI. There is no code generation.
-- **Weekly zmx check** (`.github/workflows/zmx-check.yml`, macOS, Mondays and on dispatch). zmx is a Homebrew dependency that upgrades freely, so it builds zmx's latest release and main with `scripts/zmx-build <ref>` and runs the zmx-backed integration tests (`internal/backend/zmx`, `internal/zmxtest`, `cmd`'s `*AgainstZmx`) on each. The release leg skips with a notice while the release is no newer than the pin. A failed run is the alert; it posts nothing. Locally, `PORTAL_TEST_ZMX_BINARY=<absolute path to a zmx>` points `zmxtest.Binary` at another build; a test fails if it isn't an executable file named `zmx`.
+- **Weekly zmx check** (`.github/workflows/zmx-check.yml`, macOS, Mondays and on dispatch). zmx is a Homebrew dependency that upgrades freely, so it builds zmx's latest release and main with `scripts/zmx-build <ref>` and runs the zmx-backed integration tests (`internal/backend/zmx`, `internal/runner`, `internal/zmxtest`, `cmd`'s `*AgainstZmx`) on each. The release leg skips with a notice while the release is no newer than the pin. A failed run is the alert; it posts nothing. Locally, `PORTAL_TEST_ZMX_BINARY=<absolute path to a zmx>` points `zmxtest.Binary` at another build; a test fails if it isn't an executable file named `zmx`.
 
 ### Visual capture harness
 
@@ -108,6 +108,8 @@ Connecting to a session: `attachConnector` `syscall.Exec`s the backend's `Attach
 | `hooksweep` | The hook-staleness cycle and its stand-down reasons, run only by the tmux daemon's sweep |
 | `sessionindex` | `sessions.json` version 2, the session index: each session's label, recorded dir, created time and scrollback file, keyed by name; `Claim` ties an entry to one creation |
 | `commitlock` | `commit.lock`, the lock every writer of `sessions.json` holds; a leaf so `state` and `sessionindex` share it |
+| `attachkeys` | The attach key config (`prefs.json` `keys`) and the matcher that finds bound keys in a read: legacy and CSI-u forms, refusals for keys a terminal can't tell apart |
+| `runner` | The attach runner: `zmx attach` on a pty Portal owns, through private descriptions of the user's terminal; bound keys detach, detach to the shell or kill; one deferred teardown resets the terminal unless zmx's own reset is known to have arrived |
 | `log` | Sole owner of logging (see Logging) |
 | `bootstrapadapter` | Production adapters for `cmd/bootstrap`'s Orchestrator seams |
 | `xdg` | Config path resolution and per-file identity (`ConfigFileID`, `ConfigDirID`) |

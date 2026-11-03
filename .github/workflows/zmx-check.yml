@@ -77,5 +77,5 @@ jobs:
       - name: Test
         if: steps.zmx.outputs.skip != 'true'
         run: |
-          go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/zmxtest/...
+          go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/runner/... ./internal/zmxtest/...
           go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd
