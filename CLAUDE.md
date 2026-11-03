@@ -67,13 +67,19 @@ For load generators, match the exact command (`ps -eo ppid,command | awk '$1==1 
 
 ## Architecture
 
-Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2; all tmux access goes through `internal/tmux`. `main.go` → `cmd/root.go` → subcommands. `PersistentPreRunE` runs the server bootstrap and injects a shared `tmux.Client` and `serverStarted` into the context, except for the bootstrap-exempt `skipTmuxCheck` set (`version`, `init`, `help`, `alias`, `hook`, `doctor`, `theme`, `uninstall`, `state`, `__complete`).
+Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2; all tmux access goes through `internal/tmux`. `main.go` → `cmd/root.go` → subcommands. Mid-move to zmx (see `docs/design/zmx-backend.md`), `PersistentPreRunE` runs:
+1. the version 1 `sessions.json` stop (every command but `version` and the `state` tree);
+2. the `bootstrapExempt` check;
+3. for `open`, the zmx binary lookup;
+4. `bootstrapFor`.
+
+No command runs the tmux bootstrap; `cmd/no_tmux_bootstrap_guard_test.go` pins that. The bootstrap runner seam stays dormant until phase 3. Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Commands not yet moved get tmux through `tmuxClient(cmd)`, whose fallback cmd's `TestMain` replaces with one that panics.
 
 ### Commands
 
 - **`open`** (`cmd/open.go`; the `x` shell function from `portal init`) — the main entry. A bare positional runs the resolution chain (exact session → glob → path → alias → zoxide) and creates or attaches. `-s/-p/-a/-z` pin one domain and hard-fail on a miss; `-f` opens the picker pre-filtered; no args opens the picker. A positional starting with `/` and containing no further `/` is the **search form** (`resolver.IsSearchSigil`, `cmd/open_search.go`): never resolved, composes with nothing. Two or more targets, or a glob that may expand to two, run the multi-target burst (`cmd/open_burst*.go`; see Multi-window spawn).
 - **`doctor [--fix]`** (`cmd/doctor.go`) — read-only health catalog with a scriptable exit code (0 iff no check fails; info and not-evaluable lines never fail it). `--fix` applies reversible repairs (prune stale hooks and projects, sweep logs) then re-diagnoses. It must start no server and heal nothing on the read-only path.
-- **`uninstall`** — kills `_portal-saver` (SIGHUP, so the daemon flushes) and unregisters the global hooks. Touches no files.
+- **`uninstall`** — refuses until the zmx saver lands (phase 3): its tmux teardown would kill an installed Portal's saver.
 - **`hook set/rm/list`** (`cmd/hooks.go`; `hooks` is a permanent silent alias) — see Resume hooks. `hook list` is a machine interface: tab-separated key, event, command, location, mode. Never add columns before the existing ones, or header/footer lines.
 - `list`, `kill`, `alias`, `theme export`, `version`, `init`, and the hidden `state` subcommands (`daemon`, `commit-now`, `hydrate`, `notify`, `signal-hydrate`, `resume-draw`, `resume-wait`, `resume-recover`).
 
@@ -135,7 +141,7 @@ All logging goes through `internal/log`. Bind once per package (`var logger = lo
 
 ### Server bootstrap
 
-`cmd/bootstrap`'s Orchestrator runs ten steps. The order is load-bearing:
+No user-facing command reaches this any more; it survives for the `state` commands' integration suites (`runTmuxBootstrap`) until phases 3 and 5 replace it. `cmd/bootstrap`'s Orchestrator runs ten steps. The order is load-bearing:
 
 1. **EnsureServer** — starts tmux with a detached `_portal-bootstrap` session, because a server with no sessions exits. That session is a permanent anchor, never killed by production code and hidden from the picker and capture. It is not an orphan.
 2. **RegisterPortalHooks** — converges each event in `managedEvents` to exactly one Portal hook, reading with per-event `show-hooks -g <event>`; the no-arg global read is blind to `pane-*` and geometry `window-*` events on tmux 3.6b.
