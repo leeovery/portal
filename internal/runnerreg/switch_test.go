@@ -67,6 +67,27 @@ func TestSwitch(t *testing.T) {
 		}
 	})
 
+	t.Run("a runner whose entry names a session other than current is ErrNoRunner, asked nothing", func(t *testing.T) {
+		sink := logtest.Install(t)
+		r := runnerreg.New(stateDir(t))
+		h := &handler{}
+		register(t, r, "tok123", "docs-e5f6", h)
+
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrNoRunner) {
+			t.Errorf("Switch = %v, want ErrNoRunner", err)
+		}
+		if switches, _ := h.asked(); len(switches) != 0 {
+			t.Errorf("the runner on docs-e5f6 was asked to switch to %q", switches)
+		}
+		if !exists(t, r.EntryPath("tok123")) {
+			t.Error("the runner's entry was removed")
+		}
+		rec := sink.Records().Matching("attach", "switch").Only(t, "switch record")
+		if got := rec.AttrString(t, "result"); got != "no runner" || rec.IntAttr(t, "target_pid") != int64(os.Getpid()) {
+			t.Errorf("switch record = %+v, want result no runner, naming the runner the token names", rec)
+		}
+	})
+
 	t.Run("a refusal is returned, and logged as one", func(t *testing.T) {
 		sink := logtest.Install(t)
 		r := runnerreg.New(stateDir(t))

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"slices"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -119,8 +118,8 @@ func TestRun_Requests(t *testing.T) {
 
 		err := ask(t, requests, runner.Request{Switch: "blog-c3d4", Deadline: time.Now().Add(-time.Millisecond)})
 
-		if err == nil || !strings.Contains(err.Error(), "deadline") {
-			t.Errorf("Run answered %v, want a refusal past the deadline", err)
+		if !errors.Is(err, runner.ErrPastDeadline) {
+			t.Errorf("Run answered %v, want ErrPastDeadline", err)
 		}
 		h.detach(t)
 		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {

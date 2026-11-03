@@ -1,12 +1,13 @@
 package runner_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
-	"time"
 
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/logtest"
@@ -56,81 +57,140 @@ func TestScanForSwitch(t *testing.T) {
 	})
 }
 
-// onSwitchedAway counts the calls of SwitchedAway, and closes called at the
-// first.
-func onSwitchedAway(calls *atomic.Int32, called chan struct{}) option {
+// confirming counts the calls of Confirm, answering each with answer.
+func confirming(calls *atomic.Int32, answer error) option {
 	return func(_ *harness, cfg *runner.Config) {
-		cfg.SwitchedAway = func() {
-			if calls.Add(1) == 1 {
-				close(called)
-			}
+		cfg.Confirm = func(context.Context) error {
+			calls.Add(1)
+			return answer
 		}
 	}
 }
 
-// switchedAway attaches a child that zmx switches to another session, and
-// waits for the runner to see it.
-func switchedAway(t *testing.T, opts ...option) (*harness, *atomic.Int32) {
+// unsure attaches a child whose output shows a switch twice, and waits for
+// the terminal to show both, by when the runner has seen them.
+func unsure(t *testing.T, opts ...option) *harness {
 	t.Helper()
-	calls, called := new(atomic.Int32), make(chan struct{})
-	h := attach(t, modeSwitched, append(opts, onSwitchedAway(calls, called))...)
+	h := attach(t, modeSwitched, opts...)
 	h.ready(t)
-	select {
-	case <-called:
-	case <-time.After(settle):
-		t.Fatalf("SwitchedAway was never called; the terminal shows %q", h.term.output())
-	}
-	return h, calls
+	h.term.await(t, switchSignature+switchSignature)
+	return h
 }
 
-func TestRun_SwitchedAway(t *testing.T) {
-	t.Run("it is called once, logged, and the switch reaches the terminal unchanged", func(t *testing.T) {
+func TestRun_Unsure(t *testing.T) {
+	t.Run("a switch reaches the terminal unchanged and is logged once", func(t *testing.T) {
 		sink := logtest.Install(t)
-		h, calls := switchedAway(t)
+		h := unsure(t)
 
-		h.term.await(t, switchSignature+switchSignature)
 		h.detach(t)
 
-		if n := calls.Load(); n != 1 {
-			t.Errorf("SwitchedAway was called %d times for two switches, want once", n)
-		}
-		rec := sink.Records().Matching("attach", "switched away").AtExactLevel(slog.LevelInfo).Only(t, "switched away record")
+		rec := sink.Records().Matching("attach", "switch seen").AtExactLevel(slog.LevelDebug).Only(t, "switch seen record")
 		if got := rec.AttrString(t, "session"); got != "fake" {
-			t.Errorf("switched away session = %q, want fake", got)
+			t.Errorf("switch seen session = %q, want fake", got)
 		}
 	})
 
-	t.Run("the kill key kills nothing and ends the attach for the picker, saying why", func(t *testing.T) {
-		sink := logtest.Install(t)
-		h, _ := switchedAway(t) // the harness's Kill fails the test if called
+	t.Run("the kill key asks Confirm as it is pressed, and kills once it confirms", func(t *testing.T) {
+		calls := new(atomic.Int32)
+		h := unsure(t, confirming(calls, nil), func(h *harness, cfg *runner.Config) {
+			cfg.Kill = func(context.Context, string) error {
+				if calls.Load() != 1 {
+					t.Error("the session was killed before Confirm confirmed it")
+				}
+				return syscall.Kill(h.child(), syscall.SIGUSR1)
+			}
+		})
+		if n := calls.Load(); n != 0 {
+			t.Errorf("Confirm was asked %d times as the switch was seen, want only as the kill key is pressed", n)
+		}
 
 		h.term.typeIn(t, keyKill)
 		out, err := h.finish(t)
 
-		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrSwitchedAway) {
-			t.Fatalf("Run = %+v, %v; want the kill refused for the switch", out, err)
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
+			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("Confirm was asked %d times, want once", n)
+		}
+	})
+
+	t.Run("a kill Confirm refuses kills nothing and ends the attach for the picker, saying why", func(t *testing.T) {
+		sink := logtest.Install(t)
+		doubt := errors.New("another client leads the session")
+		h := unsure(t, confirming(new(atomic.Int32), doubt)) // the harness's Kill fails the test if called
+
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+			t.Fatalf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
 		}
 		if !out.Picker() {
 			t.Error("Picker() = false, want the picker to show why")
 		}
+		rec := sink.Records().Matching("attach", "kill unconfirmed").AtExactLevel(slog.LevelDebug).Only(t, "kill unconfirmed record")
+		if got := rec.AttrString(t, "error"); got != doubt.Error() {
+			t.Errorf("kill unconfirmed error = %q, want Confirm's %q", got, doubt)
+		}
 		assertDetachedCleanly(t, h, sink)
 	})
 
-	t.Run("every request is refused, and the attach goes on to detach", func(t *testing.T) {
-		requests := make(chan runner.Request)
-		h, _ := switchedAway(t, withRequests(requests))
+	t.Run("with no Confirm, nothing confirms a kill", func(t *testing.T) {
+		h := unsure(t)
 
-		for _, req := range []runner.Request{{Switch: "blog-c3d4"}, {}} {
-			if err := ask(t, requests, req); !errors.Is(err, runner.ErrSwitchedAway) {
-				t.Errorf("Run answered %+v with %v, want ErrSwitchedAway", req, err)
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if err != nil || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+			t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
+		}
+	})
+
+	t.Run("a context that ends while Confirm is asked ends the attach with its error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		h := attachWithin(t, ctx, modeSwitched, func(_ *harness, cfg *runner.Config) {
+			cfg.Confirm = func(ctx context.Context) error {
+				cancel()
+				return ctx.Err()
 			}
+		})
+		h.ready(t)
+		h.term.await(t, switchSignature+switchSignature)
+
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run = %+v, %v; want the context's error", out, err)
+		}
+	})
+
+	t.Run("a switch request is taken", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := unsure(t, withRequests(requests))
+
+		send(t, requests, runner.Request{Switch: "blog-c3d4"})
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Switch: "blog-c3d4"}) {
+			t.Errorf("Run = %+v, %v; want the switch", out, err)
+		}
+	})
+
+	t.Run("a request for the picker is refused, and the attach goes on to detach", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := unsure(t, withRequests(requests))
+
+		if err := ask(t, requests, runner.Request{}); !errors.Is(err, runner.ErrUnconfirmed) {
+			t.Errorf("Run answered the picker's request with %v, want ErrUnconfirmed", err)
 		}
 		h.detach(t)
 	})
 
 	t.Run("the detach keys still detach", func(t *testing.T) {
 		for key, action := range map[string]attachkeys.Action{keyDetach: attachkeys.Detach, keyDetachToShell: attachkeys.DetachToShell} {
-			h, _ := switchedAway(t)
+			h := unsure(t)
 
 			h.term.typeIn(t, key)
 			out, err := h.finish(t)
@@ -140,4 +200,22 @@ func TestRun_SwitchedAway(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRun_KillWithNoSwitchSeenNeverAsksConfirm(t *testing.T) {
+	h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
+		cfg.Confirm = func(context.Context) error {
+			t.Error("Confirm was asked with no switch seen")
+			return nil
+		}
+		cfg.Kill = func(context.Context, string) error { return syscall.Kill(h.child(), syscall.SIGUSR1) }
+	})
+	h.ready(t)
+
+	h.term.typeIn(t, keyKill)
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
+		t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+	}
 }

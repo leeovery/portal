@@ -4,10 +4,11 @@ package runner_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -98,29 +99,51 @@ func TestRunOverZmx(t *testing.T) {
 	})
 
 	t.Run("a zmx attach typed in the session switches the child under the runner, whose kill key then kills nothing", func(t *testing.T) {
-		calls, called := new(atomic.Int32), make(chan struct{})
-		z := attachZmxWith(t, nil, nil, onSwitchedAway(calls, called))
+		z := attachZmx(t, nil)
 		if _, err := z.b.Create(t.Context(), "other", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
 		z.h.term.typeIn(t, shellquote.Single(zmxtest.Binary(t))+" attach other\r")
-		select {
-		case <-called:
-		case <-time.After(settle):
-			t.Fatalf("the runner never saw the switch; the terminal shows %q", z.h.term.output())
-		}
+		z.awaitSwitchSeen(t)
 		z.h.term.typeIn(t, keyKill)
 		out, err := z.h.finish(t)
 
-		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrSwitchedAway) {
-			t.Errorf("Run = %+v, %v; want the kill refused for the switch", out, err)
+		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+			t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
 		}
 		z.assertEndedByZmx(t)
 		for _, name := range []string{sessionName, "other"} {
 			if alive, err := z.b.Exists(t.Context(), name); err != nil || !alive {
 				t.Errorf("Exists(%s) = %v, %v after the kill key, want it alive", name, alive, err)
 			}
+		}
+	})
+
+	t.Run("a zmx inside the session switching its own client leaves the kill key killing the session", func(t *testing.T) {
+		z := attachZmx(t, nil)
+		inner := zmxtest.New(t)
+		for _, name := range []string{"inner1", "inner2"} {
+			if _, err := inner.Create(t.Context(), name, t.TempDir(), nil); err != nil {
+				t.Fatalf("Create %s: %v", name, err)
+			}
+		}
+		binary := shellquote.Single(zmxtest.Binary(t))
+
+		z.h.term.typeIn(t, "env -u ZMX_SESSION ZMX_DIR="+shellquote.Single(inner.Dir())+" "+binary+" attach inner1\r")
+		awaitClients(t, inner, "inner1", 1)
+		z.h.term.typeIn(t, binary+" attach inner2\r")
+		awaitClients(t, inner, "inner2", 1)
+		z.awaitSwitchSeen(t)
+		z.h.term.typeIn(t, keyKill)
+		out, err := z.h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
+			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+		}
+		z.assertEndedByZmx(t)
+		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || alive {
+			t.Errorf("Exists = %v, %v after the kill, want the session gone", alive, err)
 		}
 	})
 
@@ -159,8 +182,13 @@ func attachZmx(t *testing.T, command []string, environ ...string) *zmxAttach {
 	return attachZmxWith(t, command, environ)
 }
 
+// attachToken is the variable whose value in the attach's client marks the
+// session's leader as the runner's own, as Portal's own token does.
+const attachToken = "RUNNER_TEST_ATTACH"
+
 // attachZmxWith is attachZmx with each of opts applied to the attach's
-// config.
+// config. The runner confirms a kill as Portal does: through the session's
+// leader carrying a token its attach command gave its client.
 func attachZmxWith(t *testing.T, command, environ []string, opts ...option) *zmxAttach {
 	t.Helper()
 	sink := logtest.Install(t)
@@ -168,9 +196,20 @@ func attachZmxWith(t *testing.T, command, environ []string, opts ...option) *zmx
 	if _, err := b.Create(t.Context(), sessionName, t.TempDir(), command); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	h := attachOn(t, t.Context(), newTerminal(t), attachCommand(t, b, environ), append([]option{func(_ *harness, cfg *runner.Config) {
+	const token = "runner-token"
+	h := attachOn(t, t.Context(), newTerminal(t), b.Track(attachCommand(t, b, environ), attachToken, token), append([]option{func(_ *harness, cfg *runner.Config) {
 		cfg.Session = sessionName
 		cfg.Kill = b.Kill
+		cfg.Confirm = func(ctx context.Context) error {
+			env, err := b.LeaderEnv(ctx, sessionName)
+			if err != nil {
+				return err
+			}
+			if got, _ := env.Lookup(attachToken); got != token {
+				return fmt.Errorf("the session's leader carries %q, not %q", got, token)
+			}
+			return nil
+		}
 	}}, opts...)...)
 	z := &zmxAttach{h: h, b: b, sink: sink}
 	z.awaitClients(t, 1)
@@ -202,15 +241,32 @@ func attachCommand(t *testing.T, b *zmx.Backend, environ []string) backend.Comma
 // awaitClients waits for the session to have want clients attached.
 func (z *zmxAttach) awaitClients(t *testing.T, want int) {
 	t.Helper()
+	awaitClients(t, z.b, sessionName, want)
+}
+
+// awaitClients waits for b's session name to have want clients attached.
+func awaitClients(t *testing.T, b *zmx.Backend, name string, want int) {
+	t.Helper()
 	var got int
 	var err error
 	if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
 		var s backend.Session
-		s, err = z.b.Session(t.Context(), sessionName)
+		s, err = b.Session(t.Context(), name)
 		got = s.Clients
 		return err == nil && got == want
 	}) {
-		t.Fatalf("the session has %d clients (%v), want %d", got, err, want)
+		t.Fatalf("session %s has %d clients (%v), want %d", name, got, err, want)
+	}
+}
+
+// awaitSwitchSeen waits for the runner to see a switch in the child's
+// output.
+func (z *zmxAttach) awaitSwitchSeen(t *testing.T) {
+	t.Helper()
+	if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+		return len(z.sink.Records().Matching("attach", "switch seen")) > 0
+	}) {
+		t.Fatalf("the runner never saw the switch; the terminal shows %q", z.h.term.output())
 	}
 }
 

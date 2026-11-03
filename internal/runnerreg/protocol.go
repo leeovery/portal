@@ -45,8 +45,7 @@ const answerGrace = 500 * time.Millisecond
 // or can't carry out, as when its attach is already ending.
 var ErrRefused = errors.New("refused")
 
-// errOtherPID is an answer from a process other than the runner registered,
-// which proves that runner gone.
+// errOtherPID is an answer from a process other than the runner registered.
 var errOtherPID = errors.New("answered as another process")
 
 type request struct {

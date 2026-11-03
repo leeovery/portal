@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -34,8 +35,8 @@ var logger = log.For("attach")
 const TokenVar = "PORTAL_ATTACH"
 
 // ErrNoRunner is a request with no runner to take it: no token, as from a
-// raw zmx client or none leading, a token the registry doesn't hold, or a
-// runner proved gone.
+// raw zmx client or none leading, a token the registry doesn't hold, one
+// naming a runner on another session, or a runner proved gone.
 var ErrNoRunner = errors.New("no runner to ask")
 
 const (
@@ -87,10 +88,21 @@ func (r Registry) Switch(ctx context.Context, token, current, target string) err
 	rn, err := r.lookup(token)
 	if err == nil {
 		attrs = append(attrs, "target_pid", rn.PID)
-		err = r.ask(ctx, rn, request{Request: reqSwitch, Session: target})
+		err = r.askSwitch(ctx, rn, current, target)
 	}
 	report("switch", err, attrs...)
 	return err
+}
+
+// askSwitch asks rn to switch to target only if its entry says it shows
+// current. A token leading current that names a runner on another session is
+// in some other client's environment: the shells of a session zmx made
+// through a runner's client inherit it.
+func (r Registry) askSwitch(ctx context.Context, rn registered, current, target string) error {
+	if rn.Session != current {
+		return fmt.Errorf("%w: runner %d is on %s, not %s", ErrNoRunner, rn.PID, rn.Session, current)
+	}
+	return r.ask(ctx, rn, request{Request: reqSwitch, Session: target})
 }
 
 // DetachToPicker asks every runner registered on session to detach to the
@@ -153,11 +165,25 @@ func (r Registry) lookup(token string) (registered, error) {
 	return registered{token: token, entry: e}, nil
 }
 
-// on reads the directory for the runners registered on session. An entry it
-// can't read is left; a socket with no entry, which no runner registering
+// on is the runners registered on session, read as scan reads them.
+func (r Registry) on(session string) ([]registered, error) {
+	runners, err := r.scan()
+	return slices.DeleteFunc(runners, func(rn registered) bool { return rn.Session != session }), err
+}
+
+// sweep removes what scan proves stale, so runners that ended without
+// unregistering, killed or with the machine, leave nothing behind for long.
+// What it can't read it leaves.
+func (r Registry) sweep() {
+	_, _ = r.scan()
+}
+
+// scan reads the directory for the runners registered in it whose pids are
+// running. An entry whose pid isn't running is removed with its socket; one
+// it can't read is left. A socket with no entry, which no runner registering
 // leaves for longer than it takes to write one, is removed if it refuses
 // connections. A registry never made holds no runners.
-func (r Registry) on(session string) ([]registered, error) {
+func (r Registry) scan() ([]registered, error) {
 	files, err := os.ReadDir(r.dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -181,11 +207,14 @@ func (r Registry) on(session string) ([]registered, error) {
 	var runners []registered
 	for token := range entries {
 		e, err := r.read(token)
+		rn := registered{token: token, entry: e}
 		switch {
 		case err != nil:
 			r.leave(token, 0, "unreadable", err)
-		case e.Session == session:
-			runners = append(runners, registered{token: token, entry: e})
+		case !running(e.PID):
+			r.remove(rn)
+		default:
+			runners = append(runners, rn)
 		}
 	}
 	return runners, nil
@@ -208,61 +237,47 @@ func (r Registry) read(token string) (entry, error) {
 }
 
 // ask sends req to rn, returning nil once it accepts. It removes rn's entry
-// and socket only on proof the runner is gone: its pid not running, its socket
-// refusing connections or missing, or an answer from another pid. Anything
-// else leaves them: a runner that doesn't answer in time may be busy, and one
+// and socket only on proof the runner is gone, its pid not running. Anything
+// else leaves them: a live runner's socket refuses connections once its
+// backlog is full, as a closed one does; a missing socket or an answer from
+// another pid may mean the pid is reused, which can't be told from the
+// runner itself; a runner that doesn't answer in time may be busy; and one
 // that refuses, or answers unreadably, may be another version's.
 func (r Registry) ask(ctx context.Context, rn registered, req request) error {
 	if !running(rn.PID) {
-		r.remove(rn, "dead", nil)
+		r.remove(rn)
 		return fmt.Errorf("%w: runner %d has exited", ErrNoRunner, rn.PID)
 	}
 	err := send(ctx, r.socketPath(rn.token), rn.PID, req)
-	if err == nil {
-		return nil
+	if err != nil {
+		r.leave(rn.token, rn.PID, leftReason(err), err)
 	}
-	if reason := goneReason(err); reason != "" {
-		r.remove(rn, reason, err)
-		return fmt.Errorf("%w: %w", ErrNoRunner, err)
-	}
-	r.leave(rn.token, rn.PID, leftReason(err), err)
 	return err
 }
 
-// goneReason is why a failed request proves its runner gone, "" when it
-// doesn't.
-func goneReason(err error) string {
-	switch {
-	case errors.Is(err, syscall.ECONNREFUSED):
-		return "refused"
-	case errors.Is(err, fs.ErrNotExist):
-		return "missing"
-	case errors.Is(err, errOtherPID):
-		return "another pid"
-	}
-	return ""
-}
-
-// leftReason is why a failed request that proves nothing leaves the entry.
+// leftReason is why a failed request leaves the entry.
 func leftReason(err error) string {
 	switch {
 	case errors.Is(err, ErrRefused):
 		return "refused"
+	case errors.Is(err, errOtherPID):
+		return "another pid"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, fs.ErrNotExist):
+		return "missing"
 	case errors.Is(err, os.ErrDeadlineExceeded), errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	}
 	return "no answer"
 }
 
-// remove removes a gone runner's socket, then its entry.
-func (r Registry) remove(rn registered, reason string, cause error) {
+// remove removes the socket, then the entry, of a runner whose pid isn't
+// running.
+func (r Registry) remove(rn registered) {
 	_ = os.Remove(r.socketPath(rn.token))
 	_ = os.Remove(r.entryPath(rn.token))
-	attrs := []any{"path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", reason}
-	if cause != nil {
-		attrs = append(attrs, "error", cause)
-	}
-	logger.Debug("stale runner", attrs...)
+	logger.Debug("stale runner", "path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", "dead")
 }
 
 // leave logs why an entry stays, its runner's pid when it is known.

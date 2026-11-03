@@ -139,7 +139,7 @@ func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRe
 }
 
 // runnersFake stands in for the runner registry. It answers each switch with
-// switchErr, marks each attach's command with runnerToken through the tracker
+// switchErr, marks each attach's command with runnerToken through the backend
 // its listing was given, and records the switches asked for and, in order,
 // what each attach did to the listing: listed or moved to a session as it
 // began, ended, and unlisted.
@@ -148,7 +148,7 @@ type runnersFake struct {
 	switches  []switchCall
 	events    []string
 	listed    bool
-	tracker   runnerreg.Tracker
+	backend   runnerreg.Backend
 }
 
 // runnerToken is the token runnersFake lists every runner under.
@@ -156,8 +156,8 @@ const runnerToken = "tok123"
 
 type switchCall struct{ token, current, target string }
 
-func (f *runnersFake) Listing(t runnerreg.Tracker) runnerListing {
-	f.tracker = t
+func (f *runnersFake) Listing(b runnerreg.Backend) runnerListing {
+	f.backend = b
 	return f
 }
 
@@ -167,7 +167,7 @@ func (f *runnersFake) Switch(_ context.Context, token, current, target string) e
 }
 
 func (f *runnersFake) Attach(cfg *runner.Config) {
-	cfg.Command = f.tracker.Track(cfg.Command, runnerreg.TokenVar, runnerToken)
+	cfg.Command = f.backend.Track(cfg.Command, runnerreg.TokenVar, runnerToken)
 	session := cfg.Session
 	cfg.Began = func() {
 		if f.listed {

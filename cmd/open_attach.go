@@ -120,9 +120,13 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 
 // switchTo moves the terminal this command was typed in to name, from inside
 // a session: through the runner whose terminal leads the session, else by the
-// command, which zmx routes to the leader.
+// command, which zmx routes to the leader. The session it was typed in needs
+// no move, and gets none: a switch would detach and attach it again.
 func (c attachConnector) switchTo(name string, command backend.Command) error {
 	ctx, current := c.cmd.Context(), c.backend.Current()
+	if name == current {
+		return nil
+	}
 	if err := c.runners.Switch(ctx, c.leader(ctx, current), current, name); err == nil {
 		return nil
 	}

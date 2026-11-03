@@ -1,6 +1,7 @@
 package runnerreg
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -33,3 +34,11 @@ func (g *Registration) Socket() string { return g.registry.socketPath(g.token) }
 // live.
 func (r Registry) EntryPath(token string) string  { return r.entryPath(token) }
 func (r Registry) SocketPath(token string) string { return r.socketPath(token) }
+
+// ServeThrough serves a registration of token on session through ln, as
+// Register does once it has bound the socket, until Close.
+func (r Registry) ServeThrough(token, session string, h Handler, ln net.Listener) *Registration {
+	g := &Registration{registry: r, token: token, handler: h, session: session, listener: ln}
+	g.start()
+	return g
+}

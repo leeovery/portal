@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
+	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runnerreg"
 )
 
@@ -89,6 +97,34 @@ func TestRegister(t *testing.T) {
 		}
 	})
 
+	t.Run("it first sweeps entries whose pids aren't running, on any session, and orphan sockets that refuse", func(t *testing.T) {
+		sink := logtest.Install(t)
+		r := runnerreg.New(stateDir(t))
+		writeEntry(t, r, "dead01", entryFor(deadPID(t), "api-x7Kd9a"))
+		refusingSocket(t, r.SocketPath("dead01"))
+		writeEntry(t, r, "dead02", entryFor(deadPID(t), "blog-c3d4"))
+		writeEntry(t, r, "live01", entryFor(otherPID(t), "blog-c3d4"))
+		refusingSocket(t, r.SocketPath("live01"))
+		writeEntry(t, r, "odd001", "not json")
+		refusingSocket(t, r.SocketPath("orphan"))
+		silentSocket(t, r.SocketPath("listen")) // a runner yet to write its entry
+
+		register(t, r, "tok123", "docs-e5f6", &handler{})
+
+		want := []string{"listen.sock", "live01.json", "live01.sock", "odd001.json", "tok123.json", "tok123.sock"}
+		if got := files(t, r.Dir()); !slices.Equal(got, want) {
+			t.Errorf("the registry holds %q, want %q", got, want)
+		}
+		var swept []string
+		for _, rec := range sink.Records().Matching("attach", "stale runner") {
+			swept = append(swept, filepath.Base(rec.AttrString(t, "path")))
+		}
+		slices.Sort(swept)
+		if want := []string{"dead01.json", "dead02.json", "orphan.sock"}; !slices.Equal(swept, want) {
+			t.Errorf("stale runner records name %q, want %q", swept, want)
+		}
+	})
+
 	t.Run("a token no runner could have is refused, making nothing", func(t *testing.T) {
 		for _, token := range []string{"", "../tok", "a/b", "tok.12", "tók123"} {
 			r := runnerreg.New(stateDir(t))
@@ -149,6 +185,87 @@ func TestRegister_SocketPathLength(t *testing.T) {
 		}
 		if exists(t, r.Dir()) {
 			t.Errorf("the refused registration made %s", r.Dir())
+		}
+	})
+}
+
+// failingListener fails Accept as a process out of descriptors does, as many
+// times as fails says, then takes connections from the listener it wraps.
+type failingListener struct {
+	net.Listener
+	fails atomic.Int32
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if l.fails.Add(-1) >= 0 {
+		return nil, &net.OpError{Op: "accept", Net: "unix", Err: os.NewSyscallError("accept", syscall.EMFILE)}
+	}
+	return l.Listener.Accept()
+}
+
+// servedThrough serves a registration of tok123 through a listener on its
+// socket that fails fails times before it takes a connection.
+func servedThrough(t *testing.T, fails int32) (*runnerreg.Registration, *failingListener) {
+	t.Helper()
+	r := runnerreg.New(stateDir(t))
+	if err := os.MkdirAll(r.Dir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", r.SocketPath("tok123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &failingListener{Listener: ln}
+	failing.fails.Store(fails)
+	g := r.ServeThrough("tok123", "api-x7Kd9a", &handler{}, failing)
+	t.Cleanup(func() { _ = g.Close() })
+	return g, failing
+}
+
+func TestRegister_ServingThroughAcceptFailures(t *testing.T) {
+	t.Run("a connection the socket fails to take is taken on a retry, with one WARN for each run of failures", func(t *testing.T) {
+		sink := logtest.Install(t)
+		g, failing := servedThrough(t, 3)
+		request := `{"version":1,"request":"switch","session":"blog-c3d4",` + due() + `}` + "\n"
+
+		for run := range 2 {
+			if got := call(t, g.Socket(), request); !got.OK {
+				t.Fatalf("run %d: answer = %+v, want the switch served once the socket takes the connection", run, got)
+			}
+			failing.fails.Store(2)
+		}
+
+		recs := sink.Records().Matching("attach", "serve failed").AtExactLevel(slog.LevelWarn)
+		if len(recs) != 2 {
+			t.Fatalf("serve failed records = %d, want one for each run of failures", len(recs))
+		}
+		if err := recs[0].ErrorAttr(t, "error"); !errors.Is(err, syscall.EMFILE) {
+			t.Errorf("serve failed error = %v, want the socket's EMFILE", err)
+		}
+		if got := recs[0].AttrString(t, "session"); got != "api-x7Kd9a" {
+			t.Errorf("serve failed session = %q, want api-x7Kd9a", got)
+		}
+	})
+
+	t.Run("Close ends the retries of a socket that never takes a connection", func(t *testing.T) {
+		sink := logtest.Install(t)
+		g, _ := servedThrough(t, 1<<30)
+		if !harnesstest.PollUntil(t, 5*time.Second, 5*time.Millisecond, func() bool {
+			return len(sink.Records().Matching("attach", "serve failed")) > 0
+		}) {
+			t.Fatal("the socket never failed to take a connection")
+		}
+
+		closed := make(chan error, 1)
+		go func() { closed <- g.Close() }()
+
+		select {
+		case err := <-closed:
+			if err != nil {
+				t.Errorf("Close = %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Close never returned: serve went on retrying")
 		}
 	})
 }

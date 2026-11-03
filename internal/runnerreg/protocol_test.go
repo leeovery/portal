@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
 )
 
@@ -103,8 +104,8 @@ func TestProtocol_Requests(t *testing.T) {
 
 		r := call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4","deadline":"`+past+`"}`+"\n")
 
-		if r.OK || !strings.Contains(r.Refusal, "deadline") {
-			t.Errorf("answer = %+v; want a refusal past the deadline", r)
+		if r.OK || !strings.Contains(r.Refusal, runner.ErrPastDeadline.Error()) {
+			t.Errorf("answer = %+v; want the runner's refusal past the deadline", r)
 		}
 		if switches, _ := h.asked(); len(switches) != 0 {
 			t.Errorf("the handler was asked to switch to %q", switches)
@@ -237,9 +238,10 @@ func TestProtocol_LogsEachRequestServed(t *testing.T) {
 
 	call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4",`+due()+`}`+"\n")
 	call(t, g.Socket(), `{"version":1,"request":"rename",`+due()+`}`+"\n")
+	call(t, g.Socket(), "not json\n")
 
 	recs := sink.Records().Matching("attach", "request").AtExactLevel(slog.LevelDebug)
-	if len(recs) != 2 {
+	if len(recs) != 3 {
 		t.Fatalf("request records = %d, want one per request", len(recs))
 	}
 	for i, want := range []struct{ detail, result string }{{"switch", "accepted"}, {"rename", "refused"}} {
@@ -258,5 +260,8 @@ func TestProtocol_LogsEachRequestServed(t *testing.T) {
 	}
 	if !recs[1].HasAttr("error") {
 		t.Error("the refusal names no error")
+	}
+	if got := recs[2].AttrString(t, "result"); got != "refused" || recs[2].HasAttr("detail") || !recs[2].HasAttr("error") {
+		t.Errorf("the unreadable request's record = %+v, want a refusal with its error and no detail", recs[2])
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/runner"
 )
 
 // ErrSocketPathTooLong refuses a control socket whose path a unix socket's
@@ -30,8 +31,12 @@ func checkSocketPath(path string) error {
 	return nil
 }
 
-// errPastDeadline refuses a request its caller has given up on.
-var errPastDeadline = errors.New("the request is past its deadline")
+// acceptBackoffMin and acceptBackoffMax bound the wait before serve takes a
+// connection again after its socket fails to take one.
+const (
+	acceptBackoffMin = 5 * time.Millisecond
+	acceptBackoffMax = time.Second
+)
 
 // Handler carries out the requests sent to a registered runner, each by ctx's
 // deadline, the caller's.
@@ -61,14 +66,16 @@ type Registration struct {
 }
 
 // Register lists this process under token as a runner attached to session,
-// serving the requests sent to its socket through h until Close. The
-// registry's directory is made 0700 and the socket 0600. A token that could
-// not have been minted for a runner is refused, and a socket path too long for
-// a unix socket's address with ErrSocketPathTooLong, making nothing.
+// serving the requests sent to its socket through h until Close, once it has
+// swept the registry of runners whose pids aren't running. The registry's
+// directory is made 0700 and the socket 0600. A token that could not have
+// been minted for a runner is refused, and a socket path too long for a unix
+// socket's address with ErrSocketPathTooLong, making nothing.
 func (r Registry) Register(token, session string, h Handler) (*Registration, error) {
 	if !validToken(token) {
 		return nil, fmt.Errorf("register runner: token %q is no runner's", token)
 	}
+	r.sweep()
 	g := &Registration{registry: r, token: token, handler: h, session: session}
 	if err := g.listen(); err != nil {
 		return nil, fmt.Errorf("register runner: %w", err)
@@ -77,10 +84,15 @@ func (r Registry) Register(token, session string, h Handler) (*Registration, err
 		_ = g.listener.Close()
 		return nil, fmt.Errorf("register runner: %w", err)
 	}
-	g.ctx, g.cancel = context.WithCancel(context.Background())
-	g.served.Go(g.serve)
+	g.start()
 	logger.Debug("listed", "session", session, "path", r.entryPath(token))
 	return g, nil
+}
+
+// start serves the socket until Close.
+func (g *Registration) start() {
+	g.ctx, g.cancel = context.WithCancel(context.Background())
+	g.served.Go(g.serve)
 }
 
 // SetSession moves the entry to session, as the runner switches to it.
@@ -156,17 +168,30 @@ func (g *Registration) write(session string) error {
 	return fileutil.AtomicWrite0600(g.registry.entryPath(g.token), data)
 }
 
-// serve answers each connection to the socket until Close.
+// serve answers each connection to the socket until Close. A connection the
+// socket fails to take, as with no descriptors free, is tried again after a
+// backoff that doubles from acceptBackoffMin to acceptBackoffMax, and logged
+// once for each run of failures; the entry stays listed throughout.
 func (g *Registration) serve() {
+	var backoff time.Duration
 	for {
 		conn, err := g.listener.Accept()
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				logger.Warn("serve failed", "session", g.currentSession(), "error", err)
-			}
+		switch {
+		case err == nil:
+			backoff = 0
+			g.served.Go(func() { g.answer(conn) })
+			continue
+		case errors.Is(err, net.ErrClosed):
 			return
+		case backoff == 0:
+			logger.Warn("serve failed", "session", g.currentSession(), "error", err)
 		}
-		g.served.Go(func() { g.answer(conn) })
+		backoff = min(max(2*backoff, acceptBackoffMin), acceptBackoffMax)
+		select {
+		case <-g.ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
 	}
 }
 
@@ -194,7 +219,7 @@ func (g *Registration) answer(conn net.Conn) {
 // runner takes is one its caller is still waiting to hear of.
 func (g *Registration) carryOut(q request) error {
 	if !time.Now().Before(q.Deadline) {
-		return errPastDeadline
+		return runner.ErrPastDeadline
 	}
 	ctx, cancel := context.WithDeadline(g.ctx, q.Deadline)
 	defer cancel()
@@ -209,7 +234,10 @@ func (g *Registration) logRequest(q request, refusal error) {
 	if refusal != nil {
 		result = "refused"
 	}
-	attrs := []any{"session", g.currentSession(), "detail", q.Request, "result", result}
+	attrs := []any{"session", g.currentSession(), "result", result}
+	if q.Request != "" {
+		attrs = append(attrs, "detail", q.Request)
+	}
 	if q.Session != "" {
 		attrs = append(attrs, "target", q.Session)
 	}

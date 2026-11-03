@@ -116,6 +116,23 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	return env, stateDir
 }
 
+// OwnStateDir hands dir the ownership IsolateStateForTest gave the state dir
+// it made, for a fixture whose processes use another, such as one short enough
+// for unix sockets: the sandbox surfaces daemons on dir, in this process and
+// in subprocesses, and this process's PORTAL_STATE_DIR names it. The fixture
+// still appends PORTAL_STATE_DIR=dir to its subprocesses' env slice. The
+// fingerprint backstop needs nothing: it watches the default path under the
+// scrubbed HOME, wherever the state dir is.
+func OwnStateDir(t *testing.T, dir string) {
+	t.Helper()
+	if os.Getenv(state.SandboxRegistryEnv) == "" {
+		t.Fatal("portaltest: OwnStateDir runs after IsolateStateForTest")
+	}
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	state.RegisterSandboxStateDir(dir)
+	appendSandboxRegistryDir(t, dir)
+}
+
 // shellConfigDirOutsideTempTree creates the directory ZDOTDIR names and
 // registers its removal. It is deliberately not a t.TempDir(): the point is to
 // sit outside the tree the framework removes, so a shell still flushing at

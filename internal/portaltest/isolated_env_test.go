@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -282,6 +283,25 @@ func TestStateDirEnv(t *testing.T) {
 		named, _ := envValue(env, "PORTAL_STATE_DIR")
 		if got := strings.TrimSpace(string(body)); got != named {
 			t.Fatalf("sandbox registry names %q, env slice names %q", got, named)
+		}
+	})
+
+	t.Run("OwnStateDir hands a fixture's own state dir to the process env and the sandbox registry", func(t *testing.T) {
+		env, isolated := portaltest.IsolateStateForTest(t)
+		own := t.TempDir()
+
+		portaltest.OwnStateDir(t, own)
+
+		if got := os.Getenv("PORTAL_STATE_DIR"); got != own {
+			t.Errorf("process PORTAL_STATE_DIR = %q, want %q", got, own)
+		}
+		registryPath, _ := envValue(env, state.SandboxRegistryEnv)
+		body, err := os.ReadFile(registryPath)
+		if err != nil {
+			t.Fatalf("read sandbox registry: %v", err)
+		}
+		if got, want := strings.Fields(string(body)), []string{isolated, own}; !slices.Equal(got, want) {
+			t.Errorf("sandbox registry names %q, want %q", got, want)
 		}
 	})
 

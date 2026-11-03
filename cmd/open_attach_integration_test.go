@@ -54,6 +54,7 @@ func newPortalWorld(t *testing.T, binary string) *portalWorld {
 	// macOS's $TMPDIR is too long for a socket's address. Made before the zmx
 	// directory, so it is removed after the sessions are killed.
 	stateDir := shortTempDir(t)
+	portaltest.OwnStateDir(t, stateDir)
 	b := zmxtest.New(t)
 	env = append(env,
 		"PORTAL_STATE_DIR="+stateDir,
@@ -205,9 +206,15 @@ func (w *portalWorld) awaitOneSession(t *testing.T) string {
 
 func (w *portalWorld) awaitClients(t *testing.T, name string, want int) {
 	t.Helper()
+	awaitClientsOn(t, w.b, name, want)
+}
+
+// awaitClientsOn waits for b's session name to have want clients attached.
+func awaitClientsOn(t *testing.T, b *zmx.Backend, name string, want int) {
+	t.Helper()
 	var got int
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
-		s, err := w.b.Session(t.Context(), name)
+		s, err := b.Session(t.Context(), name)
 		got = s.Clients
 		return err == nil && got == want
 	}) {

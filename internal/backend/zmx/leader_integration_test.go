@@ -84,7 +84,7 @@ func TestLeaderAgainstZmx(t *testing.T) {
 		// its client's messages in order, so once it has gone its reply was
 		// read first; had the reply made it the leader, its going would leave
 		// no leader at all.
-		time.Sleep(200 * time.Millisecond)
+		passive.AwaitRead(t)
 		passive.Type(t, "\x1c")
 		if !passive.Exited(settle) {
 			t.Fatal("the passive client never detached")
@@ -98,7 +98,14 @@ func TestLeaderAgainstZmx(t *testing.T) {
 	t.Run("a client whose environment names nothing to track is tracked for zmx's default list, as Portal copies it", func(t *testing.T) {
 		b := zmxtest.New(t)
 		mustCreate(t, b, "work", t.TempDir(), "sleep", "1000")
-		zmxtest.Attach(t, b, "work")
+		attach, err := b.AttachCommand(t.Context(), "work")
+		if err != nil {
+			t.Fatalf("AttachCommand = %v", err)
+		}
+		// Stripped, so a list the developer exports never reaches the client,
+		// however the test's environment is made.
+		attach.Env = slices.DeleteFunc(slices.Clone(attach.Env), func(kv string) bool { return strings.HasPrefix(kv, "ZMX_TRACK_ENV=") })
+		zmxtest.Run(t, attach)
 
 		var names []string
 		for _, v := range awaitLeader(t, b, "work") {

@@ -11,38 +11,43 @@ import (
 	"github.com/leeovery/portal/internal/runner"
 )
 
-// Tracker marks an attach command's client with a variable the backend
-// reports while that client leads its session: backend.Backend's Track.
-type Tracker interface {
+// Backend is what a Listing asks of the backend: backend.Backend's Track, to
+// mark an attach's client with the runner's token, and LeaderEnv, to read the
+// token back from the client leading a session.
+type Backend interface {
 	Track(command backend.Command, name, value string) backend.Command
+	LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error)
 }
+
+// errNotLeading is a confirmation's refusal: the session's leader is another
+// client, or none.
+var errNotLeading = errors.New("the session's leader is not this runner's client")
 
 // Listing keeps one runner process in the registry while it is attached, its
 // attaches coming one at a time. Each attach's command carries the runner's
 // token, tracked. The runner registers once an attach has begun, moves to the
-// next session as a switch attaches it, takes the requests sent it while an
-// attach lasts, and is unlisted as soon as it no longer knows the session it
-// shows.
+// next session as a switch attaches it, and takes the requests sent it while
+// an attach lasts.
 type Listing struct {
 	registry Registry
-	tracker  Tracker
+	backend  Backend
 	relay    relay
 	token    string
 	reg      *Registration
 }
 
 // Listing is a listing in r of a runner not yet registered, marking each
-// attach's client through t.
-func (r Registry) Listing(t Tracker) *Listing {
-	return &Listing{registry: r, tracker: t}
+// attach's client through b.
+func (r Registry) Listing(b Backend) *Listing {
+	return &Listing{registry: r, backend: b}
 }
 
 // Attach readies cfg's attach to be listed: its command's client carries
 // the runner's token in TokenVar, tracked. Once the attach begins, the runner
 // is registered on cfg.Session, or moved there from the session a switch
-// left, and takes the requests sent it until Ended; once zmx switches the
-// attach away, it is unlisted. A token that can't be minted leaves the
-// attach unlisted.
+// left, and takes the requests sent it until Ended. The attach is confirmed
+// to show cfg.Session while its client leads it, carrying the token. A token
+// that can't be minted leaves the attach unlisted and unconfirmed.
 func (l *Listing) Attach(cfg *runner.Config) {
 	session := cfg.Session
 	if l.token == "" {
@@ -53,7 +58,8 @@ func (l *Listing) Attach(cfg *runner.Config) {
 		}
 		l.token = token
 	}
-	cfg.Command = l.tracker.Track(cfg.Command, TokenVar, l.token)
+	token := l.token
+	cfg.Command = l.backend.Track(cfg.Command, TokenVar, token)
 	requests := make(chan runner.Request)
 	cfg.Requests = requests
 	cfg.Began = func() {
@@ -61,7 +67,21 @@ func (l *Listing) Attach(cfg *runner.Config) {
 			l.relay.open(requests)
 		}
 	}
-	cfg.SwitchedAway = l.Close
+	cfg.Confirm = func(ctx context.Context) error { return l.leads(ctx, session, token) }
+}
+
+// leads is why the client carrying token may not be leading session, nil when
+// it is. A client that has left a session can't lead it: the backend clears a
+// session's leader as its client disconnects.
+func (l *Listing) leads(ctx context.Context, session, token string) error {
+	env, err := l.backend.LeaderEnv(ctx, session)
+	if err != nil {
+		return fmt.Errorf("ask for the leader of %s: %w", session, err)
+	}
+	if got, _ := env.Lookup(TokenVar); got != token {
+		return errNotLeading
+	}
+	return nil
 }
 
 // Ended refuses every request from now until the next attach begins, one

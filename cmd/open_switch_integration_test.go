@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -128,14 +129,6 @@ func (p *portalTerm) awaitRunner(t *testing.T, session string) {
 		return len(pids) == 1 && pids[0] == p.cmd.Process.Pid
 	}) {
 		t.Fatalf("runners = %v, want portal %d alone on %s", got, p.cmd.Process.Pid, session)
-	}
-}
-
-// awaitUnlisted waits for the registry to drop p's portal.
-func (p *portalTerm) awaitUnlisted(t *testing.T) {
-	t.Helper()
-	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return p.token(t) == "" }) {
-		t.Fatalf("runners = %v, want portal %d unlisted", p.runners(t), p.cmd.Process.Pid)
 	}
 }
 
@@ -272,7 +265,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("a leading runner that refuses, as another version's, is switched by the fallback, and kills nothing after", func(t *testing.T) {
+	t.Run("a leading runner that refuses, as another version's, is switched by the fallback, stays listed, and kills nothing after", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		p, alpha := w.openProject(t)
 		w.create(t, "beta")
@@ -285,7 +278,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		w.awaitClients(t, alpha, 0)
 		p.showsSession(t, "beta", 21)
 		w.awaitExitStatus(t, alpha, 0)
-		p.awaitUnlisted(t)
+		p.awaitRunner(t, alpha)
 		p.awaitKillRefused(t)
 		for _, name := range []string{alpha, "beta"} {
 			if !w.alive(t, name) {
@@ -294,7 +287,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("a zmx attach typed in a Portal attach switches it under the runner, which unlists and kills nothing after", func(t *testing.T) {
+	t.Run("a zmx attach typed in a Portal attach switches it under the runner, which stays listed and kills nothing after", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		p, alpha := w.openProject(t)
 		w.create(t, "beta")
@@ -305,12 +298,43 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		w.awaitClients(t, "beta", 1)
 		w.awaitClients(t, alpha, 0)
 		p.showsSession(t, "beta", 21)
-		p.awaitUnlisted(t)
+		p.awaitRunner(t, alpha)
 		p.awaitKillRefused(t)
 		for _, name := range []string{alpha, "beta"} {
 			if !w.alive(t, name) {
 				t.Errorf("%s ended on the kill key of a runner switched away", name)
 			}
+		}
+	})
+
+	t.Run("a zmx inside a Portal attach switching its own client, as one over ssh does, leaves the kill key killing the session", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		p, alpha := w.openProject(t)
+		p.awaitRunner(t, alpha)
+		inner := zmxtest.New(t)
+		for _, name := range []string{"inner1", "inner2"} {
+			if _, err := inner.Create(t.Context(), name, t.TempDir(), nil); err != nil {
+				t.Fatalf("create %s: %v", name, err)
+			}
+		}
+		zmxBinary := shellquote.Single(zmxtest.Binary(t))
+
+		p.typeIn(t, "env -u ZMX_SESSION ZMX_DIR="+shellquote.Single(inner.Dir())+" "+zmxBinary+" attach inner1\r")
+		awaitClientsOn(t, inner, "inner1", 1)
+		p.typeIn(t, zmxBinary+" attach inner2\r")
+		awaitClientsOn(t, inner, "inner2", 1)
+		// The runner reads the inner switch before the echo that follows it.
+		p.showsSession(t, "inner2", 21)
+		p.awaitRunner(t, alpha)
+		mark := p.mark()
+		p.typeIn(t, altQ)
+
+		p.awaitAfter(t, mark, pickerMark)
+		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return !w.alive(t, alpha) }) {
+			t.Errorf("%s outlived the kill key", alpha)
+		}
+		if shown := p.shownSince(mark); strings.Contains(shown, "kill refused") {
+			t.Errorf("the kill was refused:\n%s", shown)
 		}
 	})
 

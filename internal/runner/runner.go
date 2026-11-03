@@ -27,13 +27,16 @@ var logger = log.For("attach")
 // the attach command itself.
 var ErrNoTerminal = errors.New("the attach needs a terminal")
 
-// ErrSwitchedAway is why Run refuses the kill key and every request once zmx
-// has switched the attach to another session outside Portal: it no longer
-// knows which session the terminal shows.
-var ErrSwitchedAway = errors.New("the terminal was switched to another session outside Portal")
+// ErrUnconfirmed is why Run refuses the kill key, and a request for the
+// picker, once the child's output has shown a switch and nothing confirms the
+// terminal still shows its session.
+var ErrUnconfirmed = errors.New("the terminal may show another session, switched outside Portal")
 
-// errPastDeadline refuses a request its asker has given up on.
-var errPastDeadline = errors.New("the request is past its deadline")
+// ErrPastDeadline refuses a request its asker has given up on.
+var ErrPastDeadline = errors.New("the request is past its deadline")
+
+// errNothingConfirms is a Config's missing Confirm.
+var errNothingConfirms = errors.New("nothing confirms the session")
 
 // grace bounds each of the runner's waits but the one for the terminal: for
 // the child to read what it was sent, to exit after a detach, a kill or each
@@ -70,12 +73,14 @@ type Config struct {
 	// Began, when set, is called once the attach has begun, before Run reads
 	// any request.
 	Began func()
-	// SwitchedAway, when set, is called on Run's goroutine once the child's
-	// output shows zmx has switched it to another session outside Portal, as
-	// an attach typed by hand in the session does. From then on Run refuses
-	// the kill key, ending the attach for the picker to show why, and every
-	// request; the detach keys still detach.
-	SwitchedAway func()
+	// Confirm confirms through the backend that the terminal still shows
+	// Session, returning why not otherwise. Once the child's output shows a
+	// switch, zmx's reset then its screen clear, Run is unsure: zmx may have
+	// switched the child to another session, or a zmx inside the session, one
+	// reached over ssh say, may have switched its own client, writing the
+	// same bytes. Unsure, Run kills only if Confirm confirms as the kill key
+	// is pressed, and refuses a request for the picker. Nil confirms nothing.
+	Confirm func(ctx context.Context) error
 }
 
 // Request ends the attach from outside it as the detach key does: to the
@@ -234,15 +239,10 @@ func (e ending) report(session string) {
 
 // await is the one place an attach ends.
 func (a *attach) await(ctx context.Context) ending {
-	away := a.away
 	for {
 		select {
 		case <-a.winch:
 			a.resize()
-		case <-away:
-			away = nil
-			logger.Info("switched away", "session", a.cfg.Session)
-			a.cfg.SwitchedAway()
 		case action := <-a.keys:
 			return a.act(ctx, action)
 		case req := <-a.cfg.Requests:
@@ -269,16 +269,12 @@ func (a *attach) await(ctx context.Context) ending {
 
 // act carries out an action, whatever asked for it. A kill that succeeds
 // leaves the child to end with the session; one that fails, or that Run
-// refuses because zmx switched the attach away, detaches it, so the picker
-// can show why. A context that ends during the kill ends the attach as it
-// would anywhere else.
+// refuses, detaches it, so the picker can show why. A context that ends
+// during the kill ends the attach as it would anywhere else.
 func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	end := ending{out: Outcome{Action: action}, reason: action.String()}
-	switch {
-	case action == attachkeys.Kill && a.switchedAway.Load():
-		end.out.Err = fmt.Errorf("kill refused: %w", ErrSwitchedAway)
-	case action == attachkeys.Kill:
-		end.out.Err = a.cfg.Kill(ctx, a.cfg.Session)
+	if action == attachkeys.Kill {
+		end.out.Err = a.kill(ctx)
 		if ctx.Err() != nil {
 			end = cancelled(ctx)
 		} else if end.out.Err == nil {
@@ -289,14 +285,30 @@ func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	return end
 }
 
-// admit is why Run won't take req, nil when it will: zmx has switched the
-// attach away, or the request's asker has stopped waiting.
+// kill kills the session. Unsure which session the terminal shows, it first
+// asks Confirm, now rather than as the switch was seen, so the backend has
+// long since seen a client that left, and refuses the kill unless it
+// confirms.
+func (a *attach) kill(ctx context.Context) error {
+	if a.unsure.Load() {
+		if err := a.cfg.Confirm(ctx); err != nil {
+			logger.Debug("kill unconfirmed", "session", a.cfg.Session, "error", err)
+			return fmt.Errorf("kill refused: %w", ErrUnconfirmed)
+		}
+	}
+	return a.cfg.Kill(ctx, a.cfg.Session)
+}
+
+// admit is why Run won't take req, nil when it will: its asker has stopped
+// waiting, or it asks for the picker while Run is unsure which session the
+// terminal shows. A switch is taken unsure: its asker found this runner by
+// the backend naming it the leader of the session it attached.
 func (a *attach) admit(req Request) error {
 	switch {
-	case a.switchedAway.Load():
-		return ErrSwitchedAway
 	case !req.Deadline.IsZero() && !time.Now().Before(req.Deadline):
-		return errPastDeadline
+		return ErrPastDeadline
+	case req.Switch == "" && a.unsure.Load():
+		return ErrUnconfirmed
 	}
 	return nil
 }

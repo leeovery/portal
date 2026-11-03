@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -56,10 +57,8 @@ type attach struct {
 	exited chan struct{}
 	// keys carries the action of the bound key the input found.
 	keys chan attachkeys.Action
-	// switchedAway is set, and then away closed, once the child's output
-	// shows zmx switched it to another session.
-	switchedAway atomic.Bool
-	away         chan struct{}
+	// unsure is set once the child's output shows a switch.
+	unsure atomic.Bool
 	// broken carries the end a copy loop's panic makes.
 	broken         chan ending
 	signals, winch chan os.Signal
@@ -70,8 +69,8 @@ func newAttach(cfg Config) *attach {
 	if cfg.Began == nil {
 		cfg.Began = func() {}
 	}
-	if cfg.SwitchedAway == nil {
-		cfg.SwitchedAway = func() {}
+	if cfg.Confirm == nil {
+		cfg.Confirm = func(context.Context) error { return errNothingConfirms }
 	}
 	return &attach{
 		cfg:     cfg,
@@ -80,7 +79,6 @@ func newAttach(cfg Config) *attach {
 		outDone: make(chan struct{}),
 		exited:  make(chan struct{}),
 		keys:    make(chan attachkeys.Action, 1),
-		away:    make(chan struct{}),
 		broken:  make(chan ending, 2),
 		signals: make(chan os.Signal, 1),
 		winch:   make(chan os.Signal, 1),
@@ -484,9 +482,9 @@ func (a *attach) copyOutput() {
 			a.drained = !refused && (err == nil || errors.Is(err, unix.EIO))
 			return
 		}
-		if !a.switchedAway.Load() && watch.scan(buf[:n]) {
-			a.switchedAway.Store(true)
-			close(a.away)
+		if !a.unsure.Load() && watch.scan(buf[:n]) {
+			a.unsure.Store(true)
+			logger.Debug("switch seen", "session", a.cfg.Session)
 		}
 		if refused {
 			continue

@@ -11,18 +11,11 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
 )
-
-// tracker marks a command as the backend's Track does, setting the variable.
-type tracker struct{}
-
-func (tracker) Track(c backend.Command, name, value string) backend.Command {
-	c.Env = append(slices.Clone(c.Env), name+"="+value)
-	return c
-}
 
 // attachment is one attach a Listing readied, standing in for runner.Run:
 // the test begins it and answers its requests as Run would.
@@ -79,19 +72,35 @@ func (a *attachment) untaken(t *testing.T, within time.Duration) {
 	}
 }
 
-// switchVia asks the runner the token names to switch to target, in the
-// background.
-func switchVia(t *testing.T, r runnerreg.Registry, token, target string) <-chan error {
+// switchVia asks the runner the token names, on current, to switch to
+// target, in the background.
+func switchVia(t *testing.T, r runnerreg.Registry, token, current, target string) <-chan error {
 	done := make(chan error, 1)
-	go func() { done <- r.Switch(t.Context(), token, "api-x7Kd9a", target) }()
+	go func() { done <- r.Switch(t.Context(), token, current, target) }()
 	return done
 }
 
 func listing(t *testing.T, r runnerreg.Registry) *runnerreg.Listing {
 	t.Helper()
-	l := r.Listing(tracker{})
+	return listingOn(t, r, sessions())
+}
+
+// sessions is a backend holding the sessions the tests attach.
+func sessions() *backendtest.Fake {
+	return backendtest.New(backend.Session{Name: "api-x7Kd9a"}, backend.Session{Name: "blog-c3d4"})
+}
+
+// listingOn is a listing whose attaches b marks and confirms.
+func listingOn(t *testing.T, r runnerreg.Registry, b *backendtest.Fake) *runnerreg.Listing {
+	t.Helper()
+	l := r.Listing(b)
 	t.Cleanup(l.Close)
 	return l
+}
+
+// leading makes the client carrying token lead session, as far as b says.
+func leading(b *backendtest.Fake, session, token string) {
+	b.SetLeaderEnv(session, backend.ClientEnv{{Name: "DISPLAY", Value: ":0"}, {Name: runnerreg.TokenVar, Value: token}})
 }
 
 func TestListing(t *testing.T) {
@@ -120,7 +129,7 @@ func TestListing(t *testing.T) {
 		a := begun(listing(t, r), "api-x7Kd9a")
 
 		before := time.Now()
-		switched := switchVia(t, r, a.token(), "blog-c3d4")
+		switched := switchVia(t, r, a.token(), "api-x7Kd9a", "blog-c3d4")
 
 		req := a.take(t, nil)
 		if req.Switch != "blog-c3d4" || req.Deadline.Before(before.Add(runnerreg.Timeout())) || req.Deadline.After(time.Now().Add(runnerreg.Timeout())) {
@@ -135,10 +144,10 @@ func TestListing(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		a := begun(listing(t, r), "api-x7Kd9a")
 
-		switched := switchVia(t, r, a.token(), "blog-c3d4")
-		a.take(t, runner.ErrSwitchedAway)
+		switched := switchVia(t, r, a.token(), "api-x7Kd9a", "blog-c3d4")
+		a.take(t, runner.ErrUnconfirmed)
 
-		if err := <-switched; !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), runner.ErrSwitchedAway.Error()) {
+		if err := <-switched; !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), runner.ErrUnconfirmed.Error()) {
 			t.Errorf("Switch = %v, want the attach's refusal", err)
 		}
 	})
@@ -166,7 +175,7 @@ func TestListing(t *testing.T) {
 		l := listing(t, r)
 		a := begun(l, "api-x7Kd9a")
 
-		switched := switchVia(t, r, a.token(), "blog-c3d4")
+		switched := switchVia(t, r, a.token(), "api-x7Kd9a", "blog-c3d4")
 		// The request waits on the attach, which never takes it.
 		time.Sleep(100 * time.Millisecond)
 		l.Ended()
@@ -181,7 +190,7 @@ func TestListing(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		a := begun(listing(t, r), "api-x7Kd9a")
 
-		switched := switchVia(t, r, a.token(), "blog-c3d4")
+		switched := switchVia(t, r, a.token(), "api-x7Kd9a", "blog-c3d4")
 
 		select {
 		case err := <-switched:
@@ -225,7 +234,7 @@ func TestListing(t *testing.T) {
 		if names := files(t, r.Dir()); len(names) != 2 {
 			t.Errorf("the registry holds %q, want the one entry and its socket", names)
 		}
-		switched := switchVia(t, r, b.token(), "docs-e5f6")
+		switched := switchVia(t, r, b.token(), "blog-c3d4", "docs-e5f6")
 		if req := b.take(t, nil); req.Switch != "docs-e5f6" {
 			t.Errorf("the next attach took %+v, want the switch sent it", req)
 		}
@@ -254,29 +263,16 @@ func TestListing(t *testing.T) {
 		}
 	})
 
-	t.Run("zmx switching the attach away unlists the runner at once", func(t *testing.T) {
-		r := runnerreg.New(stateDir(t))
-		a := begun(listing(t, r), "api-x7Kd9a")
-
-		a.cfg.SwitchedAway()
-
-		if names := files(t, r.Dir()); len(names) != 0 {
-			t.Errorf("the registry holds %q, want the runner unlisted", names)
-		}
-		if err := r.Switch(t.Context(), a.token(), "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrNoRunner) {
-			t.Errorf("Switch = %v, want ErrNoRunner", err)
-		}
-	})
-
 	t.Run("an attach the registry can't list goes on unlisted, with a WARN", func(t *testing.T) {
 		sink := logtest.Install(t)
 		long := filepath.Join(stateDir(t), strings.Repeat("s", runnerreg.MaxSocketPath()))
 		if err := os.MkdirAll(long, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		l := listing(t, runnerreg.New(long))
+		b := sessions()
+		l := listingOn(t, runnerreg.New(long), b)
 
-		begun(l, "api-x7Kd9a")
+		a := begun(l, "api-x7Kd9a")
 
 		rec := sink.Records().Matching("attach", "register failed").AtExactLevel(slog.LevelWarn).Only(t, "register failed record")
 		if got := rec.AttrString(t, "session"); got != "api-x7Kd9a" {
@@ -284,6 +280,10 @@ func TestListing(t *testing.T) {
 		}
 		if err := rec.ErrorAttr(t, "error"); !errors.Is(err, runnerreg.ErrSocketPathTooLong) {
 			t.Errorf("error = %v, want ErrSocketPathTooLong", err)
+		}
+		leading(b, "api-x7Kd9a", a.token())
+		if err := a.cfg.Confirm(t.Context()); err != nil {
+			t.Errorf("Confirm = %v, want the unlisted attach still confirmed by the token its client carries", err)
 		}
 	})
 
@@ -313,6 +313,68 @@ func TestListing(t *testing.T) {
 		rec := sink.Records().Matching("attach", "register failed").AtExactLevel(slog.LevelWarn).Only(t, "register failed record")
 		if got := rec.AttrString(t, "session"); got != "blog-c3d4" {
 			t.Errorf("session = %q, want blog-c3d4", got)
+		}
+	})
+}
+
+func TestListing_Confirm(t *testing.T) {
+	t.Run("an attach is confirmed while its client leads its session, carrying the runner's token", func(t *testing.T) {
+		b := sessions()
+		a := begun(listingOn(t, runnerreg.New(stateDir(t)), b), "api-x7Kd9a")
+		leading(b, "api-x7Kd9a", a.token())
+
+		if err := a.cfg.Confirm(t.Context()); err != nil {
+			t.Errorf("Confirm = %v, want the attach confirmed", err)
+		}
+		if calls := b.CallsTo(backendtest.OpLeaderEnv); len(calls) != 1 || calls[0].Name != "api-x7Kd9a" {
+			t.Errorf("LeaderEnv calls = %+v, want one for the attach's session", calls)
+		}
+	})
+
+	t.Run("each attach is confirmed on its own session", func(t *testing.T) {
+		b := sessions()
+		l := listingOn(t, runnerreg.New(stateDir(t)), b)
+		a := begun(l, "api-x7Kd9a")
+		l.Ended()
+		next := begun(l, "blog-c3d4")
+		leading(b, "blog-c3d4", a.token())
+
+		if err := next.cfg.Confirm(t.Context()); err != nil {
+			t.Errorf("Confirm of the next attach = %v, want it confirmed on blog-c3d4", err)
+		}
+		if err := a.cfg.Confirm(t.Context()); err == nil {
+			t.Error("Confirm of the attach that left api-x7Kd9a = nil, want it unconfirmed: nothing leads api-x7Kd9a")
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		leader backend.ClientEnv
+	}{
+		{"no client leads the session", nil},
+		{"the leader carries another runner's token", backend.ClientEnv{{Name: runnerreg.TokenVar, Value: "other1"}}},
+		{"the leader carries no token", backend.ClientEnv{{Name: "DISPLAY", Value: ":0"}}},
+		{"the leader unset the token", backend.ClientEnv{{Name: runnerreg.TokenVar, Unset: true}}},
+	} {
+		t.Run("an attach is unconfirmed when "+tc.name, func(t *testing.T) {
+			b := sessions()
+			a := begun(listingOn(t, runnerreg.New(stateDir(t)), b), "api-x7Kd9a")
+			b.SetLeaderEnv("api-x7Kd9a", tc.leader)
+
+			if err := a.cfg.Confirm(t.Context()); err == nil {
+				t.Error("Confirm = nil, want the attach unconfirmed")
+			}
+		})
+	}
+
+	t.Run("an attach is unconfirmed when the backend can't say who leads, saying why", func(t *testing.T) {
+		b := sessions()
+		a := begun(listingOn(t, runnerreg.New(stateDir(t)), b), "api-x7Kd9a")
+		leading(b, "api-x7Kd9a", a.token())
+		b.Fail(backendtest.OpLeaderEnv, backend.ErrTimeout)
+
+		if err := a.cfg.Confirm(t.Context()); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("Confirm = %v, want the backend's ErrTimeout", err)
 		}
 	})
 }

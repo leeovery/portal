@@ -12,8 +12,9 @@ import (
 // it.
 type runnerRegistry interface {
 	// Listing keeps one attach loop's runner listed while it is attached,
-	// marking each attach's client through t.
-	Listing(t runnerreg.Tracker) runnerListing
+	// marking each attach's client through b and confirming through b that
+	// the client leads its session.
+	Listing(b runnerreg.Backend) runnerListing
 	// Switch asks the runner registered under token, whose terminal leads
 	// session current, to switch to target, returning nil once it has
 	// accepted.
@@ -30,13 +31,13 @@ type runnerListing interface {
 // stateRunners is the registry under Portal's state directory.
 type stateRunners struct{}
 
-func (stateRunners) Listing(t runnerreg.Tracker) runnerListing {
+func (stateRunners) Listing(b runnerreg.Backend) runnerListing {
 	dir, err := state.Dir()
 	if err != nil {
 		attachLogger.Warn("register failed", "error", err)
 		return unlisted{}
 	}
-	return runnerreg.New(dir).Listing(t)
+	return runnerreg.New(dir).Listing(b)
 }
 
 func (stateRunners) Switch(ctx context.Context, token, current, target string) error {
@@ -48,7 +49,7 @@ func (stateRunners) Switch(ctx context.Context, token, current, target string) e
 }
 
 // unlisted lists nothing, for a state directory that won't resolve: the
-// runner attaches unlisted, as one the registry can't hold does.
+// runner attaches unlisted, and with no token to confirm its attach by.
 type unlisted struct{}
 
 func (unlisted) Attach(*runner.Config) {}

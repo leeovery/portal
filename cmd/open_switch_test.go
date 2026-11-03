@@ -103,6 +103,21 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 		})
 	}
 
+	t.Run("opening the session it was typed in moves nothing, and Portal exits 0", func(t *testing.T) {
+		fake, rec := stageAttach(t, "blog-c3d4")
+		fake.SetCurrent("blog-c3d4")
+		fake.SetLeaderEnv("blog-c3d4", leading("lead01"))
+		rec.runners.switchErr = nil
+
+		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
+			t.Fatalf("openSession = %v, want nil", err)
+		}
+		rec.assertNone(t)
+		if len(rec.runners.switches) != 0 || len(fake.CallsTo(backendtest.OpLeaderEnv)) != 0 {
+			t.Errorf("switches = %+v, leader reads = %+v; want neither", rec.runners.switches, fake.CallsTo(backendtest.OpLeaderEnv))
+		}
+	})
+
 	t.Run("outside a session neither the leader nor the registry is asked", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a")
 		rec.runners.switchErr = nil

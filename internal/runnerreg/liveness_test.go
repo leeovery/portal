@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -34,29 +35,17 @@ func resultOf(t *testing.T, sink *logtest.Sink, call string) string {
 	return sink.Records().Matching("attach", call).AtExactLevel(slog.LevelInfo).Only(t, call+" record").AttrString(t, "result")
 }
 
-func TestLiveness_RemovesARunnerOnlyOnProofItIsGone(t *testing.T) {
+func TestLiveness_RemovesARunnerOnlyWhenItsPidIsNotRunning(t *testing.T) {
 	for _, tc := range []struct {
-		name, reason string
-		stage        func(t *testing.T, r runnerreg.Registry)
+		name  string
+		stage func(t *testing.T, r runnerreg.Registry)
 	}{
-		{"its pid is dead", "dead", func(t *testing.T, r runnerreg.Registry) {
+		{"with its socket", func(t *testing.T, r runnerreg.Registry) {
 			writeEntry(t, r, "gone01", entryFor(deadPID(t), "api-x7Kd9a"))
 			refusingSocket(t, r.SocketPath("gone01"))
 		}},
-		{"its socket refuses, though another process holds its pid now", "refused", func(t *testing.T, r runnerreg.Registry) {
-			writeEntry(t, r, "gone01", entryFor(otherPID(t), "api-x7Kd9a"))
-			refusingSocket(t, r.SocketPath("gone01"))
-		}},
-		{"its socket is missing", "missing", func(t *testing.T, r runnerreg.Registry) {
-			writeEntry(t, r, "gone01", entryFor(os.Getpid(), "api-x7Kd9a"))
-		}},
-		{"its socket answers as another pid", "another pid", func(t *testing.T, r runnerreg.Registry) {
-			register(t, r, "gone01", "api-x7Kd9a", &handler{})
-			writeEntry(t, r, "gone01", entryFor(otherPID(t), "api-x7Kd9a"))
-		}},
-		{"its socket refuses as another pid", "another pid", func(t *testing.T, r runnerreg.Registry) {
-			writeEntry(t, r, "gone01", entryFor(otherPID(t), "api-x7Kd9a"))
-			answeringSocket(t, r.SocketPath("gone01"), `{"version":1,"ok":false,"refusal":"busy","pid":1}`, nil)
+		{"without its socket", func(t *testing.T, r runnerreg.Registry) {
+			writeEntry(t, r, "gone01", entryFor(deadPID(t), "api-x7Kd9a"))
 		}},
 	} {
 		for call, ask := range askedBy {
@@ -70,12 +59,12 @@ func TestLiveness_RemovesARunnerOnlyOnProofItIsGone(t *testing.T) {
 				if got := resultOf(t, sink, call); got != "no runner" {
 					t.Errorf("%s result = %q, want no runner", call, got)
 				}
-				if exists(t, r.EntryPath("gone01")) || exists(t, r.SocketPath("gone01")) {
-					t.Errorf("the registry holds %q, want the entry and its socket gone", files(t, r.Dir()))
+				if names := files(t, r.Dir()); len(names) != 0 {
+					t.Errorf("the registry holds %q, want the entry and its socket gone", names)
 				}
 				rec := sink.Records().Matching("attach", "stale runner").AtExactLevel(slog.LevelDebug).Only(t, "stale runner record")
-				if got := rec.AttrString(t, "reason"); got != tc.reason {
-					t.Errorf("stale runner reason = %q, want %q", got, tc.reason)
+				if got := rec.AttrString(t, "reason"); got != "dead" {
+					t.Errorf("stale runner reason = %q, want dead", got)
 				}
 				if got := rec.AttrString(t, "path"); got != r.EntryPath("gone01") {
 					t.Errorf("stale runner path = %q, want the entry", got)
@@ -85,52 +74,76 @@ func TestLiveness_RemovesARunnerOnlyOnProofItIsGone(t *testing.T) {
 	}
 }
 
-func TestLiveness_LeavesWhatProvesNothing(t *testing.T) {
-	ours := func(t *testing.T, r runnerreg.Registry) {
+func TestLiveness_LeavesARunnerWhosePidIsRunning(t *testing.T) {
+	// ours stages an entry naming this process, which is running, and returns
+	// its pid.
+	ours := func(t *testing.T, r runnerreg.Registry) int {
 		writeEntry(t, r, "kept01", entryFor(os.Getpid(), "api-x7Kd9a"))
+		return os.Getpid()
 	}
 	for _, tc := range []struct {
 		name, reason string
-		stage        func(t *testing.T, r runnerreg.Registry)
+		stage        func(t *testing.T, r runnerreg.Registry) int
 	}{
-		{"a socket that never answers in time, as a busy runner's", "timeout", func(t *testing.T, r runnerreg.Registry) {
+		{"a socket that refuses connections, as a live runner's does with its backlog full", "connection refused", func(t *testing.T, r runnerreg.Registry) int {
+			refusingSocket(t, r.SocketPath("kept01"))
+			return ours(t, r)
+		}},
+		{"a missing socket, as when another process took the pid", "missing", ours},
+		{"an answer from another pid", "another pid", func(t *testing.T, r runnerreg.Registry) int {
+			register(t, r, "kept01", "api-x7Kd9a", &handler{})
+			pid := otherPID(t)
+			writeEntry(t, r, "kept01", entryFor(pid, "api-x7Kd9a"))
+			return pid
+		}},
+		{"a refusal from another pid", "another pid", func(t *testing.T, r runnerreg.Registry) int {
+			pid := otherPID(t)
+			writeEntry(t, r, "kept01", entryFor(pid, "api-x7Kd9a"))
+			answeringSocket(t, r.SocketPath("kept01"), `{"version":1,"ok":false,"refusal":"busy","pid":1}`, nil)
+			return pid
+		}},
+		{"a socket that never answers in time, as a busy runner's", "timeout", func(t *testing.T, r runnerreg.Registry) int {
 			runnerreg.SetTimeout(t, 100*time.Millisecond)
-			ours(t, r)
 			silentSocket(t, r.SocketPath("kept01"))
+			return ours(t, r)
 		}},
-		{"a refusal, as another version's", "refused", func(t *testing.T, r runnerreg.Registry) {
-			ours(t, r)
+		{"a refusal, as another version's", "refused", func(t *testing.T, r runnerreg.Registry) int {
 			answeringSocket(t, r.SocketPath("kept01"), `{"version":2,"ok":false,"refusal":"protocol version 1, where this runner speaks 2","pid":`+strconv.Itoa(os.Getpid())+`}`, nil)
+			return ours(t, r)
 		}},
-		{"an answer it can't read", "no answer", func(t *testing.T, r runnerreg.Registry) {
-			ours(t, r)
+		{"an answer it can't read", "no answer", func(t *testing.T, r runnerreg.Registry) int {
 			answeringSocket(t, r.SocketPath("kept01"), `{"Version":1,"ok":true,"pid":`+strconv.Itoa(os.Getpid())+`}`, nil)
+			return ours(t, r)
 		}},
-		{"a hang-up with no answer", "no answer", func(t *testing.T, r runnerreg.Registry) {
-			ours(t, r)
+		{"a hang-up with no answer", "no answer", func(t *testing.T, r runnerreg.Registry) int {
 			hangingUpSocket(t, r.SocketPath("kept01"))
+			return ours(t, r)
 		}},
 	} {
 		for call, ask := range askedBy {
 			t.Run(call+": "+tc.name, func(t *testing.T) {
 				sink := logtest.Install(t)
 				r := runnerreg.New(stateDir(t))
-				tc.stage(t, r)
+				if err := os.MkdirAll(r.Dir(), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				pid := tc.stage(t, r)
+				staged := files(t, r.Dir())
 
 				ask(t, r, "kept01")
 
 				if got := resultOf(t, sink, call); got == "no runner" || got == "accepted" {
 					t.Errorf("%s result = %q, want a refusal or a failure", call, got)
 				}
-				if !exists(t, r.EntryPath("kept01")) || !exists(t, r.SocketPath("kept01")) {
-					t.Errorf("the registry holds %q, want the entry and its socket left", files(t, r.Dir()))
+				if got := files(t, r.Dir()); !slices.Equal(got, staged) {
+					t.Errorf("the registry holds %q, want what was staged, %q", got, staged)
 				}
 				rec := sink.Records().Matching("attach", "runner entry left").AtExactLevel(slog.LevelDebug).Only(t, "runner entry left record")
 				if got := rec.AttrString(t, "reason"); got != tc.reason {
 					t.Errorf("runner entry left reason = %q, want %q", got, tc.reason)
 				}
-				if got := rec.IntAttr(t, "target_pid"); got != int64(os.Getpid()) {
-					t.Errorf("runner entry left target_pid = %d, want %d", got, os.Getpid())
+				if got := rec.IntAttr(t, "target_pid"); got != int64(pid) {
+					t.Errorf("runner entry left target_pid = %d, want %d", got, pid)
 				}
 				if recs := sink.Records().Matching("attach", "stale runner"); len(recs) > 0 {
 					t.Errorf("logged a stale runner: %+v", recs)
@@ -138,43 +151,64 @@ func TestLiveness_LeavesWhatProvesNothing(t *testing.T) {
 			})
 		}
 	}
+}
 
-	t.Run("an entry it can't read", func(t *testing.T) {
-		pid := strconv.Itoa(os.Getpid())
-		for name, body := range map[string]string{
-			"not json":              "not json",
-			"no pid":                `{"session":"api-x7Kd9a"}`,
-			"no session":            `{"pid":` + pid + `}`,
-			"a field to add":        `{"pid":` + pid + `,"session":"api-x7Kd9a","tty":"/dev/ttys001"}`,
-			"a key in another case": `{"PID":` + pid + `,"session":"api-x7Kd9a"}`,
-			"a key given twice":     `{"pid":` + pid + `,"session":"blog-c3d4","session":"api-x7Kd9a"}`,
-		} {
-			t.Run(name, func(t *testing.T) {
-				sink := logtest.Install(t)
-				r := runnerreg.New(stateDir(t))
-				writeEntry(t, r, "odd001", body)
-				refusingSocket(t, r.SocketPath("odd001"))
+func TestLiveness_LeavesWhatItCannotRead(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	for name, body := range map[string]string{
+		"not json":              "not json",
+		"no pid":                `{"session":"api-x7Kd9a"}`,
+		"no session":            `{"pid":` + pid + `}`,
+		"a field to add":        `{"pid":` + pid + `,"session":"api-x7Kd9a","tty":"/dev/ttys001"}`,
+		"a key in another case": `{"PID":` + pid + `,"session":"api-x7Kd9a"}`,
+		"a key given twice":     `{"pid":` + pid + `,"session":"blog-c3d4","session":"api-x7Kd9a"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			sink := logtest.Install(t)
+			r := runnerreg.New(stateDir(t))
+			writeEntry(t, r, "odd001", body)
+			refusingSocket(t, r.SocketPath("odd001"))
 
-				if err := r.Switch(t.Context(), "odd001", "api-x7Kd9a", "blog-c3d4"); err == nil || errors.Is(err, runnerreg.ErrNoRunner) {
-					t.Errorf("Switch = %v, want a failure, and not ErrNoRunner", err)
+			if err := r.Switch(t.Context(), "odd001", "api-x7Kd9a", "blog-c3d4"); err == nil || errors.Is(err, runnerreg.ErrNoRunner) {
+				t.Errorf("Switch = %v, want a failure, and not ErrNoRunner", err)
+			}
+			if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
+				t.Errorf("DetachToPicker = %d, %v; want none asked", accepted, err)
+			}
+			if !exists(t, r.EntryPath("odd001")) || !exists(t, r.SocketPath("odd001")) {
+				t.Error("an entry the registry could not read was removed")
+			}
+			for _, rec := range sink.Records().Matching("attach", "runner entry left") {
+				if got := rec.AttrString(t, "reason"); got != "unreadable" {
+					t.Errorf("runner entry left reason = %q, want unreadable", got)
 				}
-				if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
-					t.Errorf("DetachToPicker = %d, %v; want none asked", accepted, err)
-				}
-				if !exists(t, r.EntryPath("odd001")) || !exists(t, r.SocketPath("odd001")) {
-					t.Error("an entry the registry could not read was removed")
-				}
-				for _, rec := range sink.Records().Matching("attach", "runner entry left") {
-					if got := rec.AttrString(t, "reason"); got != "unreadable" {
-						t.Errorf("runner entry left reason = %q, want unreadable", got)
-					}
-				}
-				if n := len(sink.Records().Matching("attach", "runner entry left")); n != 2 {
-					t.Errorf("runner entry left records = %d, want one for each read", n)
-				}
-			})
-		}
-	})
+			}
+			if n := len(sink.Records().Matching("attach", "runner entry left")); n != 2 {
+				t.Errorf("runner entry left records = %d, want one for each read", n)
+			}
+		})
+	}
+}
+
+func TestLiveness_ReadingTheDirectorySweepsEverySession(t *testing.T) {
+	sink := logtest.Install(t)
+	r := runnerreg.New(stateDir(t))
+	writeEntry(t, r, "gone01", entryFor(deadPID(t), "blog-c3d4"))
+	refusingSocket(t, r.SocketPath("gone01"))
+	writeEntry(t, r, "kept01", entryFor(otherPID(t), "blog-c3d4"))
+	refusingSocket(t, r.SocketPath("kept01"))
+
+	if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil {
+		t.Fatalf("DetachToPicker: %v", err)
+	}
+
+	if got, want := files(t, r.Dir()), []string{"kept01.json", "kept01.sock"}; !slices.Equal(got, want) {
+		t.Errorf("the registry holds %q, want only the runner whose pid is running, %q", got, want)
+	}
+	rec := sink.Records().Matching("attach", "stale runner").Only(t, "stale runner record")
+	if got := rec.AttrString(t, "path"); got != r.EntryPath("gone01") {
+		t.Errorf("stale runner path = %q, want the dead runner's entry", got)
+	}
 }
 
 func TestLiveness_AnOrphanSocketThatRefusesGoesWhenTheDirectoryIsRead(t *testing.T) {
