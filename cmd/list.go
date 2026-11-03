@@ -7,6 +7,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -31,17 +32,17 @@ const listNotAnswering = "not answering"
 // formatSessionLong is name, label, attached state and dir. A session that
 // did not answer is known only by its name, so it says so rather than leave
 // its other fields to read as missing.
-func formatSessionLong(s backend.Session, idx *sessionindex.Index) string {
-	if !s.Answered {
+func formatSessionLong(s tui.Session) string {
+	if s.NotAnswering {
 		return s.Name + listColumnGap + listNotAnswering
 	}
 	status := "detached"
-	if s.Attached() {
+	if s.Attached {
 		status = "attached"
 	}
-	fields := []string{s.Name, idx.Label(s.Name), status}
-	if s.Dir != "" {
-		fields = append(fields, s.Dir)
+	fields := []string{s.Name, s.DisplayName(), status}
+	if s.Cwd != "" {
+		fields = append(fields, s.Cwd)
 	}
 	return strings.Join(fields, listColumnGap)
 }
@@ -76,7 +77,7 @@ var listCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			format = func(s backend.Session) string { return formatSessionLong(s, &idx) }
+			format = func(s backend.Session) string { return formatSessionLong(shownSession(s, &idx)) }
 		}
 
 		w := cmd.OutOrStdout()

@@ -24,13 +24,53 @@ func TestLookup(t *testing.T) {
 	}
 }
 
-func TestLabel(t *testing.T) {
-	idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Label: "Alpha"}, {Name: "b"}}}
-	for name, want := range map[string]string{"a": "Alpha", "b": "b", "missing": "missing"} {
-		if got := idx.Label(name); got != want {
-			t.Errorf("Label(%s) = %q, want %q", name, got, want)
-		}
+func TestLookupLive(t *testing.T) {
+	created := time.Date(2026, 10, 30, 9, 15, 0, 0, time.UTC)
+	other := created.Add(time.Second)
+	entry := sessionindex.Entry{Name: "api-x7Kd9a", Label: "api work", Dir: "/work/api", CreatedAt: created}
+
+	tests := []struct {
+		name    string
+		entries []sessionindex.Entry
+		live    time.Time
+		want    sessionindex.Entry
+		wantOK  bool
+	}{
+		{"the same creation finds the entry", []sessionindex.Entry{entry}, created, entry, true},
+		{"the same creation in another zone finds the entry", []sessionindex.Entry{entry}, created.In(time.FixedZone("BST", 3600)), entry, true},
+		{"another creation finds none", []sessionindex.Entry{entry}, other, sessionindex.Entry{}, false},
+		{"an entry recording no creation finds none", []sessionindex.Entry{{Name: "api-x7Kd9a", Label: "api work"}}, created, sessionindex.Entry{}, false},
+		{"a live session reporting no creation finds none", []sessionindex.Entry{entry}, time.Time{}, sessionindex.Entry{}, false},
+		{"no entry finds none", []sessionindex.Entry{{Name: "web-Qm3pLz", CreatedAt: created}}, created, sessionindex.Entry{}, false},
+		{
+			"an unprintable label is dropped, the rest kept",
+			[]sessionindex.Entry{{Name: "api-x7Kd9a", Label: "api\nwork", Dir: "/work/api", CreatedAt: created}},
+			created,
+			sessionindex.Entry{Name: "api-x7Kd9a", Dir: "/work/api", CreatedAt: created},
+			true,
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := sessionindex.Index{Sessions: tt.entries}
+
+			got, ok := idx.LookupLive("api-x7Kd9a", tt.live)
+
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("LookupLive = %+v, %v; want %+v, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+
+	t.Run("it leaves an unprintable label in the index", func(t *testing.T) {
+		idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Label: "x\ty", CreatedAt: created}}}
+
+		_, _ = idx.LookupLive("a", created)
+
+		if idx.Sessions[0].Label != "x\ty" {
+			t.Errorf("Label = %q, want the file's label untouched", idx.Sessions[0].Label)
+		}
+	})
 }
 
 func TestSetLabel(t *testing.T) {
@@ -62,9 +102,6 @@ func TestSetLabel(t *testing.T) {
 			}
 			if idx.Sessions[0].Label != "" {
 				t.Errorf("label = %q, want cleared", idx.Sessions[0].Label)
-			}
-			if got := idx.Label("a"); got != "a" {
-				t.Errorf("Label = %q, want the name", got)
 			}
 		})
 
@@ -109,7 +146,7 @@ func TestSetLabel(t *testing.T) {
 		if err := idx.SetLabel("a", "café — 日本"); err != nil {
 			t.Fatalf("SetLabel: %v", err)
 		}
-		if got := idx.Label("a"); got != "café — 日本" {
+		if got := labelOf(idx, "a"); got != "café — 日本" {
 			t.Errorf("Label = %q", got)
 		}
 	})
@@ -120,7 +157,7 @@ func TestSetLabel(t *testing.T) {
 		if err := idx.SetLabel("a", family); err != nil {
 			t.Fatalf("SetLabel: %v", err)
 		}
-		if got := idx.Label("a"); got != family {
+		if got := labelOf(idx, "a"); got != family {
 			t.Errorf("Label = %q, want %q", got, family)
 		}
 	})
@@ -204,7 +241,7 @@ func TestClaim(t *testing.T) {
 	t.Run("a creation time recorded in another zone is the same creation", func(t *testing.T) {
 		idx := sessionindex.Index{Sessions: []sessionindex.Entry{labelled(created, "/kept")}}
 		idx.Claim("a", "/a", created.In(time.FixedZone("x", 3600)))
-		if got := idx.Label("a"); got != "Old" {
+		if got := labelOf(idx, "a"); got != "Old" {
 			t.Errorf("Label(a) = %q, want the label kept", got)
 		}
 	})
@@ -230,4 +267,9 @@ func TestRemove(t *testing.T) {
 	if idx.Remove("b") {
 		t.Errorf("Remove of an absent entry = true, want false")
 	}
+}
+
+func labelOf(idx sessionindex.Index, name string) string {
+	e, _ := idx.Lookup(name)
+	return e.Label
 }

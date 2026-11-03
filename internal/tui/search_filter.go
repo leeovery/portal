@@ -11,20 +11,19 @@ import (
 // searchEntry holds the session fields a filter value was built from, so a pass
 // can rank a target it was handed without holding the item it came from.
 type searchEntry struct {
-	name string
-	dir  string
-	home string
+	subject resolver.SearchSubject
+	home    string
 }
 
 // searchItemSource maps each session row's filter value to every distinct field
-// pair any generation of the list has produced for it, accumulated for the life
+// set any generation of the list has produced for it, accumulated for the life
 // of the source, so a filter pass can answer for targets from any generation.
 // One source is built per picker run and every generation is recorded before its
 // items reach the list, so a pass can only be handed session targets the source
 // has already held. A filter value is not injective — a session named for the text
 // another session's directory abbreviates to yields the same one — and two
-// generations can produce one value from different pairs, so a key holds a set
-// rather than a single pair, and accumulating it is what lets a pass see both
+// generations can produce one value from different sets, so a key holds every
+// set rather than a single one, and accumulating it is what lets a pass see both
 // sides of such a collision. It is held by pointer
 // because Model is a value Bubble Tea copies on every Update: a map field would
 // go stale in whichever copy the filter closure was built against, while a
@@ -37,7 +36,7 @@ type searchItemSource struct {
 }
 
 // set folds the session rows among items into what the source already holds.
-// Rows sharing a field pair collapse onto one entry.
+// Rows sharing a field set collapse onto one entry.
 func (s *searchItemSource) set(items []list.Item) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -52,7 +51,7 @@ func (s *searchItemSource) set(items []list.Item) {
 		if !ok {
 			continue
 		}
-		entry := searchEntry{name: si.Session.Name, dir: si.Session.Dir, home: si.Home}
+		entry := searchEntry{subject: si.Session.SearchSubject(), home: si.Home}
 		value := si.FilterValue()
 		if !slices.Contains(entries[value], entry) {
 			entries[value] = append(entries[value], entry)
@@ -69,14 +68,14 @@ func (s *searchItemSource) current() map[string][]searchEntry {
 	return s.entries
 }
 
-// containmentFilter narrows to the sessions whose own name or recorded directory
+// containmentFilter narrows to the sessions whose label, name or recorded directory
 // contains term, in the order the list already holds them, for as long as the
 // committed filter text is still term; any other value falls through to the
 // picker's own fuzzy rule. Ranks index the targets the pass was handed, so they
 // resolve against the item generation that pass belongs to however many rebuilds
 // have landed since. A target ranks only when the source holds it and every field
-// pair recorded under it matches: a target no generation has produced, and one
-// whose accumulated pairs disagree about the term, both rank nothing — so a pass
+// set recorded under it matches: a target no generation has produced, and one
+// whose accumulated sets disagree about the term, both rank nothing — so a pass
 // running behind a rebuild, a pass answering for a target two distinct sessions
 // produced, and a pass that is both at once can each only omit a row, never
 // surface one the term does not match.
@@ -99,11 +98,11 @@ func containmentFilter(term string, src *searchItemSource) list.FilterFunc {
 	}
 }
 
-// everyEntryMatches reports whether term is contained by every field pair one
+// everyEntryMatches reports whether term is contained by every field set one
 // filter value was built from.
 func everyEntryMatches(entries []searchEntry, term string) bool {
 	for _, entry := range entries {
-		if !resolver.MatchesSearchTerm(entry.home, term, entry.name, entry.dir) {
+		if !resolver.MatchesSearchTerm(entry.home, term, entry.subject) {
 			return false
 		}
 	}

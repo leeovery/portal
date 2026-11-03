@@ -262,14 +262,14 @@ type Model struct {
 	// dials nor draws; nil when no read is under way.
 	endPreviewRead context.CancelFunc
 
-	// The derived directory is never stamped back to tmux — a pane's cwd can drift
-	// from the origin dir, and freezing that drift would permanently mis-group the
-	// session. Either seam nil skips the pass.
-	dirReader session.PaneCurrentPathReader
+	// dirRunner resolves the git root grouping falls back to. The derived
+	// directory is never written anywhere — a session's cwd can drift from the
+	// origin dir, and freezing that drift would permanently mis-group the
+	// session. Nil skips the pass.
 	dirRunner resolver.CommandRunner
 
 	// derivedDirs is the grouping-only companion to the recorded Session.Dir,
-	// keyed on session name: a guess derived from the pane's cwd, canonicalised,
+	// keyed on session name: a guess derived from the session's cwd, canonicalised,
 	// and read by the grouped arms alone. It must never land in Session.Dir —
 	// a regroup would then make a session findable by a path it was not findable
 	// by a moment earlier. Cleared on every session-list refresh.
@@ -699,9 +699,10 @@ func WithHistory(r HistoryReader) Option {
 	}
 }
 
-func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.CommandRunner) Option {
+// WithDirRunner resolves the git root of a session's cwd, which grouping falls
+// back to for a session with no recorded directory.
+func WithDirRunner(runner resolver.CommandRunner) Option {
 	return func(m *Model) {
-		m.dirReader = reader
 		m.dirRunner = runner
 	}
 }
@@ -892,7 +893,7 @@ func New(lister SessionLister, opts ...Option) Model {
 	}
 	// Recompute now that mode / current session are known (newSessionList set the Flat
 	// default), so the first frame paints the correct mode heading.
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSession)
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown())
 	// The NO_COLOR carve-out wins over every nomination shape: no canvas to
 	// select, so the gate is colourless and detection is skipped.
 	if m.colourless {
@@ -1150,6 +1151,17 @@ func (m Model) projectBandHeight() int {
 	return lipgloss.Height(slot)
 }
 
+// currentSessionShown is what the title names the session the picker runs
+// inside by: its row's text, though the list leaves the row out, or its name
+// until the listing holds it.
+func (m Model) currentSessionShown() string {
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == m.currentSession })
+	if i < 0 {
+		return m.currentSession
+	}
+	return m.sessions[i].DisplayName()
+}
+
 func (m Model) filteredSessions() []Session {
 	return PickerSessions(m.sessions, m.currentSession)
 }
@@ -1220,9 +1232,9 @@ func (m *Model) setProjects(projects []project.Project) {
 
 // Best-effort: an unresolvable session is not negative-cached — nothing is
 // stored and the next grouped rebuild tries again. Call it only from the grouped
-// arms — Flat must pay zero pane reads.
+// arms — Flat must pay zero git-root resolutions.
 func (m *Model) resolveDerivedDirs(sessions []Session) map[string]string {
-	if m.dirReader == nil || m.dirRunner == nil {
+	if m.dirRunner == nil {
 		return m.derivedDirs
 	}
 
@@ -1233,8 +1245,8 @@ func (m *Model) resolveDerivedDirs(sessions []Session) map[string]string {
 		if _, cached := m.derivedDirs[s.Name]; cached {
 			continue
 		}
-		dir, ok, err := session.ResolveSessionDir(s.Name, m.dirReader, m.dirRunner)
-		if !ok || err != nil || dir == "" {
+		dir, ok := session.GroupingDir(s.Cwd, m.dirRunner)
+		if !ok {
 			continue
 		}
 		if m.derivedDirs == nil {
@@ -1253,14 +1265,12 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 
 	var items []list.Item
 	switch {
-	case m.byTagSignpost:
-		items = ToListItems(filtered)
 	case m.sessionListMode == prefs.ModeByProject:
 		items = buildByProject(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
-	case m.sessionListMode == prefs.ModeByTag:
+	case m.sessionListMode == prefs.ModeByTag && !m.byTagSignpost:
 		items = buildByTag(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
 	default:
-		items = ToListItems(filtered)
+		items = buildFlat(filtered)
 	}
 	items = withHome(items, m.home)
 
@@ -1271,7 +1281,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	}
 	cmd := m.sessionList.SetItems(items)
 
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSession)
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown())
 
 	// Without this re-apply the list keeps sizing against pre-load defaults
 	// and overflows under the footer once items populate.
@@ -3684,7 +3694,7 @@ func (m Model) applySectionHeader(listView string) string {
 	}
 	return replaceHeaderLine(listView, renderSectionHeader(
 		m.sessionListMode,
-		m.currentSession,
+		m.currentSessionShown(),
 		m.visibleSessionRowCount(),
 		m.contentWidth(),
 		m.themeState.active,

@@ -93,10 +93,9 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
 		History:       fakeHistory{content: f.history, file: f.historyFile},
-		// DirReader/DirRunner stay nil, so the lazy pane-read fallback returns
-		// before reading anything and a fixture session carrying no recorded
-		// directory groups into the catch-all; ModePersister stays nil so an
-		// `s`-toggle writes nowhere.
+		// DirRunner stays nil, so the git-root fallback resolves nothing and a
+		// fixture session carrying no recorded directory groups into the
+		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
 		InitialMode:   f.initialMode,
 		Search:        f.search,
 		Command:       f.command,
@@ -158,6 +157,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsFlatFixture,
 		sessionsEmptyFixture,
 		sessionsByProjectFixture,
+		sessionsByProjectLabelledFixture,
 		sessionsByTagFixture,
 		sessionsPagedFixture,
 		sessionsInlineFlashFixture,
@@ -223,8 +223,8 @@ func FixtureNames() []string {
 	return names
 }
 
-// Every session carries a stamped Dir so the grouped-render lazy pane-read
-// fallback never fires (the harness has no tmux server).
+// Every session carries a recorded Dir, so grouping never needs the git-root
+// fallback the harness leaves unwired.
 func sessionsFlatFixture() *Fixture {
 	sessions := []tui.Session{
 		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
@@ -285,6 +285,34 @@ func sessionsByProjectFixture() *Fixture {
 
 	return &Fixture{
 		name:         "sessions-by-project",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeByProject,
+	}
+}
+
+// Labelled rows in a grouped mode: each group, the catch-all included, orders
+// by the text its rows show, so a label sits where it reads and two rows
+// showing the same text fall back to their names.
+func sessionsByProjectLabelledFixture() *Fixture {
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-Vb3kQw", Label: "release checklist", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-Hq7wNe", Label: "api · user search", Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-m4TzpD", Label: "spike", Dir: "/home/user/code/kiln"},
+		{Name: "kiln-3RJDWA", Label: "spike", Dir: "/home/user/code/kiln"},
+		{Name: "kiln-aws-migration", Dir: "/home/user/code/kiln"},
+		{Name: "scratch-p84cXa", Label: "notes on the outage", Dir: "/home/user/code/untracked-scratch"},
+		{Name: "scratch-Ue9fLr", Dir: "/home/user/code/untracked-scratch"},
+	}
+
+	projects := []project.Project{
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+	}
+
+	return &Fixture{
+		name:         "sessions-by-project-labelled",
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: projects},
 		initialMode:  prefs.ModeByProject,
@@ -488,10 +516,9 @@ const fixtureHome = "/home/user"
 // and a session matching neither field so the narrowing is visible by its
 // absence.
 //
-// legacy-port-shim carries no Dir, against this file's stamped-Dir convention:
-// the dir-resolution seams are nil, so a grouped rebuild resolves nothing and
-// routes it to the catch-all rather than issuing a pane read the harness has no
-// server for.
+// legacy-port-shim carries no Dir, against this file's recorded-Dir convention:
+// the git-root fallback is unwired, so a grouped rebuild resolves nothing and
+// routes it to the catch-all.
 func sessionsSearchResultsFixture() *Fixture {
 	home := fixtureHome
 	portalDir := filepath.Join(home, "code/portal")
@@ -887,7 +914,9 @@ func previewScreenFixture() *Fixture {
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
 		history:      history,
-		captureKeys:  []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		// The history is tessera's, so the cursor sits on its row.
+		initialCursor: "tessera-proxy-Vb3kQw",
+		captureKeys:   []tea.KeyPressMsg{{Code: tea.KeySpace}},
 		// Without the read landing, the frame is the preview's loading line.
 		landsLastKeyRead: true,
 	}

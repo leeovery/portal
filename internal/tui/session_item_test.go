@@ -40,7 +40,7 @@ func TestSessionItem(t *testing.T) {
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(home, session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.SearchSubject()), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the search fields joined)", got, want)
 		}
@@ -53,7 +53,7 @@ func TestSessionItem(t *testing.T) {
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(home, session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.SearchSubject()), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the one-element slice joins to the bare name)", got, want)
 		}

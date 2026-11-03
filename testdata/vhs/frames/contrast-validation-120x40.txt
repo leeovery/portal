@@ -1,8 +1,8 @@
 CONTRAST VALIDATION — canvas #0B0C14
 
 bg.selection  #28243A
-portal-9fk2  ~/code/portal  3 windows  ●●
-fg-on-tint: text.on-selection · text.tertiary · text.secondary · state.positive · accent.attention
+portal · search work  ~/code/portal  ●●
+fg-on-tint: text.on-selection · text.secondary · state.positive · accent.attention
 
 bg.attention  #241B10
 ⚠ state saver is not running — restore may be incomplete

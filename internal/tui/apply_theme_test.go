@@ -13,22 +13,21 @@ import (
 
 const swapProbeSessions = 12
 
-func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListMode, reader *fakeStamper) Model {
+func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListMode, runner *fakeDirRunner) Model {
 	t.Helper()
 	const w, h = 120, 40
 
-	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
+	projects := []project.Project{{Path: runner.gitRoot, Name: "Portal", Tags: []string{"work"}}}
 	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, Session{Name: nameN(i)})
+		sessions = append(sessions, Session{Name: nameN(i), Cwd: runner.gitRoot})
 	}
 
 	m := Build(Deps{
 		Lister:      fakeLister{},
 		Theme:       theme.ConstantNomination(before),
 		InitialMode: mode,
-		DirReader:   reader,
-		DirRunner:   &fakeDirRunner{gitRoot: reader.path},
+		DirRunner:   runner,
 	})
 	m.termWidth = w
 	m.termHeight = h
@@ -69,30 +68,30 @@ func TestApplyTheme_RestylesWithoutRebuild(t *testing.T) {
 
 	for _, tc := range swapProbeGroupingModes() {
 		t.Run(tc.name, func(t *testing.T) {
-			reader := &fakeStamper{path: t.TempDir()}
-			m := newSwapProbeModel(t, before, tc.mode, reader)
+			runner := &fakeDirRunner{gitRoot: t.TempDir()}
+			m := newSwapProbeModel(t, before, tc.mode, runner)
 
-			reader.reads = nil
+			runner.reads = nil
 			m.ApplyTheme(after)
 
-			if len(reader.reads) != 0 {
-				t.Errorf("ApplyTheme performed %d lazy pane read(s) %v — a swap is the O(1) restyle, never the rebuild's dir-resolution pass", len(reader.reads), reader.reads)
+			if len(runner.reads) != 0 {
+				t.Errorf("ApplyTheme performed %d lazy git-root resolution(s) %v — a swap is the O(1) restyle, never the rebuild's dir-resolution pass", len(runner.reads), runner.reads)
 			}
 
 			frame := m.viewSessionList()
 			assertRepointed(t, tc.name+" sessions frame after ApplyTheme",
 				frame, tokenBgSeq(t, after.Canvas), tokenBgSeq(t, before.Canvas))
 
-			if len(reader.reads) != 0 {
-				t.Errorf("rendering after ApplyTheme performed %d lazy pane read(s) %v — the render path pays no reads either", len(reader.reads), reader.reads)
+			if len(runner.reads) != 0 {
+				t.Errorf("rendering after ApplyTheme performed %d lazy git-root resolution(s) %v — the render path pays no reads either", len(runner.reads), runner.reads)
 			}
 
 			if !tc.rebuildReads {
 				return
 			}
 			m.rebuildSessionList()
-			if len(reader.reads) == 0 {
-				t.Fatal("positive control: rebuildSessionList performed no pane reads, so the counting DirReader proves nothing about ApplyTheme")
+			if len(runner.reads) == 0 {
+				t.Fatal("positive control: rebuildSessionList performed no git-root resolutions, so the counting DirRunner proves nothing about ApplyTheme")
 			}
 		})
 	}

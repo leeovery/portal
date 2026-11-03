@@ -57,7 +57,7 @@ func TestRead(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		if got := idx.Label("a"); got != "Alpha" {
+		if got := labelOf(idx, "a"); got != "Alpha" {
 			t.Errorf("Label(a) = %q, want Alpha", got)
 		}
 	})
@@ -90,7 +90,7 @@ func TestUpdate(t *testing.T) {
 		if !idx.SavedAt.Equal(at) || idx.SavedAt.Location() != time.UTC {
 			t.Errorf("saved_at = %v, want %v in UTC", idx.SavedAt, at)
 		}
-		if got := idx.Label("a"); got != "Alpha" {
+		if got := labelOf(idx, "a"); got != "Alpha" {
 			t.Errorf("Label(a) = %q, want Alpha", got)
 		}
 	})

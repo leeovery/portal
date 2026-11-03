@@ -34,13 +34,21 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 	return idx.Sessions[i], true
 }
 
-// Label is what Portal shows for the session: its label, or its name when it
-// has none.
-func (idx *Index) Label(name string) string {
-	if e, ok := idx.Lookup(name); ok && e.Label != "" {
-		return e.Label
+// LookupLive returns a copy of the live session's entry: the session named
+// name that its backend created at created, zero when it reports no time. An
+// entry counts only when it records that same creation; any other belonged to
+// an earlier session under the name, so the live one has none, and shows its
+// name and no dir. A label only a hand-edited file can hold, one SetLabel
+// would refuse, is dropped too, so no surface prints it.
+func (idx *Index) LookupLive(name string, created time.Time) (Entry, bool) {
+	e, ok := idx.Lookup(name)
+	if !ok || !sameCreation(e.CreatedAt, created) {
+		return Entry{}, false
 	}
-	return name
+	if !printable(e.Label) {
+		e.Label = ""
+	}
+	return e, true
 }
 
 // SetLabel sets the session's label, trimmed of surrounding whitespace. An

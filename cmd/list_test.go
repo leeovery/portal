@@ -8,17 +8,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
-	"github.com/leeovery/portal/internal/tmux"
 )
-
-type mockSessionLister struct {
-	sessions []tmux.Session
-	err      error
-}
-
-func (m *mockSessionLister) ListSessions() ([]tmux.Session, error) {
-	return m.sessions, m.err
-}
 
 // stageList stages fake as the backend and tty as whether stdout is a
 // terminal, in a state directory of the test's own.
@@ -58,8 +48,8 @@ func setLabel(t *testing.T, stateDir, name, label string) {
 func TestListCommand(t *testing.T) {
 	twoSessions := func() *backendtest.Fake {
 		return backendtest.New(
-			backend.Session{Name: "claude-lab", Dir: "/work/lab"},
-			backend.Session{Name: "flowx-dev", Dir: "/work/flowx", Clients: 2},
+			backend.Session{Name: "claude-lab", Dir: "/work/lab", Created: joinCreated},
+			backend.Session{Name: "flowx-dev", Dir: "/work/flowx", Clients: 2, Created: joinCreated},
 		)
 	}
 
@@ -76,7 +66,8 @@ func TestListCommand(t *testing.T) {
 	t.Run("it prints label, attached state and dir on a terminal", func(t *testing.T) {
 		fake := twoSessions()
 		stateDir := stageList(t, fake, true)
-		setLabel(t, stateDir, "flowx-dev", "flowx · api work")
+		flowx, _ := fake.Held("flowx-dev")
+		labelSession(t, stateDir, flowx, "flowx · api work")
 
 		want := "claude-lab    claude-lab    detached    /work/lab\n" +
 			"flowx-dev    flowx · api work    attached    /work/flowx\n"
@@ -118,9 +109,10 @@ func TestListCommand(t *testing.T) {
 
 	t.Run("it lists a session that does not answer by its name, marked not answering in the long form", func(t *testing.T) {
 		fake := twoSessions()
+		lab, _ := fake.Held("claude-lab")
 		fake.StopAnswering("claude-lab")
 		stateDir := stageList(t, fake, false)
-		setLabel(t, stateDir, "claude-lab", "lab")
+		labelSession(t, stateDir, lab, "lab")
 
 		if got, want := runList(t, "--short"), "claude-lab\nflowx-dev\n"; got != want {
 			t.Errorf("--short output = %q, want %q", got, want)

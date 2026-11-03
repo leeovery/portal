@@ -4,7 +4,7 @@
                                      │ ▌ nord          ● dark
   Sessions 12                        │ ⚠ couldn't save theme
                                      │ ⏎   set theme
-  ▌ orchard-pipeline-code-based      │ d   set as dark
+  ▌ atelier-web-m4TzpD               │ d   set as dark
                                      │ l   set as light
                          ••••••••••••│ esc close
 

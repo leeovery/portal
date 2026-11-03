@@ -53,26 +53,22 @@ var hooksListCmd = &cobra.Command{
 }
 
 // sessionLocations maps each live session's name, the key its hooks are
-// stored under, to its label. A key no live session carries, such as a pane
-// token from the tmux version, maps to nothing.
+// stored under, to what it shows. A key no live session carries, such as a
+// pane token from the tmux version, maps to nothing.
 func sessionLocations(ctx context.Context) map[string]string {
 	b, err := sessionBackend()
 	if err != nil {
 		return nil
 	}
-	sessions, err := userSessions(ctx, b)
+	sessions, err := listShownSessions(ctx, b)
 	if err != nil {
 		// A listing that fails leaves every location empty; the hooks
 		// themselves still list.
 		return nil
 	}
-	// An index that cannot be read costs only the labels: each live session
-	// is still located, under its name.
-	idx, _ := readSessionIndex()
-
 	locations := make(map[string]string, len(sessions))
 	for _, s := range sessions {
-		locations[s.Name] = idx.Label(s.Name)
+		locations[s.Name] = s.DisplayName()
 	}
 	return locations
 }

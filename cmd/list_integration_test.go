@@ -34,8 +34,15 @@ func TestPortalListAgainstZmx(t *testing.T) {
 		t.Fatal("web-Qm3pLz never showed its client attached")
 	}
 	zmxtest.StopDaemon(t, b, "wedged-Lp4s")
+	// A label shows only for the creation it was set on, so it is claimed for
+	// the live session's, as rename claims it.
+	web, err := b.Session(t.Context(), "web-Qm3pLz")
+	if err != nil {
+		t.Fatalf("read web-Qm3pLz: %v", err)
+	}
 	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		return idx.SetLabel("web-Qm3pLz", "web · checkout")
+		idx.Claim(web.Name, web.Dir, web.Created)
+		return idx.SetLabel(web.Name, "web · checkout")
 	}); err != nil {
 		t.Fatalf("label web-Qm3pLz: %v", err)
 	}

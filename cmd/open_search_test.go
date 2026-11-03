@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/spf13/cobra"
 )
@@ -172,10 +173,11 @@ func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	return sc
 }
 
-// live holds sessions of the names given in the capture's backend.
+// live holds sessions of the names given in the capture's backend, each
+// created at joinCreated.
 func (sc *searchFormCapture) live(names ...string) {
 	for _, name := range names {
-		sc.fake.Add(backend.Session{Name: name})
+		sc.fake.Add(backend.Session{Name: name, Created: joinCreated})
 	}
 }
 
@@ -510,7 +512,7 @@ func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirector
 	sc := installSearchFormSeams(t)
 	sc.live("api-work", "blog-c3d4")
 	dir := filepath.Join(os.Getenv("HOME"), "Code", "portal")
-	seedSessionsJSON(t, `{"version":2,"sessions":[{"name":"api-work","dir":"`+dir+`"}]}`)
+	seedIndex(t, sessionindex.Entry{Name: "api-work", Dir: dir, CreatedAt: joinCreated})
 
 	executeOpen(t, "/portal")
 

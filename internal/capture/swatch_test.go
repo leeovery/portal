@@ -223,11 +223,9 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 		want  string
 	}{
 		{"text.on-selection", selectionBand(th),
-			wantStyle(th.TextOnSelection, th.BgSelection).Bold(true).Render(swatchSessionName)},
-		{"text.tertiary", selectionBand(th),
-			wantStyle(th.TextTertiary, th.BgSelection).Render(swatchSessionPath)},
+			wantStyle(th.TextOnSelection, th.BgSelection).Bold(true).Render(swatchSessionLabel)},
 		{"text.secondary", selectionBand(th),
-			wantStyle(th.TextSecondary, th.BgSelection).Render(swatchWindowCount)},
+			wantStyle(th.TextSecondary, th.BgSelection).Render(swatchSessionPath)},
 		{"state.positive", selectionBand(th),
 			wantStyle(th.StatePositive, th.BgSelection).Render(swatchIndicatorDot) +
 				wantStyle(th.AccentAttention, th.BgSelection).Render(swatchIndicatorDot)},
@@ -249,6 +247,9 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 
 	if strings.Contains(out, "attached") {
 		t.Errorf("swatch still carries the retired worded attached marker\n--- swatch ---\n%s", out)
+	}
+	if strings.Contains(out, "windows") {
+		t.Errorf("swatch still carries the retired window count\n--- swatch ---\n%s", out)
 	}
 
 	selectionCaption := "state.positive · accent.attention"

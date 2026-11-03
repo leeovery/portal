@@ -8,95 +8,89 @@ import (
 )
 
 func TestRebuildSessionListResolutionGate(t *testing.T) {
-	t.Run("Flat (default) performs zero resolutions over un-stamped sessions", func(t *testing.T) {
+	t.Run("Flat (default) performs zero resolutions over sessions with no recorded directory", func(t *testing.T) {
+		cwd := t.TempDir()
 		sessions := []Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
-			{Name: "portal-c", Dir: ""},
+			{Name: "portal-a", Cwd: cwd},
+			{Name: "portal-b", Cwd: cwd},
+			{Name: "portal-c", Cwd: cwd},
 		}
 
-		stamper := &fakeStamper{path: t.TempDir()}
+		runner := &fakeDirRunner{gitRoot: cwd}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
-		m.dirReader = stamper
-		m.dirRunner = &fakeDirRunner{gitRoot: t.TempDir()}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
 
-		if len(stamper.reads) != 0 {
-			t.Errorf("Flat performed %d resolutions (reads=%v), want 0", len(stamper.reads), stamper.reads)
-		}
-		if len(stamper.setCalls) != 0 {
-			t.Errorf("Flat performed %d stamp writes, want 0", len(stamper.setCalls))
+		if len(runner.reads) != 0 {
+			t.Errorf("Flat performed %d resolutions (reads=%v), want 0", len(runner.reads), runner.reads)
 		}
 	})
 
 	t.Run("byTagSignpost (ByTag, zero tags anywhere) performs zero resolutions", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		cwd := t.TempDir()
 		sessions := []Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
+			{Name: "portal-a", Cwd: cwd},
+			{Name: "portal-b", Cwd: cwd},
 		}
 
-		stamper := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
-		m.dirReader = stamper
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
 
 		if !m.byTagSignpost {
 			t.Fatalf("expected byTagSignpost to be set (zero tags anywhere)")
 		}
-		if len(stamper.reads) != 0 {
-			t.Errorf("signpost performed %d resolutions (reads=%v), want 0", len(stamper.reads), stamper.reads)
-		}
-		if len(stamper.setCalls) != 0 {
-			t.Errorf("signpost performed %d stamp writes, want 0", len(stamper.setCalls))
+		if len(runner.reads) != 0 {
+			t.Errorf("signpost performed %d resolutions (reads=%v), want 0", len(runner.reads), runner.reads)
 		}
 	})
 
-	t.Run("ModeByProject resolves every un-stamped session", func(t *testing.T) {
+	t.Run("ModeByProject resolves every session with no recorded directory", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		cwd := t.TempDir()
 		sessions := []Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
-			{Name: "portal-c", Dir: ""},
+			{Name: "portal-a", Cwd: cwd},
+			{Name: "portal-b", Cwd: cwd},
+			{Name: "portal-c", Cwd: cwd},
 		}
 
-		stamper := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = stamper
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
 
-		if len(stamper.reads) != len(sessions) {
-			t.Errorf("ModeByProject performed %d resolutions (reads=%v), want %d", len(stamper.reads), stamper.reads, len(sessions))
+		if len(runner.reads) != len(sessions) {
+			t.Errorf("ModeByProject performed %d resolutions (reads=%v), want %d", len(runner.reads), runner.reads, len(sessions))
 		}
 	})
 
-	t.Run("ModeByTag (tags present) resolves every un-stamped session", func(t *testing.T) {
+	t.Run("ModeByTag (tags present) resolves every session with no recorded directory", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
+		cwd := t.TempDir()
 		sessions := []Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
+			{Name: "portal-a", Cwd: cwd},
+			{Name: "portal-b", Cwd: cwd},
 		}
 
-		stamper := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
-		m.dirReader = stamper
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
 
 		if m.byTagSignpost {
 			t.Fatalf("did not expect byTagSignpost (tags present)")
 		}
-		if len(stamper.reads) != len(sessions) {
-			t.Errorf("ModeByTag performed %d resolutions (reads=%v), want %d", len(stamper.reads), stamper.reads, len(sessions))
+		if len(runner.reads) != len(sessions) {
+			t.Errorf("ModeByTag performed %d resolutions (reads=%v), want %d", len(runner.reads), runner.reads, len(sessions))
 		}
 	})
 }

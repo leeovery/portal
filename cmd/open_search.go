@@ -6,7 +6,6 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -139,32 +138,14 @@ func validateCommandScopeAndFilter(cmd *cobra.Command, args []string) error {
 }
 
 // searchCandidates returns the sessions a term is counted over: the user's
-// sessions less the one the caller is in, which the picker omits too, each
-// with its recorded directory. An index that cannot be read records none, so
-// the term is matched against names alone.
+// sessions less the one the caller is in, which the picker omits too, as the
+// picker shows them.
 func searchCandidates(ctx context.Context, b backend.Backend) ([]tui.Session, error) {
-	sessions, err := userSessions(ctx, b)
+	sessions, err := listShownSessions(ctx, b)
 	if err != nil {
 		return nil, err
 	}
-	idx, _ := readSessionIndex()
-	return tui.PickerSessions(indexedSessions(sessions, &idx), b.Current()), nil
-}
-
-// indexedSessions joins the backend's sessions with the directory the index
-// records for each.
-func indexedSessions(sessions []backend.Session, idx *sessionindex.Index) []tui.Session {
-	out := make([]tui.Session, 0, len(sessions))
-	for _, s := range sessions {
-		entry, _ := idx.Lookup(s.Name)
-		out = append(out, tui.Session{
-			Name:         s.Name,
-			Dir:          entry.Dir,
-			Attached:     s.Attached(),
-			NotAnswering: !s.Answered,
-		})
-	}
-	return out
+	return tui.PickerSessions(sessions, b.Current()), nil
 }
 
 // searchMatches returns, in enumeration order, the sessions the term matches,
@@ -172,7 +153,7 @@ func indexedSessions(sessions []backend.Session, idx *sessionindex.Index) []tui.
 func searchMatches(home, term string, sessions []tui.Session) []tui.Session {
 	var matches []tui.Session
 	for _, s := range sessions {
-		if resolver.MatchesSearchTerm(home, term, s.Name, s.Dir) {
+		if resolver.MatchesSearchTerm(home, term, s.SearchSubject()) {
 			matches = append(matches, s)
 		}
 	}

@@ -1740,7 +1740,7 @@ func TestRenameSession(t *testing.T) {
 			{Name: "bravo", Attached: false},
 		}
 		renamedSessions := []tui.Session{
-			{Name: "new-alpha", Attached: false},
+			{Name: "alpha-renamed", Attached: false},
 			{Name: "bravo", Attached: false},
 		}
 		renamer := &mockSessionRenamer{}
@@ -1752,7 +1752,7 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-		for _, r := range "new-alpha" {
+		for _, r := range "alpha-renamed" {
 			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
 
@@ -1764,8 +1764,8 @@ func TestRenameSession(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View().Content
-		if !strings.Contains(view, "new-alpha") {
-			t.Errorf("expected renamed session 'new-alpha' in list, got:\n%s", view)
+		if !strings.Contains(view, "alpha-renamed") {
+			t.Errorf("expected renamed session 'alpha-renamed' in list, got:\n%s", view)
 		}
 		if strings.Contains(view, "Rename session") {
 			t.Errorf("rename modal should be dismissed after successful rename, got:\n%s", view)

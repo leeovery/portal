@@ -94,7 +94,7 @@ type SessionItem struct {
 // directory is no part of it — a regroup must never make a session findable by a
 // path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	return strings.Join(resolver.SearchFields(i.Home, i.Session.Name, i.Session.Dir), " ")
+	return strings.Join(resolver.SearchFields(i.Home, i.Session.SearchSubject()), " ")
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered

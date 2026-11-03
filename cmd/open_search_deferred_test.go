@@ -225,7 +225,7 @@ func searchDecisionTUI(t *testing.T, decide func() (string, error)) tui.Model {
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           asPickerLister(&mockSessionLister{}),
+		Lister:           fakePickerLister(),
 		ServerStarted:    true,
 		ProgressReceiver: receiver,
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/backend"
@@ -17,11 +16,8 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -414,85 +410,29 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 	return resolver.ResolveGitRoot(dir, &resolver.RealCommandRunner{})
 }
 
-// pendingSettleBound outlasts a hydrate helper's signal timeout, so a helper
-// never signalled has reached the tail that marks its pane before the picker
-// stops re-reading.
-const pendingSettleBound = hydrateTimeout + 2*time.Second
-
-type skeletonMarkerReader struct {
-	lister state.ServerOptionLister
-}
-
-func (r skeletonMarkerReader) ListSkeletonMarkers() (map[string]struct{}, error) {
-	return state.ListSkeletonMarkers(r.lister)
-}
-
-// pickerSessions maps tmux's sessions onto the picker's. tmux answers for every
-// session it lists, and no label is recorded anywhere yet, so each row shows its
-// name. The picker resolves a session's directory from Dir as it always has,
-// falling back to the pane's git root when grouping.
-func pickerSessions(sessions []tmux.Session) []tui.Session {
-	out := make([]tui.Session, 0, len(sessions))
-	for _, s := range sessions {
-		out = append(out, tui.Session{Name: s.Name, Dir: s.Dir, Attached: s.Attached})
-	}
-	return out
-}
-
-type tmuxSessionLister interface {
-	ListSessions() ([]tmux.Session, error)
-}
-
-type tmuxPendingResumeReader interface {
-	ListPendingResumePanes() (tmux.PendingResumeView, error)
-}
-
-// pickerSessionSource serves the picker's session and pending-resume reads from
-// tmux.
-type pickerSessionSource struct {
-	sessions tmuxSessionLister
-	pending  tmuxPendingResumeReader
-}
-
-func (p pickerSessionSource) ListSessions() ([]tui.Session, error) {
-	sessions, err := p.sessions.ListSessions()
-	return pickerSessions(sessions), err
-}
-
-func (p pickerSessionSource) ListPendingResumeSessions() (map[string]struct{}, error) {
-	view, err := p.pending.ListPendingResumePanes()
-	if err != nil {
-		return nil, err
-	}
-	return view.Sessions, nil
-}
-
 type tuiConfig struct {
-	lister          tui.SessionLister
-	killer          tui.SessionKiller
-	renamer         tui.SessionRenamer
-	projectStore    tui.ProjectStore
-	projectEditor   tui.ProjectEditor
-	aliasEditor     tui.AliasEditor
-	sessionCreator  tui.SessionCreator
-	history         tui.HistoryReader
-	dirReader       session.PaneCurrentPathReader
-	dirRunner       resolver.CommandRunner
-	pendingReader   tui.PendingResumeReader
-	skeletonMarkers tui.SkeletonMarkerReader
-	initialMode     prefs.SessionListMode
-	theme           theme.Nomination
-	themeKeys       theme.RawKeys
-	themeSource     tui.ThemeSource
-	modePersister   tui.ModePersister
-	themePersister  tui.ThemePersister
-	detector        tui.TerminalDetector
-	resolve         spawn.AdapterResolver
-	sessionExists   func(string) bool
-	ackChannel      spawn.AckChannelFull
-	spawnExe        spawn.ExecutableResolver
-	spawnGetenv     func(string) string
-	spawnLogger     *slog.Logger
+	lister         tui.SessionLister
+	killer         tui.SessionKiller
+	renamer        tui.SessionRenamer
+	projectStore   tui.ProjectStore
+	projectEditor  tui.ProjectEditor
+	aliasEditor    tui.AliasEditor
+	sessionCreator tui.SessionCreator
+	history        tui.HistoryReader
+	dirRunner      resolver.CommandRunner
+	initialMode    prefs.SessionListMode
+	theme          theme.Nomination
+	themeKeys      theme.RawKeys
+	themeSource    tui.ThemeSource
+	modePersister  tui.ModePersister
+	themePersister tui.ThemePersister
+	detector       tui.TerminalDetector
+	resolve        spawn.AdapterResolver
+	sessionExists  func(string) bool
+	ackChannel     spawn.AckChannelFull
+	spawnExe       spawn.ExecutableResolver
+	spawnGetenv    func(string) string
+	spawnLogger    *slog.Logger
 	// multiWindowRefusal turns the picker's multi-select off with this flash.
 	multiWindowRefusal string
 	cwd                string
@@ -550,11 +490,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ProjectEditor:      cfg.projectEditor,
 		AliasEditor:        cfg.aliasEditor,
 		History:            cfg.history,
-		DirReader:          cfg.dirReader,
 		DirRunner:          cfg.dirRunner,
-		PendingReader:      cfg.pendingReader,
-		SkeletonMarkers:    cfg.skeletonMarkers,
-		PendingSettleBound: pendingSettleBound,
 		ModePersister:      cfg.modePersister,
 		ThemePersister:     cfg.themePersister,
 		CWD:                cfg.cwd,
@@ -665,27 +601,24 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	// terminal the TUI holds.
 	connector := newSessionConnector(cmd, b)
 
-	sessionSource := pickerSessionSource{sessions: client, pending: client}
-
+	// No pending-resume or skeleton-marker reader: nothing is saved or restored
+	// yet, so no session is waiting.
 	cfg := tuiConfig{
-		lister:          sessionSource,
-		killer:          client,
-		renamer:         client,
-		projectStore:    store,
-		projectEditor:   store,
-		aliasEditor:     aliasStore,
-		sessionCreator:  newIndexingCreator(cmd.Context(), store, b, "tui"),
-		history:         b,
-		dirReader:       client,
-		dirRunner:       &resolver.RealCommandRunner{},
-		pendingReader:   sessionSource,
-		skeletonMarkers: skeletonMarkerReader{lister: client},
-		initialMode:     initialMode,
-		theme:           resolution.Nomination,
-		themeKeys:       themeKeys,
-		themeSource:     newThemeSource(themeLoader),
-		cwd:             cwd,
-		serverStarted:   serverStarted,
+		lister:         pickerLister{ctx: cmd.Context(), b: b},
+		killer:         client,
+		renamer:        client,
+		projectStore:   store,
+		projectEditor:  store,
+		aliasEditor:    aliasStore,
+		sessionCreator: newIndexingCreator(cmd.Context(), store, b, "tui"),
+		history:        b,
+		dirRunner:      &resolver.RealCommandRunner{},
+		initialMode:    initialMode,
+		theme:          resolution.Nomination,
+		themeKeys:      themeKeys,
+		themeSource:    newThemeSource(themeLoader),
+		cwd:            cwd,
+		serverStarted:  serverStarted,
 		// No spawn seams: multi-select refuses until the attach runner, as
 		// the CLI burst does, so nothing detects a terminal or opens windows.
 		multiWindowRefusal: errSeveralSessions.Error(),

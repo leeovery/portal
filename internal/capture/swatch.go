@@ -103,9 +103,8 @@ func (s swatchModel) fillCanvas(view string) string {
 const bandWidth = 56
 
 const (
-	swatchSessionName  = "portal-9fk2"
+	swatchSessionLabel = "portal · search work"
 	swatchSessionPath  = "~/code/portal"
-	swatchWindowCount  = "3 windows"
 	swatchIndicatorDot = "●"
 	swatchAttentionMsg = "⚠ state saver is not running — restore may be incomplete"
 )
@@ -128,7 +127,7 @@ func renderSwatch(th theme.Theme) string {
 	b.WriteString(selectionBand(th))
 	b.WriteString("\n")
 	// Caption order matches the band's left-to-right order — the order is the mapping.
-	b.WriteString(caption(th, "fg-on-tint: text.on-selection · text.tertiary · text.secondary · state.positive · accent.attention"))
+	b.WriteString(caption(th, "fg-on-tint: text.on-selection · text.secondary · state.positive · accent.attention"))
 	b.WriteString("\n\n")
 
 	b.WriteString(tintLabel(th, "bg.attention", th.BgAttention))
@@ -180,10 +179,11 @@ func fill(tint color.Color, n int) string {
 func selectionBand(th theme.Theme) string {
 	tint := th.BgSelection.Color()
 	gap := onTint(th.TextOnSelection, tint).Render("  ")
+	// The selected row as a search-opened picker draws it: the label, the
+	// recorded directory, then the indicators.
 	content := strings.Join([]string{
-		onTint(th.TextOnSelection, tint).Bold(true).Render(swatchSessionName),
-		onTint(th.TextTertiary, tint).Render(swatchSessionPath),
-		onTint(th.TextSecondary, tint).Render(swatchWindowCount),
+		onTint(th.TextOnSelection, tint).Bold(true).Render(swatchSessionLabel),
+		onTint(th.TextSecondary, tint).Render(swatchSessionPath),
 		// Packed as the picker's indicator cluster packs them: attached, then
 		// pending, adjacent.
 		onTint(th.StatePositive, tint).Render(swatchIndicatorDot) +

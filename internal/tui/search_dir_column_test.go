@@ -244,12 +244,11 @@ func TestSearchDirColumn(t *testing.T) {
 	t.Run("it shows no directory for a session whose directory is known only to grouping", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := dirColumnModel(t, Deps{
 			InitialMode: prefs.ModeByProject,
 			Search:      &SearchForm{Term: "portal"},
-			DirReader:   &fakeStamper{path: dir},
 			DirRunner:   &fakeDirRunner{gitRoot: dir},
 		}, sessions, projects)
 
@@ -259,20 +258,19 @@ func TestSearchDirColumn(t *testing.T) {
 		assertDirAbsent(t, m, dir)
 	})
 
-	t.Run("it issues no pane read for the column", func(t *testing.T) {
+	t.Run("it resolves no git root for the column", func(t *testing.T) {
 		dir, sessions, projects := dirColumnFixture(t)
-		reader := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := dirColumnModel(t, Deps{
 			InitialMode: prefs.ModeFlat,
 			Search:      &SearchForm{Term: "portal"},
-			DirReader:   reader,
-			DirRunner:   &fakeDirRunner{gitRoot: dir},
+			DirRunner:   runner,
 		}, sessions, projects)
 
 		assertDirRendered(t, m, dir)
 
-		if len(reader.reads) != 0 {
-			t.Errorf("the column must issue no pane read, got reads for %v", reader.reads)
+		if len(runner.reads) != 0 {
+			t.Errorf("the column must resolve no git root, got queries for %v", runner.reads)
 		}
 	})
 

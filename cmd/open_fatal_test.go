@@ -12,7 +12,7 @@ import (
 func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 	fatal := bootstrap.NewFatal("Portal failed to set @portal-restoring marker: permission denied", errors.New("permission denied"))
 
-	lister := asPickerLister(&mockSessionLister{})
+	lister := fakePickerLister()
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
@@ -40,7 +40,7 @@ func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 
 func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	t.Run("clean exit returns nil and does not connect", func(t *testing.T) {
-		m := tui.New(asPickerLister(&mockSessionLister{}))
+		m := tui.New(fakePickerLister())
 		connector := &mockSessionConnector{}
 		if err := processTUIResult(m, connector); err != nil {
 			t.Fatalf("unexpected error: %v", err)

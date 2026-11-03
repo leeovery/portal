@@ -8,10 +8,10 @@ import (
 	"github.com/leeovery/portal/internal/project"
 )
 
-// effectiveDir is the directory grouping matches on: the recorded @portal-dir
-// stamp when present, else the grouping-only derived guess. The item a builder
-// emits keeps the recorded value untouched — the two are not interchangeable
-// (the derived one is canonicalised, the recorded one is the raw stamp).
+// effectiveDir is the directory grouping matches on: the index's recorded dir
+// when present, else the grouping-only derived guess. The item a builder emits
+// keeps the recorded value untouched — the two are not interchangeable (the
+// derived one is canonicalised, the recorded one is raw).
 func effectiveDir(s Session, derived map[string]string) string {
 	if s.Dir != "" {
 		return s.Dir
@@ -22,6 +22,11 @@ func effectiveDir(s Session, derived map[string]string) string {
 const unknownHeading = "Unknown"
 
 const untaggedHeading = "Untagged"
+
+// buildFlat lists the sessions ungrouped, in the order their rows read.
+func buildFlat(sessions []Session) []list.Item {
+	return ToListItems(slices.SortedFunc(slices.Values(sessions), compareShown))
+}
 
 // The group key is the canonical path, not the heading name, so two distinct
 // directories sharing a project name form two distinct groups.
@@ -114,10 +119,7 @@ func unknownItem(s Session) SessionItem {
 // stamping GroupKey = heading makes injectGroupHeaders treat it as one group.
 func orderedSessionItems(resolved, catchAll []SessionItem, heading string) []SessionItem {
 	slices.SortFunc(resolved, func(a, b SessionItem) int {
-		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Session.Name, b.Session.Name)
+		return cmp.Or(cmp.Compare(a.GroupKey, b.GroupKey), compareShown(a.Session, b.Session))
 	})
 
 	out := make([]SessionItem, 0, len(resolved)+len(catchAll))
@@ -130,7 +132,7 @@ func orderedSessionItems(resolved, catchAll []SessionItem, heading string) []Ses
 			stamped = append(stamped, si)
 		}
 		slices.SortFunc(stamped, func(a, b SessionItem) int {
-			return cmp.Compare(a.Session.Name, b.Session.Name)
+			return compareShown(a.Session, b.Session)
 		})
 		out = append(out, stamped...)
 	}

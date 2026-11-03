@@ -234,7 +234,7 @@ func TestShouldRunConcurrentBootstrap(t *testing.T) {
 
 func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
 	t.Run("warm (serverStarted=false) starts on PageSessions, never PageLoading", func(t *testing.T) {
-		m := tui.New(asPickerLister(&mockSessionLister{}), tui.WithServerStarted(false))
+		m := tui.New(fakePickerLister(), tui.WithServerStarted(false))
 
 		if m.ActivePage() == tui.PageLoading {
 			t.Error("warm path landed on PageLoading; want PageSessions")
@@ -245,7 +245,7 @@ func TestWithServerStarted_GatesLoadingPage(t *testing.T) {
 	})
 
 	t.Run("cold (serverStarted=true) starts on PageLoading", func(t *testing.T) {
-		m := tui.New(asPickerLister(&mockSessionLister{}), tui.WithServerStarted(true))
+		m := tui.New(fakePickerLister(), tui.WithServerStarted(true))
 
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)

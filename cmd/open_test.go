@@ -1270,7 +1270,7 @@ func stubTmuxCommander() *commandertest.Scripted {
 
 func defaultTestTUIConfig() tuiConfig {
 	return tuiConfig{
-		lister:         asPickerLister(&mockSessionLister{}),
+		lister:         fakePickerLister(),
 		killer:         &stubSessionKiller{},
 		renamer:        &stubSessionRenamer{},
 		projectStore:   &stubProjectStore{},
@@ -1465,7 +1465,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 func TestProcessTUIResult(t *testing.T) {
 	t.Run("clean exit without selection returns nil", func(t *testing.T) {
-		m := tui.New(asPickerLister(&mockSessionLister{}))
+		m := tui.New(fakePickerLister())
 		connector := &mockSessionConnector{}
 
 		err := processTUIResult(m, connector)

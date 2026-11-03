@@ -4,18 +4,18 @@
                                                                                         │
   Sessions 12                                                                           │ Themes
                                                                                         │
-  ▌ orchard-pipeline-code-based                                                         │   catppuccin-latte
-    orchard-pipeline-codify                                                             │   gitlab-dark-grey
+  ▌ atelier-web-m4TzpD                                                                  │   catppuccin-latte
+    kiln-aws-migration                                                                  │   gitlab-dark-grey
     kiln-relayx-explore                                                                 │   horizon
-    lumen webhooks and watchers                                                         │ ▌ nord                ● dark
-    tessera-proxy-Vb3kQw                                                                │   nord-wave
-    atelier-web-m4TzpD                                                                  │   tokyo-night
-    lumen-sync-engine                                                                   │   tokyo-night-day    ● light
-    kiln-aws-migration                                                                  │   vivid-01
-    relay-v1-api-Hq7wNe                                                                 │   vivid-02
-    relayx-3RJDWA                                                                       │   vivid-03
-    loom-p84cXa                                                                         │   vivid-04
-    quill-Ue9fLr                                                                        │   vivid-05
+    loom-p84cXa                                                                         │ ▌ nord                ● dark
+    lumen webhooks and watchers                                                         │   nord-wave
+    lumen-sync-engine                                                                   │   tokyo-night
+    orchard-pipeline-code-based                                                         │   tokyo-night-day    ● light
+    orchard-pipeline-codify                                                             │   vivid-01
+    quill-Ue9fLr                                                                        │   vivid-02
+    relay-v1-api-Hq7wNe                                                                 │   vivid-03
+    relayx-3RJDWA                                                                       │   vivid-04
+    tessera-proxy-Vb3kQw                                                                │   vivid-05
                                                                                         │   vivid-06
                                                                                         │   vivid-07
                                                                                         │   vivid-08

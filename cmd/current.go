@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -36,16 +37,29 @@ var currentCmd = &cobra.Command{
 	Short: "Print the current session's label",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name, err := currentSession()
+		b, err := sessionBackend()
 		if err != nil {
 			return err
 		}
-		// Footers and Claude's --name read this, so an index that cannot be
-		// read costs only the label: the name still names the session.
-		idx, _ := readSessionIndex()
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), idx.Label(name))
+		name, err := currentSessionIn(b)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), currentShown(cmd.Context(), b, name))
 		return err
 	},
+}
+
+// currentShown is what the session this process runs in shows. Footers and
+// Claude's --name read it, so a session that cannot be read, or an index that
+// cannot, costs only the label: the name still names the session.
+func currentShown(ctx context.Context, b backend.Backend, name string) string {
+	live, err := b.Session(ctx, name)
+	if err != nil {
+		return name
+	}
+	idx, _ := readSessionIndex()
+	return shownSession(live, &idx).DisplayName()
 }
 
 func init() {

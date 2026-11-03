@@ -4,11 +4,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
-// The current and rename suites run on the production backend, whose current
-// session is ZMX_SESSION, so they set it rather than stage a fake.
+// Where the current suite runs on the production backend, whose current session
+// is ZMX_SESSION, it sets that rather than stage a fake; ZMX_DIR is poisoned
+// there, so that backend reads no session.
 const currentSessionName = "dotfiles-PpaTER"
 
 func TestCurrentCommand(t *testing.T) {
@@ -31,9 +34,13 @@ func TestCurrentCommand(t *testing.T) {
 
 	t.Run("it prints the session's label from the index", func(t *testing.T) {
 		dir := isolateStateDir(t)
-		setLabel(t, dir, currentSessionName, "dotfiles · user search")
-		setLabel(t, dir, "web-Qm3pLz", "web · checkout")
-		t.Setenv("ZMX_SESSION", currentSessionName)
+		current := backend.Session{Name: currentSessionName, Created: joinCreated}
+		web := backend.Session{Name: "web-Qm3pLz", Created: joinCreated}
+		fake := backendtest.New(current, web)
+		fake.SetCurrent(currentSessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		labelSession(t, dir, current, "dotfiles · user search")
+		labelSession(t, dir, web, "web · checkout")
 
 		stdout, _, err := runRootCmd(t, "current")
 
@@ -47,7 +54,43 @@ func TestCurrentCommand(t *testing.T) {
 
 	t.Run("it prints the session's name when the index cannot be read", func(t *testing.T) {
 		blockStateDir(t)
+		fake := backendtest.New(backend.Session{Name: currentSessionName, Created: joinCreated})
+		fake.SetCurrent(currentSessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		stdout, _, err := runRootCmd(t, "current")
+
+		if err != nil {
+			t.Fatalf("current: %v", err)
+		}
+		if got, want := stdout.String(), currentSessionName+"\n"; got != want {
+			t.Errorf("stdout = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it prints the session's name when the session cannot be read", func(t *testing.T) {
+		dir := isolateStateDir(t)
 		t.Setenv("ZMX_SESSION", currentSessionName)
+		labelSession(t, dir, backend.Session{Name: currentSessionName, Created: joinCreated}, "dotfiles · user search")
+
+		stdout, _, err := runRootCmd(t, "current")
+
+		if err != nil {
+			t.Fatalf("current: %v", err)
+		}
+		if got, want := stdout.String(), currentSessionName+"\n"; got != want {
+			t.Errorf("stdout = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it prints the name of a session that is not answering", func(t *testing.T) {
+		dir := isolateStateDir(t)
+		current := backend.Session{Name: currentSessionName, Created: joinCreated}
+		fake := backendtest.New(current)
+		fake.StopAnswering(currentSessionName)
+		fake.SetCurrent(currentSessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		labelSession(t, dir, current, "dotfiles · user search")
 
 		stdout, _, err := runRootCmd(t, "current")
 

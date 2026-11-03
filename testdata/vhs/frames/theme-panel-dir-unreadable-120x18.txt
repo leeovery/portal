@@ -4,13 +4,13 @@
                                                                                         │
   Sessions 12                                                                           │ Themes
                                                                                         │
-  ▌ orchard-pipeline-code-based                                                         │ ⚠ dir unreadable
-    orchard-pipeline-codify                                                             │   nord-wave
+  ▌ atelier-web-m4TzpD                                                                  │ ⚠ dir unreadable
+    kiln-aws-migration                                                                  │   nord-wave
     kiln-relayx-explore                                                                 │   solarized-dusk   ⚠ ● light
-    lumen webhooks and watchers                                                         │ ▌ tokyo-night
-    tessera-proxy-Vb3kQw                                                                │   tokyo-night-day
-    atelier-web-m4TzpD                                                                  │
-    lumen-sync-engine                                                                   │              ••
+    loom-p84cXa                                                                         │ ▌ tokyo-night
+    lumen webhooks and watchers                                                         │   tokyo-night-day
+    lumen-sync-engine                                                                   │
+    orchard-pipeline-code-based                                                         │              ••
                                                                                         │ ⏎   set theme
                                                            ••                           │ d   set as dark
   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light

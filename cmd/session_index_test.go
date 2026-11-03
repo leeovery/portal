@@ -176,8 +176,8 @@ func TestReadSessionIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readSessionIndex: %v", err)
 		}
-		if got := idx.Label("api-x7Kd9a"); got != "api" {
-			t.Errorf("label = %q, want %q", got, "api")
+		if got, _ := idx.Lookup("api-x7Kd9a"); got.Label != "api" {
+			t.Errorf("label = %q, want %q", got.Label, "api")
 		}
 	})
 }
@@ -196,8 +196,8 @@ func TestUpdateSessionIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read back: %v", err)
 		}
-		if got := idx.Label("api-x7Kd9a"); got != "api" {
-			t.Errorf("label = %q, want %q", got, "api")
+		if got, _ := idx.Lookup("api-x7Kd9a"); got.Label != "api" {
+			t.Errorf("label = %q, want %q", got.Label, "api")
 		}
 	})
 
@@ -238,7 +238,7 @@ func TestUpdateSessionIndexMakesTheStateDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if got := idx.Label("api-x7Kd9a"); got != "api" {
-		t.Errorf("label = %q, want %q", got, "api")
+	if got, _ := idx.Lookup("api-x7Kd9a"); got.Label != "api" {
+		t.Errorf("label = %q, want %q", got.Label, "api")
 	}
 }

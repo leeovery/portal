@@ -127,8 +127,9 @@ func TestHooksListLocationColumn(t *testing.T) {
 			hookSessionA: {"on-resume": "npm start"},
 			hookSessionB: {"on-resume": "make dev"},
 		})
-		inSession(t, "", backend.Session{Name: hookSessionA}, backend.Session{Name: hookSessionB})
-		setLabel(t, os.Getenv("PORTAL_STATE_DIR"), hookSessionB, "web · checkout")
+		web := backend.Session{Name: hookSessionB, Created: joinCreated}
+		inSession(t, "", backend.Session{Name: hookSessionA}, web)
+		labelSession(t, os.Getenv("PORTAL_STATE_DIR"), web, "web · checkout")
 
 		got := runHookList(t)
 		want := hookSessionA + "\ton-resume\tnpm start\t" + hookSessionA + "\t\n" +

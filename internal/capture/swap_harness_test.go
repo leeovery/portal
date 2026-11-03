@@ -37,6 +37,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-flat", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-empty", page: tui.PageSessions, present: []string{"No sessions yet"}},
 		{fixture: "sessions-by-project", page: tui.PageSessions, present: []string{sessionRow, "— by project"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-by-project-labelled", page: tui.PageSessions, present: []string{"api · user search", "release checklist", "notes on the outage", "— by project"}, absent: []string{"orchard-pipeline-Hq7wNe", "No sessions yet"}},
 		{fixture: "sessions-by-tag", page: tui.PageSessions, present: []string{sessionRow, "— by tag"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-paged", page: tui.PageSessions, present: []string{"session-00"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
@@ -58,9 +59,9 @@ func capturedStates() []capturedStateWant {
 		{fixture: "theme-panel-projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects", "Themes", "● light", "● dark"}},
 		{fixture: "theme-panel-confirm", page: tui.PageSessions, present: []string{sessionRow, "Themes", "clear constant nord?  y / n", "confirm", "cancel"}, absent: []string{"No sessions yet", "set as dark", "set as light"}},
 		{fixture: "theme-panel-commit-failed", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● light", "● dark", "set as dark"}, absent: []string{"No sessions yet", "confirm", "cancel"}},
-		// The floor's body is one list row, so the light badge's row is off the
-		// frame rather than missing from it.
-		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
+		// The floor's body is one list row, the first by the text rows show, so
+		// the light badge's row is off the frame rather than missing from it.
+		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{"atelier-web-m4TzpD", "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
 		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "~/code/portal", "~/code/portal-gateway", "/opt/portal-tools"}, absent: []string{"lumen-sync-engine", "No sessions yet"}},
 		{fixture: "sessions-search-home", page: tui.PageSessions, present: []string{"portal-a1b2 ~/code/portal", "api-work ~/code/portal-gateway", "lumen-sync-engine ~/code/lumen"}, absent: []string{"legacy-port-shim", "portal-notes", "No sessions yet"}},
 		{fixture: "sessions-pending-resume", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet"}},

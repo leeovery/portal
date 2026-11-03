@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
 )
@@ -25,7 +24,8 @@ type Deps struct {
 	ProjectEditor ProjectEditor
 	AliasEditor   AliasEditor
 	History       HistoryReader
-	DirReader     session.PaneCurrentPathReader
+	// DirRunner resolves the git root of a session's cwd, which grouping falls
+	// back to for a session with no recorded directory.
 	DirRunner     resolver.CommandRunner
 	PendingReader PendingResumeReader
 	// SkeletonMarkers keeps the cold route re-reading the pending set until no
@@ -134,8 +134,8 @@ func Build(deps Deps) Model {
 	if deps.History != nil {
 		opts = append(opts, WithHistory(deps.History))
 	}
-	if deps.DirReader != nil && deps.DirRunner != nil {
-		opts = append(opts, WithDirResolver(deps.DirReader, deps.DirRunner))
+	if deps.DirRunner != nil {
+		opts = append(opts, WithDirRunner(deps.DirRunner))
 	}
 	if deps.PendingReader != nil {
 		opts = append(opts, WithPendingResumeReader(deps.PendingReader))
