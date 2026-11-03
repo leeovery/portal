@@ -158,8 +158,7 @@ func TestOutOfModeNewInCWDUnchanged(t *testing.T) {
 func TestMultiSelectKeepsCoexistingKeysLive(t *testing.T) {
 	t.Run("Space opens the preview in mode", func(t *testing.T) {
 		m := NewModelWithSessions(twoFlatSessions())
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m.history = newPreviewHistory(keymapParityHistory{})
 		m = enterMultiSelect(t, m)
 
 		m = pressSession(t, m, keySpace)

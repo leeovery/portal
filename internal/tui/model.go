@@ -41,12 +41,6 @@ type SessionLister interface {
 	ListSessions() ([]Session, error)
 }
 
-// Run's tea.Cmd emits a previewAttachSelectedMsg or previewAttachBailMsg; the
-// connector handoff happens post-TUI, not here.
-type PreviewAttacher interface {
-	Run(session string, window, pane int) tea.Cmd
-}
-
 type ProjectStore interface {
 	List() ([]project.Project, error)
 	CleanStale() ([]project.Project, error)
@@ -259,10 +253,14 @@ type Model struct {
 	// it back. Async and non-gating; empty if no response arrived.
 	originalBg string
 
-	enumerator      TmuxEnumerator
-	reader          ScrollbackReader
-	previewAttacher PreviewAttacher
-	preview         previewModel
+	history previewHistory
+	preview previewModel
+	// previewGen counts preview opens, so a read that lands after its preview
+	// has stepped on or closed is told apart from the one now showing.
+	previewGen uint64
+	// endPreviewRead ends the current open's read, so a superseded one neither
+	// dials nor draws; nil when no read is under way.
+	endPreviewRead context.CancelFunc
 
 	// The derived directory is never stamped back to tmux — a pane's cwd can drift
 	// from the origin dir, and freezing that drift would permanently mis-group the
@@ -693,21 +691,11 @@ func WithProgressReceiver(receiver tea.Cmd) Option {
 	}
 }
 
-func WithEnumerator(e TmuxEnumerator) Option {
+// WithHistory is where the preview reads a session's screen and scrollback.
+// Without it, Space opens no preview.
+func WithHistory(r HistoryReader) Option {
 	return func(m *Model) {
-		m.enumerator = e
-	}
-}
-
-func WithScrollbackReader(r ScrollbackReader) Option {
-	return func(m *Model) {
-		m.reader = r
-	}
-}
-
-func WithPreviewAttachPipeline(p PreviewAttacher) Option {
-	return func(m *Model) {
-		m.previewAttacher = p
+		m.history = newPreviewHistory(r)
 	}
 }
 
@@ -1407,22 +1395,35 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	}
 }
 
-func (m Model) newSessionPreview(session string) (previewModel, bool) {
-	pmodel, ok := NewPreviewModel(session, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
-	if !ok {
-		return previewModel{}, false
+// openSessionPreview opens the preview on s with its body still to come, and
+// returns the read that brings it. A session the listing already found not
+// answering says so at once, with nothing dialled. ok is false, and nothing
+// opens, when no history is wired.
+func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
+	if m.history.reader == nil {
+		return nil, false
 	}
-	pmodel.th = m.themeState.active
-	pmodel.colourless = m.colourless
-	return pmodel, true
+	m.endRead()
+	m.previewGen++
+	body := previewLoading
+	if s.NotAnswering {
+		body = previewNotAnswering
+	} else {
+		var open context.Context
+		open, m.endPreviewRead = context.WithCancel(context.Background())
+		cmd = m.history.read(open, s.Name, m.previewGen)
+	}
+	m.preview = NewPreviewModel(s.Name, body, m.contentWidth(), m.contentHeight())
+	m.preview.th = m.themeState.active
+	m.preview.colourless = m.colourless
+	return cmd, true
 }
 
 // Steps the preview to the next session in the list's visible order, wrapping as
 // the list's arrows do and skipping group headings. The list cursor moves with
 // it, so a dismiss lands on the session last previewed and the filter is never
-// touched. A session that no longer enumerates is passed over, as Space passes
-// over it; with no other session to open, the preview stays where it is.
-func (m *Model) stepPreviewSession(delta int) {
+// touched. With no other session to open, the preview stays where it is.
+func (m *Model) stepPreviewSession(delta int) tea.Cmd {
 	visible := m.sessionList.VisibleItems()
 	n := len(visible)
 	start := m.sessionList.Index()
@@ -1441,22 +1442,28 @@ func (m *Model) stepPreviewSession(delta int) {
 		if !ok {
 			continue
 		}
-		pmodel, ok := m.newSessionPreview(si.Session.Name)
-		if !ok {
-			continue
-		}
 		m.sessionList.Select(i)
-		m.preview = pmodel
-		return
+		cmd, _ := m.openSessionPreview(si.Session)
+		return cmd
 	}
+	return nil
 }
 
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
 // m.preview.session afterwards yields an empty string.
 func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
+	m.endRead()
 	m.activePage = PageSessions
 	m.preview = previewModel{}
 	return m.refreshSessionsAfterPreviewCmd(preserveName)
+}
+
+// endRead ends the preview's read under way, if any.
+func (m *Model) endRead() {
+	if m.endPreviewRead != nil {
+		m.endPreviewRead()
+		m.endPreviewRead = nil
+	}
 }
 
 // Clamps to the last index when the name is gone, and operates on filtered
@@ -1715,7 +1722,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case pendingSettleTickMsg:
 		return m, m.pendingSettleTick()
 	case pendingSettleReadMsg:
-		return m, m.applyPendingSettleRead(msg)
+		cmd := m.applyPendingSettleRead(msg)
+		return m, cmd
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// A fatal parks the model in the error state — never dismiss into the
@@ -1830,15 +1838,15 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.activePage != pagePreview {
 			return m, nil
 		}
-		m.stepPreviewSession(msg.delta)
+		cmd := m.stepPreviewSession(msg.delta)
+		return m, cmd
+	case previewBodyMsg:
+		if m.activePage != pagePreview || msg.gen != m.previewGen {
+			return m, nil
+		}
+		m.preview.setBody(msg.body)
 		return m, nil
-	case previewAttachBailMsg:
-		// Batch, not Sequence: the flash must render on the same frame as the
-		// page flip, with list consistency converging a render or two later.
-		refreshCmd := m.exitPreviewToSessions(msg.Session)
-		m.setFlash(formatSessionGoneFlash(msg.Session))
-		return m, tea.Batch(refreshCmd, flashTickCmd(m.flashGen))
-	case previewAttachSelectedMsg:
+	case previewOpenMsg:
 		m.selected = msg.Session
 		return m, tea.Quit
 	case previewSessionsRefreshedMsg:
@@ -2660,13 +2668,12 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := m.newSessionPreview(si.Session.Name)
+			cmd, ok := m.openSessionPreview(si.Session)
 			if !ok {
 				return m, nil
 			}
-			m.preview = pmodel
 			m.activePage = pagePreview
-			return m, nil
+			return m, cmd
 		}
 		switch {
 		case keyIsCode(msg, tea.KeyEscape):

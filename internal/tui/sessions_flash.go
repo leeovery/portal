@@ -2,7 +2,6 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,11 +45,6 @@ func flashTickCmd(gen uint64) tea.Cmd {
 // library-emitted no-op key events; every real keystroke satisfies one condition.
 func isActionableKey(msg tea.KeyPressMsg) bool {
 	return msg.Code != 0 || msg.Text != ""
-}
-
-// Literal quote bytes, never %q, so output is byte-exact.
-func formatSessionGoneFlash(name string) string {
-	return fmt.Sprintf(`session "%s" no longer exists`, name)
 }
 
 // The band's own voice for each rename refusal. None carries a ⚠ glyph — the

@@ -3,36 +3,28 @@ package tui
 import (
 	"errors"
 	"strings"
-	"syscall"
 	"testing"
 
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 )
 
-func TestPreviewFooter_ByteIdenticalAcrossViewportStates(t *testing.T) {
-	groups := []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-		{WindowIndex: 1, WindowName: "logs", Panes: []tmux.WindowPane{{Index: 0}}},
-	}
-
+func TestPreviewFooter_ByteIdenticalAcrossBodies(t *testing.T) {
 	cases := []struct {
-		name   string
-		reader ScrollbackReader
+		name  string
+		stage func(*backendtest.Fake)
 	}{
-		{name: "real bytes", reader: &recordingReader{bytes: []byte("hello world\n")}},
-		{name: "(nil, nil) placeholder", reader: &nilNilReader{}},
-		{name: "OS read error", reader: &nilErrReader{err: syscall.EACCES}},
-		{name: "OS read error EIO", reader: &nilErrReader{err: errors.New("EIO synthetic")}},
+		{name: "history", stage: func(*backendtest.Fake) {}},
+		{name: "not answering", stage: func(f *backendtest.Fake) { f.StopAnswering("work") }},
+		{name: "unavailable", stage: func(f *backendtest.Fake) { f.SetHistory("work", nil) }},
+		{name: "failed read", stage: func(f *backendtest.Fake) { f.Fail(backendtest.OpHistory, errors.New("EIO synthetic")) }},
 	}
 
 	var first string
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			enum := &stubEnumerator{groups: groups}
-			m, ok := NewPreviewModel("work", enum, tc.reader, nil, 80, 24)
-			if !ok {
-				t.Fatalf("expected ok=true on construction, got false")
-			}
+			history := historyFake(t, "hello world", "work")
+			tc.stage(history)
+			m := openedPreview(t, "work", history, 80, 24)
 			got := stripANSI(footerLineForTest(m))
 
 			if !strings.Contains(got, "⏎ attach  ␣ back") {
@@ -59,7 +51,7 @@ func TestSessionsPageView_DoesNotContainPreviewChrome(t *testing.T) {
 
 	got := stripANSI(m.View().Content)
 
-	for _, forbidden := range []string{"◉ preview", "←→ window", "⇥ pane", "␣ back"} {
+	for _, forbidden := range []string{"◉ preview", "↑↓ session", "␣ back"} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("Sessions-page View() contains forbidden preview-chrome token %q; got %q", forbidden, got)
 		}

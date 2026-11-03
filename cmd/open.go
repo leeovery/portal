@@ -475,9 +475,7 @@ type tuiConfig struct {
 	projectEditor   tui.ProjectEditor
 	aliasEditor     tui.AliasEditor
 	sessionCreator  tui.SessionCreator
-	enumerator      tui.TmuxEnumerator
-	reader          tui.ScrollbackReader
-	previewAttacher tui.PreviewAttacher
+	history         tui.HistoryReader
 	dirReader       session.PaneCurrentPathReader
 	dirRunner       resolver.CommandRunner
 	pendingReader   tui.PendingResumeReader
@@ -551,9 +549,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ProjectStore:       cfg.projectStore,
 		ProjectEditor:      cfg.projectEditor,
 		AliasEditor:        cfg.aliasEditor,
-		Enumerator:         cfg.enumerator,
-		Reader:             cfg.reader,
-		PreviewAttacher:    cfg.previewAttacher,
+		History:            cfg.history,
 		DirReader:          cfg.dirReader,
 		DirRunner:          cfg.dirRunner,
 		PendingReader:      cfg.pendingReader,
@@ -648,12 +644,6 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	stateDir, err := state.Dir()
-	if err != nil {
-		return fmt.Errorf("failed to resolve state directory: %w", err)
-	}
-	previewReader := tui.NewProductionScrollbackReader(stateDir)
-
 	// A prefs path-resolution failure must not block opening the picker: degrade to
 	// a nil persister, zero keys (the shipped pair) and the Flat default.
 	loadedPrefs, err := loadPrefsStore()
@@ -675,8 +665,6 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	// terminal the TUI holds.
 	connector := newSessionConnector(cmd, b)
 
-	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
-
 	sessionSource := pickerSessionSource{sessions: client, pending: client}
 
 	cfg := tuiConfig{
@@ -687,9 +675,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		projectEditor:   store,
 		aliasEditor:     aliasStore,
 		sessionCreator:  newIndexingCreator(cmd.Context(), store, b, "tui"),
-		enumerator:      client,
-		reader:          previewReader,
-		previewAttacher: previewAttacher,
+		history:         b,
 		dirReader:       client,
 		dirRunner:       &resolver.RealCommandRunner{},
 		pendingReader:   sessionSource,

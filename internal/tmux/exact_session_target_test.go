@@ -71,12 +71,6 @@ var perSessionRoutes = []perSessionRoute{
 		invoke:  func(c *tmux.Client) { _, _ = c.ListPanesInSession(exactTargetSession) },
 	},
 	{
-		name:    "ListWindowsAndPanesInSession",
-		command: "list-panes",
-		want:    coordTargetForm,
-		invoke:  func(c *tmux.Client) { _, _ = c.ListWindowsAndPanesInSession(exactTargetSession) },
-	},
-	{
 		name:    "SaverPaneID",
 		command: "list-panes",
 		want:    coordTargetForm,

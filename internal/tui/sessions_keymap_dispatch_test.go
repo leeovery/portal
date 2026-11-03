@@ -1,10 +1,10 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type keymapParityKiller struct{}
@@ -15,15 +15,12 @@ type keymapParityRenamer struct{}
 
 func (keymapParityRenamer) RenameSession(string, string) error { return nil }
 
-type keymapParityEnumerator struct{}
+// keymapParityHistory answers every session with a one-line history.
+type keymapParityHistory struct{}
 
-func (keymapParityEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	return []tmux.WindowGroup{{WindowIndex: 0, WindowName: "w", Panes: []tmux.WindowPane{{Index: 0}}}}, nil
+func (keymapParityHistory) History(context.Context, string, int) ([]byte, error) {
+	return []byte("x"), nil
 }
-
-type keymapParityReader struct{}
-
-func (keymapParityReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 func sessionsDispatchModel(t *testing.T) Model {
 	t.Helper()
@@ -174,8 +171,7 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 
 	t.Run("space routes to preview", func(t *testing.T) {
 		m := NewModelWithSessions([]Session{{Name: "alpha"}})
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m.history = newPreviewHistory(keymapParityHistory{})
 		m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 		if m.activePage != pagePreview {
 			t.Errorf("space must open the preview page; active page = %d", m.activePage)

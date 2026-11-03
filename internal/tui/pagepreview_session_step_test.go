@@ -1,29 +1,14 @@
 package tui
 
 import (
-	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 )
-
-// Enumerates every session as one single-pane window, except the sessions
-// listed in failing, which answer an error as a session killed outside the
-// picker does.
-type stepEnumerator struct {
-	failing map[string]bool
-}
-
-func (s *stepEnumerator) ListWindowsAndPanesInSession(session string) ([]tmux.WindowGroup, error) {
-	if s.failing[session] {
-		return nil, errors.New("can't find session")
-	}
-	return []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-	}, nil
-}
 
 func stepSessions(names ...string) []Session {
 	sessions := make([]Session, 0, len(names))
@@ -33,9 +18,10 @@ func stepSessions(names ...string) []Session {
 	return sessions
 }
 
-func stepModel(t *testing.T, enum TmuxEnumerator, names ...string) Model {
+func stepModel(t *testing.T, names ...string) Model {
 	t.Helper()
-	return modelWithSeams(t, stepSessions(names...), enum, &recordingReader{bytes: []byte("hi")})
+	sessions := stepSessions(names...)
+	return modelWithSeams(t, sessions, historyFor(t, strings.Repeat("hi\r\n", 60), sessions))
 }
 
 func asModel(t *testing.T, tm tea.Model) Model {
@@ -50,7 +36,7 @@ func asModel(t *testing.T, tm tea.Model) Model {
 func openPreviewAt(t *testing.T, m Model, index int) Model {
 	t.Helper()
 	m.sessionList.Select(index)
-	m = asModel(t, dropCmd(m.Update(keySpaceMsg())))
+	m = openPreviewOn(t, m)
 	if m.activePage != pagePreview {
 		t.Fatalf("setup: expected pagePreview after Space, got %v", m.activePage)
 	}
@@ -59,8 +45,8 @@ func openPreviewAt(t *testing.T, m Model, index int) Model {
 
 func dropCmd(tm tea.Model, _ tea.Cmd) tea.Model { return tm }
 
-// Presses the key on the preview page and feeds the step message it emits back
-// through the parent, as the runtime does.
+// Presses the key on the preview page and feeds the step message it emits, and
+// then the read the step starts, back through the parent, as the runtime does.
 func pressPreviewStep(t *testing.T, m Model, code rune) Model {
 	t.Helper()
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: code})
@@ -72,7 +58,12 @@ func pressPreviewStep(t *testing.T, m Model, code rune) Model {
 	if _, ok := msg.(previewStepSessionMsg); !ok {
 		t.Fatalf("expected previewStepSessionMsg, got %T", msg)
 	}
-	return asModel(t, dropCmd(m.Update(msg)))
+	updated, read := m.Update(msg)
+	m = asModel(t, updated)
+	if read == nil {
+		return m
+	}
+	return landRead(t, m, read)
 }
 
 func assertPreviewing(t *testing.T, m Model, wantSession string, wantIndex int) {
@@ -89,7 +80,7 @@ func assertPreviewing(t *testing.T, m Model, wantSession string, wantIndex int) 
 }
 
 func TestPreviewStep_DownOpensTheNextSession(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie"), 0)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 0)
 
 	m = pressPreviewStep(t, m, tea.KeyDown)
 	assertPreviewing(t, m, "bravo", 1)
@@ -99,7 +90,7 @@ func TestPreviewStep_DownOpensTheNextSession(t *testing.T) {
 }
 
 func TestPreviewStep_UpOpensThePreviousSession(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie"), 2)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 2)
 
 	m = pressPreviewStep(t, m, tea.KeyUp)
 
@@ -107,7 +98,7 @@ func TestPreviewStep_UpOpensThePreviousSession(t *testing.T) {
 }
 
 func TestPreviewStep_WrapsPastEitherEnd(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie"), 2)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 2)
 
 	m = pressPreviewStep(t, m, tea.KeyDown)
 	assertPreviewing(t, m, "alpha", 0)
@@ -116,30 +107,23 @@ func TestPreviewStep_WrapsPastEitherEnd(t *testing.T) {
 	assertPreviewing(t, m, "charlie", 2)
 }
 
-func TestPreviewStep_ResetsWindowPaneAndScrollForTheNewSession(t *testing.T) {
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "one", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-		{WindowIndex: 1, WindowName: "two", Panes: []tmux.WindowPane{{Index: 0}}},
-	}}
-	m := openPreviewAt(t, modelWithSeams(t, stepSessions("alpha", "bravo"), enum, &recordingReader{bytes: []byte("hi")}), 0)
-	m = asModel(t, dropCmd(m.Update(tea.KeyPressMsg{Code: tea.KeyRight})))
-	if m.preview.windowIdx != 1 {
-		t.Fatalf("setup: expected windowIdx=1 after →, got %d", m.preview.windowIdx)
+func TestPreviewStep_AnchorsTheNewSessionAtTheBottom(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo"), 0)
+	m = asModel(t, dropCmd(m.Update(tea.KeyPressMsg{Code: tea.KeyHome})))
+	if m.preview.viewport.AtBottom() {
+		t.Fatalf("setup: expected Home to leave the bottom")
 	}
 
 	m = pressPreviewStep(t, m, tea.KeyDown)
 
 	assertPreviewing(t, m, "bravo", 1)
-	if m.preview.windowIdx != 0 || m.preview.paneIdx != 0 {
-		t.Errorf("stepped preview focus = window %d pane %d, want 0/0", m.preview.windowIdx, m.preview.paneIdx)
-	}
 	if !m.preview.viewport.AtBottom() {
 		t.Errorf("stepped preview must anchor at the bottom, got YOffset=%d", m.preview.viewport.YOffset())
 	}
 }
 
 func TestPreviewStep_CarriesTheActiveThemeAndColourMode(t *testing.T) {
-	m := stepModel(t, &stepEnumerator{}, "alpha", "bravo")
+	m := stepModel(t, "alpha", "bravo")
 	m.colourless = true
 	m = openPreviewAt(t, m, 0)
 
@@ -154,7 +138,7 @@ func TestPreviewStep_CarriesTheActiveThemeAndColourMode(t *testing.T) {
 }
 
 func TestPreviewStep_SkipsGroupHeadings(t *testing.T) {
-	m := stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie")
+	m := stepModel(t, "alpha", "bravo", "charlie")
 	m.sessionList.SetItems([]list.Item{
 		HeaderItem{Heading: "one", Count: 2, Key: "one"},
 		SessionItem{Session: Session{Name: "alpha"}, GroupKey: "one"},
@@ -175,35 +159,62 @@ func TestPreviewStep_SkipsGroupHeadings(t *testing.T) {
 	assertPreviewing(t, m, "charlie", 4)
 }
 
-func TestPreviewStep_PassesOverASessionThatNoLongerEnumerates(t *testing.T) {
-	enum := &stepEnumerator{failing: map[string]bool{"bravo": true}}
-	m := openPreviewAt(t, stepModel(t, enum, "alpha", "bravo", "charlie"), 0)
+// The step opens the next session at once, before its read can say whether
+// the backend still holds it, so a gone one is opened and says so.
+func TestPreviewStep_OpensASessionThatIsGoneAndSaysSo(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 0)
+	m.history.reader.(*backendtest.Fake).Remove("bravo")
 
 	m = pressPreviewStep(t, m, tea.KeyDown)
 
-	assertPreviewing(t, m, "charlie", 2)
+	assertPreviewing(t, m, "bravo", 1)
+	if body := lastBodyRow(m.preview); body != previewSessionGone {
+		t.Errorf("stepped preview body = %q, want %q", body, previewSessionGone)
+	}
 }
 
-func TestPreviewStep_StaysPutWhenNoOtherSessionOpens(t *testing.T) {
-	t.Run("single session", func(t *testing.T) {
-		m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha"), 0)
+func TestPreviewStep_OpensASessionListedNotAnsweringWithoutDialling(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo", NotAnswering: true}}
+	history := historyFor(t, "hi", sessions)
+	m := openPreviewAt(t, modelWithSeams(t, sessions, history), 0)
 
-		m = pressPreviewStep(t, m, tea.KeyDown)
+	m = pressPreviewStep(t, m, tea.KeyDown)
 
-		assertPreviewing(t, m, "alpha", 0)
-	})
-	t.Run("every other session gone", func(t *testing.T) {
-		enum := &stepEnumerator{failing: map[string]bool{"bravo": true, "charlie": true}}
-		m := openPreviewAt(t, stepModel(t, enum, "alpha", "bravo", "charlie"), 0)
+	assertPreviewing(t, m, "bravo", 1)
+	if body := lastBodyRow(m.preview); body != previewNotAnswering {
+		t.Errorf("stepped preview body = %q, want %q", body, previewNotAnswering)
+	}
+	if calls := historyCalls(history); slices.Contains(calls, "bravo") {
+		t.Errorf("History read %v, want none for bravo", calls)
+	}
+}
 
-		m = pressPreviewStep(t, m, tea.KeyUp)
+func TestPreviewStep_OpensASessionNotAnsweringAndSaysSo(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo"), 0)
+	m.history.reader.(*backendtest.Fake).StopAnswering("bravo")
 
-		assertPreviewing(t, m, "alpha", 0)
-	})
+	m = pressPreviewStep(t, m, tea.KeyDown)
+
+	assertPreviewing(t, m, "bravo", 1)
+	if body := previewBody(m.preview); body[len(body)-1] != previewNotAnswering {
+		t.Errorf("stepped preview body = %q, want %q", body, previewNotAnswering)
+	}
+}
+
+func TestPreviewStep_StaysPutWithNoOtherSession(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha"), 0)
+	reads := len(historyCalls(m.history.reader.(*backendtest.Fake)))
+
+	m = pressPreviewStep(t, m, tea.KeyDown)
+
+	assertPreviewing(t, m, "alpha", 0)
+	if n := len(historyCalls(m.history.reader.(*backendtest.Fake))); n != reads {
+		t.Errorf("History reads %d → %d; staying put re-read the session", reads, n)
+	}
 }
 
 func TestPreviewStep_WalksOnlyTheFilteredSessions(t *testing.T) {
-	m := stepModel(t, &stepEnumerator{}, "alpha", "bravo", "alphabet")
+	m := stepModel(t, "alpha", "bravo", "alphabet")
 	m.sessionList.SetFilterText("alpha")
 	m.sessionList.SetFilterState(list.FilterApplied)
 	if n := len(m.sessionList.VisibleItems()); n != 2 {
@@ -227,7 +238,7 @@ func TestPreviewStep_WalksOnlyTheFilteredSessions(t *testing.T) {
 }
 
 func TestPreviewStep_DismissLandsOnTheSessionLastPreviewed(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie"), 0)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 0)
 	m = pressPreviewStep(t, m, tea.KeyDown)
 	m = pressPreviewStep(t, m, tea.KeyDown)
 
@@ -243,7 +254,7 @@ func TestPreviewStep_DismissLandsOnTheSessionLastPreviewed(t *testing.T) {
 }
 
 func TestPreviewStep_StepsFromThePreviewedSessionWhenTheCursorDrifted(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo", "charlie", "delta"), 1)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie", "delta"), 1)
 	// A late refresh re-anchored the cursor elsewhere while bravo stays open.
 	m.sessionList.Select(3)
 
@@ -253,7 +264,7 @@ func TestPreviewStep_StepsFromThePreviewedSessionWhenTheCursorDrifted(t *testing
 }
 
 func TestPreviewStep_MessageAfterDismissIsIgnored(t *testing.T) {
-	m := openPreviewAt(t, stepModel(t, &stepEnumerator{}, "alpha", "bravo"), 0)
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo"), 0)
 	m.activePage = PageSessions
 
 	m = asModel(t, dropCmd(m.Update(previewStepSessionMsg{delta: +1})))

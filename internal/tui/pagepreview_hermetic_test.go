@@ -7,53 +7,28 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-type hermeticEnumerator struct {
-	calls   int
-	lastArg string
-}
+func TestPreviewHermetic_FullLifecycleReadsTheHistoryOnceAtOpen(t *testing.T) {
+	history := historyFake(t, strings.Repeat("content\r\n", 40), "work")
 
-func (e *hermeticEnumerator) ListWindowsAndPanesInSession(session string) ([]tmux.WindowGroup, error) {
-	e.calls++
-	e.lastArg = session
-	return []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "first", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-		{WindowIndex: 1, WindowName: "second", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1, Token: "abcdef", Pending: true}}},
-	}, nil
-}
-
-type hermeticReader struct {
-	calls []string
-}
-
-func (r *hermeticReader) Tail(pane PaneScrollback) ([]byte, error) {
-	paneKey := pane.PaneKey
-	r.calls = append(r.calls, paneKey)
-	return []byte("content"), nil
-}
-
-func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusReads(t *testing.T) {
-	enum := &hermeticEnumerator{}
-	reader := &hermeticReader{}
-
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("expected ok=true on construction, got false")
-	}
+	m := openedPreview(t, "work", history, 80, 24)
 
 	keys := []tea.KeyPressMsg{
-		nextPaneKey,
-		nextPaneKey,
-		nextWindowKey,
-		nextPaneKey,
-		nextPaneKey,
-		prevWindowKey,
+		{Code: 'k', Text: "k"},
+		{Code: 'j', Text: "j"},
+		{Code: tea.KeyHome},
+		{Code: tea.KeyEnd},
+		{Code: tea.KeyLeft},
+		{Code: tea.KeyRight},
+		{Code: tea.KeyTab},
+		keyQuestionMark(),
+		keyQuestionMark(),
 	}
 	for _, k := range keys {
 		m, _ = m.Update(k)
 	}
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
@@ -63,19 +38,8 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 		t.Fatalf("Esc cmd produced %T; want previewDismissedMsg", cmd())
 	}
 
-	if enum.calls != 1 {
-		t.Errorf("expected ListWindowsAndPanesInSession called exactly 1 time across full lifecycle, got %d",
-			enum.calls)
-	}
-	if enum.lastArg != "work" {
-		t.Errorf("enumerator received session %q; want %q (constructor must pass the session arg through verbatim)",
-			enum.lastArg, "work")
-	}
-
-	const wantReads = 1 + 6
-	if len(reader.calls) != wantReads {
-		t.Errorf("expected %d Tail calls (1 open + 6 cycle keypresses; Esc reads 0), got %d (calls=%v)",
-			wantReads, len(reader.calls), reader.calls)
+	if got := historyCalls(history); len(got) != 1 || got[0] != "work" {
+		t.Errorf("History read %v across the lifecycle, want once for work, at open", got)
 	}
 }
 

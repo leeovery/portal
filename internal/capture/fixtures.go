@@ -12,7 +12,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -62,15 +61,19 @@ type Fixture struct {
 	initialBurstOpening [2]int
 	initialFlash        string
 	command             []string
-	scrollback          string
-	enumeratorGroups    []tmux.WindowGroup
+	history             string
+	historyFile         string
 	serverStarted       bool
 	loadingEvents       []tui.BootstrapProgressMsg
 	fatalEvent          tui.BootstrapFatalMsg
 	// Tapes are scaffolding and do not live in the repository, so the post-load
 	// key script is declared here.
 	captureKeys []tea.KeyPressMsg
-	noColor     bool
+	// landsLastKeyRead runs the last capture key's command and delivers what it
+	// returns, as a running program would: the preview's body arrives that way.
+	// It delivers only that command's own message, not any it leads to.
+	landsLastKeyRead bool
+	noColor          bool
 }
 
 // Deps hands the palette to two seams that must agree — the constant nomination
@@ -89,8 +92,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		ProjectStore:  f.projectStore,
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
-		Enumerator:    fakeEnumerator{groups: f.enumeratorGroups},
-		Reader:        fakeScrollbackReader{content: f.scrollback},
+		History:       fakeHistory{content: f.history, file: f.historyFile},
 		// DirReader/DirRunner stay nil, so the lazy pane-read fallback returns
 		// before reading anything and a fixture session carrying no recorded
 		// directory groups into the catch-all; ModePersister stays nil so an
@@ -187,6 +189,7 @@ func fixtureBuilders() []func() *Fixture {
 		themePanelMinHeightMessageFixture,
 		previewScreenFixture,
 		previewLongScrollbackFixture,
+		previewZmxHistoryFixture,
 		loadingScreenFixture,
 		loadingErrorFixture,
 	}
@@ -860,7 +863,7 @@ func projectsCommandPendingFixture() *Fixture {
 	return fx
 }
 
-// The scrollback stays generic terminal output: no fixture may reference a
+// The history stays generic terminal output: no fixture may reference a
 // specific tool.
 func previewScreenFixture() *Fixture {
 	sessions := []tui.Session{
@@ -870,7 +873,7 @@ func previewScreenFixture() *Fixture {
 		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
 	}
 
-	scrollback := "$ kubectl rollout status deploy/tessera-proxy\n" +
+	history := "$ kubectl rollout status deploy/tessera-proxy\n" +
 		"deployment \"tessera-proxy\" successfully rolled out\n" +
 		"$ make build\n" +
 		"go build -o bin/tessera-proxy ./cmd/tessera-proxy\n" +
@@ -879,13 +882,14 @@ func previewScreenFixture() *Fixture {
 		"config ok · 3 routes · listening on :8080\n"
 
 	return &Fixture{
-		name:             "preview-screen",
-		Lister:           &fakeLister{sessions: sessions},
-		projectStore:     &fakeProjectStore{projects: nil},
-		initialMode:      prefs.ModeFlat,
-		scrollback:       scrollback,
-		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}},
-		captureKeys:      []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		name:         "preview-screen",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
+		history:      history,
+		captureKeys:  []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		// Without the read landing, the frame is the preview's loading line.
+		landsLastKeyRead: true,
 	}
 }
 
@@ -898,7 +902,16 @@ func previewLongScrollbackFixture() *Fixture {
 	for i := 1; i <= 300; i++ {
 		fmt.Fprintf(&b, "%3d  build step %d complete\n", i, i)
 	}
-	fx.scrollback = b.String()
+	fx.history = b.String()
+	return fx
+}
+
+// Drawn from zmx's own serialisation of a real session, so the frame shows the
+// preview's rendering of what zmx sends, not of what a fixture author typed.
+func previewZmxHistoryFixture() *Fixture {
+	fx := previewScreenFixture()
+	fx.name = "preview-zmx-history"
+	fx.historyFile = zmxHistoryFile()
 	return fx
 }
 

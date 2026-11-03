@@ -7,11 +7,14 @@
 package capture
 
 import (
+	"context"
 	"maps"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -111,29 +114,30 @@ func (fakeAliasEditor) SetAndSave(string, string, string) error { return nil }
 
 func (fakeAliasEditor) DeleteAndSave(string, string) (bool, error) { return true, nil }
 
-type fakeEnumerator struct {
-	groups []tmux.WindowGroup
-}
-
-func (e fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	if e.groups != nil {
-		return e.groups, nil
-	}
-	return []tmux.WindowGroup{
-		{WindowIndex: 1, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
-		{WindowIndex: 2, WindowName: "server", Panes: []tmux.WindowPane{{Index: 1}}},
-	}, nil
-}
-
-// Seeded content stays generic terminal output — Portal's preview is
-// tool-agnostic, so no fixture references any specific tool.
-type fakeScrollbackReader struct {
+// fakeHistory answers every session's History with the same content, or with
+// file's bytes when it names one. Seeded content stays generic terminal output
+// — Portal's preview is tool-agnostic, so no fixture references any specific
+// tool.
+type fakeHistory struct {
 	content string
+	file    string
 }
 
-func (r fakeScrollbackReader) Tail(tui.PaneScrollback) ([]byte, error) {
-	if r.content != "" {
-		return []byte(r.content), nil
+func (h fakeHistory) History(context.Context, string, int) ([]byte, error) {
+	if h.file != "" {
+		return os.ReadFile(h.file)
 	}
-	return []byte("$ portal open\n(canned preview scrollback)\n"), nil
+	if h.content != "" {
+		return []byte(h.content), nil
+	}
+	return []byte("$ portal open\n(canned preview history)\n"), nil
+}
+
+// zmxHistoryFile is a History answer zmx itself serialised, recorded by the zmx
+// package's integration test. It is found beside this source file rather than
+// from the working directory, which differs between capturetool's live view
+// and the test lanes.
+func zmxHistoryFile() string {
+	_, self, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(self), "..", "backend", "zmx", "testdata", "history.vt")
 }

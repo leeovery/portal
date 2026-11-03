@@ -5,21 +5,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("alpha\nbeta\ngamma\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "alpha\nbeta\ngamma\n", "work"), 80, 24)
 
 	out := m.View()
 	lines := strings.Split(out, "\n")
@@ -36,8 +25,8 @@ func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 	}
 
 	header := stripANSI(lines[1])
-	if !strings.Contains(header, "◉ preview work Window 1/2 · Pane 1/2") {
-		t.Errorf("View() second line = %q; want the header compartment with marker + counters", header)
+	if !strings.HasSuffix(strings.TrimRight(header, " │"), "◉ preview work") {
+		t.Errorf("View() second line = %q; want the header compartment with marker and session, nothing after", header)
 	}
 
 	if !strings.Contains(stripANSI(out), "alpha") {
@@ -45,7 +34,7 @@ func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 	}
 
 	footer := stripANSI(lines[len(lines)-2])
-	if !strings.Contains(footer, "←→ window") {
+	if !strings.Contains(footer, "↑↓ session") || strings.Contains(footer, "window") {
 		t.Errorf("View() penultimate line = %q; want the footer nav hints", footer)
 	}
 	bottom := stripANSI(lines[len(lines)-1])
@@ -56,16 +45,7 @@ func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 
 func TestPreviewView_FillsFullTerminalHeight(t *testing.T) {
 	const termH = 24
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("only-one-line\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, termH)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "only-one-line\n", "work"), 80, termH)
 
 	out := m.View()
 	if got := strings.Count(out, "\n") + 1; got != termH {
@@ -88,41 +68,6 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 	}
 }
 
-func TestPreviewView_ChromeRowCountConstantAcrossWindowAndPaneCycles(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("content\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
-
-	chromeLineCount := func(s string) int {
-		return strings.Count(s, "\n") + 1
-	}
-
-	before := chromeLineCount(chromeLineForTest(m))
-
-	m, _ = m.Update(nextPaneKey)
-	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("header row count changed after Tab: before=%d after=%d", before, got)
-	}
-
-	m, _ = m.Update(nextWindowKey)
-	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("header row count changed after →: before=%d after=%d", before, got)
-	}
-
-	m, _ = m.Update(prevWindowKey)
-	if got := chromeLineCount(chromeLineForTest(m)); got != before {
-		t.Errorf("header row count changed after ←: before=%d after=%d", before, got)
-	}
-}
-
 func TestPreviewWindowSizeMsg_SmallHeightDoesNotProduceNegativeViewportHeight(t *testing.T) {
 	m, _ := newPreviewModelWithLines(t, 50)
 
@@ -140,17 +85,7 @@ func TestPreviewWindowSizeMsg_SmallHeightDoesNotProduceNegativeViewportHeight(t 
 
 func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 	const initialHeight = 24
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("x\n")}
-
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, initialHeight)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "x", "work"), 80, initialHeight)
 
 	wantHeight := initialHeight - previewFrameOverhead
 	if m.viewport.Height() != wantHeight {

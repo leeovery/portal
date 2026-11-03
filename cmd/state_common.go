@@ -9,7 +9,6 @@ var (
 	hydrateLogger   = log.For("hydrate")
 	notifyLogger    = log.For("notify")
 	bootstrapLogger = log.For("bootstrap")
-	previewLogger   = log.For("preview")
 	// The component (subsystem) is orthogonal to process_role (binary): the
 	// signal-hydrate command's role stays `hydrate` while the subsystem it
 	// instruments is signal.

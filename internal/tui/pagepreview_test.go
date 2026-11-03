@@ -1,226 +1,217 @@
 package tui
 
 import (
+	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 )
 
-type stubEnumerator struct {
-	groups  []tmux.WindowGroup
-	err     error
-	calls   int
-	lastArg string
+// historyFake holds each named session with vt as its history.
+func historyFake(t *testing.T, vt string, names ...string) *backendtest.Fake {
+	t.Helper()
+	f := backendtest.New()
+	for _, name := range names {
+		f.Add(backend.Session{Name: name})
+		f.SetHistory(name, []byte(vt))
+	}
+	return f
 }
 
-func (s *stubEnumerator) ListWindowsAndPanesInSession(session string) ([]tmux.WindowGroup, error) {
-	s.calls++
-	s.lastArg = session
-	return s.groups, s.err
+// openedPreview is the preview of session once its read from history has
+// landed, as the picker shows it a moment after Space.
+func openedPreview(t *testing.T, session string, history HistoryReader, width, height int) previewModel {
+	t.Helper()
+	return NewPreviewModel(session, bodyOf(t, newPreviewHistory(history), session), width, height)
 }
 
-type recordingReader struct {
-	bytes []byte
-	err   error
-	calls []string
-	panes []PaneScrollback
-}
-
-func (r *recordingReader) Tail(pane PaneScrollback) ([]byte, error) {
-	r.calls = append(r.calls, pane.PaneKey)
-	r.panes = append(r.panes, pane)
-	return r.bytes, r.err
-}
-
-func TestNewPreviewModel_ReturnsFalseWhenEnumerationErrors(t *testing.T) {
-	enum := &stubEnumerator{err: errors.New("boom")}
-	reader := &recordingReader{}
-
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if ok {
-		t.Errorf("expected ok=false on enumeration error, got true")
-	}
-	if len(reader.calls) != 0 {
-		t.Errorf("expected no Tail calls on enumeration error, got %d", len(reader.calls))
-	}
-}
-
-func TestNewPreviewModel_ReturnsFalseOnEmptyEnumeration(t *testing.T) {
-	enum := &stubEnumerator{groups: nil}
-	reader := &recordingReader{}
-
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if ok {
-		t.Errorf("expected ok=false on empty enumeration, got true")
-	}
-	if len(reader.calls) != 0 {
-		t.Errorf("expected no Tail calls on empty enumeration, got %d", len(reader.calls))
-	}
-}
-
-func TestNewPreviewModel_ReturnsFalseWhenFirstWindowHasZeroPanes(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: nil},
-		},
-	}
-	reader := &recordingReader{}
-
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if ok {
-		t.Errorf("expected ok=false when first window has zero panes, got true")
-	}
-	if len(reader.calls) != 0 {
-		t.Errorf("expected no Tail calls when first window has zero panes, got %d", len(reader.calls))
-	}
-}
-
-func TestNewPreviewModel_SetsFocusToZeroZeroOnSuccess(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}, {Index: 1}}},
-			{WindowIndex: 1, WindowName: "other", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
+// bodyOf is h's body for session, read for an open that never ends.
+func bodyOf(t *testing.T, h previewHistory, session string) string {
+	t.Helper()
+	body, ok := h.body(context.Background(), session)
 	if !ok {
-		t.Fatalf("expected ok=true on success, got false")
+		t.Fatalf("body(%q) ok=false for an open that never ended", session)
 	}
-	if m.windowIdx != 0 {
-		t.Errorf("expected windowIdx=0, got %d", m.windowIdx)
+	return body
+}
+
+// newTestPreview is the opened preview of session "work" whose history is vt.
+func newTestPreview(t *testing.T, vt string, width, height int) previewModel {
+	t.Helper()
+	return openedPreview(t, "work", historyFake(t, vt, "work"), width, height)
+}
+
+// previewBody is the viewport's rows as text, right-trimmed, without the blank
+// rows that pad a short history to the viewport's height.
+func previewBody(m previewModel) []string {
+	rows := strings.Split(stripANSI(m.viewport.View()), "\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
 	}
-	if m.paneIdx != 0 {
-		t.Errorf("expected paneIdx=0, got %d", m.paneIdx)
+	for len(rows) > 1 && rows[len(rows)-1] == "" {
+		rows = rows[:len(rows)-1]
+	}
+	return rows
+}
+
+func lastBodyRow(m previewModel) string {
+	body := previewBody(m)
+	return body[len(body)-1]
+}
+
+// stallingHistory answers nothing until its context ends, then fails with the
+// context's cause, as a wedged session does under the Backend contract.
+type stallingHistory struct {
+	deadline, entered time.Time
+}
+
+func (s *stallingHistory) History(ctx context.Context, _ string, _ int) ([]byte, error) {
+	s.entered = time.Now()
+	s.deadline, _ = ctx.Deadline()
+	<-ctx.Done()
+	return nil, context.Cause(ctx)
+}
+
+func TestPreviewHistoryBody_IsTheSessionsWholeHistory(t *testing.T) {
+	fake := historyFake(t, "first\r\nsecond", "work")
+
+	body := bodyOf(t, newPreviewHistory(fake), "work")
+
+	calls := fake.CallsTo(backendtest.OpHistory)
+	if len(calls) != 1 || calls[0].Name != "work" || calls[0].Rows != 0 {
+		t.Errorf("History calls = %+v, want one for work with rows 0 (the whole history)", calls)
+	}
+	if got := stripANSI(body); got != "first\nsecond" {
+		t.Errorf("body = %q, want the history's two rows", got)
 	}
 }
 
-func TestNewPreviewModel_ReadsTailForZeroZeroPaneSynchronously(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 2, WindowName: "main", Panes: []tmux.WindowPane{{Index: 5}, {Index: 6}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hello")}
+func TestPreviewHistoryBody_DrawsTheHistoryAsTheTerminalWould(t *testing.T) {
+	// zmx's own serialisation: a CUF step, a background erase, then the
+	// cursor's CUP and the state after it.
+	m := newTestPreview(t, "a\x1b[3Cb\r\n\x1b[44mx\x1b[2X\x1b[2C\x1b[0m\x1b[2;4H\x1b[0m", 80, 24)
 
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if !ok {
-		t.Fatalf("expected ok=true, got false")
+	body := previewBody(m)
+	if got := body[len(body)-2:]; !slices.Equal(got, []string{"a   b", "x"}) {
+		t.Errorf("body = %q, want the CUF drawn as blanks and nothing after the CUP", got)
 	}
-	if len(reader.calls) != 1 {
-		t.Fatalf("expected exactly 1 Tail call, got %d", len(reader.calls))
-	}
-	want := state.SanitizePaneKey("work", 2, 5)
-	if reader.calls[0] != want {
-		t.Errorf("expected Tail called with paneKey %q, got %q", want, reader.calls[0])
+	if view := m.viewport.View(); strings.Contains(view, "\x1b[2X") || strings.Contains(view, "\x1b[2;4H") {
+		t.Errorf("viewport content carries a non-SGR sequence: %q", view)
 	}
 }
 
-func TestNewPreviewModel_PassesRawANSIBytesVerbatimToSetContent(t *testing.T) {
-	raw := []byte("\x1b[31mred\x1b[0m")
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: raw}
+func TestPreviewHistoryBody_SaysWhyThereIsNone(t *testing.T) {
+	for name, tc := range map[string]struct {
+		stage func(*backendtest.Fake)
+		want  string
+	}{
+		"not answering":   {func(f *backendtest.Fake) { f.StopAnswering("work") }, previewNotAnswering},
+		"unavailable":     {func(f *backendtest.Fake) { f.Fail(backendtest.OpHistory, backend.ErrHistoryUnavailable) }, previewHistoryUnavailable},
+		"any other error": {func(f *backendtest.Fake) { f.Fail(backendtest.OpHistory, errors.New("connection reset")) }, previewHistoryUnavailable},
+		"gone":            {func(f *backendtest.Fake) { f.Remove("work") }, previewSessionGone},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := historyFake(t, "unread", "work")
+			tc.stage(fake)
 
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if !ok {
-		t.Fatalf("expected ok=true, got false")
-	}
-	view := m.View()
-	if !strings.Contains(view, "\x1b[31m") || !strings.Contains(view, "red") || !strings.Contains(view, "\x1b[0m") {
-		t.Errorf("expected View() to contain raw ANSI bytes verbatim, got %q", view)
+			if got := bodyOf(t, newPreviewHistory(fake), "work"); got != tc.want {
+				t.Errorf("body = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestNewPreviewModel_PositionsViewportAtScrollTailOnInitialOpen(t *testing.T) {
-	var b strings.Builder
-	for range 50 {
-		b.WriteString("line\n")
-	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte(b.String())}
+func TestPreviewHistoryBody_AWedgedSessionHoldsTheReadOnlyToTheCeiling(t *testing.T) {
+	const ceiling = 20 * time.Millisecond
+	stall := &stallingHistory{}
+	start := time.Now()
 
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
+	body := bodyOf(t, previewHistory{reader: stall, ceiling: ceiling}, "work")
 
-	if !ok {
-		t.Fatalf("expected ok=true, got false")
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("the read took %s against a %s ceiling", elapsed, ceiling)
+	}
+	if stall.deadline.IsZero() || stall.deadline.Sub(stall.entered) > ceiling {
+		t.Errorf("History's context deadline = %v, want one within %s of the call", stall.deadline, ceiling)
+	}
+	if body != previewNotAnswering {
+		t.Errorf("body = %q, want %q once the ceiling passes", body, previewNotAnswering)
+	}
+}
+
+func TestPreviewHistoryRead_CarriesItsGeneration(t *testing.T) {
+	msg := newPreviewHistory(historyFake(t, "x", "work")).read(context.Background(), "work", 7)()
+
+	got, ok := msg.(previewBodyMsg)
+	if !ok || got.gen != 7 || got.body != "x" {
+		t.Errorf("read's message = %#v, want the body for generation 7", msg)
+	}
+}
+
+func TestPreviewHistoryRead_OfAnEndedOpenNeitherDialsNorDraws(t *testing.T) {
+	fake := historyFake(t, "x", "work")
+	open, end := context.WithCancel(context.Background())
+	end()
+
+	msg := newPreviewHistory(fake).read(open, "work", 1)()
+
+	if msg != nil {
+		t.Errorf("read of an ended open returned %#v, want no message", msg)
+	}
+	if n := len(fake.CallsTo(backendtest.OpHistory)); n != 0 {
+		t.Errorf("History dialled %d times for an ended open, want none", n)
+	}
+}
+
+// endingHistory answers with history, but ends the open it is read for first,
+// as the next open does while a read is under way.
+type endingHistory struct {
+	end context.CancelFunc
+}
+
+func (h endingHistory) History(context.Context, string, int) ([]byte, error) {
+	h.end()
+	return []byte("drawn only if the read was still wanted"), nil
+}
+
+func TestPreviewHistoryRead_AnOpenEndedDuringTheReadDrawsNothing(t *testing.T) {
+	open, end := context.WithCancel(context.Background())
+
+	if msg := newPreviewHistory(endingHistory{end: end}).read(open, "work", 1)(); msg != nil {
+		t.Errorf("read whose open ended mid-read returned %#v, want no message", msg)
+	}
+}
+
+func TestWithHistory_BoundsEveryReadByTheCeiling(t *testing.T) {
+	m := New(nil, WithHistory(historyFake(t, "x", "work")))
+
+	if m.history.ceiling != previewHistoryCeiling {
+		t.Errorf("history ceiling = %s, want %s", m.history.ceiling, previewHistoryCeiling)
+	}
+}
+
+func TestNewPreviewModel_OpensAtTheBottomOfItsBody(t *testing.T) {
+	m := newTestPreview(t, strings.Repeat("line\r\n", 50)+"last", 80, 24)
+
+	if !m.viewport.AtBottom() {
+		t.Errorf("viewport.AtBottom() = false right after construction, want true")
+	}
+}
+
+func TestPreviewSetBody_ReplacesTheBodyAnchoredAtTheBottom(t *testing.T) {
+	m := NewPreviewModel("work", previewLoading, 80, 24)
+
+	m.setBody(renderHistory([]byte(strings.Repeat("line\r\n", 50) + "last")))
+
+	if got := lastBodyRow(m); got != "last" {
+		t.Errorf("last row = %q, want the new body's", got)
 	}
 	if !m.viewport.AtBottom() {
-		t.Errorf("expected viewport.AtBottom()=true immediately after construction, got false")
-	}
-}
-
-func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilNil(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: nil, err: nil}
-
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if !ok {
-		t.Errorf("expected ok=true when Tail returns (nil, nil), got false")
-	}
-}
-
-func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilError(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: nil, err: errors.New("EACCES")}
-
-	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-
-	if !ok {
-		t.Errorf("expected ok=true when Tail returns (nil, err), got false")
-	}
-}
-
-func TestNewPreviewModel_ConstructsFreshModelPerCallWithNoCarriedState(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("first")}
-
-	_, ok1 := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok1 {
-		t.Fatalf("first call: expected ok=true, got false")
-	}
-
-	reader.bytes = []byte("second")
-
-	_, ok2 := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok2 {
-		t.Fatalf("second call: expected ok=true, got false")
-	}
-
-	if enum.calls != 2 {
-		t.Errorf("expected 2 enumeration calls (one per construction), got %d", enum.calls)
-	}
-	if len(reader.calls) != 2 {
-		t.Errorf("expected 2 Tail calls (one per construction), got %d", len(reader.calls))
+		t.Errorf("viewport.AtBottom() = false after the body landed, want true")
 	}
 }

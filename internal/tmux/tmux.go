@@ -609,98 +609,6 @@ func (c *Client) ListPanesInSession(session string) ([]PaneCoord, error) {
 	return coords, nil
 }
 
-type WindowGroup struct {
-	WindowIndex int
-	WindowName  string
-	Panes       []WindowPane
-}
-
-// WindowPane is one pane of a WindowGroup. Token is the pane's @portal-pane-id,
-// empty for a pane that carries no stamp; Pending reports whether it is waiting
-// on a resume decision.
-type WindowPane struct {
-	Index   int
-	Token   string
-	Pending bool
-}
-
-// ASCII Unit Separator rather than '|': tmux permits pipes in window names but
-// refuses this byte in one.
-const listWindowsAndPanesFieldSep = "\x1f"
-
-const listWindowsAndPanesFormat = "#{window_index}" + listWindowsAndPanesFieldSep +
-	"#{window_name}" + listWindowsAndPanesFieldSep +
-	"#{pane_index}" + listWindowsAndPanesFieldSep +
-	HookKeyFormat + listWindowsAndPanesFieldSep +
-	"#{" + state.ResumePendingOption + "}"
-
-const listWindowsAndPanesFieldCount = 5
-
-// ListWindowsAndPanesInSession returns one WindowGroup per window of the named
-// session, sorted ascending, each group's Panes likewise by index. Indices are
-// verbatim tmux values, so they honour base-index settings and keep the gaps left
-// by killed windows; a caller wanting ordinal counters must derive them from
-// slice position.
-func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, error) {
-	out, err := c.cmd.Run("list-panes", "-s", "-t", string(CoordTargetExact(session)), "-F", listWindowsAndPanesFormat)
-	if err != nil {
-		return nil, fmt.Errorf("list windows and panes for session %s: %w", session, err)
-	}
-	if strings.TrimSpace(out) == "" {
-		return []WindowGroup{}, nil
-	}
-
-	groups := make([]WindowGroup, 0)
-	byIndex := make(map[int]int)
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		win, name, pane, err := parseWindowPaneRow(line)
-		if err != nil {
-			return nil, err
-		}
-		if pos, ok := byIndex[win]; ok {
-			groups[pos].Panes = append(groups[pos].Panes, pane)
-			continue
-		}
-		byIndex[win] = len(groups)
-		groups = append(groups, WindowGroup{
-			WindowIndex: win,
-			WindowName:  name,
-			Panes:       []WindowPane{pane},
-		})
-	}
-
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].WindowIndex < groups[j].WindowIndex
-	})
-	for i := range groups {
-		sort.Slice(groups[i].Panes, func(a, b int) bool {
-			return groups[i].Panes[a].Index < groups[i].Panes[b].Index
-		})
-	}
-	return groups, nil
-}
-
-func parseWindowPaneRow(line string) (window int, windowName string, pane WindowPane, err error) {
-	parts := strings.Split(line, listWindowsAndPanesFieldSep)
-	if len(parts) != listWindowsAndPanesFieldCount {
-		return 0, "", WindowPane{}, fmt.Errorf("unexpected window/pane format %q", line)
-	}
-	window, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, "", WindowPane{}, fmt.Errorf("invalid window index %q in line %q: %w", parts[0], line, err)
-	}
-	index, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return 0, "", WindowPane{}, fmt.Errorf("invalid pane index %q in line %q: %w", parts[2], line, err)
-	}
-	pane = WindowPane{Index: index, Token: parts[3], Pending: state.ResumePendingSet(parts[4])}
-	return window, parts[1], pane, nil
-}
-
 // ListAllPanesWithFormat enumerates every pane on the server under a caller-
 // supplied tmux format, returning the raw untrimmed output. Any tmux failure is
 // returned wrapped, never flattened into an empty result.
@@ -1006,16 +914,6 @@ func (c *Client) SelectLayout(session string, window int, layout string) error {
 	_, err := c.cmd.Run(args...)
 	if err != nil {
 		return fmt.Errorf("failed to select-layout %s: %w", bareTarget, err)
-	}
-	return nil
-}
-
-func (c *Client) SelectWindow(session string, window int) error {
-	bareTarget := windowTarget(session, window)
-	args := []string{"select-window", "-t", string(windowTargetExact(session, window))}
-	_, err := c.cmd.Run(args...)
-	if err != nil {
-		return fmt.Errorf("failed to select-window %s: %w", bareTarget, err)
 	}
 	return nil
 }

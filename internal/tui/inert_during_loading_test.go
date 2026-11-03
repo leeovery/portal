@@ -1,19 +1,18 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type mutationRecorder struct {
 	killCalls     int
 	renameCalls   int
 	createCalls   int
-	attachCalls   int
-	enumCalls     int
+	historyCalls  int
 	listSessCalls int
 }
 
@@ -24,13 +23,8 @@ func (r *mutationRecorder) CreateFromDir(string, []string) (string, error) {
 	return "", nil
 }
 
-func (r *mutationRecorder) Run(string, int, int) tea.Cmd {
-	r.attachCalls++
-	return nil
-}
-
-func (r *mutationRecorder) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	r.enumCalls++
+func (r *mutationRecorder) History(context.Context, string, int) ([]byte, error) {
+	r.historyCalls++
 	return nil, nil
 }
 
@@ -40,7 +34,7 @@ func (r *mutationRecorder) ListSessions() ([]Session, error) {
 }
 
 func (r *mutationRecorder) totalMutations() int {
-	return r.killCalls + r.renameCalls + r.createCalls + r.attachCalls + r.enumCalls
+	return r.killCalls + r.renameCalls + r.createCalls + r.historyCalls
 }
 
 func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
@@ -52,8 +46,7 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 		WithKiller(rec),
 		WithRenamer(rec),
 		WithSessionCreator(rec),
-		WithPreviewAttachPipeline(rec),
-		WithEnumerator(rec),
+		WithHistory(rec),
 	)
 
 	var model tea.Model = m
@@ -104,8 +97,8 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 
 	if got := rec.totalMutations(); got != 0 {
 		t.Errorf("inert-during-loading VIOLATED: %d mutating seam call(s) reached during loading "+
-			"(kill=%d rename=%d create=%d attach=%d enum=%d)",
-			got, rec.killCalls, rec.renameCalls, rec.createCalls, rec.attachCalls, rec.enumCalls)
+			"(kill=%d rename=%d create=%d history=%d)",
+			got, rec.killCalls, rec.renameCalls, rec.createCalls, rec.historyCalls)
 	}
 	if rec.listSessCalls != 0 {
 		t.Errorf("inert-during-loading: the loading-page key arm issued %d ListSessions call(s); "+

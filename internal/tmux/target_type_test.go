@@ -95,11 +95,6 @@ var targetTakingRoutes = []targetTakingRoute{
 		want:   []string{"select-layout", "-t", "=work:2", "tiled"},
 	},
 	{
-		name:   "SelectWindow",
-		invoke: func(c *tmux.Client) { _ = c.SelectWindow(routeTargetSession, 2) },
-		want:   []string{"select-window", "-t", "=work:2"},
-	},
-	{
 		name:   "SelectPane",
 		invoke: func(c *tmux.Client) { _ = c.SelectPane(routeTargetSession, 2, 3) },
 		want:   []string{"select-pane", "-t", "=work:2.3"},

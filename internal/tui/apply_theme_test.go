@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -103,13 +104,13 @@ type countingStores struct {
 	aliasEditor    *countingAliasEditor
 	modePersister  *countingModePersister
 	themePersister *countingThemePersister
-	scrollback     *countingScrollbackReader
+	history        *countingHistory
 	lister         *countingLister
 }
 
 func (c countingStores) calls() int {
 	return c.projectStore.calls + c.projectEditor.calls + c.aliasEditor.calls +
-		c.modePersister.calls + c.themePersister.calls + c.scrollback.calls + c.lister.calls
+		c.modePersister.calls + c.themePersister.calls + c.history.calls + c.lister.calls
 }
 
 func (c countingStores) reset() {
@@ -118,7 +119,7 @@ func (c countingStores) reset() {
 	c.aliasEditor.calls = 0
 	c.modePersister.calls = 0
 	c.themePersister.calls = 0
-	c.scrollback.calls = 0
+	c.history.calls = 0
 	c.lister.calls = 0
 }
 
@@ -128,7 +129,7 @@ func (c countingStores) exercise() {
 	_, _ = c.aliasEditor.Load()
 	_ = c.modePersister.Save(prefs.ModeFlat)
 	_ = c.themePersister.CommitTheme("nord")
-	_, _ = c.scrollback.Tail(PaneScrollback{PaneKey: "pane"})
+	_, _ = c.history.History(context.Background(), "work", 0)
 	_, _ = c.lister.ListSessions()
 }
 
@@ -181,9 +182,12 @@ func (c *countingThemePersister) CommitThemeSlot(string, theme.Member) error {
 	return nil
 }
 
-type countingScrollbackReader struct{ calls int }
+type countingHistory struct{ calls int }
 
-func (c *countingScrollbackReader) Tail(PaneScrollback) ([]byte, error) { c.calls++; return nil, nil }
+func (c *countingHistory) History(context.Context, string, int) ([]byte, error) {
+	c.calls++
+	return nil, nil
+}
 
 type countingLister struct{ calls int }
 
@@ -196,7 +200,7 @@ func newCountingStores() countingStores {
 		aliasEditor:    &countingAliasEditor{},
 		modePersister:  &countingModePersister{},
 		themePersister: &countingThemePersister{},
-		scrollback:     &countingScrollbackReader{},
+		history:        &countingHistory{},
 		lister:         &countingLister{},
 	}
 }
@@ -220,7 +224,7 @@ func TestApplyTheme_PerformsNoFileRead(t *testing.T) {
 			AliasEditor:    stores.aliasEditor,
 			ModePersister:  stores.modePersister,
 			ThemePersister: stores.themePersister,
-			Reader:         stores.scrollback,
+			History:        stores.history,
 		})
 		m.termWidth, m.termHeight = 120, 40
 		m.applySessionListSize(m.contentWidth(), m.contentHeight())
@@ -233,9 +237,9 @@ func TestApplyTheme_PerformsNoFileRead(t *testing.T) {
 		}
 
 		if got := stores.calls(); got != 0 {
-			t.Errorf("fifty swaps made %d file-touching seam call(s) — a swap reads nothing (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, scrollback %d, lister %d)",
+			t.Errorf("fifty swaps made %d file-touching seam call(s) — a swap reads nothing (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, history %d, lister %d)",
 				got, stores.projectStore.calls, stores.projectEditor.calls, stores.aliasEditor.calls,
-				stores.modePersister.calls, stores.themePersister.calls, stores.scrollback.calls, stores.lister.calls)
+				stores.modePersister.calls, stores.themePersister.calls, stores.history.calls, stores.lister.calls)
 		}
 	})
 
