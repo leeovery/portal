@@ -180,6 +180,8 @@ func TestCreate(t *testing.T) {
 type createResult struct {
 	session backend.Session
 	err     error
+	// afterUp is how long Create took to return once the daemon was up.
+	afterUp time.Duration
 }
 
 // createBringingUp runs Create of name with a fake zmx that prints its
@@ -187,14 +189,25 @@ type createResult struct {
 // until up has run here and brought the session's daemon up.
 func createBringingUp(t *testing.T, dir, name string, up func()) createResult {
 	t.Helper()
+	return createBringingUpWithin(t, dir, name, ceiling, up)
+}
+
+// createBringingUpWithin is createBringingUp under the probe ceiling probe.
+func createBringingUpWithin(t *testing.T, dir, name string, probe time.Duration, up func()) createResult {
+	t.Helper()
 	ready := filepath.Join(t.TempDir(), "up")
 	binary, log := fakeZmx(t, createdLine+"; while [ ! -e "+ready+" ]; do sleep 0.01; done")
 	b := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin")
+	zmx.ShortenCeilings(b, probe)
 
-	done := make(chan createResult, 1)
+	type returned struct {
+		result createResult
+		at     time.Time
+	}
+	done := make(chan returned, 1)
 	go func() {
 		s, err := b.Create(t.Context(), name, t.TempDir(), nil)
-		done <- createResult{s, err}
+		done <- returned{createResult{session: s, err: err}, time.Now()}
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -210,7 +223,10 @@ func createBringingUp(t *testing.T, dir, name string, up func()) createResult {
 	if err := os.WriteFile(ready, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return <-done
+	upAt := time.Now()
+	r := <-done
+	r.result.afterUp = r.at.Sub(upAt)
+	return r.result
 }
 
 func TestCreateReturnsTheSessionItMade(t *testing.T) {
@@ -231,7 +247,9 @@ func TestCreateReturnsTheSessionItMade(t *testing.T) {
 
 	t.Run("it asks again while the new daemon is not yet accepting", func(t *testing.T) {
 		dir := socketDir(t)
-		got := createBringingUp(t, dir, "work", func() {
+		// A probe ceiling of several seconds, which the asking ends well
+		// inside, so the daemon's coming up late under load can't outlast it.
+		got := createBringingUpWithin(t, dir, "work", 50*ceiling, func() {
 			refusing(t, dir, "work")
 			go func() {
 				time.Sleep(50 * time.Millisecond)
@@ -257,13 +275,14 @@ func TestCreateReturnsTheSessionItMade(t *testing.T) {
 
 	t.Run("a new daemon that does not answer within a probe ceiling is returned by name", func(t *testing.T) {
 		dir := socketDir(t)
-		start := time.Now()
 		got := createBringingUp(t, dir, "work", func() { serve(t, dir, "work", silent) })
 		if got.err != nil || got.session != (backend.Session{Name: "work"}) {
 			t.Errorf("Create = %+v, %v; want only the name, and no error", got.session, got.err)
 		}
-		if took := time.Since(start); took > 2*time.Second {
-			t.Errorf("Create took %s reading back a silent daemon, want about one %s probe ceiling", took, ceiling)
+		// Far from the one ceiling it takes, and far short of the create
+		// ceiling it would wait out unbounded.
+		if bound := zmx.CreateCeiling / 2; got.afterUp > bound {
+			t.Errorf("Create took %s reading back a silent daemon, want about one %s probe ceiling, well within %s", got.afterUp, ceiling, bound)
 		}
 	})
 }

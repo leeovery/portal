@@ -14,6 +14,10 @@ func ShortenCeilings(b *Backend, d time.Duration) {
 	b.limits.probe, b.limits.kill, b.limits.detach, b.limits.history = d, d, d, d
 }
 
+// CreateCeiling is Create's own ceiling, which ShortenCeilings leaves as it
+// is.
+var CreateCeiling = defaultCeilings.create
+
 // ShortenCreateCeiling sets Create's ceiling to d.
 func ShortenCreateCeiling(b *Backend, d time.Duration) { b.limits.create = d }
 
