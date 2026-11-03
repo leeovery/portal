@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,8 +12,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
@@ -37,81 +38,64 @@ var openSessionFunc = openSession
 
 var openDeps *OpenDeps
 
-// OpenDeps overrides production dependencies; a nil field falls back to the
-// production implementation.
+// OpenDeps overrides production dependencies. Once it is staged, the
+// resolver takes its alias, zoxide and directory seams as they stand; every
+// other nil field falls back to the production implementation.
 type OpenDeps struct {
+	// SessionLister, when nil, lists the backend's user sessions.
 	SessionLister resolver.SessionLister
 	AliasLookup   resolver.AliasLookup
 	Zoxide        resolver.ZoxideQuerier
 	DirValidator  resolver.DirValidator
 	AckWriter     spawn.AckWriter
 	ThemeLoader   *theme.Loader
-	// SearchSessions enumerates the live sessions a /term search is counted over.
-	SearchSessions SearchSessionSource
+	// Execer replaces the exec that hands the terminal to the backend's
+	// attach command.
+	Execer execer
 }
 
+// SessionConnector connects the caller's terminal to a session.
 type SessionConnector interface {
 	Connect(name string) error
 }
 
-type SwitchClienter interface {
-	SwitchClient(name string) error
+// attachConnector execs the backend's attach command, so Connect returns only
+// on failure. Inside a session the command switches that session's clients
+// and exits at once, and exec is still right: Portal has nothing left to do.
+type attachConnector struct {
+	ctx     context.Context
+	backend backend.Backend
+	execer  execer
 }
 
-// SwitchConnector is the connector for use inside an existing tmux session.
-type SwitchConnector struct {
-	client SwitchClienter
-}
-
-func (sc *SwitchConnector) Connect(name string) error {
-	return sc.client.SwitchClient(name)
-}
-
-// AttachConnector is the connector for use outside tmux (bare shell); it execs,
-// so Connect never returns on success. A zero execer or tmuxPath falls back to
-// the production default.
-type AttachConnector struct {
-	execer   execer
-	tmuxPath string
-}
-
-func (ac *AttachConnector) Connect(name string) error {
-	tmuxPath := ac.tmuxPath
-	if tmuxPath == "" {
-		p, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		tmuxPath = p
+func (c attachConnector) Connect(name string) error {
+	command, err := c.backend.AttachCommand(c.ctx, name)
+	if err != nil {
+		return err
 	}
-	ex := ac.execer
-	if ex == nil {
-		ex = &realExecer{}
-	}
-
-	// attach-session parses its -t as a window or pane target before falling
-	// back to a session lookup, so the target is pinned with the trailing
-	// separator: without it a period-bearing name is split into window and pane
-	// and any live session whose name extends the pre-period component answers
-	// instead.
-	// Spent as a string because this argv is exec'd directly rather than run
-	// through the client; the pinning is the constructor's, not this slice's.
-	argv := []string{"tmux", "attach-session", "-t", string(tmux.CoordTargetExact(name))}
-
-	logExecHandoff(argv)
-
-	return ex.Exec(tmuxPath, argv, os.Environ())
+	logExecHandoff(command.Argv)
+	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }
 
-func buildSessionConnector(client *tmux.Client) SessionConnector {
-	if tmux.InsideTmux() {
-		return &SwitchConnector{client: client}
+// connectorFunc is a SessionConnector that is a function.
+type connectorFunc func(name string) error
+
+func (f connectorFunc) Connect(name string) error { return f(name) }
+
+func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector {
+	ex := execer(realExecer{})
+	if openDeps != nil && openDeps.Execer != nil {
+		ex = openDeps.Execer
 	}
-	return &AttachConnector{}
+	return attachConnector{ctx: cmd.Context(), backend: b, execer: ex}
 }
 
 func openSession(cmd *cobra.Command, name string) error {
-	return buildSessionConnector(tmuxClient(cmd)).Connect(name)
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
+	return newSessionConnector(cmd, b).Connect(name)
 }
 
 var openCmd = &cobra.Command{
@@ -350,7 +334,7 @@ func logExecHandoff(argv []string) {
 	if len(args) > 0 {
 		args = args[1:]
 	}
-	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(args, " "))
+	log.For("process").Info("exec", "target", "zmx", "args", strings.Join(args, " "))
 }
 
 func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, error) {
@@ -394,89 +378,31 @@ func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, erro
 	return nil, dest, nil
 }
 
-type sessionCreatorIface interface {
-	CreateFromDir(dir string, command []string) (string, error)
-}
-
-type quickStarter interface {
-	Run(path string, command []string) (*session.QuickStartResult, error)
-}
-
 type execer interface {
 	Exec(argv0 string, argv []string, envv []string) error
 }
 
 type realExecer struct{}
 
-func (r *realExecer) Exec(argv0 string, argv []string, envv []string) error {
+func (realExecer) Exec(argv0 string, argv []string, envv []string) error {
 	return syscall.Exec(argv0, argv, envv)
 }
 
-type quickStartAdapter struct {
-	qs *session.QuickStart
-}
-
-func (a *quickStartAdapter) Run(path string, command []string) (*session.QuickStartResult, error) {
-	return a.qs.Run(path, command)
-}
-
-type PathOpener struct {
-	insideTmux bool
-	creator    sessionCreatorIface
-	switcher   SwitchClienter
-	qs         quickStarter
-	execer     execer
-	tmuxPath   string
-}
-
-func (po *PathOpener) Open(resolvedPath string, command []string) error {
-	if po.insideTmux {
-		sessionName, err := po.creator.CreateFromDir(resolvedPath, command)
-		if err != nil {
-			return err
-		}
-		return po.switcher.SwitchClient(sessionName)
-	}
-
-	result, err := po.qs.Run(resolvedPath, command)
+func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
+	b, err := attachingBackend()
 	if err != nil {
 		return err
 	}
-
-	logExecHandoff(result.ExecArgs)
-
-	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
-}
-
-func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
-	client := tmuxClient(cmd)
-	gitResolver := &resolverAdapter{}
 	projectsPath, err := projectsFilePath()
 	if err != nil {
 		return err
 	}
-	store := project.NewStore(projectsPath)
-	gen := nanoid.NewGenerator()
-
-	insideTmux := tmux.InsideTmux()
-
-	opener := &PathOpener{
-		insideTmux: insideTmux,
-		creator:    session.NewSessionCreator(gitResolver, store, client, gen),
-		switcher:   client,
-		qs:         &quickStartAdapter{qs: session.NewQuickStart(gitResolver, store, client, gen)},
-		execer:     &realExecer{},
+	creator := newIndexingCreator(cmd.Context(), project.NewStore(projectsPath), b, "cli")
+	name, err := creator.CreateFromDir(resolvedPath, command)
+	if err != nil {
+		return err
 	}
-
-	if !insideTmux {
-		tmuxPath, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		opener.tmuxPath = tmuxPath
-	}
-
-	return opener.Open(resolvedPath, command)
+	return newSessionConnector(cmd, b).Connect(name)
 }
 
 type resolverAdapter struct{}
@@ -686,8 +612,10 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 
 func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
 	client := tmuxClient(cmd)
-	gitResolver := &resolverAdapter{}
-	gen := nanoid.NewGenerator()
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
 
 	var pipe *bootstrapProgressPipe
 	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
@@ -737,9 +665,9 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		return err
 	}
 
-	// Built now, connected only after the TUI shuts down: switching the tmux
-	// client while portal is still event-looping leaves an orphan with no UI.
-	connector := buildSessionConnector(client)
+	// Connected only after the TUI shuts down, since the attach takes over the
+	// terminal the TUI holds.
+	connector := newSessionConnector(cmd, b)
 
 	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
 
@@ -754,7 +682,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		projectStore:    store,
 		projectEditor:   store,
 		aliasEditor:     aliasStore,
-		sessionCreator:  session.NewSessionCreator(gitResolver, store, client, gen),
+		sessionCreator:  newIndexingCreator(cmd.Context(), store, b, "tui"),
 		enumerator:      client,
 		reader:          previewReader,
 		previewAttacher: previewAttacher,
@@ -790,7 +718,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		cfg.themePersister = newThemePersister(prefsStore)
 	}
 
-	cfg.currentSession = currentPickerSession(client)
+	cfg.currentSession = b.Current()
 
 	m := buildTUIModel(cfg, landing, command)
 	// Staged rather than written: a direct write while the TUI holds the screen
@@ -812,8 +740,9 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 }
 
 func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
+	sessions := resolverSessions(cmd)
 	if openDeps != nil {
-		return resolver.NewQueryResolver(openDeps.SessionLister, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
+		return resolver.NewQueryResolver(sessions, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
 	}
 
 	store, err := loadAliasStore()
@@ -824,7 +753,36 @@ func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 	zoxide := resolver.NewZoxideResolver(&resolver.RealCommandRunner{}, exec.LookPath)
 	dirValidator := &resolver.OSDirValidator{}
 
-	return resolver.NewQueryResolver(tmuxClient(cmd), store, zoxide, dirValidator), nil
+	return resolver.NewQueryResolver(sessions, store, zoxide, dirValidator), nil
+}
+
+func resolverSessions(cmd *cobra.Command) resolver.SessionLister {
+	if openDeps != nil && openDeps.SessionLister != nil {
+		return openDeps.SessionLister
+	}
+	return backendSessionNames{ctx: cmd.Context()}
+}
+
+// backendSessionNames lists the names of the backend's user sessions, the ones
+// a target resolves against: resolution matches names, never labels.
+type backendSessionNames struct {
+	ctx context.Context
+}
+
+func (l backendSessionNames) ListSessionNames() ([]string, error) {
+	b, err := sessionBackend()
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := userSessions(l.ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		names = append(names, s.Name)
+	}
+	return names, nil
 }
 
 func init() {

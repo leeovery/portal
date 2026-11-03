@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -78,6 +79,37 @@ func printable(label string) bool {
 	return utf8.ValidString(label) && !strings.ContainsFunc(label, func(r rune) bool {
 		return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
 	})
+}
+
+// Claim makes the session's entry the live session's: the one its backend
+// created at created, zero when it reports no time. A session recreated under
+// a name is a new session, told apart only by that time. So an entry from the
+// same creation keeps its label and scrollback, taking dir only when it
+// records none; an entry from another creation, or with no time, belonged to
+// an earlier session and is replaced whole; a session with no entry gets one.
+func (idx *Index) Claim(name, dir string, created time.Time) {
+	fresh := Entry{Name: name, Dir: dir, CreatedAt: created}
+	i := idx.indexOf(name)
+	switch {
+	case i < 0:
+		idx.Sessions = append(idx.Sessions, fresh)
+	case sameCreation(idx.Sessions[i].CreatedAt, created):
+		if idx.Sessions[i].Dir != "" || dir == "" {
+			return
+		}
+		idx.Sessions[i].Dir = dir
+	case idx.Sessions[i] == fresh:
+		return
+	default:
+		idx.Sessions[i] = fresh
+	}
+	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
+}
+
+// sameCreation reports whether an entry created at recorded is the session
+// created at live. An entry with no time can't be told from an earlier one.
+func sameCreation(recorded, live time.Time) bool {
+	return !recorded.IsZero() && recorded.Equal(live)
 }
 
 // Remove drops the session's entry, reporting whether there was one.

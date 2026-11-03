@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -136,50 +139,33 @@ func validateCommandScopeAndFilter(cmd *cobra.Command, args []string) error {
 	return validateFilterFlag(cmd, destination)
 }
 
-// SearchSessionSource enumerates the live sessions a search term is counted
-// against, and names the session the caller is attached to so the count is taken
-// over the set the picker would list. The enumeration discriminates a failed
-// read from an empty server: a list that could not be read has searched nothing,
-// so it must not be counted as no matches.
-type SearchSessionSource interface {
-	ListSessionsProbe() ([]tmux.Session, error)
-	CurrentSessionName() (string, error)
-}
-
-func buildSearchSessionSource(cmd *cobra.Command) SearchSessionSource {
-	if openDeps != nil && openDeps.SearchSessions != nil {
-		return openDeps.SearchSessions
-	}
-	return tmuxClient(cmd)
-}
-
-// currentSessionReader names the session the caller is attached to.
-type currentSessionReader interface {
-	CurrentSessionName() (string, error)
-}
-
-// currentPickerSession returns the session the caller is attached to, and the
-// empty string outside tmux or when the read fails or answers empty — so a
-// surface keying off it holds nothing back on a failed read.
-func currentPickerSession(src currentSessionReader) string {
-	if !tmux.InsideTmux() {
-		return ""
-	}
-	current, err := src.CurrentSessionName()
-	if err != nil {
-		return ""
-	}
-	return current
-}
-
-// searchCandidates returns the sessions a term is counted over: the enumeration
-// less the session the caller is already in, which the picker omits too.
-func searchCandidates(src SearchSessionSource) ([]tui.Session, error) {
-	sessions, err := src.ListSessionsProbe()
+// searchCandidates returns the sessions a term is counted over: the user's
+// sessions less the one the caller is in, which the picker omits too, each
+// with its recorded directory. An index that cannot be read records none, so
+// the term is matched against names alone.
+func searchCandidates(ctx context.Context, b backend.Backend) ([]tui.Session, error) {
+	sessions, err := userSessions(ctx, b)
 	if err != nil {
 		return nil, err
 	}
-	return tui.PickerSessions(pickerSessions(sessions), currentPickerSession(src)), nil
+	idx, _ := readSessionIndex()
+	return tui.PickerSessions(indexedSessions(sessions, &idx), b.Current()), nil
+}
+
+// indexedSessions joins the backend's sessions with the directory the index
+// records for each.
+func indexedSessions(sessions []backend.Session, idx *sessionindex.Index) []tui.Session {
+	out := make([]tui.Session, 0, len(sessions))
+	for _, s := range sessions {
+		entry, _ := idx.Lookup(s.Name)
+		out = append(out, tui.Session{
+			Name:         s.Name,
+			Dir:          entry.Dir,
+			Attached:     s.Attached(),
+			NotAnswering: !s.Answered,
+		})
+	}
+	return out
 }
 
 // searchMatches returns, in enumeration order, the sessions the term matches,
@@ -198,9 +184,9 @@ func searchMatches(home, term string, sessions []tui.Session) []tui.Session {
 // is the session to attach, any other count is ("", nil) and leaves the picker
 // to it, and a failed enumeration is returned unchanged. It is a closure because
 // the moment it runs differs by route — here, or from inside the picker.
-func searchDecision(src SearchSessionSource, term string) func() (string, error) {
+func searchDecision(ctx context.Context, b backend.Backend, term string) func() (string, error) {
 	return func() (string, error) {
-		sessions, err := searchCandidates(src)
+		sessions, err := searchCandidates(ctx, b)
 		if err != nil {
 			return "", err
 		}
@@ -224,7 +210,11 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil, serverWasStarted(cmd))
 	}
 
-	decide := searchDecision(buildSearchSessionSource(cmd), term)
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
+	decide := searchDecision(cmd.Context(), b, term)
 	landing := pickerLanding{search: &tui.SearchForm{Term: term}}
 
 	if deferredBootstrapFromContext(cmd) != nil {
@@ -247,4 +237,24 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 		return openSessionFunc(cmd, name)
 	}
 	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+}
+
+// currentSessionReader names the session the caller is attached to.
+type currentSessionReader interface {
+	CurrentSessionName() (string, error)
+}
+
+// currentPickerSession returns the tmux session the caller is attached to, and
+// the empty string outside tmux or when the read fails or answers empty. Only
+// completion reads it, until completion moves to the backend; open's current
+// session is the backend's Current.
+func currentPickerSession(src currentSessionReader) string {
+	if !tmux.InsideTmux() {
+		return ""
+	}
+	current, err := src.CurrentSessionName()
+	if err != nil {
+		return ""
+	}
+	return current
 }

@@ -51,8 +51,6 @@ func TestPersistentPreRunE_PickerWithRunner_DefersBootstrap(t *testing.T) {
 }
 
 func TestPersistentPreRunE_SearchFormWithRunner_DefersBootstrap(t *testing.T) {
-	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
-
 	if route := runPickerRoute(t, &recordingRunner{started: true}, "/port"); !route.deferred {
 		t.Error("openTUI did not receive a deferred bootstrap for a search form with a runner injected")
 	}
