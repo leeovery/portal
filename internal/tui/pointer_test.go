@@ -119,6 +119,22 @@ func TestMouseReportingIsOnForThePicker(t *testing.T) {
 	}
 }
 
+// The gate's blank frame is the one that enters the alt screen, so it has to ask
+// for the mouse in the same write: a terminal that re-reads its mouse state only
+// on a screen change drops the first swipe when the request lands a frame later.
+func TestMouseReportingIsOnFromTheGatesBlankFrame(t *testing.T) {
+	m := detectModel(t, testBuiltinPair(t))
+	assertBlankFrame(t, m)
+
+	v := m.View()
+	if !v.AltScreen {
+		t.Fatalf("blank frame View().AltScreen = false, want true")
+	}
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("blank frame View().MouseMode = %v, want MouseModeCellMotion alongside the alt screen", v.MouseMode)
+	}
+}
+
 func TestTapOpensTheSessionUnderIt(t *testing.T) {
 	names := []string{"alpha", "bravo", "charlie", "delta"}
 
