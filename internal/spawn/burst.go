@@ -18,7 +18,7 @@ type AckOutcome string
 const (
 	AckConfirmed AckOutcome = "confirmed"
 	// AckTimeout — the window opened but its token never appeared in time; a
-	// missing marker at timeout counts as a failed spawn.
+	// missing ack at timeout counts as a failed spawn.
 	AckTimeout AckOutcome = "timeout"
 	// AckFailed — the adapter reported no window opened, so nothing was awaited.
 	AckFailed AckOutcome = "failed"

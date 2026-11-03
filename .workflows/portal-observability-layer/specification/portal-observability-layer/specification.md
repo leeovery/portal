@@ -12,7 +12,7 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 - Calendar-daily log rotation with a configurable size-cap safety valve, replacing the 1 MiB churn-prone scheme.
 - Bounded, auditable retention (default 30 days) with per-deletion breadcrumbs.
 - A locked log-level contract (DEBUG/INFO/WARN/ERROR), production default INFO.
-- A closed subsystem-prefix taxonomy (19 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
+- A closed subsystem-prefix taxonomy (20 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
 - Defensive invariants (per-process lifecycle markers, rotated-file immutability, `O_CREAT|O_EXCL` first-of-day open) that make log destruction detectable post-hoc.
 - Instrumentation catalogs: state-mutation audit trail, cycle-level summaries, saver/daemon lifecycle events, hydrate-helper forensic trail, and a boundary-context-preservation sweep.
 
@@ -114,8 +114,8 @@ Call sites then use `logger.{Debug,Info,Warn,Error}` directly with `slog.Attr` a
 
 **The rule is bind-once *per package, per component* — not one package per component**, and the taxonomy is deliberately not partitioned by package:
 
-- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`; `bootstrap`, `hooks`, `clean` and `spawn` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
-- **A package may bind several components.** `cmd` holds package-level bindings for `daemon`, `hydrate`, `notify`, `hooks`, `bootstrap`, `restore`, `preview`, `signal`, `capture`, `spawn`, `resolve` and `theme`.
+- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`, and `attach` in `cmd`, `internal/runner` and `internal/runnerreg`; `bootstrap`, `hooks`, `clean`, `spawn` and `sessions` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
+- **A package may bind several components.** `cmd` holds package-level bindings for `daemon`, `hydrate`, `notify`, `bootstrap`, `signal`, `capture`, `spawn`, `resolve`, `theme`, `attach` and `sessions`, and binds `process` and the config stores' components (`hooks`, `projects`, `aliases`, for a file's one-shot move) at their call sites.
 - **A package handed an already-bound logger through a seam binds nothing.** `internal/theme` emits the whole `theme` component through an injected logger and never calls `log.For` at all; the single `log.For("theme")` binding lives in `cmd` (see *The `theme` component event catalog*). `internal/spawn`'s shared emission helpers take an injected logger the same way — `cmd` passes its own binding in for the CLI burst and injects that same binding into `internal/tui` for the picker burst, so the TUI binds nothing either — alongside that package's own binding, which covers its detection path and its `terminals.json` load.
 
 What the rule forbids is a *second* binding of the same component inside one package — invisible at review, because every call site still looks correct in isolation.
@@ -151,15 +151,15 @@ Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem au
 
 Call-site binding is the factory pattern defined in *The `internal/log` package* — a consumer binds each component it emits under once at init via `var logger = log.For("<component>")`, or is handed an already-bound logger through a seam and binds nothing.
 
-### Closed component value space (19 total)
+### Closed component value space (20 total)
 
 ```
 bootstrap  daemon  restore  hydrate  notify  hooks  preview
 saver  capture  signal  log-rotate  clean  aliases  projects
-process  spawn  resolve  theme  attach
+process  spawn  resolve  theme  attach  sessions
 ```
 
-This list is the **single source of truth** for the component count.
+This list is the **single source of truth** for the component count. Mid-move to zmx, production code binds 18 of them: `restore` returns with phase 3's restore, and nothing has bound `preview` since the preview began reading zmx's history.
 
 | Component | Owns |
 |---|---|
@@ -177,6 +177,7 @@ This list is the **single source of truth** for the component count.
 | `clean` | The sweep paths — bootstrap's orphan-daemon and stale-marker sweeps and `internal/state`'s orphan-FIFO sweep. Named for the `portal clean` command it was introduced for; that command is retired, and its user-invoked repairs live on `portal doctor --fix` |
 | `aliases` | `aliases` store mutations |
 | `projects` | `projects.json` store mutations |
+| `sessions` | The session index, `sessions.json` version 2, in `internal/sessionindex`: one INFO per change a committed `Update` makes, its `op` the message (`set-label`, `clear-label`, `claim`, `replace`, `rm`; `session`, `value` the label or directory set, `detail` what a `replace` dropped, `via`), each a WARN carrying `error` and `error_class` instead when the write fails, and a DEBUG `update-noop` (`op`, `via`) for an `Update` that changed nothing. Bound again in `cmd` (`open_mint.go`): a WARN `unrecorded` (`op`, `session`, `via`, `error`) when a session minted through the backend can't be claimed in the index for want of the lock or a readable index, the session made all the same |
 | `process` | Portal-binary lifecycle markers (`start` / `exit` / `exec` / `panic` / `log-level resolved`) only, regardless of subcommand |
 | `spawn` | The multi-window spawn service — host-terminal detection, adapter resolution, per-window ack outcomes, and the burst's batch summary. Bound in `internal/spawn` and again in `cmd`; both burst surfaces (the picker's multi-select burst and `portal open`'s multi-target burst) emit through `internal/spawn`'s single-sourced renderers, so the two paths cannot drift. Detection emits exactly one line: INFO `detection resolved host terminal` (`terminal`, `bundle_id`, `detail` the route), INFO `detection resolved no host-local terminal` (`detail` the route), INFO `detection could not tell the host terminal` (`detail` the route, then why it can't tell which terminal leads the session), or WARN `detection transient failure` (`detail` the error). The ack channel, `state/spawn-acks/`: a WARN `spawn ack write failed` (`batch`, `error`) when a spawned window can't write its receipt, which then attaches all the same while its burst counts it failed; a WARN `spawn ack clean failed` (`batch`, `error`) when a burst can't clean its acks, which go once stale; and a DEBUG `stale spawn ack removed` (`path`) per ack an hour old a burst's clean removes. `error` and `path` are cross-listed from the Contextual group |
 | `resolve` | `portal open`'s resolution decision — one INFO per bare positional resolved through the guessing chain (glob and domain-pinned targets are deterministic and emit nothing). Bound and emitted **only** in `cmd/open.go`; `internal/resolver` stays a pure, log-free library |

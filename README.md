@@ -104,7 +104,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 ```
   OPEN    x                       ──▶  the picker
           x /term                 ──▶  search: one match attaches, more open the picker
-          x <session | glob>      ──▶  attach, or switch-client inside tmux
+          x <session | glob>      ──▶  attach, or switch inside a session
           x <path | alias | zox>  ──▶  new session at the git root
 
   SAVE    _portal-saver ──▶ save daemon ──▶ state/sessions.json + scrollback/*.bin
@@ -114,7 +114,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
                                                        └─▶ resume hooks wait on a panel
 ```
 
-- **Opening.** Outside tmux Portal hands its process to `tmux attach-session`, so nothing of Portal stays running; inside tmux it switches your client, so sessions never nest. See [`x` (open)](#x-open).
+- **Opening.** Portal runs `zmx attach` itself and stays running while you're attached, watching for [its own keys](#keys-in-a-session); inside a session it switches the terminal you typed in, so sessions never nest. See [`x` (open)](#x-open).
 - **Saving.** A daemon in a hidden `_portal-saver` session re-reads tmux every second and writes what changed — structure, layout, zoom, working directories, and ANSI scrollback — under `state/` (see [Configuration](#configuration)).
 - **Restoring.** After a reboot, the first command that needs tmux starts the server and rebuilds every saved session that isn't already live. See [Automatic Server Bootstrap & Restoration](#automatic-server-bootstrap--restoration).
 - **Resuming.** A pane with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` goes back to the picker and leaves it waiting.
@@ -275,7 +275,7 @@ server.
 
 ### `xctl doctor`
 
-A read-only health report across Portal's resurrection machinery — daemon alive, global hooks registered without duplicates, `_portal-saver` up, state dir sane, `sessions.json` valid, no stale entries, and the detected host terminal. It starts nothing (a down runtime is reported honestly, not silently started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code.
+A read-only health report across Portal's resurrection machinery — daemon alive, global hooks registered without duplicates, `_portal-saver` up, state dir sane, `sessions.json` valid, no stale entries, the detected host terminal, and the [key config](#keys-in-a-session). It starts nothing (a down runtime is reported honestly, not silently started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code, nor does the key-config line, which names any binding that falls back to its default.
 
 ```bash
 xctl doctor              # health report (subsumes the retired `state status`)
@@ -569,7 +569,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits; and `keys`, the [keys in a session](#keys-in-a-session) | `PORTAL_PREFS_FILE` |
 | `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `themes/` | Drop-in theme files (`<slug>.theme`); see [docs/theming.md](docs/theming.md). Portal never creates it — no directory simply means no drop-ins. | `PORTAL_THEMES_DIR` |
-| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
+| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `runners/` (an entry and a control socket per attached Portal, for switching and new windows), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 
