@@ -7,43 +7,69 @@ import (
 	"testing"
 )
 
+// step is a workflow step whose run: | block holds lines.
+func step(lines ...string) string {
+	return "      - name: Test\n        run: |\n          " + strings.Join(lines, "\n          ") + "\n"
+}
+
+const goodLine = "go test -tags integration -p 1 ./cmd"
+
 func TestParseCheckRuns(t *testing.T) {
-	t.Run("it reads each go test line's packages and -run pattern", func(t *testing.T) {
+	t.Run("it reads each go test line's packages and -run pattern, passing over other steps", func(t *testing.T) {
 		runs, err := parseCheckRuns(`
+      - name: Build
+        run: |
+          binary=$(scripts/zmx-build "$COMMIT")
+          echo "PORTAL_TEST_ZMX_BINARY=$binary" >> "$GITHUB_ENV"
+
       - name: Test
         run: |
           go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/spawn/...
+
           go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd
+      - run: |
+          go test -tags integration ./internal/zmxtest
 `)
 		if err != nil {
 			t.Fatalf("parseCheckRuns: %v", err)
 		}
-		if len(runs) != 2 ||
+		if len(runs) != 3 ||
 			!slices.Equal(runs[0].packages, []string{"./internal/backend/zmx/...", "./internal/spawn/..."}) || runs[0].run != nil ||
-			!slices.Equal(runs[1].packages, []string{"./cmd"}) || runs[1].run == nil || runs[1].run.String() != "AgainstZmx$" {
-			t.Errorf("runs = %+v, want the two lines' packages, the second's pattern", runs)
+			!slices.Equal(runs[1].packages, []string{"./cmd"}) || runs[1].run == nil || runs[1].run.String() != "AgainstZmx$" ||
+			!slices.Equal(runs[2].packages, []string{"./internal/zmxtest"}) {
+			t.Errorf("runs = %+v, want the three lines' packages, the second's pattern", runs)
 		}
 	})
 
 	for name, workflow := range map[string]string{
-		"a workflow with no go test line":   "run: make test\n",
-		"a line naming no package":          "go test -tags integration -p 1\n",
-		"a line without -tags integration":  "go test -p 1 ./cmd\n",
-		"another tag":                       "go test -tags integration,manual ./cmd\n",
-		"-p other than 1":                   "go test -tags integration -p 4 ./cmd\n",
-		"a timeout that isn't a duration":   "go test -tags integration -timeout soon ./cmd\n",
-		"-run=PATTERN":                      "go test -tags integration -run=AgainstZmx ./cmd\n",
-		"an unquoted pattern":               "go test -tags integration -run AgainstZmx ./cmd\n",
-		"a double-quoted pattern":           `go test -tags integration -run "AgainstZmx" ./cmd` + "\n",
-		"a pattern split by a space":        "go test -tags integration -run 'A B' ./cmd\n",
-		"a pattern naming a subtest":        "go test -tags integration -run 'A/B' ./cmd\n",
-		"a pattern that doesn't compile":    "go test -tags integration -run '(' ./cmd\n",
-		"-skip":                             "go test -tags integration -skip 'Slow' ./cmd\n",
-		"an unknown flag":                   "go test -tags integration -race ./cmd\n",
-		"a flag given twice":                "go test -tags integration -run 'A' -run 'B' ./cmd\n",
-		"a flag with no value":              "go test ./cmd -tags\n",
-		"a line continued onto the next":    "go test -tags integration \\\n  ./cmd\n",
-		"a package that isn't a ./ pattern": "go test -tags integration github.com/leeovery/portal/cmd\n",
+		"a workflow with no go test line":                   step("make test"),
+		"a line naming no package":                          step("go test -tags integration -p 1"),
+		"a line without -tags integration":                  step("go test -p 1 ./cmd"),
+		"another tag":                                       step("go test -tags integration,manual ./cmd"),
+		"-p other than 1":                                   step("go test -tags integration -p 4 ./cmd"),
+		"a timeout that isn't a duration":                   step("go test -tags integration -timeout soon ./cmd"),
+		"-run=PATTERN":                                      step("go test -tags integration -run=AgainstZmx ./cmd"),
+		"an unquoted pattern":                               step("go test -tags integration -run AgainstZmx ./cmd"),
+		"a double-quoted pattern":                           step(`go test -tags integration -run "AgainstZmx" ./cmd`),
+		"a pattern split by a space":                        step("go test -tags integration -run 'A B' ./cmd"),
+		"a pattern naming a subtest":                        step("go test -tags integration -run 'A/B' ./cmd"),
+		"a pattern that doesn't compile":                    step("go test -tags integration -run '(' ./cmd"),
+		"-skip":                                             step("go test -tags integration -skip 'Slow' ./cmd"),
+		"an unknown flag":                                   step("go test -tags integration -race ./cmd"),
+		"a flag given twice":                                step("go test -tags integration -run 'A' -run 'B' ./cmd"),
+		"a flag with no value":                              step("go test ./cmd -tags"),
+		"a line continued onto the next":                    step("go test -tags integration \\", "  ./cmd"),
+		"a package that isn't a ./ pattern":                 step("go test -tags integration github.com/leeovery/portal/cmd"),
+		"GOFLAGS set for the job":                           "    env:\n      GOFLAGS: -count=1\n" + step(goodLine),
+		"GOFLAGS written to the environment":                step(`echo "GOFLAGS=-run=X" >> "$GITHUB_ENV"`) + step(goodLine),
+		"a working-directory":                               "      - working-directory: sub\n" + step(goodLine),
+		"a cd in the block":                                 step("cd cmd", goodLine),
+		"an exit in the block":                              step("exit 0", goodLine),
+		"anything else in the block":                        step(goodLine, "echo done"),
+		"an inline run":                                     "      - name: Test\n        run: " + goodLine + "\n",
+		"an inline run as a list item":                      "      - run: " + goodLine + "\n",
+		"a go test line in a folded block":                  "      - name: Test\n        run: >\n          " + goodLine + "\n",
+		"a go test line in a block that strips its newline": "      - name: Test\n        run: |-\n          " + goodLine + "\n",
 	} {
 		t.Run("it refuses "+name, func(t *testing.T) {
 			if runs, err := parseCheckRuns(workflow); err == nil {
@@ -53,9 +79,22 @@ func TestParseCheckRuns(t *testing.T) {
 	}
 
 	t.Run("a refusal names the line it can't judge", func(t *testing.T) {
-		const line = "go test -tags integration -skip 'Slow' ./cmd"
-		if _, err := parseCheckRuns(line + "\n"); err == nil || !strings.Contains(err.Error(), line) {
-			t.Errorf("parseCheckRuns = %v, want an error naming %q", err, line)
+		for _, c := range []struct{ workflow, line string }{
+			{step("go test -tags integration -skip 'Slow' ./cmd"), "go test -tags integration -skip 'Slow' ./cmd"},
+			{step("cd cmd", goodLine), "cd cmd"},
+			{"      - run: " + goodLine + "\n", "- run: " + goodLine},
+		} {
+			if _, err := parseCheckRuns(c.workflow); err == nil || !strings.Contains(err.Error(), "can't judge") || !strings.Contains(err.Error(), c.line) {
+				t.Errorf("parseCheckRuns = %v, want an error that can't judge %q", err, c.line)
+			}
+		}
+	})
+
+	t.Run("a refusal of GOFLAGS or a working-directory says it can't judge, naming which", func(t *testing.T) {
+		for _, word := range []string{"GOFLAGS", "working-directory"} {
+			if _, err := parseCheckRuns("# " + word + "\n" + step(goodLine)); err == nil || !strings.Contains(err.Error(), "can't judge") || !strings.Contains(err.Error(), word) {
+				t.Errorf("parseCheckRuns = %v, want an error that can't judge it, naming %s", err, word)
+			}
 		}
 	})
 }

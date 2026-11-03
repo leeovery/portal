@@ -116,23 +116,80 @@ func (c checkRun) names(pkg string) bool {
 
 // parseCheckRuns reads every go test line of workflow, strictly: a line it
 // can't read whole is an error naming it, as is a workflow with none, so the
-// check never judges a test against a line it misread.
+// check never judges a test against a line it misread. It reads no YAML, so
+// it refuses what would change a line's run without being on it: GOFLAGS or a
+// working-directory anywhere, a go test line anywhere but a run: | block, and
+// such a block holding anything but go test lines.
 func parseCheckRuns(workflow string) ([]checkRun, error) {
+	for _, word := range []string{"GOFLAGS", "working-directory"} {
+		if strings.Contains(workflow, word) {
+			return nil, fmt.Errorf("can't judge it: it names %s, which changes what its go test lines run", word)
+		}
+	}
 	var runs []checkRun
-	for line := range strings.SplitSeq(workflow, "\n") {
-		line = strings.TrimSpace(line)
+	lines := strings.Split(workflow, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "run: |" || line == "- run: |" {
+			block, next := runBlock(lines, i)
+			i = next - 1
+			blockRuns, err := parseRunBlock(block)
+			if err != nil {
+				return nil, err
+			}
+			runs = append(runs, blockRuns...)
+			continue
+		}
+		if strings.Contains(line, "go test") {
+			return nil, fmt.Errorf("can't judge %q: a go test line must stand alone in a run: | block", line)
+		}
+	}
+	if len(runs) == 0 {
+		return nil, errors.New("it has no go test line")
+	}
+	return runs, nil
+}
+
+// runBlock is the non-blank lines, trimmed, of the block scalar the run: |
+// key at lines[at] opens, and the index of the line after it: every line
+// indented deeper than the key's, and the blank ones among them.
+func runBlock(lines []string, at int) (block []string, next int) {
+	depth := indent(lines[at])
+	for next = at + 1; next < len(lines); next++ {
+		line := lines[next]
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if indent(line) <= depth {
+			break
+		}
+		block = append(block, strings.TrimSpace(line))
+	}
+	return block, next
+}
+
+func indent(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " \t"))
+}
+
+// parseRunBlock reads a run: | block's go test lines. A block holding one
+// must hold nothing else: a cd, an exit or any other command could change
+// what they run, or whether they run.
+func parseRunBlock(block []string) ([]checkRun, error) {
+	if !slices.ContainsFunc(block, func(line string) bool { return strings.Contains(line, "go test") }) {
+		return nil, nil
+	}
+	runs := make([]checkRun, 0, len(block))
+	for _, line := range block {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "go" || fields[1] != "test" {
-			continue
+			return nil, fmt.Errorf("can't judge %q: it shares a run block with go test lines, which must stand alone", line)
 		}
 		c, err := parseCheckRun(line, fields[2:])
 		if err != nil {
 			return nil, fmt.Errorf("can't judge %q: %w", line, err)
 		}
 		runs = append(runs, c)
-	}
-	if len(runs) == 0 {
-		return nil, errors.New("it has no go test line")
 	}
 	return runs, nil
 }
