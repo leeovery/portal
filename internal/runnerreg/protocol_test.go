@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // reply is an answer as it comes over the socket.
@@ -210,7 +211,7 @@ func TestProtocol_Asking(t *testing.T) {
 		writeEntry(t, r, "tok123", entryFor(os.Getpid(), "api-x7Kd9a"))
 		answeringSocket(t, r.SocketPath("tok123"), strings.Replace(ourAnswer(`"ok":true`), `"version":1`, `"version":2`, 1), nil)
 
-		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), "protocol version 2") {
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrRefused) || !strings.Contains(err.Error(), "protocol version 2") {
 			t.Errorf("Switch = %v, want ErrRefused naming protocol version 2", err)
 		}
 	})

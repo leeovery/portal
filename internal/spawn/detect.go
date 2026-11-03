@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 var spawnLogger = log.For("spawn")
@@ -35,11 +36,13 @@ const detectCeiling = 5 * time.Second
 // process runs in, and the tracked environment of the client leading it.
 type SessionReader interface {
 	Current() string
-	LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error)
+	runnertoken.LeaderReader
 }
 
 // RunnerLocator finds a session's leading attach runner by the token its
-// client carries: runnerreg.Registry.
+// client carries: runnerreg.Registry. A runner it can't find fails with
+// runnertoken.ErrNoRunner, and one that won't confirm with
+// runnertoken.ErrRefused.
 type RunnerLocator interface {
 	ConfirmSession(ctx context.Context, token, session string) (pid int, err error)
 }

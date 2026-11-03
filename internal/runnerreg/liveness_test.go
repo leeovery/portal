@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // askedBy is each call that asks a runner, by the INFO line it logs of the
@@ -169,7 +170,7 @@ func TestLiveness_LeavesWhatItCannotRead(t *testing.T) {
 			writeEntry(t, r, "odd001", body)
 			refusingSocket(t, r.SocketPath("odd001"))
 
-			if err := r.Switch(t.Context(), "odd001", "api-x7Kd9a", "blog-c3d4"); err == nil || errors.Is(err, runnerreg.ErrNoRunner) {
+			if err := r.Switch(t.Context(), "odd001", "api-x7Kd9a", "blog-c3d4"); err == nil || errors.Is(err, runnertoken.ErrNoRunner) {
 				t.Errorf("Switch = %v, want a failure, and not ErrNoRunner", err)
 			}
 			if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {

@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // attachment is one attach a Listing readied, standing in for runner.Run:
@@ -39,7 +40,7 @@ func begun(l *runnerreg.Listing, session string) *attachment {
 // token is the token the attach's command carries, "" for none.
 func (a *attachment) token() string {
 	for _, kv := range a.cfg.Command.Env {
-		if v, ok := strings.CutPrefix(kv, runnerreg.TokenVar+"="); ok {
+		if v, ok := strings.CutPrefix(kv, runnertoken.Var+"="); ok {
 			return v
 		}
 	}
@@ -100,7 +101,7 @@ func listingOn(t *testing.T, r runnerreg.Registry, b *backendtest.Fake) *runnerr
 
 // leading makes the client carrying token lead session, as far as b says.
 func leading(b *backendtest.Fake, session, token string) {
-	b.SetLeaderEnv(session, backend.ClientEnv{{Name: "DISPLAY", Value: ":0"}, {Name: runnerreg.TokenVar, Value: token}})
+	b.SetLeaderEnv(session, backend.ClientEnv{{Name: "DISPLAY", Value: ":0"}, {Name: runnertoken.Var, Value: token}})
 }
 
 func TestListing(t *testing.T) {
@@ -111,7 +112,7 @@ func TestListing(t *testing.T) {
 		a := readied(l, "api-x7Kd9a")
 		token := a.token()
 		if token == "" || !slices.Equal(a.cfg.Command.Argv, []string{"zmx", "attach", "api-x7Kd9a"}) {
-			t.Fatalf("command = %+v, want the attach marked with %s", a.cfg.Command, runnerreg.TokenVar)
+			t.Fatalf("command = %+v, want the attach marked with %s", a.cfg.Command, runnertoken.Var)
 		}
 		if names := files(t, r.Dir()); len(names) != 0 {
 			t.Fatalf("the registry holds %q before the attach began, want nothing", names)
@@ -147,7 +148,7 @@ func TestListing(t *testing.T) {
 		switched := switchVia(t, r, a.token(), "api-x7Kd9a", "blog-c3d4")
 		a.take(t, runner.ErrUnconfirmed)
 
-		if err := <-switched; !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), runner.ErrUnconfirmed.Error()) {
+		if err := <-switched; !errors.Is(err, runnertoken.ErrRefused) || !strings.Contains(err.Error(), runner.ErrUnconfirmed.Error()) {
 			t.Errorf("Switch = %v, want the attach's refusal", err)
 		}
 	})
@@ -180,7 +181,7 @@ func TestListing(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		l.Ended()
 
-		if err := <-switched; !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), "not attached") {
+		if err := <-switched; !errors.Is(err, runnertoken.ErrRefused) || !strings.Contains(err.Error(), "not attached") {
 			t.Errorf("Switch = %v, want a refusal: the attach ended", err)
 		}
 	})
@@ -194,7 +195,7 @@ func TestListing(t *testing.T) {
 
 		select {
 		case err := <-switched:
-			if !errors.Is(err, runnerreg.ErrRefused) {
+			if !errors.Is(err, runnertoken.ErrRefused) {
 				t.Errorf("Switch = %v, want the runner's refusal at the deadline", err)
 			}
 		case <-time.After(5 * time.Second):
@@ -212,7 +213,7 @@ func TestListing(t *testing.T) {
 		if !exists(t, r.EntryPath(a.token())) {
 			t.Fatal("the entry went between attaches")
 		}
-		if err := r.Switch(t.Context(), a.token(), "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
+		if err := r.Switch(t.Context(), a.token(), "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Errorf("Switch = %v, want a refusal between attaches", err)
 		}
 	})
@@ -306,7 +307,7 @@ func TestListing(t *testing.T) {
 		if names := files(t, r.Dir()); len(names) != 0 {
 			t.Errorf("the registry holds %q, want the runner unlisted", names)
 		}
-		if err := r.Switch(t.Context(), a.token(), "blog-c3d4", "docs-e5f6"); !errors.Is(err, runnerreg.ErrNoRunner) {
+		if err := r.Switch(t.Context(), a.token(), "blog-c3d4", "docs-e5f6"); !errors.Is(err, runnertoken.ErrNoRunner) {
 			t.Errorf("Switch = %v, want ErrNoRunner", err)
 		}
 		b.untaken(t, 100*time.Millisecond)
@@ -352,9 +353,9 @@ func TestListing_Confirm(t *testing.T) {
 		leader backend.ClientEnv
 	}{
 		{"no client leads the session", nil},
-		{"the leader carries another runner's token", backend.ClientEnv{{Name: runnerreg.TokenVar, Value: "other1"}}},
+		{"the leader carries another runner's token", backend.ClientEnv{{Name: runnertoken.Var, Value: "other1"}}},
 		{"the leader carries no token", backend.ClientEnv{{Name: "DISPLAY", Value: ":0"}}},
-		{"the leader unset the token", backend.ClientEnv{{Name: runnerreg.TokenVar, Unset: true}}},
+		{"the leader unset the token", backend.ClientEnv{{Name: runnertoken.Var, Unset: true}}},
 	} {
 		t.Run("an attach is unconfirmed when "+tc.name, func(t *testing.T) {
 			b := sessions()

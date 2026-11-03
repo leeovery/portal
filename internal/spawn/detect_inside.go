@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // errUncertain is detection inside a session that can't tell which terminal
@@ -28,18 +28,18 @@ func uncertain(format string, args ...any) error {
 // the process table when it is the only one that can be. Anything less
 // certain finds none.
 func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, error) {
-	env, err := d.sessions.LeaderEnv(ctx, session)
+	leader, err := runnertoken.ReadLeader(ctx, d.sessions, session)
 	if err != nil {
 		return 0, routeInside, transient("find the session's leader", err)
 	}
-	if len(env) == 0 {
+	if len(leader.Env) == 0 {
 		return 0, routeInside, uncertain("no client leads session %q", session)
 	}
-	if token, ok := env.Lookup(runnerreg.TokenVar); ok {
-		pid, err := d.runnerPID(ctx, token, session)
+	if leader.Token != "" {
+		pid, err := d.runnerPID(ctx, leader.Token, session)
 		return pid, routeInsideRunner, err
 	}
-	pid, err := d.rawClientPID(session, env)
+	pid, err := d.rawClientPID(session, leader.Env)
 	return pid, routeInsideRaw, err
 }
 
@@ -50,7 +50,7 @@ func (d *Detector) leaderPID(ctx context.Context, session string) (int, string, 
 func (d *Detector) runnerPID(ctx context.Context, token, session string) (int, error) {
 	pid, err := d.runners.ConfirmSession(ctx, token, session)
 	switch {
-	case errors.Is(err, runnerreg.ErrNoRunner), errors.Is(err, runnerreg.ErrRefused):
+	case errors.Is(err, runnertoken.ErrNoRunner), errors.Is(err, runnertoken.ErrRefused):
 		return 0, uncertain("the leading runner: %w", err)
 	case err != nil:
 		return 0, transient(fmt.Sprintf("ask the runner leading session %q", session), err)
@@ -76,7 +76,7 @@ func (d *Detector) rawClientPID(session string, leader backend.ClientEnv) (int, 
 	}
 	var pids []int
 	for _, c := range clients {
-		if !carries(c.Env, runnerreg.TokenVar) && leader.Matches(c.Env) {
+		if !carries(c.Env, runnertoken.Var) && leader.Matches(c.Env) {
 			pids = append(pids, c.PID)
 		}
 	}

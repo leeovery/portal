@@ -12,7 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/runner"
-	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/spf13/cobra"
 )
@@ -145,17 +145,14 @@ func (c attachConnector) switchTo(name string, command backend.Command) error {
 	return c.exec(command)
 }
 
-// leader is the registry token the client leading session carries, as the
-// backend reports the leader's tracked variables: empty for a raw client, no
-// client leading, or a leader the backend can't tell.
+// leader is the registry token the client leading session carries: empty for
+// a raw client, no client leading, or a leader the backend can't tell.
 func (c attachConnector) leader(ctx context.Context, session string) string {
-	env, err := c.backend.LeaderEnv(ctx, session)
+	leader, err := runnertoken.ReadLeader(ctx, c.backend, session)
 	if err != nil {
 		attachLogger.Warn("leader unknown", "session", session, "error", err)
-		return ""
 	}
-	token, _ := env.Lookup(runnerreg.TokenVar)
-	return token
+	return leader.Token
 }
 
 func (c attachConnector) exec(command backend.Command) error {

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // Version is the control protocol's version. A runner refuses a request in
@@ -42,10 +44,6 @@ var timeout = 2 * time.Second
 // for the answer. A runner takes a request only before its deadline and
 // answers at once, so the caller hears of every request a runner took.
 const answerGrace = 500 * time.Millisecond
-
-// ErrRefused is a runner's refusal of a request: one it doesn't understand,
-// or can't carry out, as when its attach is already ending.
-var ErrRefused = errors.New("refused")
 
 // errOtherPID is an answer from a process other than the runner registered.
 var errOtherPID = errors.New("answered as another process")
@@ -100,9 +98,9 @@ func (a answer) judge(pid int) error {
 	case a.PID != 0 && a.PID != pid:
 		return fmt.Errorf("%w: pid %d", errOtherPID, a.PID)
 	case a.Version != Version:
-		return fmt.Errorf("%w: it speaks protocol version %d", ErrRefused, a.Version)
+		return fmt.Errorf("%w: it speaks protocol version %d", runnertoken.ErrRefused, a.Version)
 	case !a.OK:
-		return fmt.Errorf("%w: %s", ErrRefused, a.Refusal)
+		return fmt.Errorf("%w: %s", runnertoken.ErrRefused, a.Refusal)
 	case a.PID == 0:
 		return errors.New("it accepted without naming its pid")
 	}

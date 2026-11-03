@@ -180,6 +180,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"restoretest":      {},
 		"runner":           {},
 		"runnerreg":        {},
+		"runnertoken":      {},
 		"session":          {},
 		"sessionindex":     {},
 		"shellquote":       {},

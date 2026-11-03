@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/spawn"
 )
 
@@ -31,7 +31,7 @@ func TestConfirmSessionOfADeadRunner(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := tc.runners.ConfirmSession(t.Context(), "tok123", "dev"); !errors.Is(err, runnerreg.ErrNoRunner) {
+			if _, err := tc.runners.ConfirmSession(t.Context(), "tok123", "dev"); !errors.Is(err, runnertoken.ErrNoRunner) {
 				t.Errorf("ConfirmSession = %v, want ErrNoRunner", err)
 			}
 			if _, err := os.Stat(entry); (err == nil) != tc.wantLeft {

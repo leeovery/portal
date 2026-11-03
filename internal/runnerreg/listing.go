@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // Backend is what a Listing asks of the backend: backend.Backend's Track, to
@@ -17,7 +18,7 @@ import (
 // token back from the client leading a session.
 type Backend interface {
 	Track(command backend.Command, name, value string) backend.Command
-	LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error)
+	runnertoken.LeaderReader
 }
 
 // errNotLeading is a confirmation's refusal: the session's leader is another
@@ -44,7 +45,7 @@ func (r Registry) Listing(b Backend) *Listing {
 }
 
 // Attach readies cfg's attach to be listed: its command's client carries
-// the runner's token in TokenVar, tracked. Once the attach begins, the runner
+// the runner's token in runnertoken.Var, tracked. Once the attach begins, the runner
 // is registered on cfg.Session, or moved there from the session a switch
 // left, and takes the requests sent it until Ended. The attach is confirmed
 // to show cfg.Session while its client leads it, carrying the token. A token
@@ -60,7 +61,7 @@ func (l *Listing) Attach(cfg *runner.Config) {
 		l.token = token
 	}
 	token := l.token
-	cfg.Command = l.backend.Track(cfg.Command, TokenVar, token)
+	cfg.Command = l.backend.Track(cfg.Command, runnertoken.Var, token)
 	requests := make(chan runner.Request)
 	cfg.Requests = requests
 	unsure := new(atomic.Bool)
@@ -77,11 +78,11 @@ func (l *Listing) Attach(cfg *runner.Config) {
 // it is. A client that has left a session can't lead it: the backend clears a
 // session's leader as its client disconnects.
 func (l *Listing) leads(ctx context.Context, session, token string) error {
-	env, err := l.backend.LeaderEnv(ctx, session)
+	leader, err := runnertoken.ReadLeader(ctx, l.backend, session)
 	if err != nil {
-		return fmt.Errorf("ask for the leader of %s: %w", session, err)
+		return err
 	}
-	if got, _ := env.Lookup(TokenVar); got != token {
+	if leader.Token != token {
 		return errNotLeading
 	}
 	return nil

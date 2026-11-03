@@ -17,13 +17,13 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
-	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 // leading is a leader's tracked environment carrying the runner token.
 func leading(token string) backend.ClientEnv {
-	return backend.ClientEnv{{Name: "DISPLAY", Unset: true}, {Name: runnerreg.TokenVar, Value: token}}
+	return backend.ClientEnv{{Name: "DISPLAY", Unset: true}, {Name: runnertoken.Var, Value: token}}
 }
 
 func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
@@ -44,7 +44,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 
 	for name, leader := range map[string]backend.ClientEnv{
 		"a raw zmx client leading":      {{Name: "DISPLAY", Value: ":0"}},
-		"a leader lacking the token":    {{Name: runnerreg.TokenVar, Unset: true}},
+		"a leader lacking the token":    {{Name: runnertoken.Var, Unset: true}},
 		"no client leading the session": nil,
 	} {
 		t.Run(name+" asks no runner by token, and execs the attach command, which zmx routes to the leader", func(t *testing.T) {
@@ -83,9 +83,9 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 	})
 
 	for name, why := range map[string]error{
-		"refuses":          fmt.Errorf("ask runner 4242 to switch: %w: the runner is not attached", runnerreg.ErrRefused),
+		"refuses":          fmt.Errorf("ask runner 4242 to switch: %w: the runner is not attached", runnertoken.ErrRefused),
 		"can't be reached": errors.New("reach runner 4242: connection refused"),
-		"is gone":          fmt.Errorf("%w: runner 4242 has exited", runnerreg.ErrNoRunner),
+		"is gone":          fmt.Errorf("%w: runner 4242 has exited", runnertoken.ErrNoRunner),
 	} {
 		t.Run("a leading runner that "+name+" leaves the switch to the attach command, exec'd", func(t *testing.T) {
 			fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
@@ -268,14 +268,14 @@ func TestStateRunners_LivesInTheStateDirectory(t *testing.T) {
 
 	var token string
 	for _, kv := range cfg.Command.Env {
-		token, _ = strings.CutPrefix(kv, runnerreg.TokenVar+"=")
+		token, _ = strings.CutPrefix(kv, runnertoken.Var+"=")
 	}
 	entry := filepath.Join(dir, "runners", token+".json")
 	if data, err := os.ReadFile(entry); token == "" || err != nil || !strings.Contains(string(data), `"session":"api-x7Kd9a"`) {
 		t.Fatalf("the entry of the token %q the attach carries, %s = %s, %v; want it on api-x7Kd9a", token, entry, data, err)
 	}
 	listing.Ended()
-	if err := (stateRunners{}).Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
+	if err := (stateRunners{}).Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrRefused) {
 		t.Errorf("Switch = %v, want the refusal of the runner listed there, its attach ended", err)
 	}
 }

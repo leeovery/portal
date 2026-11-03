@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 func TestConfirmSession(t *testing.T) {
@@ -39,7 +40,7 @@ func TestConfirmSession(t *testing.T) {
 			h := &handler{}
 			register(t, r, "tok123", "api-x7Kd9a", h)
 
-			if pid, err := r.ConfirmSession(t.Context(), token, session); !errors.Is(err, runnerreg.ErrNoRunner) || pid != 0 {
+			if pid, err := r.ConfirmSession(t.Context(), token, session); !errors.Is(err, runnertoken.ErrNoRunner) || pid != 0 {
 				t.Errorf("ConfirmSession(%q, %s) = %d, %v; want ErrNoRunner", token, session, pid, err)
 			}
 			if asked := h.askedConfirms(); len(asked) != 0 {
@@ -52,7 +53,7 @@ func TestConfirmSession(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		register(t, r, "tok123", "api-x7Kd9a", &handler{refuse: runner.ErrUnconfirmed})
 
-		if pid, err := r.ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrRefused) || pid != 0 {
+		if pid, err := r.ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) || pid != 0 {
 			t.Errorf("ConfirmSession = %d, %v; want the refusal", pid, err)
 		}
 	})
@@ -61,7 +62,7 @@ func TestConfirmSession(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		writeEntry(t, r, "tok123", entryFor(deadPID(t), "api-x7Kd9a"))
 
-		if _, err := r.ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrNoRunner) {
+		if _, err := r.ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) {
 			t.Errorf("ConfirmSession = %v, want ErrNoRunner", err)
 		}
 		if exists(t, r.EntryPath("tok123")) {
@@ -74,7 +75,7 @@ func TestConfirmSession(t *testing.T) {
 		writeEntry(t, r, "tok123", entryFor(deadPID(t), "api-x7Kd9a"))
 		refusingSocket(t, r.SocketPath("tok123"))
 
-		if _, err := r.ReadOnly().ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrNoRunner) {
+		if _, err := r.ReadOnly().ConfirmSession(t.Context(), "tok123", "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) {
 			t.Errorf("ConfirmSession = %v, want ErrNoRunner", err)
 		}
 		if got, want := files(t, r.Dir()), []string{"tok123.json", "tok123.sock"}; !slices.Equal(got, want) {
@@ -100,7 +101,7 @@ func TestListing_ConfirmSession(t *testing.T) {
 
 		a.cfg.Unsure()
 
-		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrRefused) {
+		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Errorf("ConfirmSession = %v, want the unsure runner's refusal", err)
 		}
 	})
@@ -124,7 +125,7 @@ func TestListing_ConfirmSession(t *testing.T) {
 		a := begun(listing(t, r), "blog-c3d4")
 		writeEntry(t, r, a.token(), entryFor(os.Getpid(), "api-x7Kd9a"))
 
-		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrRefused) {
+		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Errorf("ConfirmSession = %v, want the runner's refusal", err)
 		}
 	})
@@ -136,7 +137,7 @@ func TestListing_ConfirmSession(t *testing.T) {
 
 		l.Ended()
 
-		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnerreg.ErrRefused) {
+		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Errorf("ConfirmSession = %v, want the ended attach's refusal", err)
 		}
 	})

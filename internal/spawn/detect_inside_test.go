@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // fakeSessions is the backend as detection reads it: the session this
@@ -41,7 +41,7 @@ func (f *fakeRunners) ConfirmSession(_ context.Context, token, session string) (
 	}
 	pid, ok := f.pids[token]
 	if !ok || f.sessions[token] != session {
-		return 0, runnerreg.ErrNoRunner
+		return 0, runnertoken.ErrNoRunner
 	}
 	return pid, nil
 }
@@ -71,7 +71,7 @@ func overSSH(pid int) backend.ClientProcess { return local(pid, sshConnection) }
 
 // runnersClient is the zmx attach a runner runs, carrying its token.
 func runnersClient(pid int, token string) backend.ClientProcess {
-	return local(pid, runnerreg.TokenVar+"="+token)
+	return local(pid, runnertoken.Var+"="+token)
 }
 
 var (
@@ -109,7 +109,7 @@ func remoteLeader() backend.ClientEnv {
 }
 
 func runnerLeader(token string) backend.ClientEnv {
-	return leaderWith(backend.EnvVar{Name: runnerreg.TokenVar, Value: token})
+	return leaderWith(backend.EnvVar{Name: runnertoken.Var, Value: token})
 }
 
 // insideDetector detects inside session dev, whose leader is leader, with
@@ -228,7 +228,7 @@ func TestDetectInsideSession(t *testing.T) {
 
 	t.Run("an unsure runner's refusal is uncertain, and walks nothing", func(t *testing.T) {
 		d, runners, _ := insideDetector(runnerLeader("tok123"), local(502))
-		runners.err = fmt.Errorf("ask runner 501 to confirm-session: %w: unsure", runnerreg.ErrRefused)
+		runners.err = fmt.Errorf("ask runner 501 to confirm-session: %w: unsure", runnertoken.ErrRefused)
 
 		if got, _, err := d.resolve(); !errors.Is(err, errUncertain) || !got.IsNull() {
 			t.Errorf("resolve = %+v, %v; want NULL, uncertain", got, err)

@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -178,7 +179,7 @@ func TestDetectInsideSession_OverZmx(t *testing.T) {
 		awaitLeader(t, w.b, "blog-c3d4")
 		typeZmx(t, tty, "attach api-x7Kd9a")
 
-		if err := awaitUncertain(t, w.detector("api-x7Kd9a", pid), routeInsideRunner); !errors.Is(err, runnerreg.ErrRefused) {
+		if err := awaitUncertain(t, w.detector("api-x7Kd9a", pid), routeInsideRunner); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Errorf("detection = %v, want the unsure runner's refusal", err)
 		}
 	})
@@ -266,7 +267,7 @@ func awaitRawLeader(t *testing.T, b *zmx.Backend, tty *os.File, session string) 
 		}
 		var err error
 		env, err = b.LeaderEnv(context.WithoutCancel(t.Context()), session)
-		_, runner := env.Lookup(runnerreg.TokenVar)
+		_, runner := env.Lookup(runnertoken.Var)
 		return err == nil && len(env) > 0 && !runner
 	}) {
 		t.Fatalf("no raw client leads %s: %v", session, env)

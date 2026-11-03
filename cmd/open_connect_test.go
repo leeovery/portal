@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -138,7 +139,7 @@ func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRe
 		fake.Add(backend.Session{Name: name})
 	}
 	withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, env: attachEnv}})
-	rec := &attachRecorder{runners: runnersFake{switchErr: runnerreg.ErrNoRunner}}
+	rec := &attachRecorder{runners: runnersFake{switchErr: runnertoken.ErrNoRunner}}
 	withOpenDeps(t, OpenDeps{Execer: rec, Runner: rec.Run, Runners: &rec.runners})
 	return fake, rec
 }
@@ -172,7 +173,7 @@ func (f *runnersFake) Switch(_ context.Context, token, current, target string) e
 }
 
 func (f *runnersFake) Attach(cfg *runner.Config) {
-	cfg.Command = f.backend.Track(cfg.Command, runnerreg.TokenVar, runnerToken)
+	cfg.Command = f.backend.Track(cfg.Command, runnertoken.Var, runnerToken)
 	session := cfg.Session
 	cfg.Began = func() {
 		if f.listed {
@@ -211,7 +212,7 @@ func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	if want := []string{backendtest.AttachProgram, name}; !slices.Equal(cfg.Command.Argv, want) {
 		t.Errorf("argv = %q, want %q", cfg.Command.Argv, want)
 	}
-	if want := append(slices.Clone(attachEnv), runnerreg.TokenVar+"="+runnerToken); !slices.Equal(cfg.Command.Env, want) {
+	if want := append(slices.Clone(attachEnv), runnertoken.Var+"="+runnerToken); !slices.Equal(cfg.Command.Env, want) {
 		t.Errorf("env = %q, want the attach command's own, marked, %q", cfg.Command.Env, want)
 	}
 	if cfg.In != os.Stdin || cfg.Out != os.Stdout {

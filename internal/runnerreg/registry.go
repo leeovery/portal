@@ -3,8 +3,8 @@
 // state directory's runners/ naming its pid and session, and beside it a
 // control socket other Portal processes send requests to, such as a switch to
 // another session. The entry's token is also in the runner's zmx client's
-// environment, as TokenVar, which zmx tracks, so the client leading a session
-// names its runner.
+// environment, as runnertoken.Var, which zmx tracks, so the client leading a
+// session names its runner.
 //
 // A connection to a runner's socket carries one request, a JSON line naming
 // the protocol version and the asker's deadline, and its answer, one JSON
@@ -26,18 +26,10 @@ import (
 
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/nanoid"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 var logger = log.For("attach")
-
-// TokenVar carries a runner's token in the environment of its zmx client,
-// which tracks it, so the backend reports it for the client leading a session.
-const TokenVar = "PORTAL_ATTACH"
-
-// ErrNoRunner is a request with no runner to take it: no token, as from a
-// raw zmx client or none leading, a token the registry doesn't hold, one
-// naming a runner on another session, or a runner proved gone.
-var ErrNoRunner = errors.New("no runner to ask")
 
 const (
 	entryExt  = ".json"
@@ -88,9 +80,9 @@ type registered struct {
 
 // Switch asks the runner registered under token, whose terminal leads the
 // session current, to switch to target, and returns once it has accepted.
-// Otherwise it returns ErrNoRunner, the runner's refusal, wrapping ErrRefused,
-// or the failure to ask it, and the caller switches as if there were no
-// runner.
+// Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal,
+// wrapping runnertoken.ErrRefused, or the failure to ask it, and the caller
+// switches as if there were no runner.
 func (r Registry) Switch(ctx context.Context, token, current, target string) error {
 	attrs := []any{"session", current, "target", target}
 	rn, err := r.lookup(token)
@@ -105,8 +97,8 @@ func (r Registry) Switch(ctx context.Context, token, current, target string) err
 // ConfirmSession returns the pid of the runner registered under token, whose
 // terminal leads session, once the runner confirms its attach under way shows
 // session and it has seen no switch since it began, so it is sure of it.
-// Otherwise it returns ErrNoRunner, the runner's refusal, wrapping
-// ErrRefused, or the failure to ask it.
+// Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal, wrapping
+// runnertoken.ErrRefused, or the failure to ask it.
 func (r Registry) ConfirmSession(ctx context.Context, token, session string) (int, error) {
 	attrs := []any{"session", session}
 	rn, err := r.lookup(token)
@@ -127,7 +119,7 @@ func (r Registry) ConfirmSession(ctx context.Context, token, session string) (in
 // shells of a session zmx made through a runner's client inherit it.
 func (r Registry) askOn(ctx context.Context, rn registered, session string, req request) error {
 	if rn.Session != session {
-		return fmt.Errorf("%w: runner %d is on %s, not %s", ErrNoRunner, rn.PID, rn.Session, session)
+		return fmt.Errorf("%w: runner %d is on %s, not %s", runnertoken.ErrNoRunner, rn.PID, rn.Session, session)
 	}
 	return r.ask(ctx, rn, req)
 }
@@ -140,7 +132,7 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 		return 0, err
 	}
 	if len(runners) == 0 {
-		report("detach to picker", ErrNoRunner, "session", session)
+		report("detach to picker", runnertoken.ErrNoRunner, "session", session)
 	}
 	accepted := 0
 	for _, rn := range runners {
@@ -157,7 +149,7 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 // ask.
 func report(msg string, err error, attrs ...any) {
 	attrs = append(attrs, "result", resultOf(err))
-	if err != nil && !errors.Is(err, ErrNoRunner) {
+	if err != nil && !errors.Is(err, runnertoken.ErrNoRunner) {
 		attrs = append(attrs, "error", err)
 	}
 	logger.Info(msg, attrs...)
@@ -167,9 +159,9 @@ func resultOf(err error) string {
 	switch {
 	case err == nil:
 		return "accepted"
-	case errors.Is(err, ErrNoRunner):
+	case errors.Is(err, runnertoken.ErrNoRunner):
 		return "no runner"
-	case errors.Is(err, ErrRefused):
+	case errors.Is(err, runnertoken.ErrRefused):
 		return "refused"
 	}
 	return "failed"
@@ -179,11 +171,11 @@ func resultOf(err error) string {
 // another program set, names none.
 func (r Registry) lookup(token string) (registered, error) {
 	if !validToken(token) {
-		return registered{}, ErrNoRunner
+		return registered{}, runnertoken.ErrNoRunner
 	}
 	e, err := r.read(token)
 	if errors.Is(err, fs.ErrNotExist) {
-		return registered{}, fmt.Errorf("%w: no entry %s", ErrNoRunner, token)
+		return registered{}, fmt.Errorf("%w: no entry %s", runnertoken.ErrNoRunner, token)
 	}
 	if err != nil {
 		r.leave(token, 0, "unreadable", err)
@@ -273,7 +265,7 @@ func (r Registry) read(token string) (entry, error) {
 func (r Registry) ask(ctx context.Context, rn registered, req request) error {
 	if !running(rn.PID) {
 		r.remove(rn)
-		return fmt.Errorf("%w: runner %d has exited", ErrNoRunner, rn.PID)
+		return fmt.Errorf("%w: runner %d has exited", runnertoken.ErrNoRunner, rn.PID)
 	}
 	err := send(ctx, r.socketPath(rn.token), rn.PID, req)
 	if err != nil {
@@ -285,7 +277,7 @@ func (r Registry) ask(ctx context.Context, rn registered, req request) error {
 // leftReason is why a failed request leaves the entry.
 func leftReason(err error) string {
 	switch {
-	case errors.Is(err, ErrRefused):
+	case errors.Is(err, runnertoken.ErrRefused):
 		return "refused"
 	case errors.Is(err, errOtherPID):
 		return "another pid"

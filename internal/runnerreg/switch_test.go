@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
 // contextWithin is a context of the test's that ends after d.
@@ -54,7 +55,7 @@ func TestSwitch(t *testing.T) {
 			h := &handler{}
 			register(t, r, "tok123", "api-x7Kd9a", h)
 
-			if err := r.Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrNoRunner) {
+			if err := r.Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrNoRunner) {
 				t.Errorf("Switch(%q) = %v, want ErrNoRunner", token, err)
 			}
 			if switches, _ := h.asked(); len(switches) != 0 {
@@ -73,7 +74,7 @@ func TestSwitch(t *testing.T) {
 		h := &handler{}
 		register(t, r, "tok123", "docs-e5f6", h)
 
-		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrNoRunner) {
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrNoRunner) {
 			t.Errorf("Switch = %v, want ErrNoRunner", err)
 		}
 		if switches, _ := h.asked(); len(switches) != 0 {
@@ -93,7 +94,7 @@ func TestSwitch(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		register(t, r, "tok123", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
 
-		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnertoken.ErrRefused) {
 			t.Fatalf("Switch = %v, want ErrRefused", err)
 		}
 		rec := sink.Records().Matching("attach", "switch").Only(t, "switch record")
