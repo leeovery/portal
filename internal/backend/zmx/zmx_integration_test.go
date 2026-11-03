@@ -109,7 +109,7 @@ func rawInfo(t *testing.T, b *zmx.Backend, name string) []byte {
 // returns the socket's path.
 func crash(t *testing.T, b *zmx.Backend, name string) string {
 	t.Helper()
-	if err := syscall.Kill(zmxtest.Daemon(t, b, name), syscall.SIGKILL); err != nil {
+	if err := zmxtest.Signal(b, zmxtest.Daemon(t, b, name), syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(b.Dir(), name)
@@ -432,7 +432,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 			t.Errorf("History of a stopped daemon = %v, want ErrTimeout", err)
 		}
 
-		if err := syscall.Kill(daemon, syscall.SIGCONT); err != nil {
+		if err := zmxtest.Signal(b, daemon, syscall.SIGCONT); err != nil {
 			t.Fatal(err)
 		}
 		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool { return syscall.Kill(daemon, 0) != nil }) {
@@ -698,7 +698,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 
 		drain()
-		if err := syscall.Kill(daemon, syscall.SIGCONT); err != nil {
+		if err := zmxtest.Signal(b, daemon, syscall.SIGCONT); err != nil {
 			t.Fatal(err)
 		}
 		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {

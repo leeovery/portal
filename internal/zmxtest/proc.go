@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"syscall"
 
 	"github.com/leeovery/portal/internal/proctable"
 )
@@ -72,6 +73,15 @@ func standing(chain []int, r procReader) bool {
 		}
 	}
 	return true
+}
+
+// signalOwned sends sig to pid if it is a process started for dir, proved as
+// the signal is sent: a pid proved earlier may since have been reused.
+func signalOwned(pid int, dir string, sig syscall.Signal) error {
+	if !ownedBy(pid, dir) {
+		return fmt.Errorf("pid %d is no process of %s, so it is not signalled", pid, dir)
+	}
+	return syscall.Kill(pid, sig)
 }
 
 // owned lists the processes started for dir. The listing only names the pids

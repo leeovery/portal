@@ -35,7 +35,7 @@ func TestTeardown(t *testing.T) {
 		b := New(t)
 		mustCreate(t, b, "wedged")
 		daemon := Daemon(t, b, "wedged")
-		if err := syscall.Kill(daemon, syscall.SIGSTOP); err != nil {
+		if err := Signal(b, daemon, syscall.SIGSTOP); err != nil {
 			t.Fatalf("stop daemon %d: %v", daemon, err)
 		}
 		rec := &harnesstest.Recorder{}
@@ -50,7 +50,7 @@ func TestTeardown(t *testing.T) {
 			t.Errorf("teardown reported %s, want the surviving daemon", rec.Report())
 		}
 		if alive(daemon) {
-			_ = syscall.Kill(daemon, syscall.SIGKILL)
+			_ = Signal(b, daemon, syscall.SIGKILL)
 			t.Errorf("daemon %d survived teardown", daemon)
 		}
 	})
@@ -71,7 +71,7 @@ func TestTeardown(t *testing.T) {
 			t.Error("teardown reported nothing for a directory it could not list")
 		}
 		if alive(daemon) {
-			_ = syscall.Kill(daemon, syscall.SIGKILL)
+			_ = Signal(b, daemon, syscall.SIGKILL)
 			t.Errorf("daemon %d survived teardown", daemon)
 		}
 	})
@@ -80,7 +80,7 @@ func TestTeardown(t *testing.T) {
 		b := New(t)
 		mustCreate(t, b, "dead")
 		daemon := Daemon(t, b, "dead")
-		if err := syscall.Kill(daemon, syscall.SIGKILL); err != nil {
+		if err := Signal(b, daemon, syscall.SIGKILL); err != nil {
 			t.Fatal(err)
 		}
 		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool { return !alive(daemon) }) {

@@ -178,10 +178,7 @@ func teardown(ctx context.Context, t harnesstest.TestingT, b *zmx.Backend) {
 	}
 	t.Errorf("zmxtest teardown: processes %v of %s survived their kill; sending SIGKILL", survivors, b.Dir())
 	for _, pid := range survivors {
-		// Re-proved just before signalling: a pid can be reused.
-		if ownedBy(pid, b.Dir()) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
+		_ = signalOwned(pid, b.Dir(), syscall.SIGKILL)
 	}
 	if survivors, err := awaitExit(t, b.Dir()); err != nil || len(survivors) > 0 {
 		t.Errorf("zmxtest teardown: processes %v of %s survived SIGKILL: %v", survivors, b.Dir(), err)
@@ -244,13 +241,17 @@ func Daemon(t *testing.T, b *zmx.Backend, name string) int {
 func StopDaemon(t *testing.T, b *zmx.Backend, name string) int {
 	t.Helper()
 	pid := Daemon(t, b, name)
-	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+	if err := Signal(b, pid, syscall.SIGSTOP); err != nil {
 		t.Fatalf("stop daemon %d: %v", pid, err)
 	}
-	t.Cleanup(func() {
-		if ownedBy(pid, b.Dir()) {
-			_ = syscall.Kill(pid, syscall.SIGCONT)
-		}
-	})
+	t.Cleanup(func() { _ = Signal(b, pid, syscall.SIGCONT) })
 	return pid
+}
+
+// Signal sends sig to pid if it is a process of b's directory, proved as the
+// signal is sent, and fails, sending nothing, for one that is not. A test
+// signals a zmx process only through here: a pid proved even a moment
+// earlier may since have been reused.
+func Signal(b *zmx.Backend, pid int, sig syscall.Signal) error {
+	return signalOwned(pid, b.Dir(), sig)
 }
