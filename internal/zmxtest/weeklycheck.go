@@ -82,7 +82,7 @@ func packageUnderTest() (string, error) {
 // covered is why no run of runs runs test in pkg, a slash path relative to
 // the module root, naming the line it needs; nil when one does.
 func covered(runs []checkRun, pkg, test string) error {
-	var unmatched []checkRun
+	var unmatched []string
 	for _, c := range runs {
 		if !c.names(pkg) {
 			continue
@@ -90,11 +90,11 @@ func covered(runs []checkRun, pkg, test string) error {
 		if c.run == nil || c.run.MatchString(test) {
 			return nil
 		}
-		unmatched = append(unmatched, c)
+		unmatched = append(unmatched, c.line)
 	}
 	if len(unmatched) > 0 {
-		return fmt.Errorf("%s.%s runs a real zmx, but %s runs %s only under -run '%s': name the test to match it (%s)",
-			pkg, test, weeklyCheck, pkg, unmatched[0].run, unmatched[0].line)
+		return fmt.Errorf("%s.%s runs a real zmx, but %s runs %s only under -run: name the test to match one of %s",
+			pkg, test, weeklyCheck, pkg, strings.Join(unmatched, "; "))
 	}
 	return fmt.Errorf("%s.%s runs a real zmx, but %s never runs %s: add the line go test -tags integration -p 1 -timeout 30m ./%s",
 		pkg, test, weeklyCheck, pkg, pkg)

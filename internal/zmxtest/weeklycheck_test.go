@@ -129,7 +129,7 @@ func TestCovered(t *testing.T) {
 		{"cmd", "TestOpenAgainstZmx", ""},
 		{"internal/backendtest", "TestA", "add the line go test -tags integration -p 1 -timeout 30m ./internal/backendtest"},
 		{"cmd/capturetool", "TestOpenAgainstZmx", "never runs cmd/capturetool"},
-		{"cmd", "TestOpenBurst", "name the test to match it (go test -tags integration -run 'AgainstZmx$' ./cmd)"},
+		{"cmd", "TestOpenBurst", "name the test to match one of go test -tags integration -run 'AgainstZmx$' ./cmd"},
 	} {
 		err := covered(runs, tc.pkg, tc.test)
 		switch {
@@ -139,6 +139,19 @@ func TestCovered(t *testing.T) {
 			t.Errorf("covered(%s, %s) = %v, want an error naming %s.%s and saying %q", tc.pkg, tc.test, err, tc.pkg, tc.test, tc.want)
 		}
 	}
+
+	t.Run("a test no line's -run matches is told every line that names its package", func(t *testing.T) {
+		runs := []checkRun{
+			{line: "go test -tags integration -run 'A$' ./cmd", packages: []string{"./cmd"}, run: regexp.MustCompile(`A$`)},
+			{line: "go test -tags integration -run 'B$' ./...", packages: []string{"./..."}, run: regexp.MustCompile(`B$`)},
+		}
+		err := covered(runs, "cmd", "TestC")
+		for _, c := range runs {
+			if err == nil || !strings.Contains(err.Error(), c.line) {
+				t.Errorf("covered = %v, want it to quote %q", err, c.line)
+			}
+		}
+	})
 
 	t.Run("a line naming ./... runs every package", func(t *testing.T) {
 		if err := covered([]checkRun{{packages: []string{"./..."}}}, "internal/spawn", "TestA"); err != nil {
