@@ -15,13 +15,20 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 )
 
+// ErrRefusing marks a session whose socket, made since this boot, refuses
+// connections. That is a crashed daemon's socket, which holds the name until
+// zmx clears it, or on macOS a live daemon's whose listen backlog is full. It
+// wraps backend.ErrTimeout: the session is held but not answering.
+var ErrRefusing = fmt.Errorf("zmx session refuses connections: %w", errNotAccepting)
+
 var (
 	errUnsupported = errors.New("zmx daemon does not support the request")
 	errSecondFrame = errors.New("a second frame on one connection to a zmx daemon")
 	// errStale marks a refused connect to a socket made before this boot.
 	errStale = errors.New("socket predates this boot")
 	// errNotAccepting marks a connect a daemon may be behind but did not
-	// accept: refused from a socket made since boot, or a full backlog.
+	// accept: refused from a socket made since boot (ErrRefusing), or a full
+	// backlog.
 	errNotAccepting = fmt.Errorf("zmx daemon is not accepting connections: %w", backend.ErrTimeout)
 	errNoAnswer     = fmt.Errorf("zmx daemon gave no well-formed answer: %w", backend.ErrTimeout)
 )
@@ -88,6 +95,32 @@ func (c *conn) header() (header, error) {
 		return header{}, err
 	}
 	return decodeHeader(b)
+}
+
+// answerVersion reads frames until the daemon's answer to Info, Info or
+// Unsupported, and returns the protocol version its header carries. Frames of
+// other tags are the session's broadcast output, skipped as await skips them,
+// but only in this protocol: the length of a frame in any other cannot be
+// trusted, and a zmx 0.8.1 daemon's output frame carries its length in bytes
+// 1-4, so its byte 1 is no version at all.
+func (c *conn) answerVersion() (uint8, error) {
+	for {
+		h, err := c.header()
+		answer := h.tag == tagInfo || h.tag == tagUnsupported
+		switch {
+		case errors.Is(err, errProtocolVersion) && answer:
+			return h.version, nil
+		case errors.Is(err, errProtocolVersion):
+			return 0, fmt.Errorf("%w: a tag %d frame of protocol %d before the answer", errFrame, h.tag, h.version)
+		case err != nil:
+			return 0, err
+		case answer:
+			return h.version, nil
+		}
+		if _, err := c.r.Discard(int(h.len)); err != nil {
+			return 0, err
+		}
+	}
 }
 
 // await reads frames until one tagged want and returns its payload. The
@@ -158,7 +191,7 @@ func (b *Backend) refused(entry string, err error) error {
 	if statErr == nil && bootErr == nil && info.ModTime().Before(boot) {
 		return fmt.Errorf("%w: %w", err, errStale)
 	}
-	return fmt.Errorf("%w: %w", err, errNotAccepting)
+	return fmt.Errorf("%w: %w", err, ErrRefusing)
 }
 
 // gone reports whether a connect found no session: the socket is missing, or

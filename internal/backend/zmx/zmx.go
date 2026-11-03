@@ -254,9 +254,11 @@ func (b *Backend) Current() string {
 }
 
 // ProtocolVersion is the socket protocol version that the daemon of the live
-// session name speaks, read from the header of its answer. Any version but
-// ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no answer, so
-// ErrTimeout: it reads the request as a frame still awaiting payload.
+// session name speaks, read from the header of its answer to Info alone. Any
+// version but ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no
+// answer, so ErrTimeout: it reads the request as a frame still awaiting
+// payload, and the output it broadcasts meanwhile is no answer. A socket that
+// refuses connections is ErrRefusing.
 func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
@@ -268,11 +270,11 @@ func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error)
 	if err := c.send(tagInfo, nil); err != nil {
 		return 0, fmt.Errorf("read protocol version of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
-	h, err := c.header()
-	if err != nil && !errors.Is(err, errProtocolVersion) {
+	version, err := c.answerVersion()
+	if err != nil {
 		return 0, fmt.Errorf("read protocol version of session %q: %w", name, b.noAnswer(ctx, s, err))
 	}
-	return int(h.version), nil
+	return int(version), nil
 }
 
 // open connects to the live session held under exactly name. A name held only

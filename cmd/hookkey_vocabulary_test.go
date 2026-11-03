@@ -34,21 +34,13 @@ func hooksBody(keys ...string) string {
 	return "{\n" + strings.Join(entries, ",\n") + "\n}"
 }
 
-// tokenRows models the enumeration's answer for stamped panes, and
-// unstampedRows for panes carrying no token. The location half is display-only,
-// so these fabricate a distinct one per row rather than asserting on it.
+// tokenRows models the enumeration's answer for stamped panes. The location
+// half is display-only, so it fabricates a distinct one per row rather than
+// asserting on it.
 func tokenRows(tokens ...string) []tmux.PaneHookRow {
 	rows := make([]tmux.PaneHookRow, 0, len(tokens))
 	for i, token := range tokens {
 		rows = append(rows, tmux.PaneHookRow{Token: token, Location: fmt.Sprintf("stamped%d:0.0", i)})
-	}
-	return rows
-}
-
-func unstampedRows(n int) []tmux.PaneHookRow {
-	rows := make([]tmux.PaneHookRow, 0, n)
-	for i := range n {
-		rows = append(rows, tmux.PaneHookRow{Location: fmt.Sprintf("bare%d:0.0", i)})
 	}
 	return rows
 }

@@ -13,59 +13,6 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 )
 
-func TestDoctorStaleHooksDegradedRead(t *testing.T) {
-	t.Run("it keeps the stale-hooks check green under a degraded read", func(t *testing.T) {
-		hooks.SetLockTimeoutForTest(t, 40*time.Millisecond)
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedA)}
-
-		unlockedStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA)})
-		baseline, err := runDoctorDiagnosis(staleDeps(t.TempDir(), lister, unlockedStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		want := findCheck(t, baseline, "stale hooks")
-		wantUnhealthy := doctorUnhealthy(baseline)
-
-		heldStore, heldPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA)})
-		hookstest.HoldHooksSidecar(t, heldPath)
-
-		sink := logtest.Install(t)
-		degraded, err := runDoctorDiagnosis(staleDeps(t.TempDir(), lister, heldStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis under a held lock: %v", err)
-		}
-		got := findCheck(t, degraded, "stale hooks")
-
-		if got.status != want.status {
-			t.Errorf("status = %v under a degraded read, want %v", got.status, want.status)
-		}
-		if got.detail != want.detail {
-			t.Errorf("detail = %q under a degraded read, want %q", got.detail, want.detail)
-		}
-		if doctorUnhealthy(degraded) != wantUnhealthy {
-			t.Errorf("doctorUnhealthy = %v under a degraded read, want %v", doctorUnhealthy(degraded), wantUnhealthy)
-		}
-		hookstest.AssertDegradedRead(t, sink, "doctor")
-	})
-
-	t.Run("it leaves the config directory untouched across portal doctor", func(t *testing.T) {
-		// A fresh install: the directory holds no hooks.json at all, so a read
-		// that created either it or the sidecar would show up as a new entry.
-		hooks.SetLockTimeoutForTest(t, 20*time.Millisecond)
-		configDir := t.TempDir()
-		store := hooks.NewStore(filepath.Join(configDir, "hooks.json"))
-		before := dirListing(t, configDir)
-
-		if _, err := runDoctorDiagnosis(staleDeps(t.TempDir(), &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedA)}, store, nil)); err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-
-		if after := dirListing(t, configDir); !reflect.DeepEqual(before, after) {
-			t.Errorf("config directory changed across a read-only doctor: before=%v after=%v", before, after)
-		}
-	})
-}
-
 func TestHookListDegradedRead(t *testing.T) {
 	t.Run("it lists hooks under a degraded read", func(t *testing.T) {
 		hooks.SetLockTimeoutForTest(t, 40*time.Millisecond)

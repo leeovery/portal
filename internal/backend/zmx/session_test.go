@@ -3,6 +3,7 @@ package zmx_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -507,6 +508,72 @@ func TestProtocolVersion(t *testing.T) {
 			t.Errorf("ProtocolVersion of a silent daemon = %v, want ErrTimeout", err)
 		}
 	})
+
+	t.Run("it skips the session's output before the answer", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "busy", answering(frame(1, 1, []byte("output")), frame(1, 1, nil), frame(6, 2, make([]byte, 552))))
+
+		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "busy"); err != nil || got != 2 {
+			t.Errorf("ProtocolVersion = %d, %v; want 2 from the answer, not the output", got, err)
+		}
+	})
+
+	// A zmx 0.8.1 daemon broadcasts its session's output to every client,
+	// a probe included, in its own frame layout: byte 1 is the low byte of the
+	// frame's length, not a version.
+	t.Run("it reads no version from a zmx 0.8.1 daemon's output", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "old", broadcastingOldOutput(143))
+
+		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "old"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion of a 0.8.1 daemon broadcasting output = %d, %v; want ErrTimeout", got, err)
+		}
+	})
+
+	t.Run("it reads no version past an output frame too long to skip", func(t *testing.T) {
+		dir := socketDir(t)
+		oversize := []byte{1, 1, 0, 0, 0, 0, 0, 0}
+		binary.NativeEndian.PutUint32(oversize[4:], 64<<20+1)
+		serve(t, dir, "garbled", answering(oversize, frame(6, 1, make([]byte, 552))))
+
+		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "garbled"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion past an oversize frame = %d, %v; want ErrTimeout", got, err)
+		}
+	})
+
+	t.Run("it reports a refusing socket as refusing", func(t *testing.T) {
+		dir := socketDir(t)
+		refusing(t, dir, "crashed")
+
+		_, err := newBackend(t, dir).ProtocolVersion(t.Context(), "crashed")
+		if !errors.Is(err, zmx.ErrRefusing) || !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion of a refusing socket = %v, want ErrRefusing wrapping ErrTimeout", err)
+		}
+	})
+
+	t.Run("it does not report a silent daemon as refusing", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "wedged", silent)
+
+		if _, err := newBackend(t, dir).ProtocolVersion(t.Context(), "wedged"); errors.Is(err, zmx.ErrRefusing) {
+			t.Errorf("ProtocolVersion of a silent daemon = %v, want no ErrRefusing", err)
+		}
+	})
+}
+
+// broadcastingOldOutput writes, before reading anything, zmx 0.8.1 output
+// frames: a 1-byte tag, a u32 length at bytes 1-4, padded to 8, and the
+// payload. Then it holds the connection.
+func broadcastingOldOutput(length uint32) func(*daemon, net.Conn) {
+	return func(_ *daemon, c net.Conn) {
+		h := make([]byte, 8)
+		h[0] = 1
+		binary.NativeEndian.PutUint32(h[1:5], length)
+		for range 3 {
+			_, _ = c.Write(append(slices.Clone(h), make([]byte, length)...))
+		}
+		_, _ = io.Copy(io.Discard, c)
+	}
 }
 
 // asking is each call that asks a session for an answer, for the rules on a
