@@ -54,13 +54,15 @@ type advisory struct {
 
 // DoctorDeps fields are all optional: an unset one falls through to the
 // production default in resolveDoctorDeps, and nothing left nil aborts
-// diagnosis. The sessions themselves are listed through sessionBackend, staged
-// with withBackendDeps.
+// diagnosis.
 type DoctorDeps struct {
 	StateDir  string
 	ThemesDir string
-	ZmxDir    string
-	LookPath  func(file string) (string, error)
+	// ZmxDir is the zmx dir the dir check judges and, unless a test injects
+	// its own, the one the sessions are listed and probed in.
+	ZmxDir       string
+	LookPath     func(file string) (string, error)
+	ListSessions func(ctx context.Context) ([]backend.Session, error)
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
 	ProtocolVersion func(ctx context.Context, name string) (int, error)
@@ -88,8 +90,14 @@ func resolveDoctorDeps() *DoctorDeps {
 	if deps.LookPath == nil {
 		deps.LookPath = exec.LookPath
 	}
-	if deps.ProtocolVersion == nil {
-		deps.ProtocolVersion = zmxProtocolVersion(deps.ZmxDir)
+	if deps.ListSessions == nil || deps.ProtocolVersion == nil {
+		list, protocolVersion := zmxSessionReads(deps.ZmxDir)
+		if deps.ListSessions == nil {
+			deps.ListSessions = list
+		}
+		if deps.ProtocolVersion == nil {
+			deps.ProtocolVersion = protocolVersion
+		}
 	}
 	if deps.Detector == nil || deps.Resolve == nil {
 		seams := buildProductionSpawnSeams(tmux.DefaultClient())
@@ -125,14 +133,15 @@ func resolveDoctorDeps() *DoctorDeps {
 	return deps
 }
 
-// zmxProtocolVersion is the driver's protocol read on dir. A dir the driver
-// refuses to bind answers every read with that refusal.
-func zmxProtocolVersion(dir string) func(context.Context, string) (int, error) {
+// zmxSessionReads are the driver's listing and protocol read, both bound on
+// dir. A dir the driver refuses to bind answers every read with that refusal.
+func zmxSessionReads(dir string) (func(context.Context) ([]backend.Session, error), func(context.Context, string) (int, error)) {
 	driver, err := zmx.New(zmx.Config{Binary: zmxProgram, Dir: dir})
 	if err != nil {
-		return func(context.Context, string) (int, error) { return 0, err }
+		return func(context.Context) ([]backend.Session, error) { return nil, err },
+			func(context.Context, string) (int, error) { return 0, err }
 	}
-	return driver.ProtocolVersion
+	return driver.List, driver.ProtocolVersion
 }
 
 var doctorCmd = &cobra.Command{
@@ -229,7 +238,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
-		checkSessionsAnswer(ctx, deps.ProtocolVersion),
+		checkSessionsAnswer(ctx, deps.ListSessions, deps.ProtocolVersion),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleProjects(deps.ProjectStore),
@@ -261,16 +270,15 @@ func checkZmxDir(dir string) checkResult {
 }
 
 // checkSessionsAnswer names every session that did not answer the listing,
-// with what its daemon says when asked for its protocol alone. A failed
-// listing is the zmx dir check's to judge, so it is not evaluable here.
-func checkSessionsAnswer(ctx context.Context, protocolVersion func(context.Context, string) (int, error)) checkResult {
+// with what its daemon says when asked for its protocol alone. A session that
+// ended since the listing is no session at all. A failed listing is the zmx
+// dir check's to judge, so it is not evaluable here. Portal's own sessions
+// count: one of them not answering is as much a fault as a user's.
+func checkSessionsAnswer(ctx context.Context, list func(context.Context) ([]backend.Session, error), protocolVersion func(context.Context, string) (int, error)) checkResult {
 	const name = "sessions"
-	sessions, err := listAllSessions(ctx)
+	sessions, err := list(ctx)
 	if err != nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not list sessions: " + err.Error()}
-	}
-	if len(sessions) == 0 {
-		return checkResult{name: name, status: checkPass, detail: "no sessions"}
 	}
 	var silent []string
 	for _, s := range sessions {
@@ -278,48 +286,61 @@ func checkSessionsAnswer(ctx context.Context, protocolVersion func(context.Conte
 			silent = append(silent, s.Name)
 		}
 	}
-	if len(silent) == 0 {
-		return checkResult{name: name, status: checkPass, detail: pluralCount(len(sessions), "session answering", "sessions answering")}
+	reasons, ended := unansweredReasons(ctx, protocolVersion, silent)
+	total := len(sessions) - ended
+	switch {
+	case total == 0:
+		return checkResult{name: name, status: checkPass, detail: "no sessions"}
+	case len(reasons) == 0:
+		return checkResult{name: name, status: checkPass, detail: pluralCount(total, "session answering", "sessions answering")}
 	}
 	return checkResult{
 		name:   name,
 		status: checkFail,
-		detail: fmt.Sprintf("%d of %d not answering: %s", len(silent), len(sessions), strings.Join(unansweredReasons(ctx, protocolVersion, silent), ", ")),
+		detail: fmt.Sprintf("%d of %d not answering: %s", len(reasons), total, strings.Join(reasons, ", ")),
 	}
 }
 
-// listAllSessions keeps Portal's own sessions: one of them not answering is as
-// much a fault as a user's.
-func listAllSessions(ctx context.Context) ([]backend.Session, error) {
-	b, err := sessionBackend()
-	if err != nil {
-		return nil, err
-	}
-	return b.List(ctx)
-}
+// maxProtocolProbes caps the probes in flight, each holding a socket open, as
+// the listing caps its own.
+const maxProtocolProbes = 64
 
-// unansweredReasons probes every silent session at once, so daemons that give
-// no answer cost one probe ceiling between them. An Info request changes
-// nothing on a daemon.
-func unansweredReasons(ctx context.Context, protocolVersion func(context.Context, string) (int, error), names []string) []string {
-	reasons := make([]string, len(names))
+// unansweredReasons probes the silent sessions at once, up to the cap, so
+// daemons that give no answer cost one probe ceiling between them. An Info
+// request changes nothing on a daemon. It returns the named reasons in the
+// sessions' order, and how many sessions had ended.
+func unansweredReasons(ctx context.Context, protocolVersion func(context.Context, string) (int, error), names []string) (reasons []string, ended int) {
+	answers := make([]string, len(names))
+	slots := make(chan struct{}, maxProtocolProbes)
 	var wg sync.WaitGroup
 	for i, n := range names {
 		wg.Go(func() {
-			reasons[i] = n + " (" + unansweredReason(ctx, protocolVersion, n) + ")"
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			answers[i] = unansweredReason(ctx, protocolVersion, n)
 		})
 	}
 	wg.Wait()
-	return reasons
+	for i, answer := range answers {
+		if answer == "" {
+			ended++
+			continue
+		}
+		reasons = append(reasons, names[i]+" ("+answer+")")
+	}
+	return reasons, ended
 }
 
-// A daemon whose header reads protocol 1 still failed the listing every
+// unansweredReason words why a session did not answer, empty for one that has
+// ended. A daemon whose header reads protocol 1 still failed the listing every
 // command reads, so it is named as not answering too.
 func unansweredReason(ctx context.Context, protocolVersion func(context.Context, string) (int, error), name string) string {
 	version, err := protocolVersion(ctx, name)
 	switch {
 	case errors.Is(err, backend.ErrNoSuchSession):
-		return "ended"
+		return ""
+	case errors.Is(err, zmx.ErrRefusing):
+		return "refuses connections; `zmx list` clears a crashed session's socket"
 	case err != nil || version == zmx.ProtocolVersion:
 		return "no answer"
 	default:
@@ -406,7 +427,8 @@ func checkDirReadable(name, dir string) checkResult {
 }
 
 // An absent sessions.json is a fresh install, told apart from an empty index.
-// A version 1 file never reaches here: the root refuses it first.
+// Doctor is exempt from the root's stop on an unusable index, so it names each
+// kind itself.
 func checkSessionsJSON(dir string, dirErr error) checkResult {
 	const name = "sessions.json"
 	if dirErr != nil {
@@ -416,16 +438,23 @@ func checkSessionsJSON(dir string, dirErr error) checkResult {
 		return checkResult{name: name, status: checkPass, detail: "no sessions indexed yet"}
 	}
 	idx, err := sessionindex.Read(dir)
-	if versionErr, ok := errors.AsType[*sessionindex.VersionError](err); ok {
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("version %d; this Portal reads version %d", versionErr.Found, sessionindex.SchemaVersion)}
-	}
-	if _, ok := errors.AsType[*fs.PathError](err); ok {
-		return checkResult{name: name, status: checkFail, detail: "unreadable"}
-	}
 	if err != nil {
-		return checkResult{name: name, status: checkFail, detail: "corrupt"}
+		return checkResult{name: name, status: checkFail, detail: unusableIndexDetail(err)}
 	}
 	return checkResult{name: name, status: checkPass, detail: pluralCount(len(idx.Sessions), "session indexed", "sessions indexed")}
+}
+
+func unusableIndexDetail(err error) string {
+	if errors.Is(err, sessionindex.ErrLegacyIndex) {
+		return "from the tmux version of Portal; run portal migrate"
+	}
+	if versionErr, ok := errors.AsType[*sessionindex.VersionError](err); ok && versionErr.Found > sessionindex.SchemaVersion {
+		return fmt.Sprintf("version %d, from a newer Portal; this one reads version %d", versionErr.Found, sessionindex.SchemaVersion)
+	}
+	if _, ok := errors.AsType[*fs.PathError](err); ok {
+		return "unreadable"
+	}
+	return "corrupt"
 }
 
 func renderDoctorReport(w io.Writer, results []checkResult, advisories []advisory) {

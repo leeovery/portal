@@ -64,8 +64,10 @@ func TestDoctorSummary_InfoLineOutsideCounts(t *testing.T) {
 }
 
 func TestDoctorSummary_NotEvaluableOutsideCounts(t *testing.T) {
-	stageDoctorBackend(t).Fail(backendtest.OpList, errors.New("transient"))
+	fake := backendtest.New()
+	fake.Fail(backendtest.OpList, errors.New("transient"))
 	deps := healthyDoctorDeps(t)
+	deps.ListSessions = fake.List
 
 	outBuf, _, err := runDoctorWith(t, deps)
 	if err != nil {

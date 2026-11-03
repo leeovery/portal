@@ -31,11 +31,13 @@ var bootstrapExempt = map[string]bool{
 	"version":    true,
 }
 
-// The state check spares version, which reads no state, and the hidden state
+// The state check spares version, which reads no state; doctor, which reports
+// an unusable sessions.json itself and writes none; and the hidden state
 // commands, which are still the tmux version's saver: they work on its version
 // 1 sessions.json until the zmx saver replaces them, and no other command
 // reaches them.
 var stateCheckExempt = map[string]bool{
+	"doctor":  true,
 	"state":   true,
 	"version": true,
 }

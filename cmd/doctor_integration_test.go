@@ -45,6 +45,20 @@ func serveProtocol2(t *testing.T, dir, name string) {
 	}()
 }
 
+// leaveRefusingSocket leaves a socket in dir under name that refuses every
+// connection, as a crashed zmx daemon's does.
+func leaveRefusingSocket(t *testing.T, dir, name string) {
+	t.Helper()
+	ln, err := net.Listen("unix", filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("listen as %s: %v", name, err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPortalDoctorAgainstZmx(t *testing.T) {
 	env, _ := portaltest.IsolateStateForTest(t)
 	b := zmxtest.New(t)
@@ -94,19 +108,21 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 		)
 	})
 
-	t.Run("it names a protocol-2 daemon and a silent one, and exits non-zero", func(t *testing.T) {
+	t.Run("it names a refusing socket, a protocol-2 daemon and a silent one, and exits non-zero", func(t *testing.T) {
 		if err := b.Create(t.Context(), "wedged-Lp4s", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(wedged-Lp4s): %v", err)
 		}
 		zmxtest.StopDaemon(t, b, "wedged-Lp4s")
 		serveProtocol2(t, b.Dir(), "future-2")
+		leaveRefusingSocket(t, b.Dir(), "crashed-9")
 
 		out, code := doctor(t)
 		if code != 1 {
 			t.Errorf("exit code = %d, want 1:\n%s", code, out)
 		}
 		assertLines(t, out,
-			"✗ sessions: 2 of 3 not answering: future-2 (speaks protocol 2; Portal speaks 1), wedged-Lp4s (no answer)",
+			"✗ sessions: 3 of 4 not answering: crashed-9 (refuses connections; `zmx list` clears a crashed session's socket), "+
+				"future-2 (speaks protocol 2; Portal speaks 1), wedged-Lp4s (no answer)",
 			"5 of 6 checks passed",
 		)
 	})

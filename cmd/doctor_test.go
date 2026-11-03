@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/project"
@@ -70,22 +71,14 @@ func writeSessionsJSON(t *testing.T, dir string, data []byte) {
 	}
 }
 
-// stageDoctorBackend stages a Fake holding sessions, every one answering.
-func stageDoctorBackend(t *testing.T, sessions ...backend.Session) *backendtest.Fake {
-	t.Helper()
-	fake := backendtest.New(sessions...)
-	withBackendDeps(t, BackendDeps{Backend: fake})
-	return fake
-}
-
-// withHealthyRuntime fills every unset runtime seam with a healthy answer, and
-// stages a Fake holding one answering session unless the test staged its own.
-// It also stubs the host-terminal seams so no doctor test invokes a real
+// withHealthyRuntime fills every unset runtime seam with a healthy answer: a
+// Fake holding one answering session, zmx on PATH and a protocol 1 daemon. It
+// also stubs the host-terminal seams so no doctor test invokes a real
 // detector, which would read the process tree and the live tmux server.
 func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 	t.Helper()
-	if backendDeps == nil {
-		stageDoctorBackend(t, backend.Session{Name: "api-x7Kd9a"})
+	if deps.ListSessions == nil {
+		deps.ListSessions = backendtest.New(backend.Session{Name: "api-x7Kd9a"}).List
 	}
 	if deps.ZmxDir == "" {
 		deps.ZmxDir = t.TempDir()
@@ -197,9 +190,7 @@ func TestDoctorZeroValueCheckResultNotHealthy(t *testing.T) {
 func TestDoctorFreshInstallIsHealthy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	zmxDir := filepath.Join(t.TempDir(), "zmx")
-	stageDoctorBackend(t)
-
-	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir}))
+	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: backendtest.New().List}))
 	if err != nil {
 		t.Fatalf("Execute err = %v; want nil on a fresh install", err)
 	}
@@ -219,10 +210,10 @@ func TestDoctorFreshInstallIsHealthy(t *testing.T) {
 func TestDoctorIsReadOnly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	zmxDir := filepath.Join(t.TempDir(), "zmx")
-	fake := stageDoctorBackend(t, backend.Session{Name: "api"}, backend.Session{Name: "wedged"})
+	fake := backendtest.New(backend.Session{Name: "api"}, backend.Session{Name: "wedged"})
 	fake.StopAnswering("wedged")
 
-	if _, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir})); err != ErrDoctorUnhealthy {
+	if _, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: fake.List})); err != ErrDoctorUnhealthy {
 		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy for the silent session", err)
 	}
 
@@ -292,54 +283,78 @@ func TestDoctorZmxDirCheck(t *testing.T) {
 	}
 }
 
+// silentSessions is a Fake holding the named sessions, none of them answering.
+func silentSessions(names ...string) *backendtest.Fake {
+	fake := backendtest.New()
+	for _, name := range names {
+		fake.Add(backend.Session{Name: name})
+		fake.StopAnswering(name)
+	}
+	return fake
+}
+
+func sessionsDeps(t *testing.T, fake *backendtest.Fake, protocolVersion func(context.Context, string) (int, error)) *DoctorDeps {
+	t.Helper()
+	return withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ListSessions: fake.List, ProtocolVersion: protocolVersion})
+}
+
+func sessionsCheck(t *testing.T, fake *backendtest.Fake, protocolVersion func(context.Context, string) (int, error)) checkResult {
+	t.Helper()
+	return findCheck(t, diagnose(t, sessionsDeps(t, fake, protocolVersion)), "sessions")
+}
+
 func TestDoctorSessionsCheck(t *testing.T) {
 	t.Run("it passes when every session answers", func(t *testing.T) {
-		stageDoctorBackend(t, backend.Session{Name: "api"}, backend.Session{Name: "web"})
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()})), "sessions")
-		assertCheck(t, got, checkPass, "2 sessions answering")
+		fake := backendtest.New(backend.Session{Name: "api"}, backend.Session{Name: "web"})
+		assertCheck(t, sessionsCheck(t, fake, nil), checkPass, "2 sessions answering")
 	})
 
 	t.Run("it names a protocol-2 daemon with its version and a silent one as not answering", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "api"}, backend.Session{Name: "future"}, backend.Session{Name: "old-zmx"})
-		fake.StopAnswering("future")
-		fake.StopAnswering("old-zmx")
+		fake := silentSessions("future", "old-zmx")
+		fake.Add(backend.Session{Name: "api"})
 		answers := protocolAnswers{
 			"future":  {version: 2},
 			"old-zmx": {err: fmt.Errorf("no answer in 1s: %w", backend.ErrTimeout)},
 		}
+		assertCheck(t, sessionsCheck(t, fake, answers.read), checkFail, "2 of 3 not answering: future (speaks protocol 2; Portal speaks 1), old-zmx (no answer)")
+	})
 
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: answers.read})), "sessions")
-		assertCheck(t, got, checkFail, "2 of 3 not answering: future (speaks protocol 2; Portal speaks 1), old-zmx (no answer)")
+	t.Run("it gives a refusing socket the hint that clears it", func(t *testing.T) {
+		answers := protocolAnswers{
+			"crashed": {err: fmt.Errorf("read protocol version: connection refused: %w", zmx.ErrRefusing)},
+			"wedged":  {err: backend.ErrTimeout},
+		}
+		assertCheck(t, sessionsCheck(t, silentSessions("crashed", "wedged"), answers.read), checkFail,
+			"2 of 2 not answering: crashed (refuses connections; `zmx list` clears a crashed session's socket), wedged (no answer)")
 	})
 
 	t.Run("it names Portal's own sessions too", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "_portal-saver"})
-		fake.StopAnswering("_portal-saver")
 		answers := protocolAnswers{"_portal-saver": {err: backend.ErrTimeout}}
-
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: answers.read})), "sessions")
-		assertCheck(t, got, checkFail, "1 of 1 not answering: _portal-saver (no answer)")
+		assertCheck(t, sessionsCheck(t, silentSessions("_portal-saver"), answers.read), checkFail, "1 of 1 not answering: _portal-saver (no answer)")
 	})
 
 	t.Run("it names a daemon whose header reads protocol 1 as not answering", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "slow"})
-		fake.StopAnswering("slow")
-
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: protocolOne})), "sessions")
-		assertCheck(t, got, checkFail, "1 of 1 not answering: slow (no answer)")
+		assertCheck(t, sessionsCheck(t, silentSessions("slow"), protocolOne), checkFail, "1 of 1 not answering: slow (no answer)")
 	})
 
-	t.Run("it names a session that ended after the listing as ended", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "gone"})
-		fake.StopAnswering("gone")
+	t.Run("it leaves out a session that ended after the listing", func(t *testing.T) {
+		fake := silentSessions("gone")
+		fake.Add(backend.Session{Name: "api"})
+		assertCheck(t, sessionsCheck(t, fake, protocolAnswers{}.read), checkPass, "1 session answering")
+	})
 
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: protocolAnswers{}.read})), "sessions")
-		assertCheck(t, got, checkFail, "1 of 1 not answering: gone (ended)")
+	t.Run("it counts a session that ended beside one still silent out of the total", func(t *testing.T) {
+		answers := protocolAnswers{"wedged": {err: backend.ErrTimeout}}
+		assertCheck(t, sessionsCheck(t, silentSessions("gone", "wedged"), answers.read), checkFail, "1 of 1 not answering: wedged (no answer)")
+	})
+
+	t.Run("it reports no sessions when every listed one has ended", func(t *testing.T) {
+		assertCheck(t, sessionsCheck(t, silentSessions("gone"), protocolAnswers{}.read), checkPass, "no sessions")
 	})
 
 	t.Run("it reads the protocol of the silent sessions alone", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "api"}, backend.Session{Name: "wedged"})
-		fake.StopAnswering("wedged")
+		fake := silentSessions("wedged")
+		fake.Add(backend.Session{Name: "api"})
 		var mu sync.Mutex
 		var asked []string
 		read := func(_ context.Context, name string) (int, error) {
@@ -349,7 +364,7 @@ func TestDoctorSessionsCheck(t *testing.T) {
 			return 0, backend.ErrTimeout
 		}
 
-		diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: read}))
+		sessionsCheck(t, fake, read)
 		if !slices.Equal(asked, []string{"wedged"}) {
 			t.Errorf("protocol read for %v; want [wedged]", asked)
 		}
@@ -358,12 +373,9 @@ func TestDoctorSessionsCheck(t *testing.T) {
 	// Each silent daemon costs the probe ceiling, so asking them in turn would
 	// cost one ceiling each.
 	t.Run("it asks every silent session at once", func(t *testing.T) {
-		fake := stageDoctorBackend(t, backend.Session{Name: "a"}, backend.Session{Name: "b"})
-		fake.StopAnswering("a")
-		fake.StopAnswering("b")
 		var arrived sync.WaitGroup
 		arrived.Add(2)
-		read := func(ctx context.Context, _ string) (int, error) {
+		read := func(context.Context, string) (int, error) {
 			arrived.Done()
 			waited := make(chan struct{})
 			go func() { arrived.Wait(); close(waited) }()
@@ -374,16 +386,52 @@ func TestDoctorSessionsCheck(t *testing.T) {
 				return 7, nil
 			}
 		}
+		assertCheck(t, sessionsCheck(t, silentSessions("a", "b"), read), checkFail, "2 of 2 not answering: a (no answer), b (no answer)")
+	})
 
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProtocolVersion: read})), "sessions")
-		assertCheck(t, got, checkFail, "2 of 2 not answering: a (no answer), b (no answer)")
+	// Each probe holds a socket open, so a directory of many silent sessions
+	// must not exhaust Portal's file descriptors.
+	t.Run("it holds no more than 64 probes in flight", func(t *testing.T) {
+		names := make([]string, 100)
+		for i := range names {
+			names[i] = fmt.Sprintf("s%03d", i)
+		}
+		var mu sync.Mutex
+		inFlight, most := 0, 0
+		full := make(chan struct{})
+		var fill sync.Once
+		read := func(context.Context, string) (int, error) {
+			mu.Lock()
+			inFlight++
+			most = max(most, inFlight)
+			if inFlight == maxProtocolProbes {
+				fill.Do(func() { close(full) })
+			}
+			mu.Unlock()
+			select {
+			case <-full:
+			case <-time.After(5 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			return 0, backend.ErrTimeout
+		}
+
+		got := sessionsCheck(t, silentSessions(names...), read)
+		if got.status != checkFail || !strings.HasPrefix(got.detail, "100 of 100 not answering: ") {
+			t.Errorf("sessions = (%v, %q); want all 100 named", got.status, got.detail)
+		}
+		if most != 64 {
+			t.Errorf("most probes in flight = %d; want the cap of 64", most)
+		}
 	})
 
 	t.Run("it is not evaluable when the listing fails", func(t *testing.T) {
-		fake := stageDoctorBackend(t)
+		fake := backendtest.New()
 		fake.Fail(backendtest.OpList, errors.New("list zmx sessions: permission denied"))
 
-		results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}))
+		results := diagnose(t, sessionsDeps(t, fake, nil))
 		assertCheck(t, findCheck(t, results, "sessions"), checkNotEvaluable, "could not list sessions: list zmx sessions: permission denied")
 		if doctorUnhealthy(results) {
 			t.Error("doctorUnhealthy = true; a not-evaluable line must never drive the exit code")
@@ -401,8 +449,8 @@ func TestDoctorSessionsJSONStates(t *testing.T) {
 		{"a version 2 index reports its sessions", func(t *testing.T, dir string) { seedValidSessionsJSON(t, dir, 3) }, checkPass, "3 sessions indexed"},
 		{"an absent file passes", func(*testing.T, string) {}, checkPass, "no sessions indexed yet"},
 		{"a corrupt file fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte("{not json")) }, checkFail, "corrupt"},
-		{"a newer version fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 3}`)) }, checkFail, "version 3; this Portal reads version 2"},
-		{"a version 1 file fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 1}`)) }, checkFail, "version 1; this Portal reads version 2"},
+		{"a newer version fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 3}`)) }, checkFail, newerIndexDetail},
+		{"a version 1 file fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 1}`)) }, checkFail, legacyIndexDetail},
 		{"an unreadable file fails", func(t *testing.T, dir string) {
 			writeSessionsJSON(t, dir, []byte(`{"version": 2}`))
 			if err := os.Chmod(sessionindex.Path(dir), 0o000); err != nil {
@@ -416,6 +464,36 @@ func TestDoctorSessionsJSONStates(t *testing.T) {
 			tc.seed(t, dir)
 			got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir})), "sessions.json")
 			assertCheck(t, got, tc.status, tc.detail)
+		})
+	}
+}
+
+const (
+	legacyIndexDetail = "from the tmux version of Portal; run portal migrate"
+	newerIndexDetail  = "version 3, from a newer Portal; this one reads version 2"
+)
+
+// Doctor runs past the root's stop on an unusable sessions.json, so it can
+// report the index itself.
+func TestDoctorReportsAnUnusableIndexThroughTheRoot(t *testing.T) {
+	for name, tc := range map[string]struct{ body, detail string }{
+		"version 1": {legacyIndexBody, legacyIndexDetail},
+		"corrupt":   {`{"version": 2,`, "corrupt"},
+		"newer":     {`{"version": 3, "sessions": []}`, newerIndexDetail},
+	} {
+		t.Run("it reports a "+name+" sessions.json and fails", func(t *testing.T) {
+			seedSessionsJSON(t, tc.body)
+
+			outBuf, errBuf, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{}))
+			if err != ErrDoctorUnhealthy {
+				t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy from the report, not the root's stop", err)
+			}
+			if errBuf.Len() != 0 {
+				t.Errorf("stderr = %q; want it silent", errBuf.String())
+			}
+			if want := "\n  ✗ sessions.json: " + tc.detail + "\n"; !strings.Contains(outBuf.String(), want) {
+				t.Errorf("report missing %q:\n%s", want, outBuf.String())
+			}
 		})
 	}
 }
@@ -504,9 +582,9 @@ func TestDoctorExitCode(t *testing.T) {
 	})
 
 	t.Run("it exits healthy when the only lines short of a pass are info and not evaluable", func(t *testing.T) {
-		fake := stageDoctorBackend(t)
+		fake := backendtest.New()
 		fake.Fail(backendtest.OpList, errors.New("transient"))
-		results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}))
+		results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ListSessions: fake.List}))
 		for _, name := range []string{"sessions", "stale projects"} {
 			if got := findCheck(t, results, name); got.status != checkNotEvaluable {
 				t.Fatalf("setup: %s status = %v; want not evaluable", name, got.status)
@@ -519,9 +597,7 @@ func TestDoctorExitCode(t *testing.T) {
 
 	t.Run("it fails for each failing check", func(t *testing.T) {
 		silent := func(t *testing.T) *DoctorDeps {
-			fake := stageDoctorBackend(t, backend.Session{Name: "wedged"})
-			fake.StopAnswering("wedged")
-			return &DoctorDeps{StateDir: t.TempDir()}
+			return &DoctorDeps{StateDir: t.TempDir(), ListSessions: silentSessions("wedged").List}
 		}
 		corrupt := func(t *testing.T) *DoctorDeps {
 			dir := t.TempDir()

@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
@@ -50,11 +54,49 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		if deps.ProtocolVersion == nil {
 			t.Error("ProtocolVersion = nil; an unset seam must fall through to its production default")
 		}
+		if deps.ListSessions == nil {
+			t.Error("ListSessions = nil; an unset seam must fall through to its production default")
+		}
 		if deps.Detector == nil {
 			t.Error("Detector = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Resolve == nil {
 			t.Error("Resolve = nil; an unset seam must fall through to its production default")
+		}
+	})
+
+	// The zmx dir check judges ZmxDir, so the sessions must be listed and
+	// probed there too, not in whatever dir the environment names.
+	t.Run("it lists and probes the sessions in the zmx dir it judges", func(t *testing.T) {
+		dir, err := os.MkdirTemp("/tmp", "pd-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		ln, err := net.Listen("unix", filepath.Join(dir, "probe"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				_ = c.Close()
+			}
+		}()
+		withDoctorDeps(t, DoctorDeps{ZmxDir: dir})
+
+		deps := resolveDoctorDeps()
+
+		sessions, err := deps.ListSessions(t.Context())
+		if err != nil || len(sessions) != 1 || sessions[0].Name != "probe" {
+			t.Errorf("ListSessions() = (%+v, %v); want the session in %s", sessions, err, dir)
+		}
+		if _, err := deps.ProtocolVersion(t.Context(), "probe"); !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
+			t.Errorf("ProtocolVersion(probe) = %v; want the session in %s found and not answering", err, dir)
 		}
 	})
 
@@ -140,6 +182,18 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got := resolveDoctorDeps().ThemesDir; got != "/sentinel/themes" {
 					t.Errorf("ThemesDir = %q; want the injected /sentinel/themes", got)
+				}
+			},
+		},
+		{
+			field: "ListSessions",
+			inject: func(t *testing.T) {
+				withDoctorDeps(t, DoctorDeps{ListSessions: backendtest.New(backend.Session{Name: "sentinel"}).List})
+			},
+			assert: func(t *testing.T) {
+				sessions, err := resolveDoctorDeps().ListSessions(t.Context())
+				if err != nil || len(sessions) != 1 || sessions[0].Name != "sentinel" {
+					t.Errorf("ListSessions() = (%+v, %v); want the injected seam's sentinel", sessions, err)
 				}
 			},
 		},
