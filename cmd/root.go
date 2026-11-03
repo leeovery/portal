@@ -21,10 +21,12 @@ import (
 var bootstrapExempt = map[string]bool{
 	"__complete": true,
 	"alias":      true,
+	"current":    true,
 	"doctor":     true,
 	"help":       true,
 	"hook":       true,
 	"init":       true,
+	"rename":     true,
 	"state":      true,
 	"theme":      true,
 	"uninstall":  true,

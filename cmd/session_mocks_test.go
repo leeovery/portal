@@ -14,14 +14,6 @@ func (m *mockSessionConnector) Connect(name string) error {
 	return m.err
 }
 
-type mockSessionValidator struct {
-	sessions map[string]bool
-}
-
-func (m *mockSessionValidator) HasSession(name string) bool {
-	return m.sessions[name]
-}
-
 type ackWrite struct {
 	batch string
 	token string

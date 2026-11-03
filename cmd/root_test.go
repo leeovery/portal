@@ -11,7 +11,6 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backendtest"
-	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -133,6 +132,16 @@ func TestExemptCommandsWorkWithNothingOnPath(t *testing.T) {
 			name: "portal alias set works with nothing on PATH",
 			args: []string{"alias", "set", "proj", "/some/path"},
 			env:  map[string]string{"PORTAL_ALIASES_FILE": "TEMPDIR/aliases"},
+		},
+		{
+			name: "portal current works with nothing on PATH",
+			args: []string{"current"},
+			env:  map[string]string{"ZMX_SESSION": currentSessionName, "PORTAL_STATE_DIR": "TEMPDIR/"},
+		},
+		{
+			name: "portal rename works with nothing on PATH",
+			args: []string{"rename", "api work"},
+			env:  map[string]string{"ZMX_SESSION": currentSessionName, "PORTAL_STATE_DIR": "TEMPDIR/"},
 		},
 	}
 
@@ -264,6 +273,8 @@ func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
 			{name: "hooks alias list", argv: []string{"hooks", "list"}},
 			{name: "hooks alias set", argv: []string{"hooks", "set", "--on-resume", "true"}},
 			{name: "hooks alias rm", argv: []string{"hooks", "rm", "--on-resume"}},
+			{name: "current", argv: []string{"current"}},
+			{name: "rename", argv: []string{"rename", "api work"}},
 		}
 
 		for _, tt := range tests {
@@ -271,25 +282,12 @@ func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
 				runner := &recordingRunner{}
 				withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
-				// Without these the command reaches real tmux and the
-				// developer's config dir.
-				if len(tt.argv) >= 2 {
-					switch tt.argv[1] {
-					case "set", "rm":
-						hooksFileInTempDir(t, map[string]map[string]string{
-							hookstest.UnjudgeableSeedA: {"on-resume": "claude --resume abc123"},
-						})
-						t.Setenv("TMUX_PANE", "%3")
-
-						resolver := &mockKeyResolver{key: hookstest.UnjudgeableSeedA}
-						withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-					case "list":
-						// The list body resolves each entry's location through the
-						// pane enumeration, so it is the empty store — not a real
-						// tmux server — that must be what leaves the read untaken.
-						withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-					}
-				}
+				// Without these the command reaches the developer's config
+				// and state dirs.
+				hooksFileInTempDir(t, map[string]map[string]string{
+					hookSessionA: {"on-resume": "claude --resume abc123"},
+				})
+				inSession(t, hookSessionA)
 
 				resetRootCmd()
 				rootCmd.SetOut(new(bytes.Buffer))
