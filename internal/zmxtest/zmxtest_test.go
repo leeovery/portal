@@ -78,6 +78,17 @@ func TestOwnedThrough(t *testing.T) {
 	}
 }
 
+func TestParentsIn(t *testing.T) {
+	parent := parentsIn([]proctable.Process{{PID: 10, PPID: 11}, {PID: 11, PPID: 1}})
+
+	if ppid, err := parent(10); err != nil || ppid != 11 {
+		t.Errorf("parent(10) = %d, %v; want 11", ppid, err)
+	}
+	if ppid, err := parent(12); err == nil {
+		t.Errorf("parent(12) = %d, want an error for a pid the reading doesn't hold", ppid)
+	}
+}
+
 func TestProcessReader(t *testing.T) {
 	t.Run("it reads this process's own argv", func(t *testing.T) {
 		if runtime.GOOS != "darwin" {

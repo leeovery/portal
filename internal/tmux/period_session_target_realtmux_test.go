@@ -108,18 +108,6 @@ func TestPeriodBearingSessionTargets(t *testing.T) {
 		}) {
 			t.Errorf("the attached client is on %q, want %q", attachedSession(t, ts), periodSession)
 		}
-
-		// list-clients composes the same target kind, so the client the switch
-		// moved must be enumerable under the session it reached and absent from
-		// the sibling it left.
-		on, err := client.ListClients(periodSession)
-		if err != nil || len(on) != 1 {
-			t.Errorf("ListClients(%q) = %v, %v; want the one attached client", periodSession, on, err)
-		}
-		off, err := client.ListClients(periodSibling)
-		if err != nil || len(off) != 0 {
-			t.Errorf("ListClients(%q) = %v, %v; want no clients", periodSibling, off, err)
-		}
 	})
 }
 

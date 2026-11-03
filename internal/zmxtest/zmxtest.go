@@ -230,7 +230,11 @@ func Daemon(t *testing.T, b *zmx.Backend, name string) int {
 	if i < 0 || !sessions[i].Answered || sessions[i].PID <= 0 {
 		t.Fatalf("no answering session %q in %s: %+v", name, b.Dir(), sessions)
 	}
-	pid, err := proctable.Parent(sessions[i].PID)
+	procs, err := proctable.List()
+	pid := 0
+	if err == nil {
+		pid, err = parentsIn(procs)(sessions[i].PID)
+	}
 	if err != nil || !ownedBy(pid, b.Dir()) {
 		t.Fatalf("parent %d of session %q is not a process of %s: %v", pid, name, b.Dir(), err)
 	}

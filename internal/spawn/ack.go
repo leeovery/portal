@@ -55,9 +55,6 @@ var (
 	_ AckChannelFull = (*FileAckChannel)(nil)
 )
 
-// Dir is the directory holding the acks.
-func (c *FileAckChannel) Dir() string { return c.dir }
-
 // Write is idempotent. It refuses a batch or token no burst could have
 // minted before either reaches a path.
 func (c *FileAckChannel) Write(batch, token string) error {
