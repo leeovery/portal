@@ -402,6 +402,51 @@ to see what Portal detects. If a burst only partially succeeds, Portal leaves th
 did open in place and keeps the failed sessions marked, so pressing `Enter` again retries just
 those.
 
+## Keys in a Session
+
+Portal stays running while you're attached, watching for three keys of its own. Everything else
+reaches the session untouched.
+
+| Key | Action |
+|---|---|
+| `Alt+D` | Detach, back to the picker |
+| `Alt+Shift+D` | Detach, straight to the shell |
+| `Alt+Q` | Kill the session, back to the picker |
+
+zmx's own `Ctrl+\` detaches too, and always to the shell. Portal detaches zmx through that key, so
+under Portal it can't be turned off: `ZMX_NO_DETACH_KEY` isn't honoured. When the session itself
+ends, Portal exits to the shell as plain `zmx attach` would.
+
+**Rebinding.** Set `keys` in [`prefs.json`](#configuration). Each action takes one key or a list,
+an empty list turns it off, and an action you leave out keeps its default:
+
+```json
+"keys": {
+  "detach": ["alt+d", "ctrl+o"],
+  "detach_to_shell": "alt+shift+d",
+  "kill": []
+}
+```
+
+A key is `ctrl`, `alt` or `shift` plus a letter, digit, punctuation mark or `f1`–`f12`, and needs
+`ctrl` or `alt`, so a binding never swallows plain typing. Refused: `ctrl+shift+<letter>`, which
+sends the same bytes as `ctrl+<letter>`; `ctrl+\`, zmx's; shift on a digit or punctuation mark, or
+a mark typed with Shift such as `!`, whose bytes depend on the keyboard layout; and the few keys
+that send another key's bytes or begin an escape sequence (`ctrl+i` is Tab, `alt+[` begins one).
+A refused or unparseable binding, or a key bound to two actions, keeps that action's default, and
+the log and `xctl doctor` say why. Changes apply from the next attach.
+
+**macOS.** The terminal must send Option as Alt, or `Option+D` types `∂`: Ghostty
+`macos-option-as-alt`, kitty `macos_option_as_alt`, iTerm2's Esc+ for the Option key, Terminal's
+"Use Option as Meta key", Blink's Option-as-Meta.
+
+**Two quirks** on terminals that send keys the older way, without the newer keyboard encoding:
+
+- With Caps Lock on, `Alt+D` arrives as `Alt+Shift+D` and detaches to the shell, and `Alt+Q`
+  arrives as `Alt+Shift+Q` and reaches the session.
+- `Alt+<key>` is sent as Escape then the key. Over a slow link, an Escape typed just before a bound
+  letter can arrive the same way and count as the Alt key: Escape then `q` kills the session.
+
 ## Session Grouping & Tags
 
 By default the session list is flat and alphabetical. Press **`s`** on the sessions
@@ -517,7 +562,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → registration). An event's value is either the command as a string or an object carrying the command alongside its settings; both shapes are permanently valid, neither deprecates the other, and there is no migration between them — the writer picks by whether there is anything to carry, so an entry that is only a command stays a plain string and a hand-edited file goes on looking as it does today. Portal creates an empty `hooks.json.lock` beside it on the first change, which it locks to keep concurrent writers from overwriting each other, and never removes. | `PORTAL_HOOKS_FILE` |
-| `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; and `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits | `PORTAL_PREFS_FILE` |
+| `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits; and `keys`, the [keys in a session](#keys-in-a-session) | `PORTAL_PREFS_FILE` |
 | `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `themes/` | Drop-in theme files (`<slug>.theme`); see [docs/theming.md](docs/theming.md). Portal never creates it — no directory simply means no drop-ins. | `PORTAL_THEMES_DIR` |
 | `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |

@@ -1,0 +1,296 @@
+//go:build integration
+
+package cmd_test
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+	"github.com/creack/pty"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/zmxtest"
+)
+
+// attachSettle bounds each wait on Portal, zmx or the session's shell.
+const attachSettle = 20 * time.Second
+
+// pickerMark is on every picker page, and nowhere in a session.
+const pickerMark = "session manager"
+
+// Portal's default keys in their legacy forms, as a terminal without the newer
+// encoding sends them.
+const (
+	altD      = "\x1bd"
+	altShiftD = "\x1bD"
+	altQ      = "\x1bq"
+)
+
+// portalTerm is a portal binary running on a pseudo-terminal the test holds,
+// against a zmx directory and state directory of the test's own.
+type portalTerm struct {
+	cmd      *exec.Cmd
+	tty      *os.File
+	b        *zmx.Backend
+	stateDir string
+
+	mu  sync.Mutex
+	out bytes.Buffer
+	// exited closes once the process is reaped, with its error in waitErr.
+	exited  chan struct{}
+	waitErr error
+}
+
+// openOnTerminal mints a session in a project directory with portal open -p,
+// on a terminal, and waits for the attach to connect.
+func openOnTerminal(t *testing.T, binary string) (*portalTerm, string) {
+	t.Helper()
+	env, stateDir := portaltest.IsolateStateForTest(t)
+	b := zmxtest.New(t)
+	work := filepath.Join(realPath(t, t.TempDir()), "myproj")
+	if err := os.Mkdir(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(binary, "open", "-p", work)
+	cmd.Env = append(env,
+		"ZMX_DIR="+b.Dir(),
+		"PATH="+filepath.Dir(zmxtest.Binary(t))+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PORTAL_PROJECTS_FILE="+filepath.Join(t.TempDir(), "projects.json"),
+		"PORTAL_PREFS_FILE="+filepath.Join(t.TempDir(), "prefs.json"),
+		"SHELL=/bin/sh",
+		"TERM=xterm-256color",
+	)
+	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
+	if err != nil {
+		t.Fatalf("start portal on a terminal: %v", err)
+	}
+	p := &portalTerm{cmd: cmd, tty: tty, b: b, stateDir: stateDir, exited: make(chan struct{})}
+	go p.record()
+	go func() {
+		p.waitErr = cmd.Wait()
+		close(p.exited)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-p.exited
+		_ = tty.Close()
+	})
+
+	name := p.awaitOneSession(t)
+	p.awaitClients(t, name, 1)
+	return p, name
+}
+
+func (p *portalTerm) record() {
+	buf := make([]byte, 4096)
+	for {
+		n, err := p.tty.Read(buf)
+		p.mu.Lock()
+		p.out.Write(buf[:n])
+		p.mu.Unlock()
+		if err != nil {
+			return
+		}
+	}
+}
+
+// mark is where the terminal's output stands, for awaitAfter.
+func (p *portalTerm) mark() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.out.Len()
+}
+
+// shownSince is what the terminal has shown since mark, its escapes stripped.
+func (p *portalTerm) shownSince(mark int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return ansi.Strip(string(p.out.Bytes()[mark:]))
+}
+
+// awaitAfter waits for the terminal to show want after mark.
+func (p *portalTerm) awaitAfter(t *testing.T, mark int, want string) {
+	t.Helper()
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		return strings.Contains(p.shownSince(mark), want)
+	}) {
+		t.Fatalf("the terminal never showed %q; it shows:\n%s", want, p.shownSince(mark))
+	}
+}
+
+func (p *portalTerm) typeIn(t *testing.T, input string) {
+	t.Helper()
+	if _, err := p.tty.WriteString(input); err != nil {
+		t.Fatalf("type %q: %v", input, err)
+	}
+}
+
+func (p *portalTerm) awaitOneSession(t *testing.T) string {
+	t.Helper()
+	var names []string
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		sessions, err := p.b.List(t.Context())
+		names = names[:0]
+		for _, s := range sessions {
+			names = append(names, s.Name)
+		}
+		return err == nil && len(names) == 1
+	}) {
+		t.Fatalf("sessions = %q, want the one portal open made", names)
+	}
+	return names[0]
+}
+
+func (p *portalTerm) awaitClients(t *testing.T, name string, want int) {
+	t.Helper()
+	var got int
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		s, err := p.b.Session(t.Context(), name)
+		got = s.Clients
+		return err == nil && got == want
+	}) {
+		t.Fatalf("session %s has %d clients, want %d", name, got, want)
+	}
+}
+
+func (p *portalTerm) alive(t *testing.T, name string) bool {
+	t.Helper()
+	alive, err := p.b.Exists(t.Context(), name)
+	if err != nil {
+		t.Fatalf("Exists %s: %v", name, err)
+	}
+	return alive
+}
+
+// exitCode waits for portal to exit and returns its status.
+func (p *portalTerm) exitCode(t *testing.T) int {
+	t.Helper()
+	select {
+	case <-p.exited:
+	case <-time.After(attachSettle):
+		t.Fatalf("portal is still running; the terminal shows:\n%s", p.shownSince(0))
+	}
+	if exit, ok := errors.AsType[*exec.ExitError](p.waitErr); ok {
+		return exit.ExitCode()
+	}
+	if p.waitErr != nil {
+		t.Fatalf("portal: %v", p.waitErr)
+	}
+	return 0
+}
+
+// echoes types a command whose output differs from its input into the
+// session, and waits for the output: what Portal forwards reaches the session,
+// so no reader left over from the picker steals the keys.
+func (p *portalTerm) echoes(t *testing.T, a, b int) {
+	t.Helper()
+	mark := p.mark()
+	p.typeIn(t, "echo out-$(("+strconv.Itoa(a)+"*"+strconv.Itoa(b)+"))\r")
+	p.awaitAfter(t, mark, "out-"+strconv.Itoa(a*b))
+}
+
+func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
+	binary := buildPortalBinary(t)
+
+	t.Run("detach returns to the picker, a pick attaches again, and kill removes the session", func(t *testing.T) {
+		p, name := openOnTerminal(t, binary)
+		p.echoes(t, 6, 7)
+
+		mark := p.mark()
+		p.typeIn(t, altD)
+		p.awaitClients(t, name, 0)
+		p.awaitAfter(t, mark, pickerMark)
+		p.awaitAfter(t, mark, name)
+		if !p.alive(t, name) {
+			t.Fatal("the session ended on a detach")
+		}
+
+		p.typeIn(t, "\r")
+		p.awaitClients(t, name, 1)
+		p.echoes(t, 7, 7)
+
+		mark = p.mark()
+		p.typeIn(t, altQ)
+		p.awaitAfter(t, mark, pickerMark)
+		if p.alive(t, name) {
+			t.Fatal("the session outlived the kill key")
+		}
+		if shown := p.shownSince(mark); strings.Contains(shown, name) {
+			t.Errorf("the picker after the kill still shows %s:\n%s", name, shown)
+		}
+		idx, err := sessionindex.Read(p.stateDir)
+		if err != nil {
+			t.Fatalf("read index: %v", err)
+		}
+		if _, ok := idx.Lookup(name); ok {
+			t.Errorf("index = %+v, want the killed session's entry gone", idx.Sessions)
+		}
+
+		p.typeIn(t, "q")
+		if code := p.exitCode(t); code != 0 {
+			t.Errorf("quitting the picker exited %d, want 0", code)
+		}
+	})
+
+	t.Run("detach to the shell exits 0 and leaves the session running", func(t *testing.T) {
+		p, name := openOnTerminal(t, binary)
+
+		p.typeIn(t, altShiftD)
+
+		if code := p.exitCode(t); code != 0 {
+			t.Errorf("exit code = %d, want 0", code)
+		}
+		if !p.alive(t, name) {
+			t.Error("the session ended on a detach to the shell")
+		}
+	})
+
+	t.Run("the session's own end exits with zmx attach's status, silently", func(t *testing.T) {
+		p, name := openOnTerminal(t, binary)
+		mark := p.mark()
+
+		p.typeIn(t, "exit 7\r")
+
+		// zmx attach exits 0 however the session's program ended, so 0 is the
+		// status Portal passes on.
+		if code := p.exitCode(t); code != 0 {
+			t.Errorf("exit code = %d, want zmx attach's 0", code)
+		}
+		if shown := p.shownSince(mark); strings.Contains(shown, "exit status") {
+			t.Errorf("portal wrote its exit:\n%s", shown)
+		}
+		if p.alive(t, name) {
+			t.Error("the session outlived its shell")
+		}
+	})
+
+	t.Run("a signal to Portal exits as a shell reports it, and the session lives on", func(t *testing.T) {
+		p, name := openOnTerminal(t, binary)
+		mark := p.mark()
+
+		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatalf("signal portal: %v", err)
+		}
+
+		if code := p.exitCode(t); code != 128+int(syscall.SIGTERM) {
+			t.Errorf("exit code = %d, want %d", code, 128+int(syscall.SIGTERM))
+		}
+		if shown := p.shownSince(mark); strings.Contains(shown, "exit status") {
+			t.Errorf("portal wrote its exit:\n%s", shown)
+		}
+		p.awaitClients(t, name, 0)
+	})
+}

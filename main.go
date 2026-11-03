@@ -70,6 +70,9 @@ func classify(err error) int {
 		_, _ = fmt.Fprintln(errOut, err)
 	}
 
+	if exit, ok := errors.AsType[*cmd.ExitCodeError](err); ok {
+		return exit.Code
+	}
 	if _, ok := errors.AsType[*cmd.UsageError](err); ok {
 		return 2
 	}

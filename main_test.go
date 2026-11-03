@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/leeovery/portal/cmd"
@@ -100,6 +101,24 @@ func TestRun(t *testing.T) {
 
 		if code != 1 {
 			t.Errorf("code = %d, want 1", code)
+		}
+		if panicked {
+			t.Error("panicked = true, want false")
+		}
+		if got := buf.String(); got != "" {
+			t.Errorf("stderr = %q, want empty (silent exit)", got)
+		}
+	})
+
+	t.Run("it exits with an attach's code, silently", func(t *testing.T) {
+		buf := withSeams(t, func() error {
+			return fmt.Errorf("open: %w", &cmd.ExitCodeError{Code: 130})
+		})
+
+		code, panicked := run()
+
+		if code != 130 {
+			t.Errorf("code = %d, want the attach's 130", code)
 		}
 		if panicked {
 			t.Error("panicked = true, want false")

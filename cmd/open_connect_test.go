@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,18 +17,29 @@ import (
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
 
-// recordingExec captures each exec instead of replacing the test process, and
-// whether the exec marker was already logged when it ran.
-type recordingExec struct {
-	sink       *logtest.Sink
-	calls      []execCall
+// attachRecorder makes no attach. It records each run the runner is asked
+// for, answering from results, and each exec instead of replacing the test
+// process, with whether the exec marker was already logged when it ran.
+type attachRecorder struct {
+	sink *logtest.Sink
+	runs []runner.Config
+	// results answers each run in turn; a run past them ends as a session that
+	// exits 0 ends it.
+	results    []runResult
+	execs      []execCall
 	markerSeen bool
+}
+
+type runResult struct {
+	out runner.Outcome
+	err error
 }
 
 type execCall struct {
@@ -35,21 +47,52 @@ type execCall struct {
 	argv, env []string
 }
 
-func (r *recordingExec) Exec(argv0 string, argv, env []string) error {
-	r.calls = append(r.calls, execCall{argv0: argv0, argv: argv, env: env})
+func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outcome, error) {
+	r.runs = append(r.runs, cfg)
+	if len(r.results) == 0 {
+		return runner.Outcome{}, nil
+	}
+	res := r.results[0]
+	r.results = r.results[1:]
+	return res.out, res.err
+}
+
+func (r *attachRecorder) Exec(argv0 string, argv, env []string) error {
+	r.execs = append(r.execs, execCall{argv0: argv0, argv: argv, env: env})
 	if r.sink != nil && len(r.sink.Records().Matching("process", "exec")) > 0 {
 		r.markerSeen = true
 	}
 	return nil
 }
 
-// only is the one exec the test expects.
-func (r *recordingExec) only(t *testing.T) execCall {
+// answer queues the outcomes of the next runs.
+func (r *attachRecorder) answer(results ...runResult) {
+	r.results = append(r.results, results...)
+}
+
+// onlyRun is the one run, and no exec, the test expects.
+func (r *attachRecorder) onlyRun(t *testing.T) runner.Config {
 	t.Helper()
-	if len(r.calls) != 1 {
-		t.Fatalf("execs = %+v, want exactly one", r.calls)
+	if len(r.runs) != 1 || len(r.execs) != 0 {
+		t.Fatalf("runs = %+v, execs = %+v; want exactly one run and no exec", r.runs, r.execs)
 	}
-	return r.calls[0]
+	return r.runs[0]
+}
+
+// onlyExec is the one exec, and no run, the test expects.
+func (r *attachRecorder) onlyExec(t *testing.T) execCall {
+	t.Helper()
+	if len(r.execs) != 1 || len(r.runs) != 0 {
+		t.Fatalf("execs = %+v, runs = %+v; want exactly one exec and no run", r.execs, r.runs)
+	}
+	return r.execs[0]
+}
+
+func (r *attachRecorder) assertNone(t *testing.T) {
+	t.Helper()
+	if len(r.runs) != 0 || len(r.execs) != 0 {
+		t.Errorf("runs = %+v, execs = %+v; want no attach", r.runs, r.execs)
+	}
 }
 
 // envBackend is a Fake whose attach command carries an environment, as the
@@ -75,16 +118,16 @@ func (b envBackend) AttachCommand(ctx context.Context, name string) (backend.Com
 var attachEnv = []string{"ZMX_DIR=/tmp/zx-open-test", "TERM=xterm-256color"}
 
 // stageAttach stages a Fake holding sessions behind an environment-carrying
-// attach, and an exec that records instead of replacing the process.
-func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *recordingExec) {
+// attach, and a runner and an exec that record instead of attaching.
+func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRecorder) {
 	t.Helper()
 	fake := backendtest.New()
 	for _, name := range sessions {
 		fake.Add(backend.Session{Name: name})
 	}
 	withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, env: attachEnv}})
-	rec := &recordingExec{}
-	withOpenDeps(t, OpenDeps{Execer: rec})
+	rec := &attachRecorder{}
+	withOpenDeps(t, OpenDeps{Execer: rec, Runner: rec.Run})
 	return fake, rec
 }
 
@@ -94,9 +137,34 @@ func contextCommand() *cobra.Command {
 	return c
 }
 
-func assertAttached(t *testing.T, rec *recordingExec, name string) {
+// assertAttached checks the one attach ran the session's attach command, its
+// environment and all, on Portal's own terminal, watching for keys and able to
+// kill.
+func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	t.Helper()
-	call := rec.only(t)
+	cfg := rec.onlyRun(t)
+	if cfg.Session != name {
+		t.Errorf("session = %q, want %q", cfg.Session, name)
+	}
+	if want := []string{backendtest.AttachProgram, name}; !slices.Equal(cfg.Command.Argv, want) {
+		t.Errorf("argv = %q, want %q", cfg.Command.Argv, want)
+	}
+	if !slices.Equal(cfg.Command.Env, attachEnv) {
+		t.Errorf("env = %q, want the attach command's own %q", cfg.Command.Env, attachEnv)
+	}
+	if cfg.In != os.Stdin || cfg.Out != os.Stdout {
+		t.Errorf("terminal = %v, %v; want Portal's stdin and stdout", cfg.In, cfg.Out)
+	}
+	if cfg.Scanner == nil || cfg.Kill == nil {
+		t.Errorf("scanner %v, kill set %v; want both", cfg.Scanner, cfg.Kill != nil)
+	}
+}
+
+// assertExeced checks the one attach exec'd the session's attach command with
+// its environment.
+func assertExeced(t *testing.T, rec *attachRecorder, name string) {
+	t.Helper()
+	call := rec.onlyExec(t)
 	if call.argv0 != backendtest.AttachProgram {
 		t.Errorf("exec'd %q, want the attach command's program %q", call.argv0, backendtest.AttachProgram)
 	}
@@ -108,8 +176,8 @@ func assertAttached(t *testing.T, rec *recordingExec, name string) {
 	}
 }
 
-func TestOpenSession_ExecsTheBackendsAttachCommand(t *testing.T) {
-	t.Run("it execs the attach argv with the attach command's environment", func(t *testing.T) {
+func TestOpenSession_AttachesThroughTheRunner(t *testing.T) {
+	t.Run("it runs the attach command, with its environment, on Portal's terminal", func(t *testing.T) {
 		_, rec := stageAttach(t, "api-x7Kd9a")
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
@@ -118,7 +186,7 @@ func TestOpenSession_ExecsTheBackendsAttachCommand(t *testing.T) {
 		assertAttached(t, rec, "api-x7Kd9a")
 	})
 
-	t.Run("inside a session it execs the same command, which switches and exits", func(t *testing.T) {
+	t.Run("inside a session it execs the command, which switches and exits, and never runs the runner", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		fake.SetCurrent("blog-c3d4")
 		if command, _ := fake.AttachCommand(context.Background(), "api-x7Kd9a"); !command.Switches {
@@ -128,10 +196,24 @@ func TestOpenSession_ExecsTheBackendsAttachCommand(t *testing.T) {
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		assertAttached(t, rec, "api-x7Kd9a")
+		assertExeced(t, rec, "api-x7Kd9a")
 	})
 
-	t.Run("inside tmux it still execs the attach, never switching a tmux client", func(t *testing.T) {
+	t.Run("a terminal the runner can't attach execs the same command instead", func(t *testing.T) {
+		_, rec := stageAttach(t, "api-x7Kd9a")
+		rec.answer(runResult{err: fmt.Errorf("attach session: %w", runner.ErrNoTerminal)})
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if len(rec.runs) != 1 || len(rec.execs) != 1 {
+			t.Fatalf("runs = %d, execs = %d; want the run refused, then one exec", len(rec.runs), len(rec.execs))
+		}
+		rec.runs = nil
+		assertExeced(t, rec, "api-x7Kd9a")
+	})
+
+	t.Run("inside tmux it still attaches through the runner, never switching a tmux client", func(t *testing.T) {
 		// The command carries no tmux client, so any tmux call panics.
 		t.Setenv("TMUX", "/tmp/portal-open-inside-tmux-test,1,0")
 		_, rec := stageAttach(t, "api-x7Kd9a")
@@ -142,28 +224,24 @@ func TestOpenSession_ExecsTheBackendsAttachCommand(t *testing.T) {
 		assertAttached(t, rec, "api-x7Kd9a")
 	})
 
-	t.Run("an attach command with no argv is refused, execing nothing", func(t *testing.T) {
+	t.Run("an attach command with no argv is refused, attaching nothing", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a")
 		withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, emptyArgv: true}})
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err == nil {
 			t.Error("openSession = nil, want a refusal of the empty command")
 		}
-		if len(rec.calls) != 0 {
-			t.Errorf("execs = %+v, want none", rec.calls)
-		}
+		rec.assertNone(t)
 	})
 
-	t.Run("an attach the backend refuses execs nothing", func(t *testing.T) {
+	t.Run("an attach the backend refuses attaches nothing", func(t *testing.T) {
 		_, rec := stageAttach(t)
 
 		err := openSession(contextCommand(), "gone-a1b2c3")
 		if !errors.Is(err, backend.ErrNoSuchSession) {
 			t.Errorf("openSession = %v, want ErrNoSuchSession", err)
 		}
-		if len(rec.calls) != 0 {
-			t.Errorf("execs = %+v, want none", rec.calls)
-		}
+		rec.assertNone(t)
 	})
 }
 
@@ -172,6 +250,7 @@ func TestOpenSession_LogsTheExecHandoffFirst(t *testing.T) {
 		sink := logtest.Install(t)
 		_, rec := stageAttach(t, "api-x7Kd9a")
 		rec.sink = sink
+		rec.answer(runResult{err: runner.ErrNoTerminal})
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
@@ -188,6 +267,19 @@ func TestOpenSession_LogsTheExecHandoffFirst(t *testing.T) {
 		}
 		if !rec.markerSeen {
 			t.Error("the exec marker was not logged when the exec ran; it must precede it")
+		}
+	})
+
+	t.Run("an attach through the runner logs no exec", func(t *testing.T) {
+		sink := logtest.Install(t)
+		_, rec := stageAttach(t, "api-x7Kd9a")
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		rec.onlyRun(t)
+		if got := sink.Records().Matching("process", "exec"); len(got) != 0 {
+			t.Errorf("exec records = %+v, want none: Portal's process carries on", got)
 		}
 	})
 
@@ -282,7 +374,7 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 		if err := openPath(contextCommand(), t.TempDir(), nil); err != nil {
 			t.Fatalf("openPath = %v, want nil: the session exists whatever the index holds", err)
 		}
-		rec.only(t)
+		rec.onlyRun(t)
 		if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != 1 {
 			t.Errorf("WARN records = %d, want the store's one", n)
 		}
@@ -299,7 +391,7 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 		if err := openPath(contextCommand(), dir, nil); err != nil {
 			t.Fatalf("openPath = %v, want nil: the session exists whatever the index holds", err)
 		}
-		name := rec.only(t).argv[1]
+		name := rec.onlyRun(t).Session
 		r := sink.Records().Matching("sessions", "unrecorded").Only(t, "unrecorded warning")
 		if r.Level != slog.LevelWarn {
 			t.Errorf("level = %v, want WARN", r.Level)
@@ -320,9 +412,7 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 		if err := openPath(contextCommand(), t.TempDir(), nil); err == nil {
 			t.Fatal("openPath = nil, want the create failure")
 		}
-		if len(rec.calls) != 0 {
-			t.Errorf("execs = %+v, want none", rec.calls)
-		}
+		rec.assertNone(t)
 		if idx, _ := sessionindex.Read(stateDir); len(idx.Sessions) != 0 {
 			t.Errorf("index = %+v, want empty", idx.Sessions)
 		}
@@ -360,13 +450,14 @@ func (s *recordingProjectStore) Upsert(string, string, string) error {
 
 // stageResolution stages the resolver's alias, zoxide and directory seams as
 // empty, leaving its session names to the backend.
-func stageResolution(t *testing.T, rec *recordingExec) {
+func stageResolution(t *testing.T, rec *attachRecorder) {
 	t.Helper()
 	withOpenDeps(t, OpenDeps{
 		AliasLookup:  &testAliasLookup{aliases: map[string]string{}},
 		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
 		DirValidator: &testDirValidator{existing: map[string]bool{}},
 		Execer:       rec,
+		Runner:       rec.Run,
 	})
 }
 
@@ -394,9 +485,7 @@ func TestOpenCommand_ResolvesSessionNamesFromTheBackend(t *testing.T) {
 		if _, _, err := runRootCmd(t, "open", "work"); err == nil {
 			t.Fatal("open work = nil, want a miss: resolution matches names, not labels")
 		}
-		if len(rec.calls) != 0 {
-			t.Errorf("execs = %+v, want none", rec.calls)
-		}
+		rec.assertNone(t)
 	})
 
 	t.Run("Portal's own sessions are not targets", func(t *testing.T) {
@@ -406,9 +495,7 @@ func TestOpenCommand_ResolvesSessionNamesFromTheBackend(t *testing.T) {
 		if _, _, err := runRootCmd(t, "open", "-s", "_portal-saver"); err == nil {
 			t.Fatal("open -s _portal-saver = nil, want a miss")
 		}
-		if len(rec.calls) != 0 {
-			t.Errorf("execs = %+v, want none", rec.calls)
-		}
+		rec.assertNone(t)
 	})
 }
 
@@ -426,6 +513,7 @@ func TestOpenCommand_SeveralSessionsAtOnceRefuse(t *testing.T) {
 				Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
 				DirValidator: &testDirValidator{existing: map[string]bool{"/tmp": true}},
 				Execer:       rec,
+				Runner:       rec.Run,
 			})
 			argv := append([]string{"open"}, args...)
 			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal"}, argv...) })
@@ -434,8 +522,9 @@ func TestOpenCommand_SeveralSessionsAtOnceRefuse(t *testing.T) {
 			if err == nil || err.Error() != "opening several sessions at once isn't available yet" {
 				t.Fatalf("open %v = %v, want the one-line refusal", args, err)
 			}
-			if len(rec.calls) != 0 || len(fake.CallsTo(backendtest.OpCreate)) != 0 {
-				t.Errorf("execs %+v, creates %+v; want neither", rec.calls, fake.CallsTo(backendtest.OpCreate))
+			rec.assertNone(t)
+			if creates := fake.CallsTo(backendtest.OpCreate); len(creates) != 0 {
+				t.Errorf("creates = %+v, want none", creates)
 			}
 		})
 	}

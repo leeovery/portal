@@ -10,11 +10,11 @@ import (
 )
 
 // Until the attach runner, the picker's multi-select refuses as the CLI burst
-// does: openTUI builds no spawn seam, so nothing walks tmux's clients, sets a
+// does: runPicker builds no spawn seam, so nothing walks tmux's clients, sets a
 // spawn ack option or opens a window, and it hands the picker the refusal.
-func TestOpenTUIBuildsNoSpawnSeams(t *testing.T) {
+func TestRunPickerBuildsNoSpawnSeams(t *testing.T) {
 	source := sourceguardtest.PackageSource(t, ".", "open.go")
-	fn := findFuncDeclInFile(t, source.File, "openTUI")
+	fn := findFuncDeclInFile(t, source.File, "runPicker")
 
 	sawRefusal := false
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -23,11 +23,11 @@ func TestOpenTUIBuildsNoSpawnSeams(t *testing.T) {
 			switch fun := n.Fun.(type) {
 			case *ast.Ident:
 				if fun.Name == "buildProductionSpawnSeams" || fun.Name == "spawnDetector" {
-					t.Errorf("open.go:%d openTUI calls %s", source.Position(n.Pos()).Line, fun.Name)
+					t.Errorf("open.go:%d runPicker calls %s", source.Position(n.Pos()).Line, fun.Name)
 				}
 			case *ast.SelectorExpr:
 				if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "spawn" {
-					t.Errorf("open.go:%d openTUI calls spawn.%s", source.Position(n.Pos()).Line, fun.Sel.Name)
+					t.Errorf("open.go:%d runPicker calls spawn.%s", source.Position(n.Pos()).Line, fun.Sel.Name)
 				}
 			}
 		case *ast.KeyValueExpr:
@@ -36,14 +36,14 @@ func TestOpenTUIBuildsNoSpawnSeams(t *testing.T) {
 				case "multiWindowRefusal":
 					sawRefusal = true
 				case "detector", "resolve", "sessionExists", "ackChannel", "spawnExe", "spawnGetenv", "spawnLogger":
-					t.Errorf("open.go:%d openTUI wires the spawn seam %s", source.Position(n.Pos()).Line, key.Name)
+					t.Errorf("open.go:%d runPicker wires the spawn seam %s", source.Position(n.Pos()).Line, key.Name)
 				}
 			}
 		}
 		return true
 	})
 	if !sawRefusal {
-		t.Error("openTUI does not hand the picker the multi-window refusal")
+		t.Error("runPicker does not hand the picker the multi-window refusal")
 	}
 }
 

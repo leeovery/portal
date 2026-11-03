@@ -47,6 +47,9 @@ type Deps struct {
 	// MultiWindowRefusal, when set, is the flash `m` shows instead of entering
 	// multi-select: opening several sessions at once is not available.
 	MultiWindowRefusal string
+	// Flash is a warning the picker opens on, such as why the attach before it
+	// failed to do what was asked.
+	Flash string
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -168,6 +171,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithSpawnGetenv(deps.SpawnGetenv))
 	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
 	opts = append(opts, WithMultiWindowRefusal(deps.MultiWindowRefusal))
+	opts = append(opts, WithOpeningFlash(deps.Flash))
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.

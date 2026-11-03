@@ -297,6 +297,9 @@ type Model struct {
 	// setSuccessFlash delegates to — and stamped only by setThemeFlash, so an
 	// unrelated message cannot inherit it.
 	flashOrigin flashOrigin
+	// openingFlashTicks arms the opening flash's clear in Init, where its tick
+	// can first be scheduled.
+	openingFlashTicks bool
 	// byTagSignpost is the "No tags yet" flag: By Tag active with zero tags
 	// anywhere. Derived — recomputed on every rebuild, never set directly.
 	byTagSignpost bool
@@ -725,6 +728,15 @@ func WithInitialFlash(text string) Option {
 		}
 		m.flashText = text
 		m.flashKind = flashWarning
+	}
+}
+
+// WithOpeningFlash opens the picker on a warning flash, which clears as a
+// raised one does: on its tick, or on the next actionable key.
+func WithOpeningFlash(text string) Option {
+	return func(m *Model) {
+		WithInitialFlash(text)(m)
+		m.openingFlashTicks = text != ""
 	}
 }
 
@@ -1713,6 +1725,9 @@ func (m Model) Init() tea.Cmd {
 	detectTimeout := m.themeState.gate.timeoutCmd()
 
 	cmds := []tea.Cmd{requestBg, detectTimeout}
+	if m.openingFlashTicks {
+		cmds = append(cmds, flashTickCmd(m.flashGen))
+	}
 
 	switch {
 	case m.commandPending:

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tui"
@@ -47,6 +48,8 @@ type OpenDeps struct {
 	// Execer replaces the exec that hands the terminal to the backend's
 	// attach command.
 	Execer execer
+	// Runner replaces runner.Run, which attaches the terminal to a session.
+	Runner func(context.Context, runner.Config) (runner.Outcome, error)
 }
 
 // SessionConnector connects the caller's terminal to a session.
@@ -54,39 +57,10 @@ type SessionConnector interface {
 	Connect(name string) error
 }
 
-// attachConnector execs the backend's attach command, so Connect returns only
-// on failure. Inside a session the command switches that session's clients
-// and exits at once, and exec is still right: Portal has nothing left to do.
-type attachConnector struct {
-	ctx     context.Context
-	backend backend.Backend
-	execer  execer
-}
-
-func (c attachConnector) Connect(name string) error {
-	command, err := c.backend.AttachCommand(c.ctx, name)
-	if err != nil {
-		return err
-	}
-	if len(command.Argv) == 0 {
-		return fmt.Errorf("attach session %q: the backend gave no command to run", name)
-	}
-	logExecHandoff(command.Argv)
-	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
-}
-
 // connectorFunc is a SessionConnector that is a function.
 type connectorFunc func(name string) error
 
 func (f connectorFunc) Connect(name string) error { return f(name) }
-
-func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector {
-	ex := execer(realExecer{})
-	if openDeps != nil && openDeps.Execer != nil {
-		ex = openDeps.Execer
-	}
-	return attachConnector{ctx: cmd.Context(), backend: b, execer: ex}
-}
 
 func openSession(cmd *cobra.Command, name string) error {
 	b, err := attachingBackend()
@@ -476,6 +450,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnGetenv:        cfg.spawnGetenv,
 		SpawnLogger:        cfg.spawnLogger,
 		MultiWindowRefusal: cfg.multiWindowRefusal,
+		Flash:              landing.flash,
 	}
 	if landing.search != nil {
 		deps.Search = landing.search
@@ -511,7 +486,8 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 	// Before the attach handoff, while the screen is still ours: terminals that
 	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
 	tui.RestoreTerminalBackground(canvas, model)
-	// Before the connect: the outside-tmux attach execs and never returns.
+	// Before the connect: an attach Portal cannot run itself execs and never
+	// returns.
 	tui.WriteBootstrapWarnings(warnings, model.WarningsOwedAtTeardown())
 
 	return processTUIResult(model, connector)
@@ -522,11 +498,34 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	if err != nil {
 		return err
 	}
+	launch := pickerLaunch{
+		landing:       landing,
+		command:       command,
+		serverStarted: serverStarted,
+		bootstrap:     deferredBootstrapFromContext(cmd),
+	}
+	return runPicker(cmd, b, launch, newSessionConnector(cmd, b))
+}
 
+// pickerLaunch is what one run of the picker opens with.
+type pickerLaunch struct {
+	landing       pickerLanding
+	command       []string
+	serverStarted bool
+	// bootstrap is the deferred bootstrap the picker runs behind its loading
+	// page; nil when none is owed.
+	bootstrap *deferredBootstrap
+}
+
+// runPicker runs the picker, tears it down and connects its pick. The
+// connector is handed in, since the attach takes over the terminal the
+// picker holds and so runs only once the picker has shut down.
+func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, connector SessionConnector) error {
+	serverStarted := launch.serverStarted
 	var pipe *bootstrapProgressPipe
-	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
+	if launch.bootstrap != nil {
 		pipe = newBootstrapProgressPipe()
-		pipe.start(cmd.Context(), deferred.runner)
+		pipe.start(cmd.Context(), launch.bootstrap.runner)
 		// Forced because a bootstrap is in progress, not because the server was cold
 		// — a warm-unlatched server reaches this route too. Its only effect is
 		// parking the model on the loading page.
@@ -564,10 +563,6 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	if err != nil {
 		return err
 	}
-
-	// Connected only after the TUI shuts down, since the attach takes over the
-	// terminal the TUI holds.
-	connector := newSessionConnector(cmd, b)
 
 	// No pending-resume or skeleton-marker reader: nothing is saved or restored
 	// yet, so no session is waiting.
@@ -607,7 +602,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 
 	cfg.currentSession = b.Current()
 
-	m := buildTUIModel(cfg, landing, command)
+	m := buildTUIModel(cfg, launch.landing, launch.command)
 	// Staged rather than written: a direct write while the TUI holds the screen
 	// corrupts the rendered frame.
 	stageBootstrapWarningsOnModel(&m)

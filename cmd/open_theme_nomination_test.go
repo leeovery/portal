@@ -23,7 +23,7 @@ import (
 func TestOpenExecPath_DoesNoThemeWork(t *testing.T) {
 	t.Run("no theme call site sits outside TUI construction", func(t *testing.T) {
 		allowed := map[string]bool{
-			"openTUI":          true,
+			"runPicker":        true,
 			"themeResolution":  true,
 			"buildThemeLoader": true,
 			"newThemeLoader":   true,

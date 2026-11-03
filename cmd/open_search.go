@@ -56,6 +56,9 @@ func completingPreDashPositional(cmd *cobra.Command, args []string) bool {
 type pickerLanding struct {
 	filter string
 	search *tui.SearchForm
+	// flash is a warning the picker opens on: why the attach that asked for it
+	// failed to do what was asked.
+	flash string
 }
 
 // validateOpenArgs refuses a search form beside anything else, a command scoped

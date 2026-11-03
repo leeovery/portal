@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -2231,7 +2232,8 @@ func TestExecMarker_VisibleAtWARN(t *testing.T) {
 	// into the sink, so the records still read back through the Sink API.
 	h, sink := newWARNBypassHandler()
 	log.SetTestHandler(t, h)
-	_, _ = stageAttach(t, "api-x7Kd9a")
+	_, rec := stageAttach(t, "api-x7Kd9a")
+	rec.answer(runResult{err: runner.ErrNoTerminal})
 
 	if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 		t.Fatalf("openSession: %v", err)

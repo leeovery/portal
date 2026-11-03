@@ -113,6 +113,9 @@ Portal starts `zmx attach <name>` as a child in a pseudo-terminal it owns:
   - **kill:** kills the current session through the backend; the picker follows.
 - The picker follows only when Portal asked for it: one of its keys, or Esc on the resume panel through the registry. Any other end of the child (`ctrl+\`, a `zmx detach` from elsewhere, the session ending) exits to the shell, as plain `zmx attach` does.
 - When the attach ends, Portal resets the terminal unless zmx's own reset is known to have reached it. Restoring the terminal (`TCSAFLUSH`) waits for the terminal to take its output, reset or not, and ends early only if the terminal hangs up.
+- The picker that follows is the plain one: no filter, no search, no pending command, no bootstrap. A kill that fails shows there as its flash. Picking attaches again, and quitting exits 0.
+- Every other end exits with the runner's code, silently: the child's, or 128 plus a signal's. zmx attach exits 0 however the session's program ended, so a session's own end exits 0.
+- With no terminal to own (input or output isn't one), Portal execs the attach command instead, as before the runner.
 
 ### Key config
 
@@ -128,7 +131,7 @@ In `prefs.json`; a missing entry keeps its default:
 
 - A value is one key or a list of keys; an empty list turns the action off.
 - A key is `ctrl`, `alt` or `shift` modifiers plus a letter, digit, punctuation mark or `f1`–`f12`. It needs `ctrl` or `alt`, so a binding never swallows plain typing. `ctrl+shift+<letter>` is refused: without the newer encoding it sends the same bytes as `ctrl+<letter>`. `ctrl+\` is refused: it's zmx's. Under Portal it always detaches, since the runner detaches zmx through it, so `ZMX_NO_DETACH_KEY` isn't honoured.
-- A binding that doesn't parse, or a key bound to two actions, falls back to that action's default with a WARN; doctor reports it.
+- A binding that doesn't parse, or a key bound to two actions, falls back to that action's default with a WARN; doctor reports it. A `prefs.json` that can't be read keeps every default, with a WARN.
 - Read at each attach.
 - On macOS the terminal must send Option as Alt for these keys (Ghostty `macos-option-as-alt`, kitty `macos_option_as_alt`, iTerm2's Esc+, Terminal's "Use Option as Meta key", Blink's Option-as-Meta); otherwise Option+D types `∂`, which no binding matches, as it depends on the layout. The README says so.
 
