@@ -13,3 +13,7 @@ func SetGrace(t testing.TB, d time.Duration) {
 	grace = d
 	t.Cleanup(func() { grace = old })
 }
+
+// SameDevice is the check that a terminal opened by path is the one Run was
+// given.
+func SameDevice(a, b int) bool { return sameDevice(a, b) }

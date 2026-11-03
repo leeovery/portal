@@ -5,6 +5,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
@@ -21,13 +21,15 @@ import (
 
 var logger = log.For("attach")
 
-// ErrNoTerminal is Run's refusal of input that is not a terminal, returned
-// before anything starts, so the caller can run the attach command itself.
-var ErrNoTerminal = errors.New("attach input is not a terminal")
+// ErrNoTerminal is Run's refusal of input or output that is not a terminal,
+// or of a terminal Portal cannot open a description of its own on. Run
+// returns an error wrapping it before anything starts, so the caller can run
+// the attach command itself.
+var ErrNoTerminal = errors.New("the attach needs a terminal")
 
-// grace bounds each of the runner's waits: for the child to read what it was
-// sent, to exit after a detach, a kill or each signal that ends it, and for a
-// copy loop to stop.
+// grace bounds each of the runner's waits but the one for the terminal: for
+// the child to read what it was sent, to exit after a detach, a kill or each
+// signal that ends it, and for its last output to reach the terminal.
 var grace = 2 * time.Second
 
 // Scanner finds Portal's bound keys in the terminal's input.
@@ -49,7 +51,8 @@ type Config struct {
 	In, Out *os.File
 	// Scanner finds Portal's keys in what the user types.
 	Scanner Scanner
-	// Kill kills the named session through the backend.
+	// Kill kills the named session through the backend. Run refuses a config
+	// without one.
 	Kill func(ctx context.Context, name string) error
 }
 
@@ -80,30 +83,43 @@ func (o Outcome) Picker() bool {
 // sending it zmx's own ctrl+\, except a kill that succeeds, whose session's
 // end ends the child. A child still running after the grace is sent SIGHUP,
 // then SIGKILL. A signal to Portal, or the terminal hanging up, at any point
-// ends the attach with that signal's outcome. A command that switches
-// sessions rather than attaching is refused.
+// ends the attach with that signal's outcome.
+//
+// Run reads and writes the terminal through descriptions of its own, so the
+// flags of the ones the shell shares never change. Unless zmx's own reset is
+// known to have reached the terminal, Run resets it, waiting for the terminal
+// to take that last write however long it takes.
+//
+// A panic in Kill is raised again once the attach is torn down. A command
+// that switches sessions rather than attaching, or a config with no Kill, is
+// refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
-	in, err := fdOf(cfg.In)
-	if err != nil || !term.IsTerminal(uintptr(in)) {
-		return Outcome{}, ErrNoTerminal
+	if err := check(cfg); err != nil {
+		return Outcome{}, err
 	}
-	if len(cfg.Command.Argv) == 0 {
-		return Outcome{}, fmt.Errorf("attach session %q: the backend gave no command to run", cfg.Session)
-	}
-	if cfg.Command.Switches {
-		return Outcome{}, fmt.Errorf("attach session %q: the command switches sessions instead of attaching", cfg.Session)
-	}
-	a, err := start(cfg, in)
+	a, err := start(cfg)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("attach session %q: %w", cfg.Session, err)
 	}
-	defer a.shutDown() // restores the terminal however Run ends, a panic included
-	end := a.finish(a.await(ctx))
-	if end.err != nil {
-		return Outcome{}, end.err
-	}
+	end := a.tearDown(a.attend(ctx))
 	end.report(cfg.Session)
-	return end.out, nil
+	if end.panicked != nil {
+		panic(end.panicked)
+	}
+	return end.out, end.err
+}
+
+// check refuses a config Run cannot attach with.
+func check(cfg Config) error {
+	switch {
+	case len(cfg.Command.Argv) == 0:
+		return fmt.Errorf("attach session %q: the backend gave no command to run", cfg.Session)
+	case cfg.Command.Switches:
+		return fmt.Errorf("attach session %q: the command switches sessions instead of attaching", cfg.Session)
+	case cfg.Kill == nil:
+		return fmt.Errorf("attach session %q: no kill for the kill key", cfg.Session)
+	}
+	return nil
 }
 
 // ending is how an attach ended: its outcome, or the error that ended it,
@@ -112,6 +128,9 @@ type ending struct {
 	out            Outcome
 	err            error
 	reason, detail string
+	// panicked is a panic on Run's goroutine, raised again once the attach is
+	// torn down.
+	panicked any
 }
 
 func signalled(sig os.Signal) ending {
@@ -119,15 +138,37 @@ func signalled(sig os.Signal) ending {
 	return ending{out: Outcome{ExitCode: 128 + int(s)}, reason: "signal", detail: unix.SignalName(s)}
 }
 
+func cancelled(ctx context.Context) ending {
+	return ending{err: context.Cause(ctx), reason: "context"}
+}
+
+// report logs the outcome: the code Run returns, or the error it returns
+// instead.
 func (e ending) report(session string) {
-	attrs := []any{"session", session, "reason", e.reason, "code", e.out.ExitCode}
+	attrs := []any{"session", session, "reason", e.reason}
+	if e.err == nil {
+		attrs = append(attrs, "code", e.out.ExitCode)
+	}
 	if e.detail != "" {
 		attrs = append(attrs, "detail", e.detail)
 	}
-	if e.out.Err != nil {
-		attrs = append(attrs, "error", e.out.Err)
+	if err := cmp.Or(e.err, e.out.Err); err != nil {
+		attrs = append(attrs, "error", err)
 	}
 	logger.Info("outcome", attrs...)
+}
+
+// attend awaits the end of the attach, taking a panic on Run's goroutine,
+// such as Kill's, as an end that raises it again once the attach is torn
+// down.
+func (a *attach) attend(ctx context.Context) (end ending) {
+	defer func() {
+		if r := recover(); r != nil {
+			end = a.panicked(r)
+			end.panicked = r
+		}
+	}()
+	return a.await(ctx)
 }
 
 // await is the one place an attach ends.
@@ -143,12 +184,12 @@ func (a *attach) await(ctx context.Context) ending {
 		case sig := <-a.signals:
 			a.detach()
 			return signalled(sig)
-		case err := <-a.broken:
+		case end := <-a.broken:
 			a.detach()
-			return ending{err: fmt.Errorf("attach session %q: %w", a.cfg.Session, err)}
+			return end
 		case <-ctx.Done():
 			a.detach()
-			return ending{err: context.Cause(ctx)}
+			return cancelled(ctx)
 		}
 	}
 }
@@ -158,24 +199,17 @@ func (a *attach) await(ctx context.Context) ending {
 // the picker can show why. A context that ends during the kill ends the
 // attach as it would anywhere else.
 func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
-	end := ending{out: Outcome{Action: action}, reason: actionNames[action]}
+	end := ending{out: Outcome{Action: action}, reason: action.String()}
 	if action == attachkeys.Kill {
 		end.out.Err = a.cfg.Kill(ctx, a.cfg.Session)
 		if ctx.Err() != nil {
-			end = ending{err: context.Cause(ctx)}
+			end = cancelled(ctx)
 		} else if end.out.Err == nil {
 			return end
 		}
 	}
 	a.detach()
 	return end
-}
-
-// actionNames match the actions' keys in prefs.json.
-var actionNames = map[attachkeys.Action]string{
-	attachkeys.Detach:        "detach",
-	attachkeys.DetachToShell: "detach_to_shell",
-	attachkeys.Kill:          "kill",
 }
 
 // exitCode is the status a shell would report for the child.

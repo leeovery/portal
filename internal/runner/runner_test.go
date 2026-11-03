@@ -62,6 +62,25 @@ func TestRun_LeavesLaterInputForTheNextReader(t *testing.T) {
 	}
 }
 
+func TestRun_DropsInputTheAttachDidNotRead(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	h := attach(t, modeDeaf)
+	h.ready(t)
+
+	h.term.typeIn(t, keyDetach)
+	// The child has its ctrl+\, so the runner reads no more, and it ignores
+	// it, so the attach is still ending when the terminal answers late.
+	h.term.await(t, "in:1c")
+	h.term.typeIn(t, "late\r")
+	if _, err := h.finish(t); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := h.term.nextRaw(t); got != "" {
+		t.Errorf("the next reader found %q, want what reached the terminal during the attach dropped", got)
+	}
+}
+
 func TestRun_BoundKey(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -337,12 +356,12 @@ func TestRun_DetachingAChildThatHasExitedIsQuick(t *testing.T) {
 	h.ready(t)
 
 	h.term.typeIn(t, "abc"+keyKill)
-	out, err := h.finish(t)
+	r := h.end(t)
 
-	if err != nil || !errors.Is(out.Err, refused) {
-		t.Errorf("Run = %+v, %v; want the failed kill", out, err)
+	if r.err != nil || !errors.Is(r.out.Err, refused) {
+		t.Errorf("Run = %+v, %v; want the failed kill", r.out, r.err)
 	}
-	if took := time.Since(time.Unix(0, killReturned.Load())); took > time.Second {
+	if took := r.returned.Sub(time.Unix(0, killReturned.Load())); took > time.Second {
 		t.Errorf("Run took %v after the child had gone, want no wait for it to read its input", took)
 	}
 }
@@ -442,7 +461,57 @@ func TestRun_PanicInACopyLoopDetachesAndRestores(t *testing.T) {
 	if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
 		t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
 	}
-	sink.Records().Matching("attach", "panic").AtExactLevel(slog.LevelError).Only(t, "panic record")
+	assertPanicLogged(t, sink, "scanner exploded")
+}
+
+func TestRun_PanicInKillTearsDownTheAttachThenPropagates(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	sink := logtest.Install(t)
+	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
+		cfg.Kill = func(context.Context, string) error { panic("kill exploded") }
+	})
+	h.ready(t)
+
+	h.term.typeIn(t, keyKill)
+	r := h.end(t) // the terminal's settings and flags are checked restored
+
+	if r.panicked != "kill exploded" {
+		t.Errorf("Run = %+v, %v, panicking with %v; want Kill's panic raised again", r.out, r.err, r.panicked)
+	}
+	if err := syscall.Kill(h.child(), 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("the child %d outlived Run: %v", h.child(), err)
+	}
+	h.term.await(t, terminalReset)
+	assertPanicLogged(t, sink, "kill exploded")
+}
+
+// assertPanicLogged checks the attach logged a panic with value, and its end.
+func assertPanicLogged(t *testing.T, sink *logtest.Sink, value string) {
+	t.Helper()
+	rec := sink.Records().Matching("attach", "panic").AtExactLevel(slog.LevelWarn).Only(t, "panic record")
+	if got := rec.AttrString(t, "error"); got != value {
+		t.Errorf("panic error = %q, want %q", got, value)
+	}
+	if got := rec.AttrString(t, "detail"); !strings.Contains(got, "goroutine") {
+		t.Errorf("panic detail = %q, want the stack", got)
+	}
+	assertErrorOutcome(t, sink, "panic", value)
+}
+
+// assertErrorOutcome checks the attach logged an outcome for an end that
+// made Run return an error.
+func assertErrorOutcome(t *testing.T, sink *logtest.Sink, reason, errorText string) {
+	t.Helper()
+	rec := sink.Records().Matching("attach", "outcome").AtExactLevel(slog.LevelInfo).Only(t, "outcome record")
+	if got := rec.AttrString(t, "reason"); got != reason {
+		t.Errorf("outcome reason = %q, want %q", got, reason)
+	}
+	if got := rec.ErrorAttr(t, "error"); got == nil || !strings.Contains(got.Error(), errorText) {
+		t.Errorf("outcome error = %v, want one saying %q", got, errorText)
+	}
+	if rec.HasAttr("code") {
+		t.Errorf("outcome has a code for an end that returns an error")
+	}
 }
 
 func TestRun_TerminalHangingUpEndsTheAttachAsSIGHUP(t *testing.T) {
@@ -471,6 +540,7 @@ func TestRun_TerminalHangingUpEndsTheAttachAsSIGHUP(t *testing.T) {
 }
 
 func TestRun_ContextEndDetachesAndRestores(t *testing.T) {
+	sink := logtest.Install(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	h := attachWithin(t, ctx, modeZmx)
 	h.ready(t)
@@ -484,10 +554,77 @@ func TestRun_ContextEndDetachesAndRestores(t *testing.T) {
 	if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
 		t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
 	}
+	assertErrorOutcome(t, sink, "context", context.Canceled.Error())
+}
+
+func TestRun_LeavesTheFlagsOfTheTerminalsDescriptionsAlone(t *testing.T) {
+	tm := newTerminal(t)
+	// Output on a description apart from the input's, so each is checked on
+	// its own.
+	out := tm.another(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeZmx), func(_ *harness, cfg *runner.Config) { cfg.Out = out })
+	h.ready(t)
+
+	h.assertFlags(t)
+
+	h.detach(t) // and checks them after
+}
+
+func TestRun_ResetsATerminalTheChildsLastOutputNeverReached(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	sink := logtest.Install(t)
+	tm := openTerminal(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill))
+	tm.readUntil(t, "ready:")
+
+	// The terminal stalls, then the child writes its last output and exits
+	// by its own hand, as zmx does with its own reset last.
+	tm.fill(t)
+	tm.typeIn(t, "x")
+	reset := waitForReset(t, sink)
+	// Longer than any of the runner's waits: the reset waits for the terminal
+	// with none.
+	time.Sleep(2 * shortGrace)
+	tm.record() // the terminal takes output again
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{}) {
+		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
+	}
+	if got := reset.AttrString(t, "reason"); got != "drain" {
+		t.Errorf("reset reason = %q, want drain", got)
+	}
+	shown := tm.output()
+	if bytes.Contains(shown, []byte(lastOutput)) {
+		t.Errorf("the child's last output reached the terminal, want it cut by the grace")
+	}
+	if !bytes.HasSuffix(shown, []byte(terminalReset)) {
+		t.Errorf("the terminal shows %q last, want the reset", shown[max(len(shown)-64, 0):])
+	}
+}
+
+func TestRun_StopsWaitingForATerminalThatHangsUp(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	sink := logtest.Install(t)
+	tm := openTerminal(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill))
+	tm.readUntil(t, "ready:")
+	tm.fill(t)
+	tm.typeIn(t, "x")
+	waitForReset(t, sink)
+
+	// The terminal's window closes before it takes the reset.
+	_ = tm.user.Close()
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{}) {
+		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
+	}
 }
 
 func TestRun_StalledTerminalLeavesNoCopyLoop(t *testing.T) {
 	runner.SetGrace(t, shortGrace)
+	sink := logtest.Install(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	tm := openTerminal(t)
 	h := attachOn(t, ctx, tm, fakeChildCommand(t, modeFlood))
@@ -499,16 +636,34 @@ func TestRun_StalledTerminalLeavesNoCopyLoop(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond)
 	cancel()
+	// The runner's last write waits for the terminal to take it.
+	waitForReset(t, sink)
+	tm.record()
 	_, err := h.finish(t)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Run error = %v, want the context's", err)
 	}
+	if shown := tm.output(); !bytes.HasSuffix(shown, []byte(terminalReset)) {
+		t.Errorf("the terminal shows %q last, want the reset", shown[max(len(shown)-64, 0):])
+	}
+}
+
+// waitForReset waits for the runner to start writing its reset to the
+// terminal, and returns the record saying so.
+func waitForReset(t *testing.T, sink *logtest.Sink) logtest.Record {
+	t.Helper()
+	if !harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
+		return len(sink.Records().Matching("attach", "terminal reset")) > 0
+	}) {
+		t.Fatal("the runner never reset the terminal")
+	}
+	return sink.Records().Matching("attach", "terminal reset").AtExactLevel(slog.LevelDebug).Only(t, "reset record")
 }
 
 func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 	tm := newTerminal(t)
-	before := stateOf(t, tm.tty)
+	before, flags := stateOf(t, tm.tty), flagsOf(t, tm.tty)
 
 	_, err := runner.Run(t.Context(), runner.Config{
 		Session: "fake",
@@ -516,6 +671,7 @@ func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 		In:      tm.tty,
 		Out:     tm.tty,
 		Scanner: keys,
+		Kill:    noKill,
 	})
 
 	if !errors.Is(err, os.ErrNotExist) {
@@ -524,34 +680,42 @@ func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 	if after := stateOf(t, tm.tty); *after != *before {
 		t.Errorf("the terminal's settings are %+v after a failed start, want %+v", after, before)
 	}
-	if nonblockingOf(t, tm.tty) {
-		t.Errorf("the terminal is non-blocking after a failed start, want it blocking again")
+	if got := flagsOf(t, tm.tty); got != flags {
+		t.Errorf("the terminal's flags are %#x after a failed start, want %#x", got, flags)
 	}
 }
 
 func TestRun_RefusesWithoutStarting(t *testing.T) {
-	in, typed, err := os.Pipe()
+	notTerminal, typed, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = in.Close(), typed.Close() })
+	t.Cleanup(func() { _, _ = notTerminal.Close(), typed.Close() })
 	tm := newTerminal(t)
-	// A start would fail on this command, with an error of its own.
-	missing := backend.Command{Argv: []string{"/nonexistent/zmx", "attach", "fake"}}
 
 	for _, tc := range []struct {
-		name    string
-		in      *os.File
-		command backend.Command
-		want    func(error) bool
+		name   string
+		change func(*runner.Config)
+		want   func(error) bool
 	}{
-		{"input that is not a terminal", in, missing, func(err error) bool { return errors.Is(err, runner.ErrNoTerminal) }},
-		{"a command that switches sessions", tm.tty, backend.Command{Argv: missing.Argv, Switches: true}, func(err error) bool {
-			return err != nil && strings.Contains(err.Error(), "switches sessions")
-		}},
+		{"input that is not a terminal", func(cfg *runner.Config) { cfg.In = notTerminal }, isNoTerminal},
+		{"output that is not a terminal", func(cfg *runner.Config) { cfg.Out = typed }, isNoTerminal},
+		{"a command that switches sessions", func(cfg *runner.Config) { cfg.Command.Switches = true }, says("switches sessions")},
+		{"no kill", func(cfg *runner.Config) { cfg.Kill = nil }, says("no kill")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := runner.Run(t.Context(), runner.Config{Session: "fake", Command: tc.command, In: tc.in, Out: tm.tty, Scanner: keys})
+			cfg := runner.Config{
+				Session: "fake",
+				// A start would fail on this command, with an error of its own.
+				Command: backend.Command{Argv: []string{"/nonexistent/zmx", "attach", "fake"}},
+				In:      tm.tty,
+				Out:     tm.tty,
+				Scanner: keys,
+				Kill:    noKill,
+			}
+			tc.change(&cfg)
+
+			_, err := runner.Run(t.Context(), cfg)
 
 			if !tc.want(err) || errors.Is(err, os.ErrNotExist) {
 				t.Errorf("Run error = %v, want the refusal before any start", err)
@@ -561,6 +725,38 @@ func TestRun_RefusesWithoutStarting(t *testing.T) {
 	if got := tm.output(); len(got) > 0 {
 		t.Errorf("Run wrote %q to its output", got)
 	}
+}
+
+func TestSameDevice(t *testing.T) {
+	tm, other := newTerminal(t), newTerminal(t)
+	pipe, _, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pipe.Close() })
+	tty := fdOf(t, tm.tty)
+
+	for _, tc := range []struct {
+		name string
+		f    *os.File
+		want bool
+	}{
+		{"another description of the terminal", tm.another(t), true},
+		{"another terminal", other.tty, false},
+		{"a pipe", pipe, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runner.SameDevice(tty, fdOf(t, tc.f)); got != tc.want {
+				t.Errorf("SameDevice = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func isNoTerminal(err error) bool { return errors.Is(err, runner.ErrNoTerminal) }
+
+func says(text string) func(error) bool {
+	return func(err error) bool { return err != nil && strings.Contains(err.Error(), text) }
 }
 
 func TestRun_LogsTheAttach(t *testing.T) {

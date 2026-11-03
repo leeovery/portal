@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"os"
 	"reflect"
 	"regexp"
@@ -70,6 +71,9 @@ type panicking struct{}
 
 func (panicking) Scan([]byte) ([]byte, attachkeys.Action, bool) { panic("scanner exploded") }
 
+// noKill is a Kill that kills nothing.
+func noKill(context.Context, string) error { return nil }
+
 // terminal is a pseudo-terminal standing in for the user's: the runner gets
 // its tty side, and the test types into and reads from its user side.
 type terminal struct {
@@ -83,13 +87,12 @@ type terminal struct {
 func newTerminal(t *testing.T) *terminal {
 	t.Helper()
 	tm := openTerminal(t)
-	tm.done = make(chan struct{})
-	go tm.record()
+	tm.record()
 	return tm
 }
 
-// openTerminal opens a terminal whose output nobody reads, as a terminal
-// over a stalled network takes none.
+// openTerminal opens a terminal whose output nobody reads until the test
+// records it, as a terminal over a stalled network takes none.
 func openTerminal(t *testing.T) *terminal {
 	t.Helper()
 	user, tty, err := pty.Open()
@@ -99,40 +102,65 @@ func openTerminal(t *testing.T) *terminal {
 	if err := pty.Setsize(user, &pty.Winsize{Cols: 80, Rows: 24}); err != nil {
 		t.Fatalf("size the user's terminal: %v", err)
 	}
-	// Blocking, as a shell's terminal is.
-	if err := unix.SetNonblock(fdOf(t, tty), false); err != nil {
-		t.Fatalf("make the user's terminal blocking: %v", err)
-	}
+	blocking(t, tty)
 	tm := &terminal{user: user, tty: tty}
 	t.Cleanup(func() {
+		// The user's side first: a tty side closing with output no one reads
+		// would wait in close for it to be read, and a runner stuck writing to
+		// the terminal is freed.
+		_ = user.Close()
 		_ = tty.Close()
 		if tm.done != nil {
 			select {
 			case <-tm.done:
 			case <-time.After(settle):
-				t.Error("the user's terminal was still being read after its tty closed")
+				t.Error("the user's terminal was still being read after it closed")
 			}
 		}
-		_ = user.Close()
 	})
 	return tm
 }
 
-func (tm *terminal) record() {
-	defer close(tm.done)
-	buf := make([]byte, 4096)
-	for {
-		n, err := tm.user.Read(buf)
-		tm.mu.Lock()
-		tm.seen = append(tm.seen, buf[:n]...)
-		tm.mu.Unlock()
-		if err != nil {
-			return
-		}
+// blocking makes f's description blocking, as a shell's terminal is.
+func blocking(t *testing.T, f *os.File) {
+	t.Helper()
+	if err := unix.SetNonblock(fdOf(t, f), false); err != nil {
+		t.Fatalf("make %s blocking: %v", f.Name(), err)
 	}
 }
 
-// output is everything the terminal has shown.
+// another opens a description of the terminal's tty side of its own, as a
+// shell's output can be.
+func (tm *terminal) another(t *testing.T) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(tm.tty.Name(), os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatalf("open %s again: %v", tm.tty.Name(), err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	blocking(t, f)
+	return f
+}
+
+// record shows the test the terminal's output from now on.
+func (tm *terminal) record() {
+	tm.done = make(chan struct{})
+	go func() {
+		defer close(tm.done)
+		buf := make([]byte, 4096)
+		for {
+			n, err := tm.user.Read(buf)
+			tm.mu.Lock()
+			tm.seen = append(tm.seen, buf[:n]...)
+			tm.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+}
+
+// output is everything the terminal has shown since the test recorded it.
 func (tm *terminal) output() []byte {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -153,6 +181,47 @@ func (tm *terminal) await(t *testing.T, want string) {
 		return bytes.Contains(tm.output(), []byte(want))
 	}) {
 		t.Fatalf("the terminal never showed %q; it shows %q", want, tm.output())
+	}
+}
+
+// readUntil reads the terminal's output, unrecorded, until it shows want.
+func (tm *terminal) readUntil(t *testing.T, want string) {
+	t.Helper()
+	user := fdOf(t, tm.user)
+	var shown []byte
+	buf := make([]byte, 4096)
+	deadline := time.Now().Add(settle)
+	for !bytes.Contains(shown, []byte(want)) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the terminal never showed %q; it shows %q", want, shown)
+		}
+		if !unread(user) {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		n, _ := unix.Read(user, buf)
+		shown = append(shown, buf[:max(n, 0)]...)
+	}
+}
+
+// fill writes to the terminal until it takes no more, as a congested link
+// leaves it.
+func (tm *terminal) fill(t *testing.T) {
+	t.Helper()
+	fd, err := unix.Open(tm.tty.Name(), unix.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("open %s to fill it: %v", tm.tty.Name(), err)
+	}
+	defer func() { _ = unix.Close(fd) }()
+	filler := bytes.Repeat([]byte("f"), 64)
+	for {
+		_, err := unix.Write(fd, filler)
+		if errors.Is(err, unix.EAGAIN) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("fill the terminal: %v", err)
+		}
 	}
 }
 
@@ -184,6 +253,20 @@ func (tm *terminal) next(t *testing.T) string {
 	return string(buf[:max(n, 0)])
 }
 
+// nextRaw is next for a reader that puts the terminal in raw mode first, as
+// a shell's line editor and the picker do. Raw, it finds input a canonical
+// reader would not.
+func (tm *terminal) nextRaw(t *testing.T) string {
+	t.Helper()
+	tty := uintptr(fdOf(t, tm.tty))
+	saved, err := term.MakeRaw(tty)
+	if err != nil {
+		t.Fatalf("put the terminal in raw mode: %v", err)
+	}
+	defer func() { _ = term.Restore(tty, saved) }()
+	return tm.next(t)
+}
+
 var readLine = regexp.MustCompile(`in:([0-9a-f]*)\r+\n`)
 
 // reads is each read of its input the fake child reported, in order.
@@ -207,7 +290,7 @@ func unread(fd int) bool {
 }
 
 // fdOf is f's descriptor, taken without the blocking mode os.File.Fd would
-// set on the description the runner made non-blocking.
+// set on its description.
 func fdOf(t *testing.T, f *os.File) int {
 	t.Helper()
 	raw, err := f.SyscallConn()
@@ -230,28 +313,33 @@ func stateOf(t *testing.T, f *os.File) *term.State {
 	return state
 }
 
-// nonblockingOf reports whether f's open file description is non-blocking.
-func nonblockingOf(t *testing.T, f *os.File) bool {
+// flagsOf is the file status flags of f's open file description.
+func flagsOf(t *testing.T, f *os.File) int {
 	t.Helper()
 	flags, err := unix.FcntlInt(uintptr(fdOf(t, f)), unix.F_GETFL, 0)
 	if err != nil {
 		t.Fatalf("read %s's flags: %v", f.Name(), err)
 	}
-	return flags&unix.O_NONBLOCK != 0
+	return flags
 }
 
+// result is how a Run ended: what it returned or panicked with, and when.
 type result struct {
-	out runner.Outcome
-	err error
+	out      runner.Outcome
+	err      error
+	panicked any
+	returned time.Time
 }
 
 // harness runs runner.Run on a terminal of its own.
 type harness struct {
 	term *terminal
-	// in is the runner's input, and before its settings before the attach.
-	in     *os.File
-	before *term.State
-	result chan result
+	// in and out are the runner's terminal; before is in's settings, and
+	// inFlags and outFlags their descriptions' flags, before the attach.
+	in, out           *os.File
+	before            *term.State
+	inFlags, outFlags int
+	result            chan result
 	// pid is the fake child's, once it is ready. Run's goroutine reads it
 	// too, in a fake kill.
 	pid atomic.Int64
@@ -293,10 +381,15 @@ func attachOn(t *testing.T, ctx context.Context, tm *terminal, command backend.C
 	for _, opt := range opts {
 		opt(h, &cfg)
 	}
-	h.in, h.before = cfg.In, stateOf(t, cfg.In)
+	h.in, h.out, h.before = cfg.In, cfg.Out, stateOf(t, cfg.In)
+	h.inFlags, h.outFlags = flagsOf(t, cfg.In), flagsOf(t, cfg.Out)
 	go func() {
-		out, err := runner.Run(ctx, cfg)
-		h.result <- result{out, err}
+		var r result
+		defer func() {
+			r.panicked, r.returned = recover(), time.Now()
+			h.result <- r
+		}()
+		r.out, r.err = runner.Run(ctx, cfg)
 	}()
 	t.Cleanup(func() {
 		select {
@@ -352,20 +445,42 @@ func (h *harness) detach(t *testing.T) {
 // left no copy loop running.
 func (h *harness) finish(t *testing.T) (runner.Outcome, error) {
 	t.Helper()
+	r := h.end(t)
+	if r.panicked != nil {
+		t.Fatalf("Run panicked: %v", r.panicked)
+	}
+	return r.out, r.err
+}
+
+// end waits for Run to return or panic, and checks it restored the
+// terminal's settings, left its descriptions' flags as they were, and left
+// no copy loop running.
+func (h *harness) end(t *testing.T) result {
+	t.Helper()
 	select {
 	case r := <-h.result:
 		h.result <- r
 		if after := stateOf(t, h.in); !reflect.DeepEqual(after, h.before) {
 			t.Errorf("the terminal's settings are %+v after the attach, want them restored to %+v", after, h.before)
 		}
-		if nonblockingOf(t, h.in) {
-			t.Errorf("the terminal is non-blocking after the attach, want it blocking again")
-		}
+		h.assertFlags(t)
 		assertNoCopyLoops(t)
-		return r.out, r.err
+		return r
 	case <-time.After(settle):
 		t.Fatalf("Run did not return; the terminal shows %q", h.term.output())
-		return runner.Outcome{}, nil
+		return result{}
+	}
+}
+
+// assertFlags fails the test unless the descriptions of the terminal Run was
+// given have the flags they had before the attach.
+func (h *harness) assertFlags(t *testing.T) {
+	t.Helper()
+	if got := flagsOf(t, h.in); got != h.inFlags {
+		t.Errorf("the input's flags are %#x, want %#x as before the attach", got, h.inFlags)
+	}
+	if got := flagsOf(t, h.out); got != h.outFlags {
+		t.Errorf("the output's flags are %#x, want %#x as before the attach", got, h.outFlags)
 	}
 }
 

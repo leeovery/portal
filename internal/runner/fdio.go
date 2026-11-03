@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
 
 var (
-	errStopped  = errors.New("copy loop stopped")
-	errTimedOut = errors.New("timed out")
+	errStopped = errors.New("copy loop stopped")
+	errHungUp  = errors.New("terminal hung up")
 )
 
 // waiter waits for fd to be ready for events.
@@ -65,22 +64,20 @@ func (s *stopper) wait(fd int, events int16) error {
 	}
 }
 
-// until is a waiter that gives up with errTimedOut at deadline.
-func until(deadline time.Time) waiter {
-	return func(fd int, events int16) error {
-		fds := []unix.PollFd{{Fd: int32(fd), Events: events}}
-		for {
-			left := time.Until(deadline).Milliseconds()
-			if left <= 0 {
-				return errTimedOut
-			}
-			n, err := unix.Poll(fds, int(left))
-			if err != nil && !errors.Is(err, unix.EINTR) {
-				return err
-			}
-			if n > 0 {
-				return nil
-			}
+// untilHangUp is a waiter with no deadline that gives up only once fd hangs
+// up or fails.
+func untilHangUp(fd int, events int16) error {
+	fds := []unix.PollFd{{Fd: int32(fd), Events: events}}
+	for {
+		_, err := unix.Poll(fds, -1)
+		switch {
+		case errors.Is(err, unix.EINTR):
+		case err != nil:
+			return err
+		case fds[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0:
+			return errHungUp
+		case fds[0].Revents != 0:
+			return nil
 		}
 	}
 }
@@ -127,22 +124,9 @@ func unread(fd int) bool {
 	return fds[0].Revents&unix.POLLIN != 0 && fds[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) == 0
 }
 
-// nonblocking puts fd's open file description in non-blocking mode, and
-// returns what puts its flags back.
-func nonblocking(fd int) (func(), error) {
-	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFL, flags|unix.O_NONBLOCK); err != nil {
-		return nil, err
-	}
-	return func() { _, _ = unix.FcntlInt(uintptr(fd), unix.F_SETFL, flags) }, nil
-}
-
 // fdOf is f's descriptor, taken without the blocking mode os.File.Fd sets on
 // each call: the descriptions the runner shares with the shell and the child
-// keep the modes their owners gave them.
+// keep the flags their owners gave them.
 func fdOf(f *os.File) (int, error) {
 	raw, err := f.SyscallConn()
 	if err != nil {

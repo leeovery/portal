@@ -36,11 +36,15 @@ type attach struct {
 	// ptmx is Portal's side of the child's terminal and tty the child's,
 	// held open to see what the child has yet to read.
 	ptmx, tty *os.File
-	// The descriptors the runner works on, taken once: the user's terminal
-	// and the two sides of the child's.
+	// The descriptors the runner works on, taken once: inFd and outFd are
+	// descriptions of the user's terminal that are Portal's alone, and ptmxFd
+	// and ttyFd the two sides of the child's.
 	inFd, outFd, ptmxFd, ttyFd int
 	// forced is set once the runner signals the child.
 	forced bool
+	// drained is set once the child's output has ended with all of it on the
+	// terminal.
+	drained bool
 
 	stopIn, stopOut *stopper
 	inDone, outDone chan struct{}
@@ -48,27 +52,31 @@ type attach struct {
 	exited chan struct{}
 	// requests carries the actions that end the attach.
 	requests chan attachkeys.Action
-	// broken carries a copy loop's panic.
-	broken         chan error
+	// broken carries the end a copy loop's panic makes.
+	broken         chan ending
 	signals, winch chan os.Signal
 	undo           []func()
 }
 
-func start(cfg Config, inFd int) (*attach, error) {
+func start(cfg Config) (*attach, error) {
 	a := &attach{
 		cfg:      cfg,
 		began:    time.Now(),
-		inFd:     inFd,
 		inDone:   make(chan struct{}),
 		outDone:  make(chan struct{}),
 		exited:   make(chan struct{}),
 		requests: make(chan attachkeys.Action, 1),
-		broken:   make(chan error, 2),
+		broken:   make(chan ending, 2),
 		signals:  make(chan os.Signal, 1),
 		winch:    make(chan os.Signal, 1),
 	}
 	if err := a.setUp(); err != nil {
 		a.release()
+		if sig := a.stopSignals(); sig != nil {
+			// Caught for an attach that never began: it does what it would
+			// have done had the runner not caught it.
+			_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+		}
 		return nil, err
 	}
 	logger.Debug("started", "session", cfg.Session, "target_pid", a.child.Process.Pid)
@@ -87,8 +95,9 @@ func start(cfg Config, inFd int) (*attach, error) {
 // terminal left raw.
 func (a *attach) setUp() error {
 	steps := []func() error{
-		a.openPty,
+		a.openTerminal,
 		a.catchSignals,
+		a.openPty,
 		a.size,
 		a.makeStoppers,
 		a.makeChildRaw,
@@ -101,6 +110,45 @@ func (a *attach) setUp() error {
 		}
 	}
 	return nil
+}
+
+// openTerminal opens the runner's own descriptions of the user's terminal.
+func (a *attach) openTerminal() error {
+	var err error
+	if a.inFd, err = a.reopen(a.cfg.In); err != nil {
+		return err
+	}
+	a.outFd, err = a.reopen(a.cfg.Out)
+	return err
+}
+
+// reopen opens Portal's own description of f's terminal, closed on release.
+func (a *attach) reopen(f *os.File) (int, error) {
+	fd, err := privateTerminal(f)
+	if err != nil {
+		return -1, fmt.Errorf("%w: %w", ErrNoTerminal, err)
+	}
+	a.onRelease(func() { _ = unix.Close(fd) })
+	return fd, nil
+}
+
+func (a *attach) catchSignals() error {
+	signal.Notify(a.signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	signal.Notify(a.winch, syscall.SIGWINCH)
+	return nil
+}
+
+// stopSignals stops catching signals, and returns the one caught and not yet
+// acted on, if any.
+func (a *attach) stopSignals() os.Signal {
+	signal.Stop(a.signals)
+	signal.Stop(a.winch)
+	select {
+	case sig := <-a.signals:
+		return sig
+	default:
+		return nil
+	}
 }
 
 func (a *attach) openPty() error {
@@ -118,19 +166,10 @@ func (a *attach) openPty() error {
 	if a.ttyFd, err = fdOf(a.tty); err != nil {
 		return fmt.Errorf("open a pseudo-terminal: %w", err)
 	}
+	// Portal's side is no one else's, so its flags are the runner's to set.
 	if err := unix.SetNonblock(a.ptmxFd, true); err != nil {
 		return fmt.Errorf("open a pseudo-terminal: %w", err)
 	}
-	return nil
-}
-
-func (a *attach) catchSignals() error {
-	signal.Notify(a.signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-	signal.Notify(a.winch, syscall.SIGWINCH)
-	a.onRelease(func() {
-		signal.Stop(a.signals)
-		signal.Stop(a.winch)
-	})
 	return nil
 }
 
@@ -168,25 +207,19 @@ func (a *attach) makeChildRaw() error {
 	return nil
 }
 
-// makeTerminalRaw puts the user's terminal in raw, non-blocking mode. The
-// shell shares its open file descriptions, so their flags are put back with
-// the terminal's settings.
+// makeTerminalRaw puts the user's terminal in raw mode until the attach is
+// released. Its settings come back as zmx puts them back, once it has taken
+// all its output and with its unread input dropped, so the terminal's late
+// replies to the session never reach the next reader.
 func (a *attach) makeTerminalRaw() error {
-	saved, err := term.MakeRaw(uintptr(a.inFd))
+	saved, err := unix.IoctlGetTermios(a.inFd, getTermios)
+	if err == nil {
+		_, err = term.MakeRaw(uintptr(a.inFd))
+	}
 	if err != nil {
 		return fmt.Errorf("put the terminal in raw mode: %w", err)
 	}
-	a.onRelease(func() { _ = term.Restore(uintptr(a.inFd), saved) })
-	if a.outFd, err = fdOf(a.cfg.Out); err != nil {
-		return fmt.Errorf("take the terminal's output: %w", err)
-	}
-	for _, fd := range []int{a.inFd, a.outFd} {
-		restore, err := nonblocking(fd)
-		if err != nil {
-			return fmt.Errorf("make the terminal non-blocking: %w", err)
-		}
-		a.onRelease(restore)
-	}
+	a.onRelease(func() { restoreTermios(a.inFd, saved) })
 	return nil
 }
 
@@ -206,44 +239,42 @@ func (a *attach) startChild() error {
 
 func (a *attach) onRelease(f func()) { a.undo = append(a.undo, f) }
 
+// release lets go of what the attach holds, in the reverse of the order it
+// took them: the terminal's settings come back before its descriptions
+// close.
 func (a *attach) release() {
 	for _, f := range slices.Backward(a.undo) {
 		f()
 	}
 }
 
-// finish ends the child, lets its last output reach the terminal, stops the
-// copy loops, and resets the terminal if zmx could not. A signal to Portal
-// that lands meanwhile wins over how the attach ended.
-func (a *attach) finish(end ending) ending {
-	a.end()
+// tearDown ends the attach in one order, however it ended: the input stops;
+// the child ends while its last output drains; the terminal is reset unless
+// zmx's own reset reached it; the terminal is restored and released. A signal
+// caught at any point until Portal stops catching them decides the outcome,
+// unless a panic is to be raised again.
+func (a *attach) tearDown(end ending) ending {
+	a.stopIn.stop()
+	<-a.inDone
+	a.endChild()
 	// Until every holder of the child's side closes it, the copy may never
 	// see the end of the child's output.
 	_ = a.tty.Close()
 	within(a.outDone, grace)
-	a.halt()
-	if !a.exitedCleanly() {
-		_ = writeAll(a.outFd, []byte(terminalReset), until(time.Now().Add(grace)))
-	}
-	select {
-	case sig := <-a.signals:
-		return signalled(sig)
-	default:
-		return end
-	}
-}
-
-// shutDown stops the copy loops and releases what the attach holds,
-// restoring the terminal.
-func (a *attach) shutDown() {
-	a.halt()
+	a.stopOut.stop()
+	<-a.outDone
+	a.reset()
 	a.release()
+	if sig := a.stopSignals(); sig != nil && end.panicked == nil {
+		end = signalled(sig)
+	}
 	logger.Debug("ended", "session", a.cfg.Session, log.Took(a.began))
+	return end
 }
 
-// end waits for the child to exit, ending it if it outlives the grace:
+// endChild waits for the child to exit, ending it if it outlives the grace:
 // SIGHUP, then SIGKILL.
-func (a *attach) end() {
+func (a *attach) endChild() {
 	if within(a.exited, grace) {
 		return
 	}
@@ -257,8 +288,27 @@ func (a *attach) end() {
 	}
 }
 
-// exitedCleanly reports whether the child exited by its own hand, as zmx
-// does after writing terminalReset.
+// reset writes terminalReset unless zmx's own reached the terminal, which it
+// did only if the child exited by its own hand, as zmx does after writing it,
+// and all the child's output reached the terminal. The reset is the runner's
+// last write to the terminal, so it waits for the terminal to take it however
+// long that takes, as whatever writes to it next would, unless the terminal
+// hangs up. Its leading ESC ends any escape sequence a cut left half written.
+func (a *attach) reset() {
+	var reason string
+	switch {
+	case !a.exitedCleanly():
+		reason = "exit"
+	case !a.drained:
+		reason = "drain"
+	default:
+		return
+	}
+	logger.Debug("terminal reset", "session", a.cfg.Session, "reason", reason)
+	_ = writeAll(a.outFd, []byte(terminalReset), untilHangUp)
+}
+
+// exitedCleanly reports whether the child exited by its own hand.
 func (a *attach) exitedCleanly() bool {
 	select {
 	case <-a.exited:
@@ -271,7 +321,7 @@ func (a *attach) exitedCleanly() bool {
 // detach sends the child zmx's own detach key once nothing else writes to it
 // and it has read what it was sent: zmx takes ctrl+\ only as the first byte
 // of a read, so one queued behind unread input would reach the session. A
-// child that reads nothing within the grace is left for end to signal.
+// child that reads nothing within the grace is left for endChild to signal.
 func (a *attach) detach() {
 	a.stopIn.stop()
 	<-a.inDone
@@ -296,17 +346,8 @@ func (a *attach) awaitRead() bool {
 		if time.Now().After(deadline) {
 			return false
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
-}
-
-// halt stops both copy loops and waits for them, which return at once:
-// every wait in them is on their stopper.
-func (a *attach) halt() {
-	a.stopIn.stop()
-	a.stopOut.stop()
-	<-a.inDone
-	<-a.outDone
 }
 
 func (a *attach) resize() {
@@ -315,19 +356,23 @@ func (a *attach) resize() {
 	}
 }
 
-// goCopy runs a copy loop, turning a panic into an error that ends the
-// attach, so the terminal is still restored.
+// goCopy runs a copy loop, turning a panic into an end of the attach.
 func (a *attach) goCopy(loop func(), done chan<- struct{}) {
 	go func() {
 		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("panic", "session", a.cfg.Session, "reason", r, "detail", string(debug.Stack()))
-				a.broken <- fmt.Errorf("copy loop panicked: %v", r)
+				a.broken <- a.panicked(r)
 			}
 		}()
 		loop()
 	}()
+}
+
+// panicked logs a recovered panic, and is the end of the attach it makes.
+func (a *attach) panicked(r any) ending {
+	logger.Warn("panic", "session", a.cfg.Session, "error", r, "detail", string(debug.Stack()))
+	return ending{err: fmt.Errorf("attach session %q: panic: %v", a.cfg.Session, r), reason: "panic"}
 }
 
 // copyInput passes the terminal's input to the child until a bound key, which
@@ -371,7 +416,11 @@ func (a *attach) copyOutput() {
 	refused := false
 	for {
 		n, err := readReady(a.ptmxFd, buf, a.stopOut.wait)
+		if errors.Is(err, errStopped) {
+			return
+		}
 		if n == 0 || err != nil {
+			a.drained = !refused
 			return
 		}
 		if refused {

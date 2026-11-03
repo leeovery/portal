@@ -45,7 +45,14 @@ const (
 	modeFrozen = "frozen"
 	// modeFlood writes output without end, and otherwise acts as modeZmx.
 	modeFlood = "flood"
+	// modeSpill writes lastOutput in one write once it reads input, then
+	// exits with status 0.
+	modeSpill = "spill"
 )
+
+// lastOutput is short enough for one write to put it all in the child's
+// terminal at once, so the runner reads it whole.
+const lastOutput = "the child's last output\r\n"
 
 const ctrlBackslash = 0x1c
 
@@ -96,6 +103,10 @@ func fakeChild(mode string) int {
 		_, _ = os.Stdout.Write(childBlob)
 	case modeFlood:
 		go flood()
+	case modeSpill:
+		await(0, unix.POLLIN)
+		_, _ = unix.Write(1, []byte(lastOutput))
+		return 0
 	}
 	go reportSizes(winch)
 	return readInput(mode != modeDeaf && mode != modeStubborn)

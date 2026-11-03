@@ -36,6 +36,7 @@ func interruptAfterRun() int {
 		In:      tty,
 		Out:     tty,
 		Scanner: keys,
+		Kill:    noKill,
 	})
 	if err != nil {
 		return 101
