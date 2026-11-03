@@ -3,6 +3,7 @@ package sourceguardtest
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ const (
 
 	fixtureDefaultLanePkg = fixtureModule + "/defaultlane"
 	fixtureLinuxPkg       = fixtureModule + "/onlinux"
+	fixtureCgoPkg         = fixtureModule + "/cgoonly"
 )
 
 func TestAssertDepsWithin_ReportsEveryDepOutsideTheAllowlist(t *testing.T) {
@@ -207,8 +209,19 @@ func TestAssertDepsWithin_ForGOOS(t *testing.T) {
 		if !errored(rec, fixtureForbiddenPkg) {
 			t.Errorf("AssertDepsWithin did not report %s, which the fixture reaches only from its _linux.go file; reported %v", fixtureForbiddenPkg, rec.Errors)
 		}
-		if !errored(rec, fixtureLinuxPkg+" under GOOS=linux") {
+		if !errored(rec, fixtureLinuxPkg+" under GOOS=linux CGO_ENABLED=0") {
 			t.Errorf("the finding does not name the GOOS it was resolved for; reported %v", rec.Errors)
+		}
+	})
+
+	t.Run("it reads with cgo off, as the release builds, even for the host's own GOOS", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureCgoPkg, nil, InDir(dir), ForGOOS(runtime.GOOS)) })
+
+		if rec.Failed() {
+			t.Errorf("the reading took in a file built only with cgo: %s", rec.Report())
 		}
 	})
 
@@ -248,6 +261,8 @@ func stageTaggedFixtureModule(t *testing.T) string {
 	write("defaultlane/defaultlane.go", "package defaultlane\n")
 	write("defaultlane/defaultlane_unit.go", "//go:build !"+IntegrationTag+"\n\npackage defaultlane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("lane/lane_integration.go", "//go:build "+IntegrationTag+"\n\npackage lane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
+	write("cgoonly/cgoonly.go", "package cgoonly\n")
+	write("cgoonly/cgoonly_cgo.go", "//go:build cgo\n\npackage cgoonly\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("onlinux/onlinux.go", "package onlinux\n")
 	write("onlinux/onlinux_linux.go", "package onlinux\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("forbidden/forbidden.go", "package forbidden\n")

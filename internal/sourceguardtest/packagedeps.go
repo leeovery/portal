@@ -36,9 +36,10 @@ func WithBuildTags(tags ...string) DepsOption {
 	return func(cfg *depsConfig) { cfg.tags = tags }
 }
 
-// ForGOOS resolves the package as it builds for goos, so a guard can judge a
-// platform other than the one it runs on: a dependency reachable only from a
-// file constrained to another GOOS sits outside the host's reading.
+// ForGOOS resolves the package as it builds for goos, with cgo off as the
+// release builds it, so a guard can judge a platform other than the one it
+// runs on: a dependency reachable only from a file constrained to another GOOS
+// sits outside the host's reading.
 func ForGOOS(goos string) DepsOption {
 	return func(cfg *depsConfig) { cfg.goos = goos }
 }
@@ -68,7 +69,7 @@ func (c depsConfig) lane() string {
 		parts = append(parts, "-tags "+strings.Join(c.tags, ","))
 	}
 	if c.goos != "" {
-		parts = append(parts, "GOOS="+c.goos)
+		parts = append(parts, "GOOS="+c.goos+" CGO_ENABLED=0")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -107,7 +108,7 @@ var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
 	cmd := exec.Command("go", append(args, pkg)...)
 	cmd.Dir = cfg.dir
 	if cfg.goos != "" {
-		cmd.Env = append(os.Environ(), "GOOS="+cfg.goos)
+		cmd.Env = append(os.Environ(), "GOOS="+cfg.goos, "CGO_ENABLED=0")
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
