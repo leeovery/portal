@@ -138,9 +138,8 @@ interactive form.
 A command to run in a freshly minted session is scoped with -e/--exec or after a
 -- separator; command scoping applies to mint outcomes only, never to an attach.
 
-Passing two or more targets (or one glob that expands to several sessions) opens a
-portal to each: this terminal becomes the first surface and the remaining N−1 open
-in host-terminal windows.`,
+Opening two or more targets at once, each in a window of its own (or one glob that
+expands to several sessions), isn't available yet, and is refused.`,
 	Args: validateOpenArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, destination, err := parseCommandArgs(cmd, args)
