@@ -48,7 +48,7 @@ func TestFake(t *testing.T) {
 		f := backendtest.New()
 		f.Now = func() time.Time { return at }
 
-		if err := f.Create(t.Context(), "work", "/srv", []string{"sh", "-c", "sleep 1"}); err != nil {
+		if _, err := f.Create(t.Context(), "work", "/srv", []string{"sh", "-c", "sleep 1"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		s, ok := f.Session("work")
@@ -67,7 +67,7 @@ func TestFake(t *testing.T) {
 		f := backendtest.New()
 		command := []string{"sh", "-c", "echo it's", ""}
 
-		if err := f.Create(t.Context(), "quoted", "/srv", command); err != nil {
+		if _, err := f.Create(t.Context(), "quoted", "/srv", command); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if s, _ := f.Session("quoted"); s.Command != zmx.DisplayCommand(command) {
@@ -87,7 +87,7 @@ func TestFake(t *testing.T) {
 		}
 		f := backendtest.New()
 
-		if err := f.Create(t.Context(), "linked", link, nil); err != nil {
+		if _, err := f.Create(t.Context(), "linked", link, nil); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if s, _ := f.Session("linked"); s.Dir != want {
@@ -105,7 +105,7 @@ func TestFake(t *testing.T) {
 		if got := names(t, f); !reflect.DeepEqual(got, []string{"b"}) {
 			t.Errorf("after Kill, List names = %v, want [b]", got)
 		}
-		_ = f.Create(t.Context(), "a", "/", nil)
+		_, _ = f.Create(t.Context(), "a", "/", nil)
 		if got, err := f.History(t.Context(), "a", 0); !errors.Is(err, backend.ErrHistoryUnavailable) {
 			t.Errorf("a recreated session's History = %q, %v; want ErrHistoryUnavailable", got, err)
 		}
@@ -212,7 +212,7 @@ func TestFake(t *testing.T) {
 		f := backendtest.New()
 		f.Validate = func(string) error { return refusal }
 
-		if err := f.Create(t.Context(), "x", "/", nil); !errors.Is(err, refusal) {
+		if _, err := f.Create(t.Context(), "x", "/", nil); !errors.Is(err, refusal) {
 			t.Errorf("Create = %v, want Validate's refusal", err)
 		}
 		if _, ok := f.Session("x"); ok {
@@ -234,7 +234,7 @@ func TestFake(t *testing.T) {
 		if _, err := f.Exists(ctx, "a"); !errors.Is(err, boom) {
 			t.Errorf("Exists = %v, want boom", err)
 		}
-		if err := f.Create(ctx, "b", "/", nil); !errors.Is(err, boom) {
+		if _, err := f.Create(ctx, "b", "/", nil); !errors.Is(err, boom) {
 			t.Errorf("Create = %v, want boom", err)
 		}
 		if _, err := f.AttachCommand(ctx, "a"); !errors.Is(err, boom) {
@@ -278,7 +278,7 @@ func TestFake(t *testing.T) {
 		ctx := t.Context()
 
 		_, _ = f.List(ctx)
-		_ = f.Create(ctx, "b", "/srv", []string{"sh"})
+		_, _ = f.Create(ctx, "b", "/srv", []string{"sh"})
 		cmd, err := f.AttachCommand(ctx, "b")
 		if err != nil {
 			t.Fatalf("AttachCommand: %v", err)

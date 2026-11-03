@@ -2,6 +2,7 @@ package sessionindex
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ type change struct {
 	op      string
 	session string
 	value   string
+	// detail says what the change dropped, empty when it dropped nothing.
+	detail string
 }
 
 // Lookup returns a copy of the entry named name. Changes go through Index's
@@ -87,6 +90,8 @@ func printable(label string) bool {
 // same creation keeps its label and scrollback, taking dir only when it
 // records none; an entry from another creation, or with no time, belonged to
 // an earlier session and is replaced whole; a session with no entry gets one.
+// A replacement is its own change, replace, saying what it dropped, so the log
+// shows a label being discarded.
 func (idx *Index) Claim(name, dir string, created time.Time) {
 	fresh := Entry{Name: name, Dir: dir, CreatedAt: created}
 	i := idx.indexOf(name)
@@ -101,9 +106,28 @@ func (idx *Index) Claim(name, dir string, created time.Time) {
 	case idx.Sessions[i] == fresh:
 		return
 	default:
+		earlier := idx.Sessions[i]
 		idx.Sessions[i] = fresh
+		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
+		return
 	}
 	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
+}
+
+// dropped says what replacing an earlier creation's entry discards.
+func dropped(earlier Entry) string {
+	what := "an earlier creation's entry"
+	if !earlier.CreatedAt.IsZero() {
+		what += " (created " + earlier.CreatedAt.UTC().Format(time.RFC3339) + ")"
+	}
+	label, scrollback := earlier.Label, earlier.ScrollbackFile
+	if label == "" {
+		label = "none"
+	}
+	if scrollback == "" {
+		scrollback = "none"
+	}
+	return fmt.Sprintf("dropped %s, its label %q and its scrollback %q", what, label, scrollback)
 }
 
 // sameCreation reports whether an entry created at recorded is the session

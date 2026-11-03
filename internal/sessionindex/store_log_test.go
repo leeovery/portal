@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,30 @@ func TestUpdate_Logging(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a claim replacing an earlier creation's entry logs replace, naming the label and scrollback it dropped", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old work","dir":"/old","created_at":"2026-11-02T08:00:00Z","scrollback_file":"scrollback/a.bin"}]}`)
+		sink := logtest.Install(t)
+
+		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Claim("a", "/a", time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+			return nil
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		rec := sink.Records().Matching("sessions", "replace").Only(t, "replace record")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "replace", Component: "sessions", Op: "replace", Via: "cli"})
+		detail := rec.AttrString(t, "detail")
+		for _, want := range []string{"earlier creation", "2026-11-02T08:00:00Z", `"Old work"`, `"scrollback/a.bin"`} {
+			if !strings.Contains(detail, want) {
+				t.Errorf("detail = %q, want it to name %s", detail, want)
+			}
+		}
+		if n := len(sink.Records().Matching("sessions", "claim")); n != 0 {
+			t.Errorf("claim records = %d, want the replacement logged as replace alone", n)
+		}
+	})
 
 	t.Run("a change fn rolls back logs nothing", func(t *testing.T) {
 		dir := t.TempDir()

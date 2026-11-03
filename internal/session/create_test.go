@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
@@ -20,7 +21,7 @@ import (
 func TestShellCommand(t *testing.T) {
 	t.Run("it runs the joined words in the interactive shell, then re-execs it", func(t *testing.T) {
 		got := session.ShellCommand([]string{"claude", "--resume", "|", "tee", "'log'"}, "/bin/zsh")
-		want := []string{"/bin/zsh", "-ic", `claude --resume | tee 'log'; exec '/bin/zsh'`}
+		want := []string{"/bin/zsh", "-ic", "claude --resume | tee 'log'\nexec '/bin/zsh'"}
 		if !slices.Equal(got, want) {
 			t.Errorf("ShellCommand = %q, want %q", got, want)
 		}
@@ -41,19 +42,40 @@ func TestShellCommand(t *testing.T) {
 	} {
 		t.Run("a shell path holding "+name+" runs the command and re-execs that same shell", func(t *testing.T) {
 			shell := stageFakeShell(t, filepath.Join(t.TempDir(), dir))
-			argv := session.ShellCommand([]string{"echo", "cmd-ran"}, shell)
-
-			var stdout, stderr bytes.Buffer
-			run := exec.Command(argv[0], argv[1:]...)
-			run.Stdout, run.Stderr = &stdout, &stderr
-			if err := run.Run(); err != nil {
-				t.Fatalf("running %q: %v (stderr %q)", argv, err, stderr.String())
-			}
-			if want := fmt.Sprintf("flag=-ic\ncmd-ran\nreexec=%s\n", shell); stdout.String() != want {
-				t.Errorf("running %q printed %q, want %q", argv, stdout.String(), want)
+			if got, want := runShellCommand(t, []string{"echo", "cmd-ran"}, shell), fmt.Sprintf("flag=-ic\ncmd-ran\nreexec=%s\n", shell); got != want {
+				t.Errorf("printed %q, want %q", got, want)
 			}
 		})
 	}
+
+	for name, command := range map[string][]string{
+		"ends in &":            {"true &"},
+		"ends in a comment":    {"echo cmd-ran # note"},
+		"ends in a newline":    {"echo cmd-ran\n"},
+		"spans lines":          {"echo one\necho two"},
+		"is words ending in &": {"sleep", "0", "&"},
+	} {
+		t.Run("a command that "+name+" still reaches the re-exec", func(t *testing.T) {
+			shell := stageFakeShell(t, t.TempDir())
+			if got := runShellCommand(t, command, shell); !strings.HasSuffix(got, "reexec="+shell+"\n") {
+				t.Errorf("printed %q, want it to end in the shell's re-exec", got)
+			}
+		})
+	}
+}
+
+// runShellCommand runs ShellCommand's argv for command and returns what it
+// printed.
+func runShellCommand(t *testing.T, command []string, shell string) string {
+	t.Helper()
+	argv := session.ShellCommand(command, shell)
+	var stdout, stderr bytes.Buffer
+	run := exec.Command(argv[0], argv[1:]...)
+	run.Stdout, run.Stderr = &stdout, &stderr
+	if err := run.Run(); err != nil {
+		t.Fatalf("running %q: %v (stderr %q)", argv, err, stderr.String())
+	}
+	return stdout.String()
 }
 
 // stageFakeShell writes a stand-in for the user's shell in dir. Given
@@ -161,8 +183,8 @@ func TestSessionCreator_Create(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if want := (session.Created{Name: "portal-abc123", Dir: root}); got != want {
-			t.Errorf("Create = %+v, want %+v", got, want)
+		if got.Name != "portal-abc123" || got.Dir != root {
+			t.Errorf("Create = %+v, want portal-abc123 at %s", got, root)
 		}
 		calls := fake.CallsTo(backendtest.OpCreate)
 		if len(calls) != 1 || calls[0].Name != "portal-abc123" || calls[0].Dir != root || calls[0].Command != nil {
@@ -285,6 +307,39 @@ func TestSessionCreator_Create(t *testing.T) {
 		}
 		if want := session.FallbackProject + "-abc123"; got.Name != want {
 			t.Errorf("name = %q, want %q", got.Name, want)
+		}
+	})
+
+	t.Run("it returns the created time the backend reports for the session", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "portal")
+		fake := backendtest.New()
+		at := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
+		fake.Now = func() time.Time { return at }
+		creator, _ := newCreator(t, root, fake, fixedID("abc123"))
+
+		got, err := creator.Create(ctx, root, nil)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if !got.At.Equal(at) {
+			t.Errorf("At = %v, want %v", got.At, at)
+		}
+		if n := len(fake.CallsTo(backendtest.OpList)); n != 0 {
+			t.Errorf("List was called %d times; the created time comes from Create", n)
+		}
+	})
+
+	t.Run("it runs commands in the shell $SHELL named at construction", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "portal")
+		fake := backendtest.New()
+		creator, _ := newCreator(t, root, fake, fixedID("abc123"))
+		t.Setenv("SHELL", "/bin/bash")
+
+		if _, err := creator.Create(ctx, root, []string{"claude"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if calls := fake.CallsTo(backendtest.OpCreate); len(calls) != 1 || calls[0].Command[0] != "/bin/zsh" {
+			t.Errorf("Create calls = %+v, want the command under /bin/zsh, $SHELL when the creator was made", calls)
 		}
 	})
 

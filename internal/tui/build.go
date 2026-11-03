@@ -46,6 +46,9 @@ type Deps struct {
 	SpawnExe      spawn.ExecutableResolver
 	SpawnGetenv   func(string) string
 	SpawnLogger   *slog.Logger
+	// MultiWindowRefusal, when set, is the flash `m` shows instead of entering
+	// multi-select: opening several sessions at once is not available.
+	MultiWindowRefusal string
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -172,6 +175,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithSpawnExe(deps.SpawnExe))
 	opts = append(opts, WithSpawnGetenv(deps.SpawnGetenv))
 	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
+	opts = append(opts, WithMultiWindowRefusal(deps.MultiWindowRefusal))
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.

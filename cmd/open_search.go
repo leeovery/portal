@@ -7,7 +7,6 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/sessionindex"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -237,24 +236,4 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 		return openSessionFunc(cmd, name)
 	}
 	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
-}
-
-// currentSessionReader names the session the caller is attached to.
-type currentSessionReader interface {
-	CurrentSessionName() (string, error)
-}
-
-// currentPickerSession returns the tmux session the caller is attached to, and
-// the empty string outside tmux or when the read fails or answers empty. Only
-// completion reads it, until completion moves to the backend; open's current
-// session is the backend's Current.
-func currentPickerSession(src currentSessionReader) string {
-	if !tmux.InsideTmux() {
-		return ""
-	}
-	current, err := src.CurrentSessionName()
-	if err != nil {
-		return ""
-	}
-	return current
 }

@@ -73,6 +73,9 @@ func (c attachConnector) Connect(name string) error {
 	if err != nil {
 		return err
 	}
+	if len(command.Argv) == 0 {
+		return fmt.Errorf("attach session %q: the backend gave no command to run", name)
+	}
 	logExecHandoff(command.Argv)
 	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }
@@ -465,38 +468,40 @@ func (p pickerSessionSource) ListPendingResumeSessions() (map[string]struct{}, e
 }
 
 type tuiConfig struct {
-	lister           tui.SessionLister
-	killer           tui.SessionKiller
-	renamer          tui.SessionRenamer
-	projectStore     tui.ProjectStore
-	projectEditor    tui.ProjectEditor
-	aliasEditor      tui.AliasEditor
-	sessionCreator   tui.SessionCreator
-	enumerator       tui.TmuxEnumerator
-	reader           tui.ScrollbackReader
-	previewAttacher  tui.PreviewAttacher
-	dirReader        session.PaneCurrentPathReader
-	dirRunner        resolver.CommandRunner
-	pendingReader    tui.PendingResumeReader
-	skeletonMarkers  tui.SkeletonMarkerReader
-	initialMode      prefs.SessionListMode
-	theme            theme.Nomination
-	themeKeys        theme.RawKeys
-	themeSource      tui.ThemeSource
-	modePersister    tui.ModePersister
-	themePersister   tui.ThemePersister
-	detector         tui.TerminalDetector
-	resolve          spawn.AdapterResolver
-	sessionExists    func(string) bool
-	ackChannel       spawn.AckChannelFull
-	spawnExe         spawn.ExecutableResolver
-	spawnGetenv      func(string) string
-	spawnLogger      *slog.Logger
-	cwd              string
-	currentSession   string
-	serverStarted    bool
-	progressReceiver tea.Cmd
-	noColor          bool
+	lister          tui.SessionLister
+	killer          tui.SessionKiller
+	renamer         tui.SessionRenamer
+	projectStore    tui.ProjectStore
+	projectEditor   tui.ProjectEditor
+	aliasEditor     tui.AliasEditor
+	sessionCreator  tui.SessionCreator
+	enumerator      tui.TmuxEnumerator
+	reader          tui.ScrollbackReader
+	previewAttacher tui.PreviewAttacher
+	dirReader       session.PaneCurrentPathReader
+	dirRunner       resolver.CommandRunner
+	pendingReader   tui.PendingResumeReader
+	skeletonMarkers tui.SkeletonMarkerReader
+	initialMode     prefs.SessionListMode
+	theme           theme.Nomination
+	themeKeys       theme.RawKeys
+	themeSource     tui.ThemeSource
+	modePersister   tui.ModePersister
+	themePersister  tui.ThemePersister
+	detector        tui.TerminalDetector
+	resolve         spawn.AdapterResolver
+	sessionExists   func(string) bool
+	ackChannel      spawn.AckChannelFull
+	spawnExe        spawn.ExecutableResolver
+	spawnGetenv     func(string) string
+	spawnLogger     *slog.Logger
+	// multiWindowRefusal turns the picker's multi-select off with this flash.
+	multiWindowRefusal string
+	cwd                string
+	currentSession     string
+	serverStarted      bool
+	progressReceiver   tea.Cmd
+	noColor            bool
 }
 
 // noColorEnabled honours the NO_COLOR convention: the variable must be present
@@ -573,6 +578,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnExe:           cfg.spawnExe,
 		SpawnGetenv:        cfg.spawnGetenv,
 		SpawnLogger:        cfg.spawnLogger,
+		MultiWindowRefusal: cfg.multiWindowRefusal,
 	}
 	if landing.search != nil {
 		deps.Search = landing.search
@@ -671,8 +677,6 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 
 	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
 
-	spawnSeams := buildProductionSpawnSeams(client)
-
 	sessionSource := pickerSessionSource{sessions: client, pending: client}
 
 	cfg := tuiConfig{
@@ -696,14 +700,10 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		themeSource:     newThemeSource(themeLoader),
 		cwd:             cwd,
 		serverStarted:   serverStarted,
-		detector:        spawnSeams.Detector,
-		resolve:         spawnSeams.Resolve,
-		sessionExists:   spawnSeams.Exists,
-		ackChannel:      spawnSeams.Ack,
-		spawnExe:        spawnSeams.Exe,
-		spawnGetenv:     spawnSeams.Getenv,
-		spawnLogger:     spawnSeams.Logger,
-		noColor:         noColorEnabled(),
+		// No spawn seams: multi-select refuses until the attach runner, as
+		// the CLI burst does, so nothing detects a terminal or opens windows.
+		multiWindowRefusal: errSeveralSessions.Error(),
+		noColor:            noColorEnabled(),
 	}
 	// On the concurrent route the channel owns the terminal BootstrapCompleteMsg;
 	// Init does not synthesize one.

@@ -44,6 +44,23 @@ func TestMultiSelectEnterMode(t *testing.T) {
 	}
 }
 
+func TestMultiSelectRefusedWhenMultiWindowIsOff(t *testing.T) {
+	m := NewModelWithSessions([]Session{{Name: "alpha"}, {Name: "bravo"}})
+	WithMultiWindowRefusal("not yet")(&m)
+
+	m = pressSession(t, m, pressM)
+
+	if m.MultiSelectActive() {
+		t.Error("m entered multi-select while multi-window opening is refused")
+	}
+	if m.flashText != "not yet" {
+		t.Errorf("flashText = %q, want the refusal", m.flashText)
+	}
+	if m.detectDispatched {
+		t.Error("the refusal dispatched terminal detection")
+	}
+}
+
 func TestMultiSelectToggleIdempotent(t *testing.T) {
 	m := NewModelWithSessions([]Session{
 		{Name: "alpha"},

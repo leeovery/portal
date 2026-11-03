@@ -13,10 +13,12 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -55,12 +57,17 @@ func (r *recordingExec) only(t *testing.T) execCall {
 type envBackend struct {
 	*backendtest.Fake
 	env []string
+	// emptyArgv breaks the attach command, as no driver should.
+	emptyArgv bool
 }
 
 func (b envBackend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	c, err := b.Fake.AttachCommand(ctx, name)
 	if err == nil {
 		c.Env = b.env
+	}
+	if b.emptyArgv {
+		c.Argv = nil
 	}
 	return c, err
 }
@@ -133,6 +140,18 @@ func TestOpenSession_ExecsTheBackendsAttachCommand(t *testing.T) {
 			t.Fatalf("openSession: %v", err)
 		}
 		assertAttached(t, rec, "api-x7Kd9a")
+	})
+
+	t.Run("an attach command with no argv is refused, execing nothing", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, emptyArgv: true}})
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err == nil {
+			t.Error("openSession = nil, want a refusal of the empty command")
+		}
+		if len(rec.calls) != 0 {
+			t.Errorf("execs = %+v, want none", rec.calls)
+		}
 	})
 
 	t.Run("an attach the backend refuses execs nothing", func(t *testing.T) {
@@ -241,7 +260,36 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("an index that cannot be written warns and the session still opens", func(t *testing.T) {
+	t.Run("a failed index write is warned of once, by the store, and the session still opens", func(t *testing.T) {
+		sink := logtest.Install(t)
+		fake, rec := stageAttach(t)
+		stateDir := stageMint(t, fake, at)
+		// Everything the write takes before the write itself is in place, so
+		// only the temp file sessions.json is written through can fail.
+		if _, err := state.EnsureDir(); err != nil {
+			t.Fatal(err)
+		}
+		lock, err := commitlock.Acquire(stateDir)
+		if err != nil {
+			t.Fatalf("seed commit lock: %v", err)
+		}
+		_ = lock.Close()
+		if err := os.Chmod(stateDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(stateDir, 0o700) })
+
+		if err := openPath(contextCommand(), t.TempDir(), nil); err != nil {
+			t.Fatalf("openPath = %v, want nil: the session exists whatever the index holds", err)
+		}
+		rec.only(t)
+		if n := len(sink.Records().AtOrAboveLevel(slog.LevelWarn)); n != 1 {
+			t.Errorf("WARN records = %d, want the store's one", n)
+		}
+		sink.Records().Matching("sessions", "claim").AtExactLevel(slog.LevelWarn).Only(t, "the store's failed-write warning")
+	})
+
+	t.Run("an index that cannot be locked warns and the session still opens", func(t *testing.T) {
 		sink := logtest.Install(t)
 		fake, rec := stageAttach(t)
 		stageMint(t, fake, at)

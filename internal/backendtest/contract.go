@@ -134,7 +134,8 @@ func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		s := newSubject(t)
 		s.Hold(t, "work", Answering)
 
-		assertExists(t, s.Backend().Create(t.Context(), "work", t.TempDir(), nil), "work")
+		_, err := s.Backend().Create(t.Context(), "work", t.TempDir(), nil)
+		assertExists(t, err, "work")
 	})
 
 	t.Run("it ends on Kill, freeing its name", func(t *testing.T) {
@@ -190,7 +191,8 @@ func notAnsweringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 					t.Errorf("%s = %v, want ErrTimeout and not ErrNoSuchSession", op.name, err)
 				}
 			}
-			assertExists(t, b.Create(ctx, "wedged", t.TempDir(), nil), "wedged")
+			_, err := b.Create(ctx, "wedged", t.TempDir(), nil)
+			assertExists(t, err, "wedged")
 			if got := listed(t, b, "wedged"); got.Answered {
 				t.Errorf("wedged after the calls = %+v, want it still held, not answering", got)
 			}
@@ -244,7 +246,8 @@ func spellingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 
 			assertGone(t, ctx, b, spelling.asked)
 			assertHeldAs(t, ctx, b, spelling.asked, spelling.held)
-			assertExists(t, b.Create(ctx, spelling.asked, t.TempDir(), nil), spelling.held)
+			_, err := b.Create(ctx, spelling.asked, t.TempDir(), nil)
+			assertExists(t, err, spelling.held)
 			if exists, err := b.Exists(ctx, spelling.held); err != nil || !exists {
 				t.Errorf("Exists(%q) after the calls = %v, %v; want it still answering", spelling.held, exists, err)
 			}
@@ -322,7 +325,7 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			if err := b.ValidateName(name); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("ValidateName(%q) = %v, want ErrInvalidName", name, err)
 			}
-			if err := b.Create(t.Context(), name, t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+			if _, err := b.Create(t.Context(), name, t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)
 			}
 		}
@@ -342,7 +345,8 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 		b, ctx, dir := s.Backend(), t.Context(), t.TempDir()
 
-		if err := b.Create(ctx, "made", dir, []string{"sleep", "1000"}); err != nil {
+		made, err := b.Create(ctx, "made", dir, []string{"sleep", "1000"})
+		if err != nil {
 			t.Fatalf("Create = %v", err)
 		}
 
@@ -350,7 +354,11 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertListing(t, listed(t, b, "made"), backend.Session{Name: "made", Answered: true, Dir: real, Command: "sleep 1000"})
+		got := listed(t, b, "made")
+		assertListing(t, got, backend.Session{Name: "made", Answered: true, Dir: real, Command: "sleep 1000"})
+		if made.Clients, got.Clients = 0, 0; made != got {
+			t.Errorf("Create returned %+v, want the session as List reports it, %+v", made, got)
+		}
 		if exists, err := b.Exists(ctx, "made"); err != nil || !exists {
 			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
@@ -374,7 +382,7 @@ func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		if _, err := b.List(ctx); !errors.Is(err, cause) {
 			t.Errorf("List = %v, want the cause", err)
 		}
-		if err := b.Create(ctx, "new", t.TempDir(), nil); !errors.Is(err, cause) {
+		if _, err := b.Create(ctx, "new", t.TempDir(), nil); !errors.Is(err, cause) {
 			t.Errorf("Create = %v, want the cause", err)
 		}
 		if _, err := b.Exists(ctx, "work"); !errors.Is(err, cause) {
@@ -401,7 +409,7 @@ func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		if _, err := b.AttachCommand(ctx, "--labels"); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("AttachCommand(--labels) = %v, want ErrInvalidName", err)
 		}
-		if err := b.Create(ctx, "-x", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
+		if _, err := b.Create(ctx, "-x", t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("Create(-x) = %v, want ErrInvalidName", err)
 		}
 		if why := s.Lacks(FoldsCase); why == "" {
@@ -539,7 +547,7 @@ func assertInvalid(t *testing.T, ctx context.Context, b backend.Backend, names .
 				t.Errorf("%s(%q) = %v, want ErrInvalidName", op.name, name, err)
 			}
 		}
-		if err := b.Create(ctx, name, "/", nil); !errors.Is(err, backend.ErrInvalidName) {
+		if _, err := b.Create(ctx, name, "/", nil); !errors.Is(err, backend.ErrInvalidName) {
 			t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)
 		}
 	}
