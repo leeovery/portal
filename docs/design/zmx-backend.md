@@ -140,13 +140,13 @@ zmx doesn't list its clients, so the runners list themselves, taking the part tm
 
 ## Commands
 
-- **open:** the resolution chain is unchanged. Exact-name matches come from `List()`. Mints use `Create`, then the runner. Inside a session, it switches through the registry.
-- **picker:** rows from `List()` joined with the index. Grouping uses the index's dir, falling back to the session cwd. Kill, rename and preview as settled above.
-- **list, kill, completion, uninstall:** re-pointed to the backend. `uninstall` kills `_portal-saver`.
-- **hook set/rm/list:** the current session comes from `$ZMX_SESSION`.
+- **open:** the resolution chain is unchanged and matches session names, not labels. Exact-name matches come from `List()`. Mints use `Create` and record the session in the index (name, dir, created time), then the runner. A generated name always carries a project part, never a bare nanoid. Inside a session, it switches through the registry.
+- **picker:** rows from `List()` joined with the index. The filter and the search form match labels as well as names. Grouping uses the index's dir, falling back to the git root of the session's cwd. Kill, rename and preview as settled above; a kill also removes the session's index entry. A session that doesn't answer is listed dimmed and marked as not answering; opening or killing it flashes why. A failed kill or rename flashes and the picker stays open.
+- **list, kill, completion, uninstall:** re-pointed to the backend. `list` prints names; `--long` adds label, attached and dir. Completion offers names. `uninstall` kills `_portal-saver`.
+- **hook set/rm/list:** the current session comes from `$ZMX_SESSION`. `hook list` keeps its columns, with the session's label as the location. `--pane-key` keeps its name.
 - **doctor:** zmx present, the sessions whose daemons speak a protocol other than 1 named, saver up, daemon alive, state dir, stale hooks and projects, pending resumes, key config.
-- **current (new):** prints the current session's label. Works however the session was attached.
-- **rename (new):** `portal rename <text>` sets the current session's label; empty text resets it to the session name.
+- **current (new):** prints the current session's label. Works however the session was attached. Outside a session it prints nothing and exits 1.
+- **rename (new):** `portal rename <text>` sets the current session's label, its arguments joined with spaces; empty text resets it to the session name.
 - **spawn:** spawned windows run with `ZMX_SESSION` removed. Detection inside a session uses the registry.
 - **migrate (new):** see Migration.
 
@@ -184,7 +184,7 @@ Borrowed from Switchboard, which grew these out of Portal's harness.
 
 ## Phases
 
-1. Golden frames for today's screens. Backend interface, zmx driver and `zmxtest`. open, picker, list, kill, hook, current, rename and doctor on zmx. No save or restore yet.
+1. Golden frames for today's screens. Backend interface, zmx driver and `zmxtest`. open, picker, list, kill, completion, hook, current, rename and doctor on zmx. No save or restore yet. From this phase no command runs the tmux bootstrap; the version 1 `sessions.json` stop lands here as the dev build's safety net, and the concurrent bootstrap and loading page stay dormant until phase 3. Attaching execs `AttachCommand` directly until the runner. The multi-target burst and `m` refuse until phase 2. Doctor checks zmx, the protocol, the state dir, projects, the terminal and resume mode; its saver, daemon, hook and pending-resume checks return in phase 3, once hooks are keyed by session name.
 2. The attach runner and its registry: keys and key config, detach to picker, switching from inside a session, `m`.
 3. State v2, the saver, restore, resume and bootstrap.
 4. `portal migrate`.
