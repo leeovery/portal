@@ -224,3 +224,22 @@ func TestUpdateSessionIndex(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateSessionIndexMakesTheStateDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+		return idx.SetLabel("api-x7Kd9a", "api")
+	})
+	if err != nil {
+		t.Fatalf("updateSessionIndex with no state dir yet: %v", err)
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got := idx.Label("api-x7Kd9a"); got != "api" {
+		t.Errorf("label = %q, want %q", got, "api")
+	}
+}

@@ -43,10 +43,10 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 }
 
 // updateSessionIndex runs fn on the state directory's index under the commit
-// lock, writing it back when fn changed something. via is cli, tui or
-// internal.
+// lock, writing it back when fn changed something, and makes the directory
+// first: the lock lives in it. via is cli, tui or internal.
 func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
-	dir, err := state.Dir()
+	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
