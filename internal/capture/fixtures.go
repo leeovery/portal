@@ -62,6 +62,7 @@ type Fixture struct {
 	initialFlash        string
 	command             []string
 	history             string
+	historyFile         string
 	serverStarted       bool
 	loadingEvents       []tui.BootstrapProgressMsg
 	fatalEvent          tui.BootstrapFatalMsg
@@ -90,7 +91,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		ProjectStore:  f.projectStore,
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
-		History:       fakeHistory{content: f.history},
+		History:       fakeHistory{content: f.history, file: f.historyFile},
 		// DirReader/DirRunner stay nil, so the lazy pane-read fallback returns
 		// before reading anything and a fixture session carrying no recorded
 		// directory groups into the catch-all; ModePersister stays nil so an
@@ -187,6 +188,7 @@ func fixtureBuilders() []func() *Fixture {
 		themePanelMinHeightMessageFixture,
 		previewScreenFixture,
 		previewLongScrollbackFixture,
+		previewZmxHistoryFixture,
 		loadingScreenFixture,
 		loadingErrorFixture,
 	}
@@ -900,6 +902,15 @@ func previewLongScrollbackFixture() *Fixture {
 		fmt.Fprintf(&b, "%3d  build step %d complete\n", i, i)
 	}
 	fx.history = b.String()
+	return fx
+}
+
+// Drawn from zmx's own serialisation of a real session, so the frame shows the
+// preview's rendering of what zmx sends, not of what a fixture author typed.
+func previewZmxHistoryFixture() *Fixture {
+	fx := previewScreenFixture()
+	fx.name = "preview-zmx-history"
+	fx.historyFile = zmxHistoryFile()
 	return fx
 }
 

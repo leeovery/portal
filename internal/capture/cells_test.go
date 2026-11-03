@@ -21,7 +21,14 @@ type cell struct {
 	pen
 }
 
+// continuation is the glyph of the cell a wide glyph covers after its own, in
+// the wide glyph's pen, as a terminal draws it. No decoded rune is negative.
+const continuation rune = -1
+
 func (c cell) String() string {
+	if c.glyph == continuation {
+		return fmt.Sprintf("a wide glyph's second cell on %s", c.bg)
+	}
 	weight := ""
 	if c.bold {
 		weight = " bold"
@@ -41,15 +48,23 @@ type pen struct {
 	link   string
 }
 
-// colour is a cell's 24-bit colour, or none where the frame leaves it to the
-// terminal.
+// colour is a cell's 24-bit colour, or its palette index, or none where the
+// frame leaves it to the terminal. A palette colour is the terminal's own to
+// choose, so it is held as its index, never as an RGB it might show.
 type colour struct {
 	r, g, b uint8
 	painted bool
+	// palette marks index, not r, g and b, as the colour.
+	palette bool
+	index   uint8
 }
 
 func rgb(r, g, b uint8) colour {
 	return colour{r: r, g: g, b: b, painted: true}
+}
+
+func paletteColour(index uint8) colour {
+	return colour{index: index, palette: true, painted: true}
 }
 
 // colourOf is c as an SGR paints it, or unpainted where c is nil.
@@ -65,6 +80,9 @@ func colourOf(c color.Color) colour {
 func (c colour) String() string {
 	if !c.painted {
 		return "default"
+	}
+	if c.palette {
+		return fmt.Sprintf("palette %d", c.index)
 	}
 	return fmt.Sprintf("#%02X%02X%02X", c.r, c.g, c.b)
 }
@@ -87,7 +105,9 @@ func (g grid) text() []string {
 	for i, row := range g {
 		var line strings.Builder
 		for _, c := range row {
-			line.WriteRune(c.glyph)
+			if c.glyph != continuation {
+				line.WriteRune(c.glyph)
+			}
 		}
 		lines[i] = strings.TrimRight(line.String(), " ")
 	}
@@ -97,11 +117,12 @@ func (g grid) text() []string {
 // parse reads a frame's ANSI into its cells as a terminal draws them, one glyph
 // a cell, each in the pen its SGR left set, carried from one cell to the next
 // and across lines until reset, and in the OSC 8 hyperlink open over it until
-// closed. A newline ends a row, and the frame's last may end in one or not.
-// Anything else, an escape that is neither SGR nor a hyperlink, an SGR
-// attribute but bold, a colour that isn't 24-bit, a control character or a
-// glyph not one cell wide, is an error, rather than read otherwise than a
-// terminal shows it.
+// closed. A glyph two cells wide, by the width rule frames are drawn with,
+// covers the cell after it too. A newline ends a row, and the frame's last may
+// end in one or not. Anything else, an escape that is neither SGR nor a
+// hyperlink, an SGR attribute but bold, a colour neither 24-bit nor a palette
+// index, a control character or a glyph neither one cell wide nor two, is an
+// error, rather than read otherwise than a terminal shows it.
 func parse(frame string) (grid, error) {
 	g := grid{nil}
 	var p pen
@@ -117,10 +138,12 @@ func parse(frame string) (grid, error) {
 			err = errors.New("not UTF-8")
 		case r < ' ' || r == '\x7f':
 			err = fmt.Errorf("control character %q", r)
-		case ansi.StringWidth(string(r)) != 1:
-			err = fmt.Errorf("%q is %d cells wide, where a cell is one", r, ansi.StringWidth(string(r)))
-		default:
+		case ansi.StringWidth(string(r)) == 1:
 			g[len(g)-1] = append(g[len(g)-1], cell{glyph: r, pen: p})
+		case ansi.StringWidth(string(r)) == 2:
+			g[len(g)-1] = append(g[len(g)-1], cell{glyph: r, pen: p}, cell{glyph: continuation, pen: p})
+		default:
+			err = fmt.Errorf("%q is %d cells wide, where a glyph takes one or two", r, ansi.StringWidth(string(r)))
 		}
 		if err != nil {
 			return nil, fmt.Errorf("row %d, column %d: %w", len(g), len(g[len(g)-1])+1, err)
@@ -201,7 +224,7 @@ func (p *pen) set(params string) error {
 		case 49:
 			p.bg = colour{}
 		case 38, 48:
-			c, err := truecolour(codes[i+1:])
+			c, used, err := extendedColour(codes[i+1:])
 			if err != nil {
 				return fmt.Errorf("SGR %q: %w", params, err)
 			}
@@ -210,7 +233,7 @@ func (p *pen) set(params string) error {
 			} else {
 				p.bg = c
 			}
-			i += 4
+			i += used
 		default:
 			return fmt.Errorf("SGR %q: attribute %d isn't read", params, n)
 		}
@@ -230,24 +253,40 @@ func attribute(code string) (int, error) {
 	return n, nil
 }
 
-// errColour is a colour SGR gives otherwise than in 24 bits.
-var errColour = errors.New("its colour isn't 24-bit")
+// errColour is a colour SGR gives otherwise than in 24 bits or as a palette
+// index.
+var errColour = errors.New("its colour is neither 24-bit nor a palette index")
 
-// truecolour is the colour the SGR parameters after 38 or 48 give: 2, then its
-// red, green and blue.
-func truecolour(codes []string) (colour, error) {
-	if len(codes) < 4 || codes[0] != "2" {
-		return colour{}, errColour
-	}
-	var channels [3]uint8
-	for i, code := range codes[1:4] {
-		n, err := strconv.ParseUint(code, 10, 8)
-		if err != nil {
-			return colour{}, errColour
+// extendedColour is the colour the SGR parameters after 38 or 48 give, and how
+// many of them it takes: 2, then its red, green and blue, or 5, then its
+// palette index. The 30–37 and 90–97 forms aren't read: on a terminal that
+// shows bold as bright, bold 31 is not bold 38;5;1.
+func extendedColour(codes []string) (colour, int, error) {
+	switch {
+	case len(codes) >= 4 && codes[0] == "2":
+		var channels [3]uint8
+		for i, code := range codes[1:4] {
+			n, err := channel(code)
+			if err != nil {
+				return colour{}, 0, err
+			}
+			channels[i] = n
 		}
-		channels[i] = uint8(n)
+		return rgb(channels[0], channels[1], channels[2]), 4, nil
+	case len(codes) >= 2 && codes[0] == "5":
+		n, err := channel(codes[1])
+		return paletteColour(n), 2, err
 	}
-	return rgb(channels[0], channels[1], channels[2]), nil
+	return colour{}, 0, errColour
+}
+
+// channel is an SGR colour's part: a channel, or a palette index, 0 to 255.
+func channel(code string) (uint8, error) {
+	n, err := strconv.ParseUint(code, 10, 8)
+	if err != nil {
+		return 0, errColour
+	}
+	return uint8(n), nil
 }
 
 // difference is a cell, at its row and column counted from 1, that a fixture
@@ -360,6 +399,23 @@ func TestParseReadsSGRAsATerminalDoes(t *testing.T) {
 			)},
 		},
 		{
+			name:  "a palette's colours, each held as its index",
+			frame: "\x1b[38;5;1;48;5;236mA\x1b[39mB\x1b[1;38;5;255;49mC",
+			want: grid{slices.Concat(
+				inked("A", pen{fg: paletteColour(1), bg: paletteColour(236)}), inked("B", pen{bg: paletteColour(236)}),
+				inked("C", pen{fg: paletteColour(255), bold: true}),
+			)},
+		},
+		{
+			name:  "a wide glyph covering the cell after it, in its pen",
+			frame: "A\x1b[48;2;11;12;20m世\x1b[0mB",
+			want: grid{slices.Concat(
+				inked("A", pen{}),
+				[]cell{{glyph: '世', pen: pen{bg: canvas}}, {glyph: continuation, pen: pen{bg: canvas}}},
+				inked("B", pen{}),
+			)},
+		},
+		{
 			name:  "a hyperlink with parameters, ended by ST",
 			frame: "\x1b]8;id=1;https://x.test\x1b\\A\x1b]8;;\x1b\\B",
 			want:  grid{slices.Concat(inked("A", pen{link: "https://x.test"}), inked("B", pen{}))},
@@ -385,9 +441,13 @@ func TestParseRefusesWhatItWouldReadOtherwiseThanATerminal(t *testing.T) {
 		{name: "faint", frame: "\x1b[2mA", want: `row 1, column 1: SGR "2": attribute 2 isn't read`},
 		{name: "underlined", frame: "AB\x1b[4mC", want: `row 1, column 3: SGR "4": attribute 4 isn't read`},
 		{name: "reversed", frame: "\x1b[7mA", want: "attribute 7 isn't read"},
-		{name: "a palette's colour", frame: "\x1b[38;5;1mA", want: "its colour isn't 24-bit"},
-		{name: "a colour cut short", frame: "\x1b[48;2;1;2mA", want: "its colour isn't 24-bit"},
-		{name: "a channel past 255", frame: "\x1b[38;2;1;2;256mA", want: "its colour isn't 24-bit"},
+		{name: "a basic colour", frame: "\x1b[31mA", want: `SGR "31": attribute 31 isn't read`},
+		{name: "a bright colour", frame: "\x1b[102mA", want: "attribute 102 isn't read"},
+		{name: "a colour cut short", frame: "\x1b[48;2;1;2mA", want: "neither 24-bit nor a palette index"},
+		{name: "a channel past 255", frame: "\x1b[38;2;1;2;256mA", want: "neither 24-bit nor a palette index"},
+		{name: "a palette colour with no index", frame: "\x1b[38;5mA", want: "neither 24-bit nor a palette index"},
+		{name: "a palette index past 255", frame: "\x1b[48;5;256mA", want: "neither 24-bit nor a palette index"},
+		{name: "a colour of another space", frame: "\x1b[38;3;1;2;3mA", want: "neither 24-bit nor a palette index"},
 		{name: "a colour's parts apart by colons", frame: "\x1b[38:2::1:2:3mA", want: `parameter "38:2::1:2:3" isn't a number`},
 		{name: "an escape that isn't SGR", frame: "A\n\x1b[2JB", want: `row 2, column 1: escape "\x1b[2J" isn't SGR`},
 		{name: "a window title", frame: "\x1b]0;x\aA", want: `escape "\x1b]" isn't SGR`},
@@ -397,7 +457,7 @@ func TestParseRefusesWhatItWouldReadOtherwiseThanATerminal(t *testing.T) {
 		{name: "an escape never ended", frame: "A\x1b[1", want: "never ends"},
 		{name: "a tab", frame: "A\tB", want: `row 1, column 2: control character '\t'`},
 		{name: "a carriage return", frame: "A\r\nB", want: `control character '\r'`},
-		{name: "a wide glyph", frame: "A世", want: "row 1, column 2: '世' is 2 cells wide, where a cell is one"},
+		{name: "a combining mark", frame: "e\u0301", want: "row 1, column 2: '\u0301' is 0 cells wide, where a glyph takes one or two"},
 		{name: "bytes that aren't UTF-8", frame: "A\xff", want: "not UTF-8"},
 	}
 	for _, tt := range tests {
@@ -434,6 +494,7 @@ func TestCompareHoldsEachCellToItsFrame(t *testing.T) {
 		{name: "a blank's foreground and weight", change: func(g grid) { g[0][2].fg = rgb(9, 9, 9); g[1][2].bold = true }},
 		{name: "a blank's background", change: func(g grid) { g[0][2].bg = rgb(9, 9, 9) }, want: [][2]int{{1, 3}}},
 		{name: "a glyph linked", change: func(g grid) { g[0][3].link = "https://x.test" }, want: [][2]int{{1, 4}}},
+		{name: "a foreground the palette's", change: func(g grid) { g[0][3].fg = paletteColour(1) }, want: [][2]int{{1, 4}}},
 		{name: "a blank linked", change: func(g grid) { g[0][2].link = "https://x.test" }, want: [][2]int{{1, 3}}},
 	}
 	for _, tt := range tests {

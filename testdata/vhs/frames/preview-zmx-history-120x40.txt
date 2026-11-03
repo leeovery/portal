@@ -1,0 +1,40 @@
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │  ◉ preview tessera-proxy-Vb3kQw                                                                                  │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  scrollback 6                                                                                                    │
+  │  scrollback 7                                                                                                    │
+  │  scrollback 8                                                                                                    │
+  │  scrollback 9                                                                                                    │
+  │  scrollback 10                                                                                                   │
+  │  scrollback 11                                                                                                   │
+  │  scrollback 12                                                                                                   │
+  │  scrollback 13                                                                                                   │
+  │  scrollback 14                                                                                                   │
+  │  scrollback 15                                                                                                   │
+  │  scrollback 16                                                                                                   │
+  │  scrollback 17                                                                                                   │
+  │  scrollback 18                                                                                                   │
+  │  scrollback 19                                                                                                   │
+  │  scrollback 20                                                                                                   │
+  │  scrollback 21                                                                                                   │
+  │  scrollback 22                                                                                                   │
+  │  scrollback 23                                                                                                   │
+  │  scrollback 24                                                                                                   │
+  │  scrollback 25                                                                                                   │
+  │  scrollback 26                                                                                                   │
+  │  scrollback 27                                                                                                   │
+  │  scrollback 28                                                                                                   │
+  │  scrollback 29                                                                                                   │
+  │  scrollback 30                                                                                                   │
+  │  bold red truecolour                                                                                             │
+  │  gap     after-tab                                                                                               │
+  │  blue to the edge                                                                                                │
+  │  wide 中文 end                                                                                                   │
+  │  link text                                                                                                       │
+  │  erased                                                                                                          │
+  │  last row 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000  │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  ↑↓ session  ⏎ attach  ␣ back                                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+

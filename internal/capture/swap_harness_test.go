@@ -71,6 +71,9 @@ func capturedStates() []capturedStateWant {
 		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "kubectl rollout"}},
 		// The preview opens at the bottom of the buffer, so the top of it is off the frame.
 		{fixture: "preview-long-scrollback", present: []string{"tessera-proxy-Vb3kQw", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
+		// zmx's rows end at its cursor's CUP, so nothing it writes after them,
+		// the pending-wrap reprint or the cwd, is drawn.
+		{fixture: "preview-zmx-history", present: []string{"tessera-proxy-Vb3kQw", "gap     after-tab", "wide 中文 end", "last row 000"}, absent: []string{"(history unavailable)", "example-host"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
 		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to set @portal-restoring marker"}},
 	}
