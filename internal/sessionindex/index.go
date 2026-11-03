@@ -13,8 +13,8 @@ import (
 // ErrLabelUnprintable refuses a label that is not valid UTF-8 or holds a
 // control, format or line/paragraph-separator character: a newline, tab,
 // escape or bidi override would break or disguise the picker row and the
-// footers that print it.
-var ErrLabelUnprintable = errors.New("session label contains an unprintable character")
+// footers that print it. Its text is the refusal every surface shows.
+var ErrLabelUnprintable = errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
 
 type change struct {
 	op      string

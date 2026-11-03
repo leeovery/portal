@@ -10,14 +10,14 @@ import (
 
 type mutationRecorder struct {
 	killCalls     int
-	renameCalls   int
+	labelCalls    int
 	createCalls   int
 	historyCalls  int
 	listSessCalls int
 }
 
-func (r *mutationRecorder) KillSession(string) error        { r.killCalls++; return nil }
-func (r *mutationRecorder) RenameSession(_, _ string) error { r.renameCalls++; return nil }
+func (r *mutationRecorder) KillSession(string) error   { r.killCalls++; return nil }
+func (r *mutationRecorder) SetLabel(_, _ string) error { r.labelCalls++; return nil }
 func (r *mutationRecorder) CreateFromDir(string, []string) (string, error) {
 	r.createCalls++
 	return "", nil
@@ -34,7 +34,7 @@ func (r *mutationRecorder) ListSessions() ([]Session, error) {
 }
 
 func (r *mutationRecorder) totalMutations() int {
-	return r.killCalls + r.renameCalls + r.createCalls + r.historyCalls
+	return r.killCalls + r.labelCalls + r.createCalls + r.historyCalls
 }
 
 func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
@@ -44,7 +44,7 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 		WithServerStarted(true),
 		WithProgressReceiver(func() tea.Msg { return nil }),
 		WithKiller(rec),
-		WithRenamer(rec),
+		WithLabeller(rec),
 		WithSessionCreator(rec),
 		WithHistory(rec),
 	)
@@ -98,7 +98,7 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 	if got := rec.totalMutations(); got != 0 {
 		t.Errorf("inert-during-loading VIOLATED: %d mutating seam call(s) reached during loading "+
 			"(kill=%d rename=%d create=%d history=%d)",
-			got, rec.killCalls, rec.renameCalls, rec.createCalls, rec.historyCalls)
+			got, rec.killCalls, rec.labelCalls, rec.createCalls, rec.historyCalls)
 	}
 	if rec.listSessCalls != 0 {
 		t.Errorf("inert-during-loading: the loading-page key arm issued %d ListSessions call(s); "+

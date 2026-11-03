@@ -2,7 +2,7 @@
   P O R T A L ▌                                                                                        session manager
   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
-  ▌ ⚠ "-" isn't allowed at the start of a session name — tmux reads it as a command flag
+  ▌ ⚠ label refused: it holds a control or formatting character, such as a newline, tab or escape
 
   Sessions 12                                                                                              / to filter
 

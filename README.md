@@ -252,9 +252,9 @@ Register per-pane commands to bring back after a reboot. Under the shipped defau
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
-Hooks stay attached to a session even if you rename it, whether from the picker's `r` modal or an external `tmux rename-session`. A renamed session still brings its command back after the next reboot — as the panel under the shipped default, and as a fired command under `eager`.
+Hooks are keyed by the session's name, which never changes. Renaming a session sets its label, from the picker's `r` modal or `xctl rename` inside the session, and leaves the name alone, so a relabelled session still brings its command back after the next reboot — as the panel under the shipped default, and as a fired command under `eager`.
 
-Three kinds of name are refused, by the picker's `r` modal and by Portal's own rename alike, because tmux cannot address them afterwards through the exact-match target every per-session operation composes, or reads them as something other than a name: `":" isn't allowed in a session name — tmux reads it as a separator`, `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`, and `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`. The picker says exactly that and leaves the session under its old name; nothing is renamed, and a hook already registered against the pane is untouched.
+A label takes any printable text. Only a label holding a control or formatting character, such as a newline, tab or escape, is refused, by the picker's `r` modal and `xctl rename` alike: `label refused: it holds a control or formatting character, such as a newline, tab or escape`. The picker says exactly that and the session keeps its label; a hook registered against it is untouched. Empty text, or the session's own name, resets the label to the name.
 
 ```bash
 xctl hook set --on-resume "npm start"            # register a resume hook

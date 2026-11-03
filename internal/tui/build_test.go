@@ -15,9 +15,9 @@ type stubKiller struct{}
 
 func (stubKiller) KillSession(string) error { return nil }
 
-type stubRenamer struct{}
+type stubLabeller struct{}
 
-func (stubRenamer) RenameSession(string, string) error { return nil }
+func (stubLabeller) SetLabel(string, string) error { return nil }
 
 type stubCreator struct{}
 
@@ -30,7 +30,7 @@ func TestBuild(t *testing.T) {
 		m := tui.Build(tui.Deps{
 			Lister:      lister,
 			Killer:      stubKiller{},
-			Renamer:     stubRenamer{},
+			Labeller:    stubLabeller{},
 			Creator:     stubCreator{},
 			CWD:         "/home/user",
 			InitialMode: prefs.ModeByTag,

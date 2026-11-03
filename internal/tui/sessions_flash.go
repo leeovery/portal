@@ -1,12 +1,9 @@
 package tui
 
 import (
-	"errors"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // The zero value is flashWarning, so an unparameterised setFlash stays a warning.
@@ -45,24 +42,4 @@ func flashTickCmd(gen uint64) tea.Cmd {
 // library-emitted no-op key events; every real keystroke satisfies one condition.
 func isActionableKey(msg tea.KeyPressMsg) bool {
 	return msg.Code != 0 || msg.Text != ""
-}
-
-// The band's own voice for each rename refusal. None carries a ⚠ glyph — the
-// warning band prepends one.
-const (
-	renameSeparatorRefusedFlash  = `":" isn't allowed in a session name — tmux reads it as a separator`
-	renameIDPrefixRefusedFlash   = `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`
-	renameFlagPrefixRefusedFlash = `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`
-)
-
-// renameRefusalFlash picks the band's wording from the rule the validator
-// reported, so the refusal names the character the user actually typed.
-func renameRefusalFlash(err error) string {
-	if errors.Is(err, tmux.ErrSessionNameIDPrefix) {
-		return renameIDPrefixRefusedFlash
-	}
-	if errors.Is(err, tmux.ErrSessionNameFlagPrefix) {
-		return renameFlagPrefixRefusedFlash
-	}
-	return renameSeparatorRefusedFlash
 }

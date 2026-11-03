@@ -175,7 +175,7 @@ func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *te
 		{
 			name: "rename",
 			run: func(t *testing.T, m Model) Model {
-				m.sessionRenamer = &mockRenamerStub{}
+				m.sessionLabeller = &mockLabellerStub{}
 				m.sessionList.Select(0)
 				updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 				opened := updated.(Model)
@@ -211,9 +211,9 @@ func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *te
 	}
 }
 
-type mockRenamerStub struct{}
+type mockLabellerStub struct{}
 
-func (mockRenamerStub) RenameSession(string, string) error { return nil }
+func (mockLabellerStub) SetLabel(string, string) error { return nil }
 
 func TestSessionListLoad_DropsADotForASessionNoLongerPending(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
@@ -272,13 +272,10 @@ func TestSessionListLoad_NeverCarriesAPendingErrorIntoTheSessionListError(t *tes
 			lister := &stepListerStub{steps: [][]Session{pendingReadSessions}, err: tt.sessionErr}
 			reader := &pendingReaderStub{steps: [][]string{{"alpha"}}, err: pendingErr}
 			m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
-			m.sessionKiller = &killerStub{}
-			m.sessionRenamer = mockRenamerStub{}
 
 			for route, cmd := range map[string]tea.Cmd{
-				"fetch":  m.fetchSessionsCmd(),
-				"kill":   m.killAndRefresh("alpha"),
-				"rename": m.renameAndRefresh("alpha", "charlie"),
+				"fetch":      m.fetchSessionsCmd(),
+				"row action": m.actAndRefresh(func() error { return nil }),
 			} {
 				msg := cmd().(SessionsMsg)
 				if !errors.Is(msg.Err, tt.wantErr) || (tt.wantErr == nil && msg.Err != nil) {
@@ -296,13 +293,10 @@ func TestSessionListLoad_NeverCarriesAPendingErrorIntoTheSessionListError(t *tes
 func TestSessionListLoad_MarksNothingWhenTheSeamIsUnwired(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, nil)
-	m.sessionKiller = &killerStub{}
-	m.sessionRenamer = mockRenamerStub{}
 
 	for route, cmd := range map[string]tea.Cmd{
-		"fetch":  m.fetchSessionsCmd(),
-		"kill":   m.killAndRefresh("alpha"),
-		"rename": m.renameAndRefresh("alpha", "charlie"),
+		"fetch":      m.fetchSessionsCmd(),
+		"row action": m.actAndRefresh(func() error { return nil }),
 	} {
 		msg := cmd().(SessionsMsg)
 		if msg.Pending != nil || msg.Err != nil {

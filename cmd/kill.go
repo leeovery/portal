@@ -19,18 +19,19 @@ var killCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return killSession(cmd.Context(), b, args[0])
+		return killSession(cmd.Context(), b, args[0], "cli")
 	},
 }
 
 // killSession kills the session and removes its index entry. A session already
-// gone keeps no entry either; one that may still be running keeps its own.
-func killSession(ctx context.Context, b backend.Backend, name string) error {
+// gone keeps no entry either; one that may still be running keeps its own. via
+// is the surface asking, as updateSessionIndex records it.
+func killSession(ctx context.Context, b backend.Backend, name, via string) error {
 	killed := b.Kill(ctx, name)
 	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {
 		return killError(name, killed)
 	}
-	removed := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+	removed := updateSessionIndex(via, func(idx *sessionindex.Index) error {
 		idx.Remove(name)
 		return nil
 	})
@@ -58,6 +59,16 @@ func killError(name string, err error) error {
 		return fmt.Errorf("session %s is not answering; the kill may still land", name)
 	}
 	return err
+}
+
+// pickerKiller kills from the picker as portal kill does.
+type pickerKiller struct {
+	ctx context.Context
+	b   backend.Backend
+}
+
+func (k pickerKiller) KillSession(name string) error {
+	return killSession(k.ctx, k.b, name, "tui")
 }
 
 func init() {

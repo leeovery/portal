@@ -29,8 +29,8 @@ func TestKillKey_StoresName(t *testing.T) {
 	if got.modal != modalKillConfirm {
 		t.Fatalf("k must open the kill-confirm modal; modal = %v", got.modal)
 	}
-	if got.pendingKillName != "alpha" {
-		t.Errorf("pendingKillName = %q, want %q", got.pendingKillName, "alpha")
+	if got.pendingKill.Name != "alpha" {
+		t.Errorf("pendingKillName = %q, want %q", got.pendingKill.Name, "alpha")
 	}
 }
 
@@ -40,8 +40,8 @@ func TestKillConfirm_YConfirmsParity(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	afterK := updated.(Model)
-	if afterK.pendingKillName != "bravo" {
-		t.Fatalf("setup: expected bravo; got %q", afterK.pendingKillName)
+	if afterK.pendingKill.Name != "bravo" {
+		t.Fatalf("setup: expected bravo; got %q", afterK.pendingKill.Name)
 	}
 
 	updated2, cmd := afterK.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
@@ -50,8 +50,8 @@ func TestKillConfirm_YConfirmsParity(t *testing.T) {
 	if afterY.modal != modalNone {
 		t.Errorf("y must close the modal; modal = %v", afterY.modal)
 	}
-	if afterY.pendingKillName != "" {
-		t.Errorf("y must clear pendingKillName; got %q", afterY.pendingKillName)
+	if afterY.pendingKill.Name != "" {
+		t.Errorf("y must clear pendingKillName; got %q", afterY.pendingKill.Name)
 	}
 	if cmd == nil {
 		t.Fatalf("y must emit the killAndRefresh cmd; got nil")
@@ -78,8 +78,8 @@ func TestKillConfirm_EscCancelsClearsName(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("Esc must not emit a cmd (no kill); got non-nil")
 	}
-	if afterEsc.pendingKillName != "" {
-		t.Errorf("Esc must clear pendingKillName; got %q", afterEsc.pendingKillName)
+	if afterEsc.pendingKill.Name != "" {
+		t.Errorf("Esc must clear pendingKillName; got %q", afterEsc.pendingKill.Name)
 	}
 	if killer.killedName != "" {
 		t.Errorf("Esc must not kill anything; KillSession called with %q", killer.killedName)
@@ -102,8 +102,8 @@ func TestKillConfirm_NIgnored(t *testing.T) {
 	if cmd != nil {
 		t.Errorf("n must not emit a cmd; got non-nil")
 	}
-	if afterN.pendingKillName != "alpha" {
-		t.Errorf("n must not clear pendingKillName; got %q", afterN.pendingKillName)
+	if afterN.pendingKill.Name != "alpha" {
+		t.Errorf("n must not clear pendingKillName; got %q", afterN.pendingKill.Name)
 	}
 	if killer.killedName != "" {
 		t.Errorf("n must not kill anything; KillSession called with %q", killer.killedName)

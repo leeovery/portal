@@ -250,7 +250,7 @@ func TestSessionsFooter_OmittedKeysStillDispatchable(t *testing.T) {
 	})
 	t.Run("r still opens the rename modal", func(t *testing.T) {
 		m := NewModelWithSessions([]Session{{Name: "alpha"}})
-		m.sessionRenamer = keymapParityRenamer{}
+		m.sessionLabeller = keymapParityLabeller{}
 		updated, _ := m.updateSessionList(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if updated.(Model).modal != modalRename {
 			t.Errorf("r must still open the rename modal after the footer swap")

@@ -59,7 +59,7 @@ func newEntryModel(t *testing.T, e ThemeSource, o entryModelOpts) (Model, *fakeT
 	deps := Deps{
 		Lister:        fakeLister{},
 		Killer:        keymapParityKiller{},
-		Renamer:       keymapParityRenamer{},
+		Labeller:      keymapParityLabeller{},
 		Creator:       sessionsGuardCreator{},
 		ProjectStore:  projectsParityStore{},
 		ProjectEditor: stubTagsProjectEditor{},

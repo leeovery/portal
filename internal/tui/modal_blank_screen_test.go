@@ -11,7 +11,7 @@ import (
 
 func openKillModal(m *Model, name string) {
 	m.modal = modalKillConfirm
-	m.pendingKillName = name
+	m.pendingKill.Name = name
 }
 
 func TestModalBlankScreen_ClearsListRowsBehindModal(t *testing.T) {

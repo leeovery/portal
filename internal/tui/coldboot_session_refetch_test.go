@@ -464,7 +464,9 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 		fmt.Sprintf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave", len(want)))
 }
 
-func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
+// The interim list was shown, so a refetch that fails keeps it and flashes,
+// as any later listing does.
+func TestColdBoot_RefetchError_FlashesAndKeepsTheInterim(t *testing.T) {
 	stale := []Session{}
 	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
@@ -495,11 +497,19 @@ func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
 		t.Fatalf("setup invariant: interim page after transition must be PageSessions, got %v", interim.ActivePage())
 	}
 
-	_, cmd := interim.Update(SessionsMsg{Err: errors.New("tmux refetch failed")})
-	if cmd == nil {
-		t.Fatal("failing refetch SessionsMsg must return a quit command, got nil")
+	updated, cmd := interim.Update(SessionsMsg{Err: errors.New("zmx: listing timed out"), afterRestore: true})
+	got := updated.(Model)
+
+	if quits(cmd) {
+		t.Error("a failing refetch quit the picker after the interim list was shown")
 	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Errorf("failing refetch SessionsMsg must run tea.Quit (mirroring a failing Init fetch), got %T", cmd())
+	if got.ActivePage() != PageSessions {
+		t.Errorf("page = %v, want PageSessions", got.ActivePage())
+	}
+	if got.flashText != "zmx: listing timed out" {
+		t.Errorf("flash = %q, want the listing's own words", got.flashText)
+	}
+	if got.ListError() != nil {
+		t.Errorf("ListError() = %v, want nil once a listing answered", got.ListError())
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/capture"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -884,8 +885,8 @@ func TestFakeSeamsAreInert(t *testing.T) {
 	if err := d.Killer.KillSession("anything"); err != nil {
 		t.Errorf("Killer.KillSession returned %v, want nil (no-op)", err)
 	}
-	if err := d.Renamer.RenameSession("a", "b"); err != nil {
-		t.Errorf("Renamer.RenameSession returned %v, want nil (no-op)", err)
+	if err := d.Labeller.SetLabel("a", "b"); err != nil {
+		t.Errorf("Labeller.SetLabel returned %v, want nil (no-op)", err)
 	}
 	if _, err := d.Creator.CreateFromDir("/x", nil); err != nil {
 		t.Errorf("Creator.CreateFromDir returned %v, want nil (no-op)", err)
@@ -896,51 +897,24 @@ func TestFakeSeamsAreInert(t *testing.T) {
 	}
 }
 
-// The refusal wording is never seeded: the fixtures type into the real rename
+// The refusal wording is never seeded: the fixture types into the real rename
 // modal, so the frame carries whatever the production band composes.
-func TestSessionsRenameRefusedFixtures(t *testing.T) {
-	cases := []struct {
-		fixture string
-		flash   string
-	}{
-		{
-			fixture: "sessions-rename-refused-separator",
-			flash:   `":" isn't allowed in a session name — tmux reads it as a separator`,
-		},
-		{
-			fixture: "sessions-rename-refused-id-prefix",
-			flash:   `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`,
-		},
-		{
-			fixture: "sessions-rename-refused-flag-prefix",
-			flash:   `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`,
-		},
+func TestSessionsRenameRefusedLabelFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-rename-refused-label")
+	if err != nil {
+		t.Fatalf("FixtureByName: %v", err)
+	}
+	if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != "" {
+		t.Errorf("Deps().Capture.Flash = %q, want empty — the refusal must be typed, not seeded", got)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.fixture, func(t *testing.T) {
-			fx, err := capture.FixtureByName(tc.fixture)
-			if err != nil {
-				t.Fatalf("FixtureByName(%s): %v", tc.fixture, err)
-			}
-			if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != "" {
-				t.Errorf("Deps().Capture.Flash = %q, want empty — the refusal must be typed, not seeded", got)
-			}
-
-			m := fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
-			frame := ansi.Strip(m.View().Content)
-			if !strings.Contains(frame, tc.flash) {
-				t.Errorf("captured frame is missing the refusal %q:\n%s", tc.flash, frame)
-			}
-		})
+	m := fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
+	frame := ansi.Strip(m.View().Content)
+	if want := sessionindex.ErrLabelUnprintable.Error(); !strings.Contains(frame, want) {
+		t.Errorf("captured frame is missing the refusal %q:\n%s", want, frame)
 	}
-}
-
-func TestFixtureNamesIncludesRenameRefusals(t *testing.T) {
-	for _, want := range []string{"sessions-rename-refused-separator", "sessions-rename-refused-id-prefix", "sessions-rename-refused-flag-prefix"} {
-		if !slices.Contains(capture.FixtureNames(), want) {
-			t.Errorf("FixtureNames() %v does not include %s", capture.FixtureNames(), want)
-		}
+	if !strings.Contains(frame, "orchard-pipeline-code-based") || strings.Contains(frame, "Rename session") {
+		t.Errorf("want the rows back under the band with the modal closed:\n%s", frame)
 	}
 }
 

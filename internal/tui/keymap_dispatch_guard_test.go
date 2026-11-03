@@ -97,7 +97,7 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 		}},
 		"r": {press: tea.KeyPressMsg{Code: 'r', Text: "r"}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
-			m.sessionRenamer = keymapParityRenamer{}
+			m.sessionLabeller = keymapParityLabeller{}
 			m = pressSession(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 			return m.modal == modalRename
 		}},

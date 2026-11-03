@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -70,9 +71,14 @@ type fakeKiller struct{}
 
 func (fakeKiller) KillSession(string) error { return nil }
 
-type fakeRenamer struct{}
+// fakeLabeller refuses what the index refuses, on an index of its own that
+// nothing reads, and lands every other label nowhere.
+type fakeLabeller struct{}
 
-func (fakeRenamer) RenameSession(string, string) error { return nil }
+func (fakeLabeller) SetLabel(name, label string) error {
+	var idx sessionindex.Index
+	return idx.SetLabel(name, label)
+}
 
 type fakeCreator struct{}
 

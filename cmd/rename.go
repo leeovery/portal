@@ -11,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var errLabelRefused = errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
-
 var renameCmd = &cobra.Command{
 	Use:   "rename [text...]",
 	Short: "Set the current session's label; no text resets it to the session's name",
@@ -27,22 +25,24 @@ var renameCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		live, err := liveSession(cmd.Context(), b, name)
-		if err != nil {
-			return err
-		}
-		label := strings.Join(args, " ")
-		// The claim ties the label to this creation of the session, so a later
-		// session under the same name starts without it.
-		err = updateSessionIndex("cli", func(idx *sessionindex.Index) error {
-			idx.Claim(name, live.Dir, live.Created)
-			return idx.SetLabel(name, label)
-		})
-		if errors.Is(err, sessionindex.ErrLabelUnprintable) {
-			return errLabelRefused
-		}
-		return err
+		return setSessionLabel(cmd.Context(), b, name, strings.Join(args, " "), "cli")
 	},
+}
+
+// setSessionLabel labels the live session name; empty text, or the name
+// itself, resets the label to the name. via is the surface asking, as
+// updateSessionIndex records it.
+func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via string) error {
+	live, err := liveSession(ctx, b, name)
+	if err != nil {
+		return err
+	}
+	// The claim ties the label to this creation of the session, so a later
+	// session under the same name starts without it.
+	return updateSessionIndex(via, func(idx *sessionindex.Index) error {
+		idx.Claim(name, live.Dir, live.Created)
+		return idx.SetLabel(name, label)
+	})
 }
 
 // liveSession reads the session rename labels. One that does not answer is
@@ -54,6 +54,16 @@ func liveSession(ctx context.Context, b backend.Backend, name string) (backend.S
 		return backend.Session{}, fmt.Errorf("session %s is not answering; its label is unchanged", name)
 	}
 	return s, err
+}
+
+// pickerLabeller labels from the picker as portal rename does.
+type pickerLabeller struct {
+	ctx context.Context
+	b   backend.Backend
+}
+
+func (l pickerLabeller) SetLabel(name, label string) error {
+	return setSessionLabel(l.ctx, l.b, name, label, "tui")
 }
 
 func init() {

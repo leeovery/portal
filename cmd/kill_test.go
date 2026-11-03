@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
@@ -178,5 +180,41 @@ func TestKillCommand(t *testing.T) {
 		if calls := fake.Calls(); len(calls) != 0 {
 			t.Errorf("backend calls = %+v, want none", calls)
 		}
+	})
+}
+
+func TestPickerKiller(t *testing.T) {
+	t.Run("it kills as portal kill does, removing the index entry via the tui", func(t *testing.T) {
+		sink := logtest.Install(t)
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"}, backend.Session{Name: "web-Qm3pLz"})
+		dir := stageKill(t, fake, "api-x7Kd9a", "web-Qm3pLz")
+
+		if err := (pickerKiller{ctx: context.Background(), b: fake}).KillSession("api-x7Kd9a"); err != nil {
+			t.Fatalf("KillSession: %v", err)
+		}
+
+		if _, held := fake.Held("api-x7Kd9a"); held {
+			t.Error("the backend still holds the killed session")
+		}
+		assertIndexed(t, dir, "api-x7Kd9a", false)
+		assertIndexed(t, dir, "web-Qm3pLz", true)
+		r := sink.Records().Matching("sessions", "rm").Only(t, "index removal record")
+		if got := r.AttrString(t, "via"); got != "tui" {
+			t.Errorf("via = %q, want tui", got)
+		}
+	})
+
+	t.Run("it words a refusal as portal kill does, keeping the entry", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "wedged-Lp4s"})
+		fake.StopAnswering("wedged-Lp4s")
+		dir := stageKill(t, fake, "wedged-Lp4s")
+
+		err := (pickerKiller{ctx: context.Background(), b: fake}).KillSession("wedged-Lp4s")
+
+		want := "session wedged-Lp4s is not answering; the kill may still land"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		assertIndexed(t, dir, "wedged-Lp4s", true)
 	})
 }

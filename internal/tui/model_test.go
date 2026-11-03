@@ -1261,60 +1261,6 @@ func TestKillSession(t *testing.T) {
 		}
 	})
 
-	t.Run("kill error returns error in SessionsMsg", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
-		lister := &mockSessionLister{sessions: sessions}
-		m := tui.New(lister, tui.WithKiller(killer))
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-		_, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-
-		if cmd == nil {
-			t.Fatal("expected command from kill confirmation, got nil")
-		}
-
-		msg := cmd()
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
-		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
-		}
-		if sessionsMsg.Err == nil {
-			t.Fatal("expected error in SessionsMsg when kill fails, got nil")
-		}
-		if sessionsMsg.Err.Error() != "failed to kill session 'alpha': session not found" {
-			t.Errorf("unexpected error message: %q", sessionsMsg.Err.Error())
-		}
-	})
-
-	t.Run("kill error clears confirmation state via SessionsMsg", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
-		lister := &mockSessionLister{sessions: sessions}
-		m := tui.New(lister, tui.WithKiller(killer))
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-		model, cmd := model.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		view := model.View().Content
-		if strings.Contains(view, "Kill session?") {
-			t.Errorf("kill-confirm modal should be cleared after kill error, got:\n%s", view)
-		}
-	})
-
 	t.Run("killing last remaining session empties list", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "solo", Attached: false},
@@ -1465,171 +1411,90 @@ func TestSessionListHelpBar(t *testing.T) {
 	})
 }
 
-type mockSessionRenamer struct {
-	renamedOld string
-	renamedNew string
-	calls      int
-	err        error
+type mockSessionLabeller struct {
+	name  string
+	label string
+	calls int
+	err   error
 }
 
-func (m *mockSessionRenamer) RenameSession(oldName, newName string) error {
+func (m *mockSessionLabeller) SetLabel(name, label string) error {
 	m.calls++
-	m.renamedOld = oldName
-	m.renamedNew = newName
+	m.name = name
+	m.label = label
 	return m.err
 }
 
-func newModelWithRenamer(lister *mockSessionLister, killer *mockSessionKiller, renamer *mockSessionRenamer) tui.Model {
-	return tui.New(lister, tui.WithKiller(killer), tui.WithRenamer(renamer))
+func newModelWithLabeller(lister *mockSessionLister, labeller *mockSessionLabeller) tui.Model {
+	return tui.New(lister, tui.WithLabeller(labeller))
+}
+
+// submitLabel opens the rename modal on the first row, replaces its text with
+// text and submits it, returning the model and the command the submit gave.
+func submitLabel(t *testing.T, model tea.Model, text string) (tea.Model, tea.Cmd) {
+	t.Helper()
+	model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	for _, r := range text {
+		model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatalf("submitting %q gave no command", text)
+	}
+	return model, cmd
 }
 
 func TestRenameSession(t *testing.T) {
-	t.Run("r opens rename modal with pre-populated session name", func(t *testing.T) {
+	t.Run("enter labels the session by its name and refreshes the rows", func(t *testing.T) {
+		sessions := []tui.Session{
+			{Name: "alpha-Hq7wNe", Label: "api work"},
+			{Name: "bravo"},
+		}
+		labeller := &mockSessionLabeller{}
+		lister := &mockSessionLister{sessions: sessions}
+		var model tea.Model = newModelWithLabeller(lister, labeller)
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		model, cmd := submitLabel(t, model, "api · search")
+		lister.sessions = []tui.Session{{Name: "alpha-Hq7wNe", Label: "api · search"}, {Name: "bravo"}}
+		model, _ = model.Update(cmd())
+
+		if labeller.calls != 1 || labeller.name != "alpha-Hq7wNe" || labeller.label != "api · search" {
+			t.Errorf("SetLabel calls = %d, last (%q, %q); want one (%q, %q)", labeller.calls, labeller.name, labeller.label, "alpha-Hq7wNe", "api · search")
+		}
+		view := ansi.Strip(model.View().Content)
+		if !strings.Contains(view, "api · search") || strings.Contains(view, "Rename session") {
+			t.Errorf("want the refreshed row and no modal, got:\n%s", view)
+		}
+	})
+
+	t.Run("empty text and the name itself are handed over to clear the label", func(t *testing.T) {
+		for _, text := range []string{"", "alpha-Hq7wNe"} {
+			sessions := []tui.Session{{Name: "alpha-Hq7wNe", Label: "api work"}}
+			labeller := &mockSessionLabeller{}
+			var model tea.Model = newModelWithLabeller(&mockSessionLister{sessions: sessions}, labeller)
+			model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+			_, cmd := submitLabel(t, model, text)
+			cmd()
+
+			if labeller.calls != 1 || labeller.name != "alpha-Hq7wNe" || labeller.label != text {
+				t.Errorf("submitting %q: SetLabel calls = %d, last (%q, %q); want one (%q, %q)", text, labeller.calls, labeller.name, labeller.label, "alpha-Hq7wNe", text)
+			}
+		}
+	})
+
+	t.Run("Esc dismisses rename modal without labelling", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "alpha", Attached: false},
 			{Name: "bravo", Attached: false},
 		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
+		labeller := &mockSessionLabeller{}
+		var model tea.Model = newModelWithLabeller(&mockSessionLister{sessions: sessions}, labeller)
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
-		view := model.View().Content
-		if !strings.Contains(view, "Rename session") {
-			t.Errorf("expected the rename modal ('Rename session' header), got:\n%s", view)
-		}
-		if !strings.Contains(view, "NEW NAME") {
-			t.Errorf("expected the rename modal 'NEW NAME' field label, got:\n%s", view)
-		}
-		if !strings.ContainsAny(view, "─│╭╮╰╯") {
-			t.Errorf("rename modal should contain border characters, got:\n%s", view)
-		}
-		if !strings.Contains(view, "alpha") {
-			t.Errorf("expected pre-filled name 'alpha' in rename modal, got:\n%s", view)
-		}
-	})
-
-	t.Run("enter in rename modal renames session and refreshes", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-		for _, r := range "new-alpha" {
-			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		}
-
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("expected command from rename confirmation, got nil")
-		}
-
-		msg := cmd()
-		_, ok := msg.(tui.SessionsMsg)
-		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
-		}
-
-		if renamer.renamedOld != "alpha" {
-			t.Errorf("expected old name %q, got %q", "alpha", renamer.renamedOld)
-		}
-		if renamer.renamedNew != "new-alpha" {
-			t.Errorf("expected new name %q, got %q", "new-alpha", renamer.renamedNew)
-		}
-	})
-
-	t.Run("it reduces the in-TUI rename path to a single RenameSession with no hook re-keying", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-		for _, r := range "renamed-alpha" {
-			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		}
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-		if cmd == nil {
-			t.Fatal("expected command from rename confirmation, got nil")
-		}
-
-		msg := cmd()
-		if _, ok := msg.(tui.SessionsMsg); !ok {
-			t.Fatalf("expected SessionsMsg (list refresh) after rename, got %T", msg)
-		}
-
-		if renamer.calls != 1 {
-			t.Errorf("in-TUI rename should call RenameSession exactly once; got %d calls", renamer.calls)
-		}
-		if renamer.renamedOld != "alpha" || renamer.renamedNew != "renamed-alpha" {
-			t.Errorf("in-TUI rename should be RenameSession(%q, %q); got RenameSession(%q, %q)",
-				"alpha", "renamed-alpha", renamer.renamedOld, renamer.renamedNew)
-		}
-
-		var _ tui.SessionRenamer = renamer
-	})
-
-	t.Run("empty rename input is rejected on enter", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-
-		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd != nil {
-			t.Error("expected nil command for empty rename input")
-		}
-
-		if renamer.renamedOld != "" {
-			t.Errorf("rename should not have been called with empty input, but got old=%q", renamer.renamedOld)
-		}
-
-		view := model.View().Content
-		if !strings.Contains(view, "Rename session") {
-			t.Errorf("rename modal should stay open after empty enter, got:\n%s", view)
-		}
-	})
-
-	t.Run("Esc dismisses rename modal without renaming", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		view := model.View().Content
@@ -1639,79 +1504,14 @@ func TestRenameSession(t *testing.T) {
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
 		}
-		if renamer.renamedOld != "" {
-			t.Errorf("rename should not have been called, but got old=%q new=%q", renamer.renamedOld, renamer.renamedNew)
-		}
-	})
-
-	t.Run("rename to same name is allowed", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("expected command from same-name rename, got nil")
-		}
-
-		msg := cmd()
-		_, ok := msg.(tui.SessionsMsg)
-		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
-		}
-
-		if renamer.renamedOld != "alpha" {
-			t.Errorf("expected old name %q, got %q", "alpha", renamer.renamedOld)
-		}
-		if renamer.renamedNew != "alpha" {
-			t.Errorf("expected new name %q, got %q", "alpha", renamer.renamedNew)
-		}
-	})
-
-	t.Run("rename error triggers refresh", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-		}
-		renamer := &mockSessionRenamer{err: fmt.Errorf("duplicate session name")}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-		for _, r := range "bravo" {
-			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		}
-		_, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("expected command from rename, got nil")
-		}
-
-		msg := cmd()
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
-		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
-		}
-		if sessionsMsg.Err == nil {
-			t.Fatal("expected error in SessionsMsg when rename fails, got nil")
+		if labeller.calls != 0 {
+			t.Errorf("SetLabel calls = %d, want none", labeller.calls)
 		}
 	})
 
 	t.Run("r on empty list is no-op", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		renamer := &mockSessionRenamer{}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
+		var model tea.Model = newModelWithLabeller(lister, &mockSessionLabeller{})
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{}})
 
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
@@ -1722,7 +1522,7 @@ func TestRenameSession(t *testing.T) {
 		}
 	})
 
-	t.Run("r without renamer configured is no-op", func(t *testing.T) {
+	t.Run("r without labeller configured is no-op", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "alpha", Attached: false},
 		}
@@ -1733,45 +1533,7 @@ func TestRenameSession(t *testing.T) {
 
 		view := model.View().Content
 		if strings.Contains(view, "Rename session") {
-			t.Errorf("r with no renamer should be no-op, got:\n%s", view)
-		}
-	})
-
-	t.Run("session list refreshes after successful rename", func(t *testing.T) {
-		sessions := []tui.Session{
-			{Name: "alpha", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		renamedSessions := []tui.Session{
-			{Name: "alpha-renamed", Attached: false},
-			{Name: "bravo", Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-
-		model, _ = model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-		for _, r := range "alpha-renamed" {
-			model, _ = model.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		}
-
-		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-
-		lister.sessions = renamedSessions
-
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		view := model.View().Content
-		if !strings.Contains(view, "alpha-renamed") {
-			t.Errorf("expected renamed session 'alpha-renamed' in list, got:\n%s", view)
-		}
-		if strings.Contains(view, "Rename session") {
-			t.Errorf("rename modal should be dismissed after successful rename, got:\n%s", view)
+			t.Errorf("r with no labeller should be no-op, got:\n%s", view)
 		}
 	})
 }
@@ -2559,13 +2321,13 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("WithRenamer enables rename functionality", func(t *testing.T) {
+	t.Run("WithLabeller enables rename functionality", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "alpha", Attached: false},
 		}
-		renamer := &mockSessionRenamer{}
+		labeller := &mockSessionLabeller{}
 		lister := &mockSessionLister{sessions: sessions}
-		m := tui.New(lister, tui.WithRenamer(renamer))
+		m := tui.New(lister, tui.WithLabeller(labeller))
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
@@ -2601,7 +2363,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 			{Name: "alpha", Attached: false},
 		}
 		killer := &mockSessionKiller{}
-		renamer := &mockSessionRenamer{}
+		labeller := &mockSessionLabeller{}
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2612,7 +2374,7 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 
 		m := tui.New(lister,
 			tui.WithKiller(killer),
-			tui.WithRenamer(renamer),
+			tui.WithLabeller(labeller),
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 		)
@@ -3888,9 +3650,9 @@ func TestEscProgressiveBack(t *testing.T) {
 			{Name: "alpha", Attached: false},
 			{Name: "bravo", Attached: false},
 		}
-		renamer := &mockSessionRenamer{}
+		labeller := &mockSessionLabeller{}
 		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
+		m := newModelWithLabeller(lister, labeller)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
@@ -3915,8 +3677,8 @@ func TestEscProgressiveBack(t *testing.T) {
 			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
 		}
 
-		if renamer.renamedOld != "" {
-			t.Errorf("rename should not have been called, but got old=%q", renamer.renamedOld)
+		if labeller.calls != 0 {
+			t.Errorf("SetLabel should not have been called, but got %q", labeller.name)
 		}
 	})
 
@@ -4043,9 +3805,9 @@ func TestEscProgressiveBack(t *testing.T) {
 			t.Errorf("expected tea.QuitMsg from Ctrl+C during kill modal, got %T", msg)
 		}
 
-		renamer := &mockSessionRenamer{}
+		labeller := &mockSessionLabeller{}
 		lister2 := &mockSessionLister{sessions: sessions}
-		m4 := newModelWithRenamer(lister2, nil, renamer)
+		m4 := newModelWithLabeller(lister2, labeller)
 		model = m4
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 		model, _ = model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
@@ -4080,9 +3842,9 @@ func TestEscProgressiveBack(t *testing.T) {
 			{Name: "alpha", Attached: false},
 			{Name: "bravo", Attached: false},
 		}
-		renamer := &mockSessionRenamer{}
+		labeller := &mockSessionLabeller{}
 		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
+		m := newModelWithLabeller(lister, labeller)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 

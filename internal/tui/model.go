@@ -22,7 +22,6 @@ import (
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type page int
@@ -47,6 +46,7 @@ type ProjectStore interface {
 	Remove(path, via string) error
 }
 
+// SessionKiller kills the session named name. Its error is the user's to read.
 type SessionKiller interface {
 	KillSession(name string) error
 }
@@ -55,8 +55,10 @@ type SessionCreator interface {
 	CreateFromDir(dir string, command []string) (string, error)
 }
 
-type SessionRenamer interface {
-	RenameSession(oldName, newName string) error
+// SessionLabeller sets the label of the session named name. Empty text, or the
+// name itself, resets the label to the name. Its error is the user's to read.
+type SessionLabeller interface {
+	SetLabel(name, label string) error
 }
 
 type ModePersister interface {
@@ -168,21 +170,21 @@ type Model struct {
 	modePersister   ModePersister
 	// colourless is the NO_COLOR carve-out; canvas-dependent surfaces read it
 	// rather than re-deriving NO_COLOR. No canvas is painted and detection skips.
-	colourless     bool
-	selected       string
-	sessionLister  SessionLister
-	pendingReader  PendingResumeReader
-	sessionKiller  SessionKiller
-	sessionRenamer SessionRenamer
-	projectStore   ProjectStore
-	projectEditor  ProjectEditor
-	aliasEditor    AliasEditor
-	sessionCreator SessionCreator
-	cwd            string
-	home           string
-	activePage     page
-	projectList    list.Model
-	initialFilter  string
+	colourless      bool
+	selected        string
+	sessionLister   SessionLister
+	pendingReader   PendingResumeReader
+	sessionKiller   SessionKiller
+	sessionLabeller SessionLabeller
+	projectStore    ProjectStore
+	projectEditor   ProjectEditor
+	aliasEditor     AliasEditor
+	sessionCreator  SessionCreator
+	cwd             string
+	home            string
+	activePage      page
+	projectList     list.Model
+	initialFilter   string
 	// initialCursor is the capture-only cursor anchor, applied and cleared in
 	// evaluateDefaultPage after items ingest. Empty is a no-op.
 	initialCursor string
@@ -202,12 +204,16 @@ type Model struct {
 	// searchItems holds the session fields the containment filter ranks its
 	// targets by; nil for every picker a search term did not open.
 	searchItems *searchItemSource
+	// listed is set once a session listing has answered; until then a failed
+	// one ends the picker with listErr, since there are no rows to keep.
+	listed  bool
+	listErr error
 	// currentSession is the session the picker runs inside, empty outside one.
 	currentSession    string
 	modal             modalState
-	pendingKillName   string
+	pendingKill       Session
 	renameInput       textinput.Model
-	renameTarget      string
+	renameTarget      Session
 	pendingDeletePath string
 	pendingDeleteName string
 	command           []string
@@ -563,9 +569,9 @@ func WithKiller(k SessionKiller) Option {
 	}
 }
 
-func WithRenamer(r SessionRenamer) Option {
+func WithLabeller(l SessionLabeller) Option {
 	return func(m *Model) {
-		m.sessionRenamer = r
+		m.sessionLabeller = l
 	}
 }
 
@@ -1590,6 +1596,23 @@ func (m Model) fetchSessionsCmd() tea.Cmd {
 	}
 }
 
+// ListError is the failed session listing that ended the picker before any
+// listing answered, nil otherwise. It is not a bootstrap fatal and takes no
+// error frame.
+func (m Model) ListError() error {
+	return m.listErr
+}
+
+// applyListingFailure ends the picker on a listing that failed before any
+// answered. Once one has, the rows it gave stay and the failure flashes.
+func (m Model) applyListingFailure(err error) (tea.Model, tea.Cmd) {
+	if !m.listed {
+		m.listErr = err
+		return m, tea.Quit
+	}
+	return m.flashError(err)
+}
+
 // The cold-boot route's snapshot is stale: the orchestrator runs in a goroutine,
 // so Init's frame-one enumeration happened before Restore created the sessions.
 // The warm route returns nil — its snapshot is already post-restore.
@@ -1732,8 +1755,9 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, nil
 	case SessionsMsg:
 		if msg.Err != nil {
-			return m, tea.Quit
+			return m.applyListingFailure(msg.Err)
 		}
+		m.listed = true
 		cmd := m.applySessions(msg.Sessions, msg.Pending)
 
 		// While loading, ingest but leave sessionsLoaded alone —
@@ -1889,6 +1913,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		cmd := m.applySessions(msg.Sessions, msg.Pending)
 		m.reanchorSessionCursor(msg.PreserveName)
 		return m, cmd
+	case sessionActionFailedMsg:
+		return m.flashError(msg.err)
 	case flashTickMsg:
 		if msg.Gen == m.flashGen {
 			m.clearFlash()
@@ -2877,7 +2903,7 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.modal = modalKillConfirm
-	m.pendingKillName = si.Session.Name
+	m.pendingKill = si.Session
 	return m, nil
 }
 
@@ -2924,27 +2950,40 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case isRuneKey(keyMsg, "y"):
-		name := m.pendingKillName
+		name := m.pendingKill.Name
 		m.modal = modalNone
-		m.pendingKillName = ""
-		return m, m.killAndRefresh(name)
+		m.pendingKill = Session{}
+		return m, m.actAndRefresh(func() error { return m.sessionKiller.KillSession(name) })
 	case keyIsCode(keyMsg, tea.KeyEscape):
 		// Cancel is Esc only; `n` falls through to the ignore-all tail.
 		m.modal = modalNone
-		m.pendingKillName = ""
+		m.pendingKill = Session{}
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m Model) killAndRefresh(name string) tea.Cmd {
+// sessionActionFailedMsg is a kill or label change that did not land; the rows
+// stay as they were.
+type sessionActionFailedMsg struct {
+	err error
+}
+
+// actAndRefresh runs a row action, then re-reads the rows it changed.
+func (m Model) actAndRefresh(action func() error) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.sessionKiller.KillSession(name); err != nil {
-			return SessionsMsg{Err: fmt.Errorf("failed to kill session '%s': %w", name, err)}
+		if err := action(); err != nil {
+			return sessionActionFailedMsg{err: err}
 		}
 		sessions, pending, err := m.readSessionList()
 		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
 	}
+}
+
+// flashError flashes err's own words, which are the user's to read.
+func (m Model) flashError(err error) (tea.Model, tea.Cmd) {
+	(&m).setFlash(err.Error())
+	return m, flashTickCmd(m.flashGen)
 }
 
 func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
@@ -2952,16 +2991,16 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.sessionRenamer == nil {
+	if m.sessionLabeller == nil {
 		return m, nil
 	}
 	m.modal = modalRename
-	m.renameTarget = si.Session.Name
+	m.renameTarget = si.Session
 	ti := textinput.New()
 	// No inline prompt: the modal renders its own labelled input box, so a
 	// prompt here would double up inside it.
 	ti.Prompt = ""
-	ti.SetValue(m.renameTarget)
+	ti.SetValue(m.renameTarget.DisplayName())
 	ti.Focus()
 	m.renameInput = ti
 	return m, nil
@@ -2972,25 +3011,13 @@ func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok {
 		switch keyMsg.Code {
 		case tea.KeyEnter:
-			newName := strings.TrimSpace(m.renameInput.Value())
-			if newName == "" {
-				return m, nil
-			}
-			// Closed, not held open: the modal blanks the page it would be
-			// reported on, so the band can only be read once the modal is gone.
-			if err := tmux.ValidateSessionName(newName); err != nil {
-				m.modal = modalNone
-				m.renameTarget = ""
-				(&m).setFlash(renameRefusalFlash(err))
-				return m, flashTickCmd(m.flashGen)
-			}
-			oldName := m.renameTarget
+			name, label := m.renameTarget.Name, m.renameInput.Value()
 			m.modal = modalNone
-			m.renameTarget = ""
-			return m, m.renameAndRefresh(oldName, newName)
+			m.renameTarget = Session{}
+			return m, m.actAndRefresh(func() error { return m.sessionLabeller.SetLabel(name, label) })
 		case tea.KeyEscape:
 			m.modal = modalNone
-			m.renameTarget = ""
+			m.renameTarget = Session{}
 			return m, nil
 		}
 	}
@@ -2998,16 +3025,6 @@ func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.renameInput, cmd = m.renameInput.Update(msg)
 	return m, cmd
-}
-
-func (m Model) renameAndRefresh(oldName, newName string) tea.Cmd {
-	return func() tea.Msg {
-		if err := m.sessionRenamer.RenameSession(oldName, newName); err != nil {
-			return SessionsMsg{Err: fmt.Errorf("failed to rename session '%s': %w", oldName, err)}
-		}
-		sessions, pending, err := m.readSessionList()
-		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
-	}
 }
 
 func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
@@ -3027,7 +3044,16 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	m.selected = si.Session.Name
+	return m.openSession(si.Session)
+}
+
+// openSession picks s to attach once the picker ends, refusing one that does
+// not answer.
+func (m Model) openSession(s Session) (tea.Model, tea.Cmd) {
+	if s.NotAnswering {
+		return m.flashError(fmt.Errorf("session %s is not answering; nothing was opened", s.Name))
+	}
+	m.selected = s.Name
 	return m, tea.Quit
 }
 
@@ -3538,9 +3564,9 @@ func (m Model) renderProjectsFooterForFilterState() string {
 func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
-		return renderKillModalOnClearedCanvas(m.pendingKillName, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
-		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
 		// Filtered through the same slice the footer renders from, so a
 		// blocked key leaves both surfaces in lockstep.

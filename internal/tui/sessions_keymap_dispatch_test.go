@@ -11,9 +11,9 @@ type keymapParityKiller struct{}
 
 func (keymapParityKiller) KillSession(string) error { return nil }
 
-type keymapParityRenamer struct{}
+type keymapParityLabeller struct{}
 
-func (keymapParityRenamer) RenameSession(string, string) error { return nil }
+func (keymapParityLabeller) SetLabel(string, string) error { return nil }
 
 // keymapParityHistory answers every session with a one-line history.
 type keymapParityHistory struct{}
@@ -152,20 +152,20 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 		if m.modal != modalKillConfirm {
 			t.Errorf("k must open the kill confirm modal; modal = %v", m.modal)
 		}
-		if m.pendingKillName != "alpha" {
-			t.Errorf("kill target = %q, want alpha", m.pendingKillName)
+		if m.pendingKill.Name != "alpha" {
+			t.Errorf("kill target = %q, want alpha", m.pendingKill.Name)
 		}
 	})
 
 	t.Run("r routes to rename (opens the rename modal)", func(t *testing.T) {
 		m := NewModelWithSessions([]Session{{Name: "alpha"}})
-		m.sessionRenamer = keymapParityRenamer{}
+		m.sessionLabeller = keymapParityLabeller{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if m.modal != modalRename {
 			t.Errorf("r must open the rename modal; modal = %v", m.modal)
 		}
-		if m.renameTarget != "alpha" {
-			t.Errorf("rename target = %q, want alpha", m.renameTarget)
+		if m.renameTarget.Name != "alpha" {
+			t.Errorf("rename target = %q, want alpha", m.renameTarget.Name)
 		}
 	})
 

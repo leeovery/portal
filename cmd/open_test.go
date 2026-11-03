@@ -1219,9 +1219,9 @@ type stubSessionKiller struct{}
 
 func (s *stubSessionKiller) KillSession(_ string) error { return nil }
 
-type stubSessionRenamer struct{}
+type stubSessionLabeller struct{}
 
-func (s *stubSessionRenamer) RenameSession(_, _ string) error { return nil }
+func (s *stubSessionLabeller) SetLabel(_, _ string) error { return nil }
 
 type stubTUISessionCreator struct{}
 
@@ -1272,7 +1272,7 @@ func defaultTestTUIConfig() tuiConfig {
 	return tuiConfig{
 		lister:         fakePickerLister(),
 		killer:         &stubSessionKiller{},
-		renamer:        &stubSessionRenamer{},
+		labeller:       &stubSessionLabeller{},
 		projectStore:   &stubProjectStore{},
 		sessionCreator: &stubTUISessionCreator{},
 		cwd:            "/home/user",

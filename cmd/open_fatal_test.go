@@ -65,3 +65,22 @@ func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 		}
 	})
 }
+
+func TestProcessTUIResult_AFirstListingThatFailed(t *testing.T) {
+	listErr := errors.New("zmx: listing timed out")
+	var model tea.Model = tui.New(fakePickerLister())
+	model, _ = model.Update(tui.SessionsMsg{Err: listErr})
+
+	connector := &mockSessionConnector{}
+	err := processTUIResult(model.(tui.Model), connector)
+
+	if !errors.Is(err, listErr) {
+		t.Fatalf("processTUIResult error = %v, want %v", err, listErr)
+	}
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
+		t.Errorf("a failed listing was reported as a bootstrap fatal: %v", fatal)
+	}
+	if connector.connectedTo != "" {
+		t.Errorf("connector was called on a failed listing (%q); must skip connect", connector.connectedTo)
+	}
+}

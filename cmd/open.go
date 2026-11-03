@@ -413,7 +413,7 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 type tuiConfig struct {
 	lister         tui.SessionLister
 	killer         tui.SessionKiller
-	renamer        tui.SessionRenamer
+	labeller       tui.SessionLabeller
 	projectStore   tui.ProjectStore
 	projectEditor  tui.ProjectEditor
 	aliasEditor    tui.AliasEditor
@@ -484,7 +484,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 	deps := tui.Deps{
 		Lister:             cfg.lister,
 		Killer:             cfg.killer,
-		Renamer:            cfg.renamer,
+		Labeller:           cfg.labeller,
 		Creator:            cfg.sessionCreator,
 		ProjectStore:       cfg.projectStore,
 		ProjectEditor:      cfg.projectEditor,
@@ -524,11 +524,15 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 	if fatal := model.FatalError(); fatal != nil {
 		return fatal
 	}
-	// A session list that could not be read has searched nothing, so it is an
-	// ordinary error rather than a bootstrap fatal: tmux's own words on stderr
-	// and a non-zero exit, with no error frame and nothing attached.
+	// A session list that could not be read has searched or shown nothing, so
+	// it is an ordinary error rather than a bootstrap fatal: the backend's own
+	// words on stderr and a non-zero exit, with no error frame and nothing
+	// attached.
 	if searchErr := model.SearchError(); searchErr != nil {
 		return searchErr
+	}
+	if listErr := model.ListError(); listErr != nil {
+		return listErr
 	}
 	selected := model.Selected()
 	if selected == "" {
@@ -549,7 +553,6 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 }
 
 func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
-	client := tmuxClient(cmd)
 	b, err := attachingBackend()
 	if err != nil {
 		return err
@@ -605,8 +608,8 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	// yet, so no session is waiting.
 	cfg := tuiConfig{
 		lister:         pickerLister{ctx: cmd.Context(), b: b},
-		killer:         client,
-		renamer:        client,
+		killer:         pickerKiller{ctx: cmd.Context(), b: b},
+		labeller:       pickerLabeller{ctx: cmd.Context(), b: b},
 		projectStore:   store,
 		projectEditor:  store,
 		aliasEditor:    aliasStore,

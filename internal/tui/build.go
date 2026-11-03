@@ -16,9 +16,9 @@ import (
 type Deps struct {
 	Lister SessionLister
 
-	Killer  SessionKiller
-	Renamer SessionRenamer
-	Creator SessionCreator
+	Killer   SessionKiller
+	Labeller SessionLabeller
+	Creator  SessionCreator
 
 	ProjectStore  ProjectStore
 	ProjectEditor ProjectEditor
@@ -111,7 +111,7 @@ type CaptureSeeds struct {
 func Build(deps Deps) Model {
 	opts := []Option{
 		WithKiller(deps.Killer),
-		WithRenamer(deps.Renamer),
+		WithLabeller(deps.Labeller),
 		WithProjectStore(deps.ProjectStore),
 		WithSessionCreator(deps.Creator),
 		WithCWD(deps.CWD),

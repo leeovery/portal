@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
@@ -232,5 +234,74 @@ func TestRenameCommand(t *testing.T) {
 		if !bootstrapExempt["rename"] {
 			t.Error(`bootstrapExempt["rename"] = false; want true`)
 		}
+	})
+}
+
+func TestPickerLabeller(t *testing.T) {
+	label := func(fake *backendtest.Fake, text string) error {
+		return pickerLabeller{ctx: context.Background(), b: fake}.SetLabel(currentSessionName, text)
+	}
+
+	t.Run("it claims the entry for the live creation, then labels it, via the tui", func(t *testing.T) {
+		sink := logtest.Install(t)
+		fake, _ := stageRename(t)
+		dir := seedSessionsJSON(t, `{"version": 2, "saved_at": "2026-10-29T00:00:00Z", "sessions": [`+
+			`{"name": "`+currentSessionName+`", "label": "old", "dir": "/work/old", "created_at": "2026-10-28T09:00:00Z"}]}`)
+
+		if err := label(fake, "api work"); err != nil {
+			t.Fatalf("SetLabel: %v", err)
+		}
+
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", Dir: renameDir, CreatedAt: renameCreated}
+		if e := entryOf(t, dir, currentSessionName); e != want {
+			t.Errorf("entry = %+v, want %+v", e, want)
+		}
+		for _, op := range []string{"replace", "set-label"} {
+			r := sink.Records().Matching("sessions", op).Only(t, op+" record")
+			if got := r.AttrString(t, "via"); got != "tui" {
+				t.Errorf("%s via = %q, want tui", op, got)
+			}
+		}
+	})
+
+	t.Run("it resets the label to the name given empty text or the name", func(t *testing.T) {
+		for _, text := range []string{"", "  ", currentSessionName} {
+			fake, dir := stageRename(t)
+			labelLive(t, dir, "api work")
+
+			if err := label(fake, text); err != nil {
+				t.Fatalf("SetLabel(%q): %v", text, err)
+			}
+
+			assertLabel(t, dir, currentSessionName, "")
+		}
+	})
+
+	t.Run("it refuses a session that does not answer, writing nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		fake.StopAnswering(currentSessionName)
+
+		err := label(fake, "api work")
+
+		want := "session " + currentSessionName + " is not answering; its label is unchanged"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
+	t.Run("it refuses an unprintable label and changes nothing", func(t *testing.T) {
+		fake, dir := stageRename(t)
+		labelLive(t, dir, "dotfiles")
+
+		err := label(fake, "api\u200bwork")
+
+		want := "label refused: it holds a control or formatting character, such as a newline, tab or escape"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		assertLabel(t, dir, currentSessionName, "dotfiles")
 	})
 }

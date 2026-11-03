@@ -11,12 +11,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backendtest"
-	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -358,25 +356,13 @@ func TestOpenTUI_FatalBeforeModelConstruction(t *testing.T) {
 	bootstrapWarnings.Add(staged)
 	t.Cleanup(func() { bootstrapWarnings.Drain() })
 
-	// The pre-construction tripwire below is only armed while tmux.InsideTmux()
-	// is true, so the fixture sets TMUX itself rather than inheriting whatever
-	// TestMain's package-wide poison happens to supply.
-	t.Setenv("TMUX", "/nonexistent/portal-test-must-set-tmux-socket,0,0")
-	if !tmux.InsideTmux() {
-		t.Fatal("tmux.InsideTmux() is false after setting TMUX — the no-calls tripwire below would be unarmed")
-	}
-
-	commander := commandertest.Quiet()
-	err := openTUI(cmdWithClient(tmux.NewClient(commander)), pickerLanding{}, nil, false)
+	err := openTUI(contextCommand(), pickerLanding{}, nil, false)
 
 	if err == nil {
 		t.Fatal("openTUI returned nil; want the broken-built-in fatal")
 	}
 	if want := theme.BrokenBuiltinError(theme.DefaultDarkSlug).Error(); err.Error() != want {
 		t.Errorf("openTUI error = %q, want %q", err.Error(), want)
-	}
-	if len(commander.Calls()) != 0 {
-		t.Errorf("tmux commander saw %v, want no calls at all — the current-session read is the last statement before construction, so any call means the fatal returned past it", commander.Calls())
 	}
 	if pending := bootstrapWarnings.Drain(); len(pending) != 1 || !slices.Equal(pending[0].Lines, staged.Lines) {
 		t.Errorf("bootstrap warnings after the fatal = %+v, want the seeded one still pending — a drained sink means a model was constructed on the fatal path", pending)

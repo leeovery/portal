@@ -52,8 +52,8 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	if afterK.modal != modalKillConfirm {
 		t.Fatalf("expected modalKillConfirm after 'k', got %v", afterK.modal)
 	}
-	if afterK.pendingKillName != "alphabet" {
-		t.Fatalf("expected pendingKillName=%q after 'k', got %q", "alphabet", afterK.pendingKillName)
+	if afterK.pendingKill.Name != "alphabet" {
+		t.Fatalf("expected pendingKillName=%q after 'k', got %q", "alphabet", afterK.pendingKill.Name)
 	}
 
 	updated2, killCmd := afterK.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})

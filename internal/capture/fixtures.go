@@ -87,7 +87,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		Lister:        f.Lister,
 		PendingReader: f.pendingReader(),
 		Killer:        fakeKiller{},
-		Renamer:       fakeRenamer{},
+		Labeller:      fakeLabeller{},
 		Creator:       fakeCreator{},
 		ProjectStore:  f.projectStore,
 		ProjectEditor: f.projectEditor,
@@ -161,9 +161,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsByTagFixture,
 		sessionsPagedFixture,
 		sessionsInlineFlashFixture,
-		sessionsRenameRefusedSeparatorFixture,
-		sessionsRenameRefusedIDPrefixFixture,
-		sessionsRenameRefusedFlagPrefixFixture,
+		sessionsRenameRefusedLabelFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -398,30 +396,13 @@ func sessionsInlineFlashFixture() *Fixture {
 }
 
 // The refusal is typed, never seeded: the keys open the real rename modal and
-// commit an unaddressable name, so the band carries production's own wording
-// rather than a copy of it this file could drift from.
-func sessionsRenameRefusedSeparatorFixture() *Fixture {
+// add a zero-width space, a format character the text input keeps, so the band
+// carries the index's own refusal rather than a copy this file could drift from.
+func sessionsRenameRefusedLabelFixture() *Fixture {
 	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-separator"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune(':'), keyEnter()}
-	return fx
-}
-
-// The modal opens with the cursor at the end of the current name and only a
-// leading "$" is refused, so the line-start key is load-bearing.
-func sessionsRenameRefusedIDPrefixFixture() *Fixture {
-	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-id-prefix"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('$'), keyEnter()}
-	return fx
-}
-
-// The third refusal, and the longest of the three: only a leading "-" is
-// refused, so the line-start key is load-bearing here too.
-func sessionsRenameRefusedFlagPrefixFixture() *Fixture {
-	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-flag-prefix"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('-'), keyEnter()}
+	fx.name = "sessions-rename-refused-label"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune('\u200b'), keyEnter()}
+	fx.landsLastKeyRead = true
 	return fx
 }
 

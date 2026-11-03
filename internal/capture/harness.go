@@ -24,11 +24,6 @@ func keyEnter() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: tea.KeyEnter}
 }
 
-// keyLineStart is the text input's own line-start binding.
-func keyLineStart() tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
-}
-
 // ModelAt drives the model to its captured state with no tea program running.
 // BootstrapCompleteMsg and LoadingMinElapsedMsg are deliberately never sent:
 // loading fixtures stay parked precisely because neither arrives.
