@@ -21,6 +21,7 @@ type Op string
 
 const (
 	OpList          Op = "List"
+	OpSession       Op = "Session"
 	OpExists        Op = "Exists"
 	OpCreate        Op = "Create"
 	OpAttachCommand Op = "AttachCommand"
@@ -118,9 +119,9 @@ func (f *Fake) Remove(name string) {
 	delete(f.history, name)
 }
 
-// Session returns the named session as the Fake holds it, without recording
-// a call.
-func (f *Fake) Session(name string) (backend.Session, bool) {
+// Held returns the named session as the Fake holds it, without recording a
+// call.
+func (f *Fake) Held(name string) (backend.Session, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	s, ok := f.sessions[name]
@@ -254,6 +255,16 @@ func (f *Fake) AttachCommand(ctx context.Context, name string) (backend.Command,
 	}
 	current, ok := f.sessions[f.current]
 	return backend.Command{Argv: []string{AttachProgram, name}, Switches: ok && current.Answered}, nil
+}
+
+// Session returns the session as List lists it.
+func (f *Fake) Session(ctx context.Context, name string) (backend.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.beginHeld(ctx, Call{Op: OpSession, Name: name}, zmx.CheckLookup); err != nil {
+		return backend.Session{}, err
+	}
+	return f.sessions[name], nil
 }
 
 func (f *Fake) Kill(ctx context.Context, name string) error {

@@ -124,6 +124,8 @@ func TestExemptCommandsWorkWithNothingOnPath(t *testing.T) {
 		name string
 		args []string
 		env  map[string]string
+		// stage sets up what the command reads beyond its env.
+		stage func(t *testing.T)
 	}{
 		{name: "portal version works with nothing on PATH", args: []string{"version"}},
 		{name: "portal init works with nothing on PATH", args: []string{"init", "zsh"}},
@@ -139,9 +141,9 @@ func TestExemptCommandsWorkWithNothingOnPath(t *testing.T) {
 			env:  map[string]string{"ZMX_SESSION": currentSessionName, "PORTAL_STATE_DIR": "TEMPDIR/"},
 		},
 		{
-			name: "portal rename works with nothing on PATH",
-			args: []string{"rename", "api work"},
-			env:  map[string]string{"ZMX_SESSION": currentSessionName, "PORTAL_STATE_DIR": "TEMPDIR/"},
+			name:  "portal rename works with nothing on PATH",
+			args:  []string{"rename", "api work"},
+			stage: func(t *testing.T) { stageRename(t) },
 		},
 	}
 
@@ -154,6 +156,9 @@ func TestExemptCommandsWorkWithNothingOnPath(t *testing.T) {
 					v = filepath.Join(t.TempDir(), after)
 				}
 				t.Setenv(k, v)
+			}
+			if tt.stage != nil {
+				tt.stage(t)
 			}
 
 			resetRootCmd()

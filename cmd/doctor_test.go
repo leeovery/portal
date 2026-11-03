@@ -227,7 +227,7 @@ func TestDoctorIsReadOnly(t *testing.T) {
 			t.Errorf("doctor called %s on the backend; the diagnosis only lists", call.Op)
 		}
 	}
-	if _, ok := fake.Session("wedged"); !ok {
+	if _, ok := fake.Held("wedged"); !ok {
 		t.Error("the silent session is gone; doctor must leave it as it found it")
 	}
 }

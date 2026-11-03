@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,11 @@ func currentSession() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return currentSessionIn(b)
+}
+
+// currentSessionIn is currentSession on a backend the caller already holds.
+func currentSessionIn(b backend.Backend) (string, error) {
 	name := b.Current()
 	if name == "" {
 		return "", errNotInSession
