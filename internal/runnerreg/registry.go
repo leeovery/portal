@@ -96,7 +96,8 @@ func (r Registry) Switch(ctx context.Context, token, current, target string) err
 
 // ConfirmSession returns the pid of the runner registered under token, whose
 // terminal leads session, once the runner confirms its attach under way shows
-// session and it has seen no switch since it began, so it is sure of it.
+// session: sure of it, having seen no switch since the attach began, or,
+// having seen one, once the session's leader carries its token as it asks.
 // Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal, wrapping
 // runnertoken.ErrRefused, or the failure to ask it.
 func (r Registry) ConfirmSession(ctx context.Context, token, session string) (int, error) {

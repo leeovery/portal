@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/nanoid"
@@ -44,12 +43,13 @@ func (r Registry) Listing(b Backend) *Listing {
 	return &Listing{registry: r, backend: b}
 }
 
-// Attach readies cfg's attach to be listed: its command's client carries
-// the runner's token in runnertoken.Var, tracked. Once the attach begins, the runner
-// is registered on cfg.Session, or moved there from the session a switch
-// left, and takes the requests sent it until Ended. The attach is confirmed
-// to show cfg.Session while its client leads it, carrying the token. A token
-// that can't be minted leaves the attach unlisted and unconfirmed.
+// Attach readies cfg's attach to be listed: its command's client carries the
+// runner's token in runnertoken.Var, tracked. Once the attach begins, the
+// runner is registered on cfg.Session, or moved there from the session a
+// switch left, and hands the attach the requests sent it until Ended. The
+// attach is confirmed to show cfg.Session while its client leads it, carrying
+// the token. A token that can't be minted leaves the attach unlisted and
+// unconfirmed.
 func (l *Listing) Attach(cfg *runner.Config) {
 	session := cfg.Session
 	if l.token == "" {
@@ -64,11 +64,9 @@ func (l *Listing) Attach(cfg *runner.Config) {
 	cfg.Command = l.backend.Track(cfg.Command, runnertoken.Var, token)
 	requests := make(chan runner.Request)
 	cfg.Requests = requests
-	unsure := new(atomic.Bool)
-	cfg.Unsure = func() { unsure.Store(true) }
 	cfg.Began = func() {
 		if l.list(session) {
-			l.relay.open(&gate{requests: requests, session: session, unsure: unsure})
+			l.relay.open(&gate{requests: requests})
 		}
 	}
 	cfg.Confirm = func(ctx context.Context) error { return l.leads(ctx, session, token) }
@@ -136,13 +134,10 @@ type relay struct {
 	attach *gate
 }
 
-// gate is one attach's way in: its requests, until closed, and what it
-// shows: its session, and whether the runner has become unsure of it.
+// gate is one attach's way in: its requests, until closed.
 type gate struct {
 	requests chan<- runner.Request
 	closed   chan struct{}
-	session  string
-	unsure   *atomic.Bool
 }
 
 func (r *relay) open(g *gate) {
@@ -175,23 +170,13 @@ func (r *relay) DetachToPicker(ctx context.Context) error {
 	return r.deliver(ctx, runner.Request{})
 }
 
-// ConfirmSession answers from the attach under way, which it asks nothing.
-func (r *relay) ConfirmSession(_ context.Context, session string) error {
-	g := r.current()
-	switch {
-	case g == nil:
-		return errNotAttached
-	case g.session != session:
-		return fmt.Errorf("the attach shows %s, not %s", g.session, session)
-	case g.unsure.Load():
-		return runner.ErrUnconfirmed
-	}
-	return nil
+func (r *relay) ConfirmSession(ctx context.Context, session string) error {
+	return r.deliver(ctx, runner.Request{Confirm: session})
 }
 
 // deliver hands req to the attach under way, carrying ctx's deadline, and
 // returns the attach's answer: nil once it has taken the request, which is
-// its acceptance.
+// its acceptance, or, for a request to confirm, its confirmation.
 func (r *relay) deliver(ctx context.Context, req runner.Request) error {
 	g := r.current()
 	if g == nil {

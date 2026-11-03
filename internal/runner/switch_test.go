@@ -8,8 +8,10 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/attachkeys"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 )
@@ -87,19 +89,6 @@ func TestRun_Unsure(t *testing.T) {
 		rec := sink.Records().Matching("attach", "switch seen").AtExactLevel(slog.LevelDebug).Only(t, "switch seen record")
 		if got := rec.AttrString(t, "session"); got != "fake" {
 			t.Errorf("switch seen session = %q, want fake", got)
-		}
-	})
-
-	t.Run("Unsure is called once, for the first switch seen", func(t *testing.T) {
-		calls := new(atomic.Int32)
-		h := unsure(t, func(_ *harness, cfg *runner.Config) {
-			cfg.Unsure = func() { calls.Add(1) }
-		})
-
-		h.detach(t)
-
-		if n := calls.Load(); n != 1 {
-			t.Errorf("Unsure was called %d times for two switches, want once", n)
 		}
 	})
 
@@ -191,12 +180,79 @@ func TestRun_Unsure(t *testing.T) {
 		}
 	})
 
-	t.Run("a request for the picker is refused, and the attach goes on to detach", func(t *testing.T) {
+	t.Run("a request for the picker asks Confirm as it comes, and detaches once it confirms", func(t *testing.T) {
 		requests := make(chan runner.Request)
-		h := unsure(t, withRequests(requests))
+		calls := new(atomic.Int32)
+		h := unsure(t, withRequests(requests), confirming(calls, nil))
 
-		if err := ask(t, requests, runner.Request{}); !errors.Is(err, runner.ErrUnconfirmed) {
-			t.Errorf("Run answered the picker's request with %v, want ErrUnconfirmed", err)
+		send(t, requests, runner.Request{})
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Action: attachkeys.Detach}) {
+			t.Errorf("Run = %+v, %v; want the picker's detach", out, err)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("Confirm was asked %d times, want once, for the request", n)
+		}
+	})
+
+	t.Run("a request for the picker Confirm refuses is refused, saying why, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		doubt := errors.New("another client leads the session")
+		h := unsure(t, withRequests(requests), confirming(new(atomic.Int32), doubt))
+
+		if err := ask(t, requests, runner.Request{}); !errors.Is(err, runner.ErrUnconfirmed) || !errors.Is(err, doubt) {
+			t.Errorf("Run answered the picker's request with %v, want ErrUnconfirmed carrying Confirm's why", err)
+		}
+		h.detach(t)
+	})
+
+	t.Run("a request to confirm asks Confirm each time, and is accepted while it confirms, ending nothing", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		calls := new(atomic.Int32)
+		h := unsure(t, withRequests(requests), confirming(calls, nil))
+
+		for range 2 {
+			if err := ask(t, requests, runner.Request{Confirm: "fake"}); err != nil {
+				t.Errorf("Run answered the request to confirm with %v, want it confirmed", err)
+			}
+		}
+
+		if n := calls.Load(); n != 2 {
+			t.Errorf("Confirm was asked %d times for two requests, want once each", n)
+		}
+		h.detach(t)
+	})
+
+	t.Run("a request to confirm Confirm refuses is refused, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		doubt := errors.New("another client leads the session")
+		h := unsure(t, withRequests(requests), confirming(new(atomic.Int32), doubt))
+
+		if err := ask(t, requests, runner.Request{Confirm: "fake"}); !errors.Is(err, runner.ErrUnconfirmed) || !errors.Is(err, doubt) {
+			t.Errorf("Run answered the request to confirm with %v, want ErrUnconfirmed carrying Confirm's why", err)
+		}
+		h.detach(t)
+	})
+
+	t.Run("Confirm is asked by the request's deadline", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		asked := make(chan time.Time, 1)
+		h := unsure(t, withRequests(requests), func(_ *harness, cfg *runner.Config) {
+			cfg.Confirm = func(ctx context.Context) error {
+				deadline, _ := ctx.Deadline()
+				asked <- deadline
+				return nil
+			}
+		})
+		due := time.Now().Add(settle)
+
+		if err := ask(t, requests, runner.Request{Confirm: "fake", Deadline: due}); err != nil {
+			t.Fatalf("Run answered %v, want the request confirmed", err)
+		}
+
+		if got := <-asked; !got.Equal(due) {
+			t.Errorf("Confirm's deadline = %v, want the request's %v", got, due)
 		}
 		h.detach(t)
 	})
@@ -221,7 +277,6 @@ func TestRun_KillWithNoSwitchSeenNeverAsksConfirm(t *testing.T) {
 			t.Error("Confirm was asked with no switch seen")
 			return nil
 		}
-		cfg.Unsure = func() { t.Error("Unsure was called with no switch seen") }
 		cfg.Kill = func(context.Context, string) error { return syscall.Kill(h.child(), syscall.SIGUSR1) }
 	})
 	h.ready(t)
@@ -231,5 +286,30 @@ func TestRun_KillWithNoSwitchSeenNeverAsksConfirm(t *testing.T) {
 
 	if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
 		t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
+	}
+}
+
+// A switch the terminal never shows, its output refused, still leaves the
+// runner unsure: the kill key acts on the session the child shows, whatever
+// the terminal took.
+func TestRun_ASwitchPastARefusingTerminalStillMakesItUnsure(t *testing.T) {
+	sink := logtest.Install(t)
+	tm, screen := newTerminal(t), openTerminal(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpillThenSwitch), func(_ *harness, cfg *runner.Config) { cfg.Out = screen.tty })
+	h.started(screen.readUntil(t, readyLine))
+
+	// The terminal refuses the child's last output, then its switch.
+	_ = screen.user.Close()
+	tm.typeIn(t, "x")
+	if !harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
+		return len(sink.Records().Matching("attach", "switch seen")) > 0
+	}) {
+		t.Fatal("the runner never saw the switch the terminal refused")
+	}
+	tm.typeIn(t, keyKill) // the harness's Kill fails the test if called
+	out, err := h.finish(t)
+
+	if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) {
+		t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
 	}
 }

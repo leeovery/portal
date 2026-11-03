@@ -1,10 +1,12 @@
 package runner_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -109,6 +111,35 @@ func TestRun_Requests(t *testing.T) {
 			t.Error("Picker() = false, want the picker to follow")
 		}
 		assertDetachedCleanly(t, h, sink)
+	})
+
+	t.Run("a request to confirm the attach's session is accepted without asking Confirm, ending nothing", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests), func(_ *harness, cfg *runner.Config) {
+			cfg.Confirm = func(context.Context) error {
+				t.Error("Confirm was asked with no switch seen")
+				return nil
+			}
+		})
+		h.ready(t)
+
+		send(t, requests, runner.Request{Confirm: "fake"})
+
+		h.detach(t)
+		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
+			t.Errorf("the child read %q, want only the detach key's ctrl+\\", got)
+		}
+	})
+
+	t.Run("a request to confirm another session is refused, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests))
+		h.ready(t)
+
+		if err := ask(t, requests, runner.Request{Confirm: "blog-c3d4"}); err == nil || errors.Is(err, runner.ErrUnconfirmed) || !strings.Contains(err.Error(), "shows fake") {
+			t.Errorf("Run answered %v, want a refusal naming the session it shows", err)
+		}
+		h.detach(t)
 	})
 
 	t.Run("a request past its deadline is refused, and the attach goes on", func(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/runnertoken"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -168,8 +169,9 @@ func TestDetectInsideSession_OverZmx(t *testing.T) {
 		awaitResolved(t, w.detector("api-x7Kd9a", pid), routeInsideRunner)
 	})
 
-	t.Run("a runner switched outside Portal and back is unsure, and refuses", func(t *testing.T) {
+	t.Run("a runner switched outside Portal and back, unsure, confirms through the leader and is walked from", func(t *testing.T) {
 		w := newZmxWorld(t)
+		w.env = append(w.env, "PORTAL_LOG_LEVEL=debug")
 		w.create(t, "api-x7Kd9a")
 		w.create(t, "blog-c3d4")
 		pid, tty := w.onTerminal(t, binary, "open", "-s", "api-x7Kd9a")
@@ -178,10 +180,15 @@ func TestDetectInsideSession_OverZmx(t *testing.T) {
 		typeZmx(t, tty, "attach blog-c3d4")
 		awaitLeader(t, w.b, "blog-c3d4")
 		typeZmx(t, tty, "attach api-x7Kd9a")
-
-		if err := awaitUncertain(t, w.detector("api-x7Kd9a", pid), routeInsideRunner); !errors.Is(err, runnertoken.ErrRefused) {
-			t.Errorf("detection = %v, want the unsure runner's refusal", err)
+		awaitLeader(t, w.b, "api-x7Kd9a")
+		if !harnesstest.PollUntil(t, settle, 50*time.Millisecond, func() bool {
+			return strings.Contains(portaltest.ReadPortalLogSafe(w.stateDir), "switch seen")
+		}) {
+			t.Fatalf("the runner never saw the switch:\n%s", portaltest.ReadPortalLogSafe(w.stateDir))
 		}
+		portaltest.AssertLogLevelResolved(t, state.PortalLog(w.stateDir), pid, "debug")
+
+		awaitResolved(t, w.detector("api-x7Kd9a", pid), routeInsideRunner)
 	})
 
 	t.Run("it walks from a raw zmx client, the session's only one, and never from zmx's daemon", func(t *testing.T) {

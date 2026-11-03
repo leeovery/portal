@@ -55,7 +55,14 @@ const (
 	// does when switched to another session, each time in two writes that
 	// split it, then acts as modeZmx.
 	modeSwitched = "switched"
+	// modeSpillThenSwitch writes lastOutput once it reads input, then, after
+	// switchLag, zmx's switch, then acts as modeZmx: the runner reads the
+	// switch apart from the output before it.
+	modeSpillThenSwitch = "spillswitch"
 )
+
+// switchLag separates modeSpillThenSwitch's two writes.
+const switchLag = 200 * time.Millisecond
 
 // switchSignature is what zmx's client writes as zmx switches it to another
 // session: its reset as it leaves one, then the screen clear it attaches the
@@ -124,6 +131,12 @@ func fakeChild(mode string) int {
 		await(0, unix.POLLIN)
 		_, _ = unix.Write(1, []byte(lastOutput))
 		return 0
+	case modeSpillThenSwitch:
+		await(0, unix.POLLIN)
+		_, _ = unix.Read(0, make([]byte, 4096))
+		write([]byte(lastOutput))
+		time.Sleep(switchLag)
+		write([]byte(switchSignature))
 	case modeSwitched:
 		for range 2 {
 			write([]byte(switchSignature[:10]))

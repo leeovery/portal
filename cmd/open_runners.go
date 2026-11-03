@@ -49,8 +49,8 @@ func (stateRunners) Switch(ctx context.Context, token, current, target string) e
 }
 
 // ConfirmSession is the pid of the runner registered under token once it
-// confirms it shows session, sure of it: what spawn detection walks from to
-// the terminal.
+// confirms it shows session: what spawn detection walks from to the
+// terminal.
 func (stateRunners) ConfirmSession(ctx context.Context, token, session string) (int, error) {
 	dir, err := state.Dir()
 	if err != nil {

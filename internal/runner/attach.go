@@ -69,9 +69,6 @@ func newAttach(cfg Config) *attach {
 	if cfg.Began == nil {
 		cfg.Began = func() {}
 	}
-	if cfg.Unsure == nil {
-		cfg.Unsure = func() {}
-	}
 	if cfg.Confirm == nil {
 		cfg.Confirm = func(context.Context) error { return errNothingConfirms }
 	}
@@ -488,7 +485,6 @@ func (a *attach) copyOutput() {
 		if !a.unsure.Load() && watch.scan(buf[:n]) {
 			a.unsure.Store(true)
 			logger.Debug("switch seen", "session", a.cfg.Session)
-			a.cfg.Unsure()
 		}
 		if refused {
 			continue

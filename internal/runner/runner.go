@@ -27,9 +27,10 @@ var logger = log.For("attach")
 // the attach command itself.
 var ErrNoTerminal = errors.New("the attach needs a terminal")
 
-// ErrUnconfirmed is why Run refuses the kill key, and a request for the
-// picker, once the child's output has shown a switch and nothing confirms the
-// terminal still shows its session.
+// ErrUnconfirmed is why Run refuses the kill key, a request for the picker
+// and a request to confirm its session, once the child's output has shown a
+// switch and Confirm, asked then, doesn't confirm the terminal still shows
+// its session.
 var ErrUnconfirmed = errors.New("the terminal may show another session, switched outside Portal")
 
 // ErrPastDeadline refuses a request its asker has given up on.
@@ -65,32 +66,35 @@ type Config struct {
 	// Kill kills the named session through the backend. Run refuses a config
 	// without one.
 	Kill func(ctx context.Context, name string) error
-	// Requests carries the ends of the attach asked for from outside it. Run
-	// reads a request only while it waits for the attach's end, and answers
-	// each it reads: nil when it takes it, which is accepting it, or why it
-	// won't. Nil asks for none.
+	// Requests carries what is asked of the attach from outside it. Run reads
+	// a request only while it waits for the attach's end, and answers each it
+	// reads: nil when it takes it, which is accepting it, or why it won't.
+	// Nil asks for none.
 	Requests <-chan Request
 	// Began, when set, is called once the attach has begun, before Run reads
 	// any request.
 	Began func()
-	// Unsure, when set, is called once Run becomes unsure, as below, on the
-	// goroutine copying the child's output to the terminal.
-	Unsure func()
 	// Confirm confirms through the backend that the terminal still shows
 	// Session, returning why not otherwise. Once the child's output shows a
-	// switch, zmx's reset then its screen clear, Run is unsure: zmx may have
-	// switched the child to another session, or a zmx inside the session, one
-	// reached over ssh say, may have switched its own client, writing the
-	// same bytes. Unsure, Run kills only if Confirm confirms as the kill key
-	// is pressed, and refuses a request for the picker. Nil confirms nothing.
+	// switch, zmx's reset then its screen clear, Run is unsure for the rest of
+	// the attach: zmx may have switched the child to another session, or a
+	// zmx inside the session, one reached over ssh say, may have switched its
+	// own client, writing the same bytes. Unsure, Run asks Confirm each time
+	// the kill key is pressed or a request for the picker or to confirm comes,
+	// and kills or takes it only once Confirm confirms. Nil confirms nothing.
 	Confirm func(ctx context.Context) error
 }
 
-// Request ends the attach from outside it as the detach key does: to the
-// picker, or, when Switch names a session, to that session.
+// Request is asked of the attach from outside it. One naming Confirm ends
+// nothing: it asks whether the attach shows that session, sure of it. Any
+// other ends the attach as the detach key does: to the picker, or, when
+// Switch names a session, to that session.
 type Request struct {
 	// Switch is the session to attach next, empty to ask for the picker.
 	Switch string
+	// Confirm is the session the asker found this runner's client leading,
+	// which Run confirms the attach shows.
+	Confirm string
 	// Deadline is when the asker stops waiting: Run refuses the request from
 	// then on. Zero is none.
 	Deadline time.Time
@@ -249,12 +253,11 @@ func (a *attach) await(ctx context.Context) ending {
 		case action := <-a.keys:
 			return a.act(ctx, action)
 		case req := <-a.cfg.Requests:
-			if err := a.admit(req); err != nil {
-				answer(req, err)
-				continue
+			err := a.admit(ctx, req)
+			answer(req, err)
+			if err == nil && req.Confirm == "" {
+				return a.request(ctx, req)
 			}
-			answer(req, nil)
-			return a.request(ctx, req)
 		case <-a.exited:
 			return ending{out: Outcome{ExitCode: exitCode(a.child.ProcessState)}, reason: "exit"}
 		case sig := <-a.signals:
@@ -288,32 +291,51 @@ func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	return end
 }
 
-// kill kills the session. Unsure which session the terminal shows, it first
-// asks Confirm, now rather than as the switch was seen, so the backend has
-// long since seen a client that left, and refuses the kill unless it
-// confirms.
+// kill kills the session, once nothing leaves Run unsure the terminal shows
+// it.
 func (a *attach) kill(ctx context.Context) error {
-	if a.unsure.Load() {
-		if err := a.cfg.Confirm(ctx); err != nil {
-			logger.Debug("kill unconfirmed", "session", a.cfg.Session, "error", err)
-			return fmt.Errorf("kill refused: %w", ErrUnconfirmed)
-		}
+	if err := a.unconfirmed(ctx); err != nil {
+		logger.Debug("kill unconfirmed", "session", a.cfg.Session, "error", err)
+		return fmt.Errorf("kill refused: %w", ErrUnconfirmed)
 	}
 	return a.cfg.Kill(ctx, a.cfg.Session)
 }
 
 // admit is why Run won't take req, nil when it will: its asker has stopped
-// waiting, or it asks for the picker while Run is unsure which session the
-// terminal shows. A switch is taken unsure: its asker found this runner by
-// the backend naming it the leader of the session it attached.
-func (a *attach) admit(req Request) error {
+// waiting, it asks to confirm a session other than the attach's, or it asks
+// for the picker or to confirm while Run is unsure which session the
+// terminal shows and Confirm, asked by the request's deadline, doesn't
+// confirm it. A switch is taken unsure: its asker found this runner by the
+// backend naming it the leader of the session it attached.
+func (a *attach) admit(ctx context.Context, req Request) error {
 	switch {
 	case !req.Deadline.IsZero() && !time.Now().Before(req.Deadline):
 		return ErrPastDeadline
-	case req.Switch == "" && a.unsure.Load():
-		return ErrUnconfirmed
+	case req.Confirm != "" && req.Confirm != a.cfg.Session:
+		return fmt.Errorf("the attach shows %s, not %s", a.cfg.Session, req.Confirm)
+	case req.Switch != "":
+		return nil
+	}
+	if !req.Deadline.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, req.Deadline)
+		defer cancel()
+	}
+	if err := a.unconfirmed(ctx); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnconfirmed, err)
 	}
 	return nil
+}
+
+// unconfirmed is why the terminal may not show the attach's session, nil
+// while Run is sure of it. Unsure, Run asks Confirm each time, now rather than
+// as the switch was seen, so the backend has long since seen a client that
+// left.
+func (a *attach) unconfirmed(ctx context.Context) error {
+	if !a.unsure.Load() {
+		return nil
+	}
+	return a.cfg.Confirm(ctx)
 }
 
 // answer sends Run's answer to req, dropping one it has no room for.
@@ -324,9 +346,9 @@ func answer(req Request, err error) {
 	}
 }
 
-// request carries out a request from outside the attach. A switch detaches
-// the child as the detach key does, naming its session in the outcome; any
-// other request is the detach key's.
+// request carries out a request that ends the attach. A switch detaches the
+// child as the detach key does, naming its session in the outcome; a request
+// for the picker is the detach key's.
 func (a *attach) request(ctx context.Context, req Request) ending {
 	if req.Switch == "" {
 		return a.act(ctx, attachkeys.Detach)

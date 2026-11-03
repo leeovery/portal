@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
@@ -85,48 +87,39 @@ func TestConfirmSession(t *testing.T) {
 }
 
 func TestListing_ConfirmSession(t *testing.T) {
-	t.Run("a listed attach confirms the session it shows, ending nothing", func(t *testing.T) {
+	t.Run("a request to confirm reaches the attach naming the session asked of, carrying the caller's deadline", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		a := begun(listing(t, r), "api-x7Kd9a")
 
-		if pid, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); err != nil || pid != os.Getpid() {
-			t.Errorf("ConfirmSession = %d, %v; want this runner", pid, err)
+		before := time.Now()
+		confirmed := make(chan error, 1)
+		go func() {
+			_, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a")
+			confirmed <- err
+		}()
+
+		req := a.take(t, nil)
+		if req.Confirm != "api-x7Kd9a" || req.Switch != "" || req.Deadline.Before(before.Add(runnerreg.Timeout())) {
+			t.Errorf("the attach took %+v, want a request to confirm api-x7Kd9a due %v from the ask", req, runnerreg.Timeout())
 		}
-		a.untaken(t, 0)
+		if err := <-confirmed; err != nil {
+			t.Errorf("ConfirmSession = %v, want the attach's confirmation", err)
+		}
 	})
 
-	t.Run("an attach that has seen a switch is unsure, and refuses", func(t *testing.T) {
+	t.Run("the attach's refusal is the runner's", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		a := begun(listing(t, r), "api-x7Kd9a")
 
-		a.cfg.Unsure()
+		confirmed := make(chan error, 1)
+		go func() {
+			_, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a")
+			confirmed <- err
+		}()
+		a.take(t, runner.ErrUnconfirmed)
 
-		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) {
-			t.Errorf("ConfirmSession = %v, want the unsure runner's refusal", err)
-		}
-	})
-
-	t.Run("the next attach, after a switch, is sure again", func(t *testing.T) {
-		r := runnerreg.New(stateDir(t))
-		l := listing(t, r)
-		first := begun(l, "api-x7Kd9a")
-		first.cfg.Unsure()
-		l.Ended()
-
-		next := begun(l, "blog-c3d4")
-
-		if _, err := r.ConfirmSession(t.Context(), next.token(), "blog-c3d4"); err != nil {
-			t.Errorf("ConfirmSession = %v, want the new attach's confirmation", err)
-		}
-	})
-
-	t.Run("an attach on another session than the one asked of refuses, whatever its entry says", func(t *testing.T) {
-		r := runnerreg.New(stateDir(t))
-		a := begun(listing(t, r), "blog-c3d4")
-		writeEntry(t, r, a.token(), entryFor(os.Getpid(), "api-x7Kd9a"))
-
-		if _, err := r.ConfirmSession(t.Context(), a.token(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrRefused) {
-			t.Errorf("ConfirmSession = %v, want the runner's refusal", err)
+		if err := <-confirmed; !errors.Is(err, runnertoken.ErrRefused) || !strings.Contains(err.Error(), runner.ErrUnconfirmed.Error()) {
+			t.Errorf("ConfirmSession = %v, want the attach's refusal", err)
 		}
 	})
 

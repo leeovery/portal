@@ -48,7 +48,8 @@ type Handler interface {
 	// returns once the runner has accepted, or with why it won't.
 	DetachToPicker(ctx context.Context) error
 	// ConfirmSession asks the runner whether its attach under way shows
-	// session, sure of it, ending nothing. It returns nil if so, or why not.
+	// session, sure of it or confirmed so, ending nothing. It returns nil if
+	// so, or why not.
 	ConfirmSession(ctx context.Context, session string) error
 }
 
