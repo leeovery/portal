@@ -69,6 +69,18 @@ func (s *zmxSubject) Hold(t *testing.T, name string, state backendtest.State) ba
 
 func (s *zmxSubject) SetCurrent(name string) { s.current = name }
 
+// Lead attaches a client by the Backend's attach command, which Track marks,
+// to the session no client leads, which makes it the leader.
+func (s *zmxSubject) Lead(t *testing.T, session, variable, value string) {
+	t.Helper()
+	attach, err := s.b.AttachCommand(t.Context(), session)
+	if err != nil {
+		t.Fatalf("AttachCommand(%q) = %v", session, err)
+	}
+	zmxtest.Run(t, s.b.Track(attach, variable, value))
+	awaitLeader(t, s.b, session)
+}
+
 func (s *zmxSubject) Lacks(b backendtest.Behaviour) string {
 	switch b {
 	case backendtest.HangingUpSessions:

@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,8 @@ var attachLogger = log.For("attach")
 // attach ends asking for the picker, it opens the plain picker and attaches
 // its pick; each time a switch ends it, it attaches the session switched to;
 // until the picker is quit or an attach ends any other way. Inside a session
-// it switches instead, through the registry.
+// it switches instead: through the registry when a runner's terminal leads
+// the session.
 type attachConnector struct {
 	cmd     *cobra.Command
 	backend backend.Backend
@@ -45,26 +47,37 @@ func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector
 }
 
 func (c attachConnector) Connect(name string) error {
-	listing := c.runners.Listing()
+	listing := c.runners.Listing(c.backend)
 	defer listing.Close()
-	for {
-		out, err := c.attach(name, listing)
-		if err != nil {
-			return err
+	out, err := c.attach(name, listing)
+	for err == nil {
+		if out.Switch != "" {
+			out = c.attachSwitched(out.Switch, listing)
+			continue
 		}
 		if name, err = c.next(out, listing); err != nil || name == "" {
 			return err
 		}
+		out, err = c.attach(name, listing)
 	}
+	return err
 }
 
-// next is the session to attach after an attach ends with out: the session a
-// switch named, or the picker's pick. It is empty when Portal exits instead,
-// with the error to exit with. The runner stays listed only through a switch.
-func (c attachConnector) next(out runner.Outcome, listing runnerListing) (string, error) {
-	if out.Switch != "" {
-		return out.Switch, nil
+// attachSwitched attaches the session a switch named. One it can't attach,
+// gone by now say, ends as a failed kill does: the picker follows, showing
+// why.
+func (c attachConnector) attachSwitched(name string, listing runnerListing) runner.Outcome {
+	out, err := c.attach(name, listing)
+	if err != nil {
+		return runner.Outcome{Action: attachkeys.Detach, Err: err}
 	}
+	return out
+}
+
+// next is the session to attach after an attach that ended with out other
+// than by a switch: the picker's pick. It is empty when Portal exits instead,
+// with the error to exit with. The runner is unlisted meanwhile.
+func (c attachConnector) next(out runner.Outcome, listing runnerListing) (string, error) {
 	listing.Close()
 	if !out.Picker() {
 		return "", exitStatus(out.ExitCode)
@@ -106,13 +119,27 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 }
 
 // switchTo moves the terminal this command was typed in to name, from inside
-// a session: through the runner attached there whose terminal last took
-// input, else by the command, which zmx routes to the client that typed it.
+// a session: through the runner whose terminal leads the session, else by the
+// command, which zmx routes to the leader.
 func (c attachConnector) switchTo(name string, command backend.Command) error {
-	if err := c.runners.SwitchFrom(c.cmd.Context(), c.backend.Current(), name); err == nil {
+	ctx, current := c.cmd.Context(), c.backend.Current()
+	if err := c.runners.Switch(ctx, c.leader(ctx, current), current, name); err == nil {
 		return nil
 	}
 	return c.exec(command)
+}
+
+// leader is the registry token the client leading session carries, as the
+// backend reports the leader's tracked variables: empty for a raw client, no
+// client leading, or a leader the backend can't tell.
+func (c attachConnector) leader(ctx context.Context, session string) string {
+	env, err := c.backend.LeaderEnv(ctx, session)
+	if err != nil {
+		attachLogger.Warn("leader unknown", "session", session, "error", err)
+		return ""
+	}
+	token, _ := env.Lookup(runnerreg.TokenVar)
+	return token
 }
 
 func (c attachConnector) exec(command backend.Command) error {

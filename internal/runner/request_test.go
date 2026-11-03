@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 )
@@ -26,18 +26,37 @@ func withRequests(requests chan runner.Request) option {
 	return func(_ *harness, cfg *runner.Config) { cfg.Requests = requests }
 }
 
-// send sends req, failing the test unless Run takes it.
-func send(t *testing.T, requests chan<- runner.Request, req runner.Request) {
+// ask sends req, failing the test unless Run reads it, and returns Run's
+// answer.
+func ask(t *testing.T, requests chan<- runner.Request, req runner.Request) error {
 	t.Helper()
+	answer := make(chan error, 1)
+	req.Answer = answer
 	select {
 	case requests <- req:
 	case <-time.After(settle):
-		t.Fatalf("Run never took %+v", req)
+		t.Fatalf("Run never read %+v", req)
+	}
+	select {
+	case err := <-answer:
+		return err
+	case <-time.After(settle):
+		t.Fatalf("Run never answered %+v", req)
+		return nil
 	}
 }
 
-// taken reports whether Run takes req within the wait.
+// send sends req, failing the test unless Run takes it.
+func send(t *testing.T, requests chan<- runner.Request, req runner.Request) {
+	t.Helper()
+	if err := ask(t, requests, req); err != nil {
+		t.Fatalf("Run refused %+v: %v", req, err)
+	}
+}
+
+// taken reports whether Run reads req within the wait.
 func taken(requests chan<- runner.Request, req runner.Request, within time.Duration) bool {
+	req.Answer = make(chan error, 1)
 	select {
 	case requests <- req:
 		return true
@@ -91,6 +110,35 @@ func TestRun_Requests(t *testing.T) {
 			t.Error("Picker() = false, want the picker to follow")
 		}
 		assertDetachedCleanly(t, h, sink)
+	})
+
+	t.Run("a request past its deadline is refused, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests))
+		h.ready(t)
+
+		err := ask(t, requests, runner.Request{Switch: "blog-c3d4", Deadline: time.Now().Add(-time.Millisecond)})
+
+		if err == nil || !strings.Contains(err.Error(), "deadline") {
+			t.Errorf("Run answered %v, want a refusal past the deadline", err)
+		}
+		h.detach(t)
+		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
+			t.Errorf("the child read %q, want only the detach key's ctrl+\\", got)
+		}
+	})
+
+	t.Run("a request before its deadline is taken", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests))
+		h.ready(t)
+
+		send(t, requests, runner.Request{Switch: "blog-c3d4", Deadline: time.Now().Add(settle)})
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Switch: "blog-c3d4"}) {
+			t.Errorf("Run = %+v, %v; want the switch", out, err)
+		}
 	})
 
 	t.Run("input typed before a request reaches the session first", func(t *testing.T) {
@@ -251,28 +299,4 @@ func TestRun_Began(t *testing.T) {
 		}
 		assertPanicLogged(t, sink, "began exploded")
 	})
-}
-
-func TestRun_Forwarded(t *testing.T) {
-	var forwarded atomic.Int32
-	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
-		cfg.Forwarded = func() { forwarded.Add(1) }
-	})
-	h.ready(t)
-
-	if n := forwarded.Load(); n != 0 {
-		t.Fatalf("Forwarded was called %d times before any input, want none", n)
-	}
-	h.term.typeIn(t, "abc")
-	h.term.await(t, "in:616263")
-	if !harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool { return forwarded.Load() > 0 }) {
-		t.Fatal("Forwarded was never called for input that reached the child")
-	}
-	before := forwarded.Load()
-
-	h.detach(t) // a read holding only the key forwards nothing
-
-	if n := forwarded.Load(); n != before {
-		t.Errorf("Forwarded was called %d times more for a read holding only a bound key, want none", n-before)
-	}
 }

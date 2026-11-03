@@ -26,6 +26,10 @@ type Subject interface {
 	// SetCurrent makes the backend run inside the named session, "" outside
 	// any.
 	SetCurrent(name string)
+	// Lead makes a client attached by an attach command that Track marked
+	// with variable=value lead the held session, answering, and returns once
+	// it does.
+	Lead(t *testing.T, session, variable, value string)
 	// Lacks says why the backend cannot show a behaviour, "" when it can, so
 	// Contract skips that case by name instead of leaving it out.
 	Lacks(b Behaviour) string
@@ -93,6 +97,10 @@ var perSession = []struct {
 		_, err := b.History(ctx, name, 0)
 		return err
 	}},
+	{"LeaderEnv", func(ctx context.Context, b backend.Backend, name string) error {
+		_, err := b.LeaderEnv(ctx, name)
+		return err
+	}},
 	{"Detach", func(ctx context.Context, b backend.Backend, name string) error { return b.Detach(ctx, name) }},
 	{"Kill", func(ctx context.Context, b backend.Backend, name string) error { return b.Kill(ctx, name) }},
 }
@@ -109,6 +117,7 @@ func Contract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	t.Run("a session made by Create", func(t *testing.T) { creatingContract(t, newSubject) })
 	t.Run("a caller context that has ended", func(t *testing.T) { endedContract(t, newSubject) })
 	t.Run("an attach from inside a session", func(t *testing.T) { switchContract(t, newSubject) })
+	t.Run("the client leading a session", func(t *testing.T) { leaderContract(t, newSubject) })
 }
 
 func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
@@ -475,6 +484,51 @@ func switchContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			})
 		})
 	}
+}
+
+func leaderContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("a session no client leads answers no environment", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+
+		if env, err := s.Backend().LeaderEnv(t.Context(), "work"); err != nil || len(env) != 0 {
+			t.Errorf("LeaderEnv = %+v, %v; want none", env, err)
+		}
+	})
+
+	t.Run("it answers the variable Track marked the leading client with", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		s.Lead(t, "work", "PORTAL_ATTACH", "tok123")
+
+		env, err := s.Backend().LeaderEnv(t.Context(), "work")
+		if value, ok := env.Lookup("PORTAL_ATTACH"); err != nil || !ok || value != "tok123" {
+			t.Errorf("LeaderEnv = %+v, %v; want PORTAL_ATTACH tok123 among it", env, err)
+		}
+	})
+
+	t.Run("Track sets the variable once, leaving the command it was given as it was", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		b := s.Backend()
+		cmd, err := b.AttachCommand(t.Context(), "work")
+		if err != nil {
+			t.Fatalf("AttachCommand = %v", err)
+		}
+		given := slices.Clone(cmd.Env)
+
+		tracked := b.Track(b.Track(cmd, "PORTAL_ATTACH", "first"), "PORTAL_ATTACH", "second")
+
+		if got := values(tracked.Env, "PORTAL_ATTACH"); !slices.Equal(got, []string{"second"}) {
+			t.Errorf("Env PORTAL_ATTACH = %q, want only the last value", got)
+		}
+		if !slices.Equal(tracked.Argv, cmd.Argv) || tracked.Switches != cmd.Switches || tracked.Dir != cmd.Dir {
+			t.Errorf("Track = %+v, want %+v with only its environment changed", tracked, cmd)
+		}
+		if !slices.Equal(cmd.Env, given) {
+			t.Errorf("the given command's Env became %q, want it left %q", cmd.Env, given)
+		}
+	})
 }
 
 func listed(t *testing.T, b backend.Backend, name string) backend.Session {

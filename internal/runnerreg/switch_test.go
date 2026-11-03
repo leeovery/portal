@@ -1,6 +1,7 @@
 package runnerreg_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -12,168 +13,128 @@ import (
 	"github.com/leeovery/portal/internal/runnerreg"
 )
 
-func TestSwitchFrom(t *testing.T) {
-	at := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
+// contextWithin is a context of the test's that ends after d.
+func contextWithin(t *testing.T, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(t.Context(), d)
+}
 
-	t.Run("it asks the runner on the session that last took input", func(t *testing.T) {
+func TestSwitch(t *testing.T) {
+	t.Run("it asks the runner the token names, and only it", func(t *testing.T) {
 		sink := logtest.Install(t)
 		r := runnerreg.New(stateDir(t))
-		earlier, typed, elsewhere := inputAt(at), inputAt(at.Add(time.Second)), inputAt(at.Add(time.Hour))
-		register(t, r, "api-x7Kd9a", earlier)
-		register(t, r, "api-x7Kd9a", typed)
-		register(t, r, "blog-c3d4", elsewhere)
+		typed, other := &handler{}, &handler{}
+		register(t, r, "typed1", "api-x7Kd9a", typed)
+		register(t, r, "other1", "api-x7Kd9a", other)
 
-		if err := r.SwitchFrom(t.Context(), "api-x7Kd9a", "docs-e5f6"); err != nil {
-			t.Fatalf("SwitchFrom: %v", err)
+		if err := r.Switch(t.Context(), "typed1", "api-x7Kd9a", "blog-c3d4"); err != nil {
+			t.Fatalf("Switch = %v, want the runner's acceptance", err)
 		}
 
-		for name, tc := range map[string]struct {
-			h    *handler
-			want []string
-		}{
-			"the runner typed in":                              {typed, []string{"docs-e5f6"}},
-			"the runner on the session typed in less recently": {earlier, nil},
-			"the runner on another session":                    {elsewhere, nil},
-		} {
-			if got, _ := tc.h.asked(); !slices.Equal(got, tc.want) {
-				t.Errorf("%s was asked to switch to %q, want %q", name, got, tc.want)
-			}
+		if switches, _ := typed.asked(); !slices.Equal(switches, []string{"blog-c3d4"}) {
+			t.Errorf("the runner named switched to %q, want blog-c3d4", switches)
+		}
+		if switches, _ := other.asked(); len(switches) != 0 {
+			t.Errorf("another runner on the session was asked to switch to %q", switches)
 		}
 		rec := sink.Records().Matching("attach", "switch").AtExactLevel(slog.LevelInfo).Only(t, "switch record")
-		for key, want := range map[string]string{"session": "api-x7Kd9a", "target": "docs-e5f6", "result": "accepted"} {
+		for key, want := range map[string]string{"session": "api-x7Kd9a", "target": "blog-c3d4", "result": "accepted"} {
 			if got := rec.AttrString(t, key); got != want {
 				t.Errorf("switch %s = %q, want %q", key, got, want)
 			}
 		}
 		if got := rec.IntAttr(t, "target_pid"); got != int64(os.Getpid()) {
-			t.Errorf("switch target_pid = %d, want the runner's %d", got, os.Getpid())
+			t.Errorf("switch target_pid = %d, want %d", got, os.Getpid())
 		}
 	})
 
-	t.Run("no runner on the session is ErrNoRunner", func(t *testing.T) {
-		sink := logtest.Install(t)
-		r := runnerreg.New(stateDir(t))
-		elsewhere := inputAt(at)
-		register(t, r, "blog-c3d4", elsewhere)
+	t.Run("no token, one the registry doesn't hold, or one no runner could have, is ErrNoRunner, asking no one", func(t *testing.T) {
+		for _, token := range []string{"", "nosuch", "../../tok123", "tok123/x"} {
+			sink := logtest.Install(t)
+			r := runnerreg.New(stateDir(t))
+			h := &handler{}
+			register(t, r, "tok123", "api-x7Kd9a", h)
 
-		if err := r.SwitchFrom(t.Context(), "api-x7Kd9a", "docs-e5f6"); !errors.Is(err, runnerreg.ErrNoRunner) {
-			t.Errorf("SwitchFrom = %v, want ErrNoRunner", err)
-		}
-		if got, _ := elsewhere.asked(); len(got) != 0 {
-			t.Errorf("the runner on another session was asked to switch to %q", got)
-		}
-		rec := sink.Records().Matching("attach", "switch").AtExactLevel(slog.LevelInfo).Only(t, "switch record")
-		if got := rec.AttrString(t, "result"); got != "no runner" {
-			t.Errorf("switch result = %q, want no runner", got)
-		}
-		if rec.HasAttr("target_pid") || rec.HasAttr("error") {
-			t.Error("a switch with no runner names a runner or an error")
-		}
-	})
-
-	t.Run("runners that have forwarded no input are no runner", func(t *testing.T) {
-		r := runnerreg.New(stateDir(t))
-		idle := &handler{}
-		register(t, r, "api-x7Kd9a", idle)
-
-		if err := r.SwitchFrom(t.Context(), "api-x7Kd9a", "docs-e5f6"); !errors.Is(err, runnerreg.ErrNoRunner) {
-			t.Errorf("SwitchFrom = %v, want ErrNoRunner", err)
-		}
-		if got, _ := idle.asked(); len(got) != 0 {
-			t.Errorf("an idle runner was asked to switch to %q", got)
+			if err := r.Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrNoRunner) {
+				t.Errorf("Switch(%q) = %v, want ErrNoRunner", token, err)
+			}
+			if switches, _ := h.asked(); len(switches) != 0 {
+				t.Errorf("Switch(%q) asked a runner to switch to %q", token, switches)
+			}
+			rec := sink.Records().Matching("attach", "switch").Only(t, "switch record")
+			if got := rec.AttrString(t, "result"); got != "no runner" || rec.HasAttr("target_pid") || rec.HasAttr("error") {
+				t.Errorf("switch record for %q = %+v, want result no runner, naming no runner and no error", token, rec)
+			}
 		}
 	})
 
 	t.Run("a refusal is returned, and logged as one", func(t *testing.T) {
 		sink := logtest.Install(t)
 		r := runnerreg.New(stateDir(t))
-		register(t, r, "api-x7Kd9a", &handler{lastInput: at, refuse: errors.New("the runner is not attached")})
+		register(t, r, "tok123", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
 
-		if err := r.SwitchFrom(t.Context(), "api-x7Kd9a", "docs-e5f6"); !errors.Is(err, runnerreg.ErrRefused) {
-			t.Errorf("SwitchFrom = %v, want ErrRefused", err)
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
+			t.Fatalf("Switch = %v, want ErrRefused", err)
 		}
-		rec := sink.Records().Matching("attach", "switch").AtExactLevel(slog.LevelInfo).Only(t, "switch record")
-		if got := rec.AttrString(t, "result"); got != "refused" {
-			t.Errorf("switch result = %q, want refused", got)
-		}
-		if err := rec.ErrorAttr(t, "error"); err == nil {
-			t.Error("the refusal names no error")
-		}
-	})
-
-	t.Run("a registry it can't read fails, and is logged as failing", func(t *testing.T) {
-		sink := logtest.Install(t)
-		blocker := stateDir(t) + "/file"
-		if err := os.WriteFile(blocker, nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
-
-		err := runnerreg.New(blocker).SwitchFrom(t.Context(), "api-x7Kd9a", "docs-e5f6")
-
-		if err == nil || errors.Is(err, runnerreg.ErrNoRunner) || errors.Is(err, runnerreg.ErrRefused) {
-			t.Errorf("SwitchFrom = %v, want the read's failure", err)
-		}
-		rec := sink.Records().Matching("attach", "switch").AtExactLevel(slog.LevelInfo).Only(t, "switch record")
-		if got := rec.AttrString(t, "result"); got != "failed" {
-			t.Errorf("switch result = %q, want failed", got)
+		rec := sink.Records().Matching("attach", "switch").Only(t, "switch record")
+		if got := rec.AttrString(t, "result"); got != "refused" || !rec.HasAttr("error") {
+			t.Errorf("switch record = %+v, want result refused with the error", rec)
 		}
 	})
 }
 
 func TestDetachToPicker(t *testing.T) {
 	t.Run("it asks every runner on the session, and no other", func(t *testing.T) {
-		sink := logtest.Install(t)
 		r := runnerreg.New(stateDir(t))
-		first, second, elsewhere, idle := inputAt(time.Now()), inputAt(time.Now()), inputAt(time.Now()), &handler{}
-		register(t, r, "api-x7Kd9a", first)
-		register(t, r, "api-x7Kd9a", second)
-		register(t, r, "api-x7Kd9a", idle)
-		register(t, r, "blog-c3d4", elsewhere)
+		first, second, elsewhere := &handler{}, &handler{}, &handler{}
+		register(t, r, "first1", "api-x7Kd9a", first)
+		register(t, r, "second", "api-x7Kd9a", second)
+		register(t, r, "elsewh", "blog-c3d4", elsewhere)
 
 		accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a")
 
-		if err != nil || accepted != 3 {
-			t.Errorf("DetachToPicker = %d, %v; want all 3 on the session", accepted, err)
+		if err != nil || accepted != 2 {
+			t.Errorf("DetachToPicker = %d, %v; want both runners on the session", accepted, err)
 		}
-		for name, tc := range map[string]struct {
-			h    *handler
-			want int
-		}{"first": {first, 1}, "second": {second, 1}, "idle": {idle, 1}, "elsewhere": {elsewhere, 0}} {
-			if _, got := tc.h.asked(); got != tc.want {
-				t.Errorf("the %s runner was asked to detach %d times, want %d", name, got, tc.want)
+		for name, h := range map[string]*handler{"first": first, "second": second} {
+			if _, detaches := h.asked(); detaches != 1 {
+				t.Errorf("the %s runner detached %d times, want once", name, detaches)
 			}
 		}
-		recs := sink.Records().Matching("attach", "detach to picker").AtExactLevel(slog.LevelInfo)
-		if len(recs) != 3 {
-			t.Fatalf("detach to picker records = %d, want one per runner asked", len(recs))
-		}
-		for _, rec := range recs {
-			if rec.AttrString(t, "session") != "api-x7Kd9a" || rec.AttrString(t, "result") != "accepted" {
-				t.Errorf("record = %+v, want an acceptance on api-x7Kd9a", rec)
-			}
+		if _, detaches := elsewhere.asked(); detaches != 0 {
+			t.Errorf("a runner on another session detached %d times", detaches)
 		}
 	})
 
 	t.Run("it counts only acceptances", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
-		register(t, r, "api-x7Kd9a", &handler{})
-		register(t, r, "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
+		register(t, r, "first1", "api-x7Kd9a", &handler{})
+		register(t, r, "second", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
 
 		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 1 {
-			t.Errorf("DetachToPicker = %d, %v; want 1", accepted, err)
+			t.Errorf("DetachToPicker = %d, %v; want the one acceptance", accepted, err)
 		}
 	})
 
 	t.Run("no runner on the session accepts none, and says so", func(t *testing.T) {
 		sink := logtest.Install(t)
-		r := runnerreg.New(stateDir(t))
 
-		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
-			t.Errorf("DetachToPicker = %d, %v; want 0", accepted, err)
+		if accepted, err := runnerreg.New(stateDir(t)).DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
+			t.Errorf("DetachToPicker = %d, %v; want none, from a registry never made", accepted, err)
 		}
-		rec := sink.Records().Matching("attach", "detach to picker").AtExactLevel(slog.LevelInfo).Only(t, "detach to picker record")
+		rec := sink.Records().Matching("attach", "detach to picker").Only(t, "detach to picker record")
 		if got := rec.AttrString(t, "result"); got != "no runner" {
 			t.Errorf("result = %q, want no runner", got)
+		}
+	})
+
+	t.Run("a registry it can't read fails", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		if err := os.WriteFile(r.Dir(), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err == nil {
+			t.Error("DetachToPicker = nil, want the failed read")
 		}
 	})
 }

@@ -4,8 +4,10 @@ package runner_test
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -94,6 +97,33 @@ func TestRunOverZmx(t *testing.T) {
 		z.awaitClients(t, 0)
 	})
 
+	t.Run("a zmx attach typed in the session switches the child under the runner, whose kill key then kills nothing", func(t *testing.T) {
+		calls, called := new(atomic.Int32), make(chan struct{})
+		z := attachZmxWith(t, nil, nil, onSwitchedAway(calls, called))
+		if _, err := z.b.Create(t.Context(), "other", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		z.h.term.typeIn(t, shellquote.Single(zmxtest.Binary(t))+" attach other\r")
+		select {
+		case <-called:
+		case <-time.After(settle):
+			t.Fatalf("the runner never saw the switch; the terminal shows %q", z.h.term.output())
+		}
+		z.h.term.typeIn(t, keyKill)
+		out, err := z.h.finish(t)
+
+		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrSwitchedAway) {
+			t.Errorf("Run = %+v, %v; want the kill refused for the switch", out, err)
+		}
+		z.assertEndedByZmx(t)
+		for _, name := range []string{sessionName, "other"} {
+			if alive, err := z.b.Exists(t.Context(), name); err != nil || !alive {
+				t.Errorf("Exists(%s) = %v, %v after the kill key, want it alive", name, alive, err)
+			}
+		}
+	})
+
 	t.Run("the session ending exits to the shell", func(t *testing.T) {
 		z := attachZmx(t, nil)
 
@@ -126,15 +156,22 @@ type zmxAttach struct {
 // command is made in, as the user's own does.
 func attachZmx(t *testing.T, command []string, environ ...string) *zmxAttach {
 	t.Helper()
+	return attachZmxWith(t, command, environ)
+}
+
+// attachZmxWith is attachZmx with each of opts applied to the attach's
+// config.
+func attachZmxWith(t *testing.T, command, environ []string, opts ...option) *zmxAttach {
+	t.Helper()
 	sink := logtest.Install(t)
 	b := zmxtest.New(t)
 	if _, err := b.Create(t.Context(), sessionName, t.TempDir(), command); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	h := attachOn(t, t.Context(), newTerminal(t), attachCommand(t, b, environ), func(_ *harness, cfg *runner.Config) {
+	h := attachOn(t, t.Context(), newTerminal(t), attachCommand(t, b, environ), append([]option{func(_ *harness, cfg *runner.Config) {
 		cfg.Session = sessionName
 		cfg.Kill = b.Kill
-	})
+	}}, opts...)...)
 	z := &zmxAttach{h: h, b: b, sink: sink}
 	z.awaitClients(t, 1)
 	return z

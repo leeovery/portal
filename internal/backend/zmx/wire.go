@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
+
+	"github.com/leeovery/portal/internal/backend"
 )
 
 // ProtocolVersion is the version of zmx's socket protocol the driver speaks,
@@ -21,6 +24,8 @@ const (
 	tagKill        tag = 5
 	tagInfo        tag = 6
 	tagHistory     tag = 8
+	tagEnvGet      tag = 19
+	tagEnvData     tag = 21
 	tagCapture     tag = 22
 	tagUnsupported tag = 255
 )
@@ -138,3 +143,21 @@ func (i info) createdAt() time.Time {
 
 // cwdTruncated reports whether the cwd filled its array, so may have been cut.
 func (i info) cwdTruncated() bool { return len(i.cwd) == maxCwd }
+
+// decodeEnv reads an EnvData payload: a line per tracked variable, NAME=value
+// for one the client had set and -NAME for one it lacked. An empty payload is
+// a session no client leads. A line of neither form is skipped: zmx writes
+// values verbatim, so one holding a newline splits across lines.
+func decodeEnv(p []byte) backend.ClientEnv {
+	var env backend.ClientEnv
+	for line := range strings.SplitSeq(string(p), "\n") {
+		name, value, set := strings.Cut(line, "=")
+		switch {
+		case set && name != "":
+			env = append(env, backend.EnvVar{Name: name, Value: value})
+		case !set && len(line) > 1 && line[0] == '-':
+			env = append(env, backend.EnvVar{Name: line[1:], Unset: true})
+		}
+	}
+	return env
+}

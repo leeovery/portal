@@ -11,3 +11,7 @@ func ShortenCeilings(b *Backend, d time.Duration) {
 
 // ShortenCreateCeiling sets Create's ceiling to d.
 func ShortenCreateCeiling(b *Backend, d time.Duration) { b.limits.create = d }
+
+// DefaultTracked is Portal's copy of the variables zmx tracks for a client
+// whose environment has no ZMX_TRACK_ENV.
+const DefaultTracked = defaultTracked

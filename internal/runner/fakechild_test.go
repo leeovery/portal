@@ -51,7 +51,16 @@ const (
 	// modeSpill writes lastOutput in one write once it reads input, then
 	// exits with status 0.
 	modeSpill = "spill"
+	// modeSwitched writes zmx's switch twice once ready, as zmx's client
+	// does when switched to another session, each time in two writes that
+	// split it, then acts as modeZmx.
+	modeSwitched = "switched"
 )
+
+// switchSignature is what zmx's client writes as zmx switches it to another
+// session: its reset as it leaves one, then the screen clear it attaches the
+// next with.
+const switchSignature = terminalReset + "\x1b[0m\x1b[2J\x1b[H"
 
 // lastOutput is short enough for one write to put it all in the child's
 // terminal at once, so the runner reads it whole.
@@ -115,6 +124,12 @@ func fakeChild(mode string) int {
 		await(0, unix.POLLIN)
 		_, _ = unix.Write(1, []byte(lastOutput))
 		return 0
+	case modeSwitched:
+		for range 2 {
+			write([]byte(switchSignature[:10]))
+			time.Sleep(readDelay)
+			write([]byte(switchSignature[10:]))
+		}
 	}
 	go reportSizes(winch)
 	return readInput(mode != modeDeaf && mode != modeStubborn && mode != modeHungUpClean)
@@ -195,12 +210,16 @@ func flood() {
 	}
 }
 
-// say writes one line, waiting for room whenever the terminal is full.
+// say writes one line.
 func say(format string, args ...any) {
-	line := fmt.Appendf(nil, format+"\r\n", args...)
-	for len(line) > 0 {
-		n, err := unix.Write(1, line)
-		line = line[max(n, 0):]
+	write(fmt.Appendf(nil, format+"\r\n", args...))
+}
+
+// write writes out, waiting for room whenever the terminal is full.
+func write(out []byte) {
+	for len(out) > 0 {
+		n, err := unix.Write(1, out)
+		out = out[max(n, 0):]
 		if errors.Is(err, unix.EAGAIN) {
 			await(1, unix.POLLOUT)
 		} else if err != nil {

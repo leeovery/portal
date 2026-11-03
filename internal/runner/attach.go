@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -55,6 +56,10 @@ type attach struct {
 	exited chan struct{}
 	// keys carries the action of the bound key the input found.
 	keys chan attachkeys.Action
+	// switchedAway is set, and then away closed, once the child's output
+	// shows zmx switched it to another session.
+	switchedAway atomic.Bool
+	away         chan struct{}
 	// broken carries the end a copy loop's panic makes.
 	broken         chan ending
 	signals, winch chan os.Signal
@@ -65,8 +70,8 @@ func newAttach(cfg Config) *attach {
 	if cfg.Began == nil {
 		cfg.Began = func() {}
 	}
-	if cfg.Forwarded == nil {
-		cfg.Forwarded = func() {}
+	if cfg.SwitchedAway == nil {
+		cfg.SwitchedAway = func() {}
 	}
 	return &attach{
 		cfg:     cfg,
@@ -75,6 +80,7 @@ func newAttach(cfg Config) *attach {
 		outDone: make(chan struct{}),
 		exited:  make(chan struct{}),
 		keys:    make(chan attachkeys.Action, 1),
+		away:    make(chan struct{}),
 		broken:  make(chan ending, 2),
 		signals: make(chan os.Signal, 1),
 		winch:   make(chan os.Signal, 1),
@@ -443,7 +449,7 @@ func (a *attach) copyInput() {
 			return
 		}
 		forward, action, found := a.cfg.Scanner.Scan(buf[:n])
-		if err := a.forward(forward); err != nil {
+		if err := writeAll(a.ptmxFd, forward, a.stopIn.wait); err != nil {
 			return // stopped, or the child's side has closed and its exit ends the attach
 		}
 		if found {
@@ -451,17 +457,6 @@ func (a *attach) copyInput() {
 			return
 		}
 	}
-}
-
-// forward passes input to the child, and reports it forwarded.
-func (a *attach) forward(input []byte) error {
-	if err := writeAll(a.ptmxFd, input, a.stopIn.wait); err != nil {
-		return err
-	}
-	if len(input) > 0 {
-		a.cfg.Forwarded()
-	}
-	return nil
 }
 
 // hangUp takes the end of the terminal's input as the hang-up a SIGHUP to
@@ -475,10 +470,12 @@ func (a *attach) hangUp() {
 }
 
 // copyOutput passes the child's output to the terminal until the child's side
-// closes. Output the terminal refuses is dropped, so the child never blocks.
+// closes, watching it for zmx's switch. Output the terminal refuses is
+// dropped, so the child never blocks.
 func (a *attach) copyOutput() {
 	buf := make([]byte, bufSize)
 	refused := false
+	var watch switchWatch
 	for {
 		n, err := readReady(a.ptmxFd, buf, a.stopOut.wait)
 		if err != nil || n == 0 {
@@ -486,6 +483,10 @@ func (a *attach) copyOutput() {
 			// error leaves its end unseen.
 			a.drained = !refused && (err == nil || errors.Is(err, unix.EIO))
 			return
+		}
+		if !a.switchedAway.Load() && watch.scan(buf[:n]) {
+			a.switchedAway.Store(true)
+			close(a.away)
 		}
 		if refused {
 			continue

@@ -4,21 +4,32 @@ package cmd_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"net"
+	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
-// create makes a detached session in the world's zmx directory.
+// create makes a detached session in the world's zmx directory, its shell
+// in the world's environment, so a portal typed there stays in the world.
 func (w *portalWorld) create(t *testing.T, name string) {
 	t.Helper()
-	if _, err := w.b.Create(t.Context(), name, t.TempDir(), nil); err != nil {
+	b, err := zmx.New(zmx.Config{Binary: zmxtest.Binary(t), Dir: w.b.Dir(), Environ: func() []string { return slices.Clone(w.env) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Create(t.Context(), name, t.TempDir(), nil); err != nil {
 		t.Fatalf("create %s: %v", name, err)
 	}
 }
@@ -57,18 +68,53 @@ func (w *portalWorld) awaitExitStatus(t *testing.T, session string, want int) {
 	}
 }
 
-// runners is the registry's live runners, by session.
+// listed is a runner's entry in the registry, by its token.
+type listed struct {
+	PID     int    `json:"pid"`
+	Session string `json:"session"`
+}
+
+// entries is the registry's entries, as their files hold them, by token.
+func (w *portalWorld) entries(t *testing.T) map[string]listed {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(runnerreg.New(w.stateDir).Dir(), "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]listed{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		var e listed
+		if err == nil {
+			err = json.Unmarshal(data, &e)
+		}
+		if err != nil {
+			continue // gone, or half-written, since the glob
+		}
+		entries[strings.TrimSuffix(filepath.Base(path), ".json")] = e
+	}
+	return entries
+}
+
+// runners is the registry's runners, by session.
 func (w *portalWorld) runners(t *testing.T) map[string][]int {
 	t.Helper()
-	live, err := runnerreg.New(w.stateDir).Live(t.Context())
-	if err != nil {
-		t.Fatalf("read the runner registry: %v", err)
-	}
 	bySession := map[string][]int{}
-	for _, rn := range live {
-		bySession[rn.Session] = append(bySession[rn.Session], rn.PID)
+	for _, e := range w.entries(t) {
+		bySession[e.Session] = append(bySession[e.Session], e.PID)
 	}
 	return bySession
+}
+
+// token is p's portal's token in the registry, "" when it is not listed.
+func (p *portalTerm) token(t *testing.T) string {
+	t.Helper()
+	for token, e := range p.entries(t) {
+		if e.PID == p.cmd.Process.Pid {
+			return token
+		}
+	}
+	return ""
 }
 
 // awaitRunner waits for the registry to list p's portal as the one runner on
@@ -85,17 +131,78 @@ func (p *portalTerm) awaitRunner(t *testing.T, session string) {
 	}
 }
 
+// awaitUnlisted waits for the registry to drop p's portal.
+func (p *portalTerm) awaitUnlisted(t *testing.T) {
+	t.Helper()
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return p.token(t) == "" }) {
+		t.Fatalf("runners = %v, want portal %d unlisted", p.runners(t), p.cmd.Process.Pid)
+	}
+}
+
+// zmxTyped types a raw zmx command into the session p's terminal shows,
+// putting the pinned zmx first on the login shell's PATH as openTyped does.
+func (p *portalTerm) zmxTyped(t *testing.T, args string) {
+	t.Helper()
+	p.typeIn(t, "PATH="+filepath.Dir(zmxtest.Binary(t))+":$PATH zmx "+args+"\r")
+}
+
+// refusingAsAnotherVersion puts a socket answering every request as a
+// runner of another protocol version does, from p's portal's pid, where p's
+// own socket was: the runner is listed and answers, but refuses.
+func (p *portalTerm) refusingAsAnotherVersion(t *testing.T) {
+	t.Helper()
+	token := p.token(t)
+	if token == "" {
+		t.Fatal("the portal is not listed")
+	}
+	socket := filepath.Join(runnerreg.New(p.stateDir).Dir(), token+".sock")
+	if err := os.Remove(socket); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("bind %s: %v", socket, err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	refusal := `{"version":2,"ok":false,"refusal":"protocol version 1, where this runner speaks 2","pid":` + strconv.Itoa(p.cmd.Process.Pid) + "}\n"
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = io.ReadAll(conn)
+			_, _ = conn.Write([]byte(refusal))
+			_ = conn.Close()
+		}
+	}()
+}
+
+// awaitKillRefused presses the kill key in p's terminal, a runner zmx
+// switched away, and waits for the picker to show why it killed nothing.
+func (p *portalTerm) awaitKillRefused(t *testing.T) {
+	t.Helper()
+	mark := p.mark()
+	p.typeIn(t, altQ)
+	p.awaitAfter(t, mark, pickerMark)
+	p.awaitAfter(t, mark, "kill refused")
+}
+
 func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 
-	t.Run("the session's shell runs portal against the test's state and zmx directories", func(t *testing.T) {
+	t.Run("a session's shell runs portal against the test's state and zmx directories, whether portal or the test made it", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		p, _ := w.openProject(t)
-		mark := p.mark()
+		w.create(t, "beta")
+		q := w.portal(t, "open", "beta")
+		w.awaitClients(t, "beta", 1)
 
-		p.typeIn(t, `echo "st=$PORTAL_STATE_DIR zd=$ZMX_DIR"`+"\r")
-
-		p.awaitAfter(t, mark, "st="+w.stateDir+" zd="+w.b.Dir())
+		for _, term := range []*portalTerm{p, q} {
+			mark := term.mark()
+			term.typeIn(t, `echo "st=$PORTAL_STATE_DIR zd=$ZMX_DIR"`+"\r")
+			term.awaitAfter(t, mark, "st="+w.stateDir+" zd="+w.b.Dir())
+		}
 	})
 
 	t.Run("portal open typed in a session moves that terminal through its runner, and exits 0", func(t *testing.T) {
@@ -111,6 +218,23 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		p.showsSession(t, "beta", 21)
 		w.awaitExitStatus(t, alpha, 0)
 		p.awaitRunner(t, "beta")
+	})
+
+	t.Run("a raw zmx client typing portal open on a runner's session switches itself, and the runner stays", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		p, alpha := w.openProject(t)
+		raw := w.start(t, zmxtest.Binary(t), "attach", alpha)
+		w.awaitClients(t, alpha, 2)
+		w.create(t, "beta")
+		p.awaitRunner(t, alpha)
+
+		raw.openTyped(t, "beta")
+
+		w.awaitClients(t, "beta", 1)
+		w.awaitClients(t, alpha, 1)
+		raw.showsSession(t, "beta", 21)
+		p.showsSession(t, alpha, 22)
+		p.awaitRunner(t, alpha)
 	})
 
 	t.Run("of two terminals on a session, the one typed in last switches, and the other stays", func(t *testing.T) {
@@ -145,6 +269,48 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		w.awaitExitStatus(t, "alpha", 0)
 		if got := w.runners(t); len(got) != 0 {
 			t.Errorf("runners = %v, want none", got)
+		}
+	})
+
+	t.Run("a leading runner that refuses, as another version's, is switched by the fallback, and kills nothing after", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		p, alpha := w.openProject(t)
+		w.create(t, "beta")
+		p.awaitRunner(t, alpha)
+		p.refusingAsAnotherVersion(t)
+
+		p.openTyped(t, "beta")
+
+		w.awaitClients(t, "beta", 1)
+		w.awaitClients(t, alpha, 0)
+		p.showsSession(t, "beta", 21)
+		w.awaitExitStatus(t, alpha, 0)
+		p.awaitUnlisted(t)
+		p.awaitKillRefused(t)
+		for _, name := range []string{alpha, "beta"} {
+			if !w.alive(t, name) {
+				t.Errorf("%s ended on the kill key of a runner switched away", name)
+			}
+		}
+	})
+
+	t.Run("a zmx attach typed in a Portal attach switches it under the runner, which unlists and kills nothing after", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		p, alpha := w.openProject(t)
+		w.create(t, "beta")
+		p.awaitRunner(t, alpha)
+
+		p.zmxTyped(t, "attach beta")
+
+		w.awaitClients(t, "beta", 1)
+		w.awaitClients(t, alpha, 0)
+		p.showsSession(t, "beta", 21)
+		p.awaitUnlisted(t)
+		p.awaitKillRefused(t)
+		for _, name := range []string{alpha, "beta"} {
+			if !w.alive(t, name) {
+				t.Errorf("%s ended on the kill key of a runner switched away", name)
+			}
 		}
 	})
 

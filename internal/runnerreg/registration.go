@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
-	"github.com/leeovery/portal/internal/nanoid"
 )
 
 // ErrSocketPathTooLong refuses a control socket whose path a unix socket's
@@ -31,11 +30,12 @@ func checkSocketPath(path string) error {
 	return nil
 }
 
-// Handler carries out the requests sent to a registered runner.
+// errPastDeadline refuses a request its caller has given up on.
+var errPastDeadline = errors.New("the request is past its deadline")
+
+// Handler carries out the requests sent to a registered runner, each by ctx's
+// deadline, the caller's.
 type Handler interface {
-	// LastInput is when the runner last forwarded input, zero when it has
-	// forwarded none.
-	LastInput() time.Time
 	// Switch asks the runner to end its attach and attach session next. It
 	// returns once the runner has accepted, or with why it won't.
 	Switch(ctx context.Context, session string) error
@@ -60,14 +60,14 @@ type Registration struct {
 	closed  bool
 }
 
-// Register lists this process as a runner attached to session, serving the
-// requests sent to its socket through h until Close. The registry's directory
-// is made 0700 and the socket 0600. A socket path too long for a unix
-// socket's address is refused with ErrSocketPathTooLong, making nothing.
-func (r Registry) Register(session string, h Handler) (*Registration, error) {
-	token, err := nanoid.NewGenerator()()
-	if err != nil {
-		return nil, fmt.Errorf("register runner: %w", err)
+// Register lists this process under token as a runner attached to session,
+// serving the requests sent to its socket through h until Close. The
+// registry's directory is made 0700 and the socket 0600. A token that could
+// not have been minted for a runner is refused, and a socket path too long for
+// a unix socket's address with ErrSocketPathTooLong, making nothing.
+func (r Registry) Register(token, session string, h Handler) (*Registration, error) {
+	if !validToken(token) {
+		return nil, fmt.Errorf("register runner: token %q is no runner's", token)
 	}
 	g := &Registration{registry: r, token: token, handler: h, session: session}
 	if err := g.listen(); err != nil {
@@ -170,53 +170,51 @@ func (g *Registration) serve() {
 	}
 }
 
-// answer answers the one request a connection carries.
+// answer answers the one request a connection carries, which must be read
+// within the bound a caller gives one. Close cuts it short.
 func (g *Registration) answer(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	stop := context.AfterFunc(g.ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
+	defer stop()
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	q, err := readRequest(conn)
-	var a answer
-	if err != nil {
-		a = refusal(err)
-	} else {
-		a = g.carryOut(q)
+	if err == nil {
+		err = g.carryOut(q)
 	}
-	g.logRequest(q, a)
-	_ = json.NewEncoder(conn).Encode(a)
+	g.logRequest(q, err)
+	a := answer{Version: Version, OK: err == nil, PID: os.Getpid()}
+	if err != nil {
+		a.Refusal = err.Error()
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(timeout))
+	_ = writeMessage(conn, a)
 }
 
-// carryOut has the handler carry out q within half a caller's bound, so a
-// request the runner takes is one its caller is still waiting to hear of.
-func (g *Registration) carryOut(q request) answer {
-	ctx, cancel := context.WithTimeout(g.ctx, timeout/2)
+// carryOut has the handler carry out q by its deadline, so a request the
+// runner takes is one its caller is still waiting to hear of.
+func (g *Registration) carryOut(q request) error {
+	if !time.Now().Before(q.Deadline) {
+		return errPastDeadline
+	}
+	ctx, cancel := context.WithDeadline(g.ctx, q.Deadline)
 	defer cancel()
-	a := answer{Version: Version, OK: true, PID: os.Getpid()}
-	var err error
-	switch q.Request {
-	case reqLastInput:
-		a.LastInput = g.handler.LastInput()
-	case reqSwitch:
-		err = g.handler.Switch(ctx, q.Session)
-	case reqDetachToPicker:
-		err = g.handler.DetachToPicker(ctx)
+	if q.Request == reqSwitch {
+		return g.handler.Switch(ctx, q.Session)
 	}
-	if err != nil {
-		return refusal(err)
-	}
-	return a
+	return g.handler.DetachToPicker(ctx)
 }
 
-func (g *Registration) logRequest(q request, a answer) {
+func (g *Registration) logRequest(q request, refusal error) {
 	result := "accepted"
-	if !a.OK {
+	if refusal != nil {
 		result = "refused"
 	}
 	attrs := []any{"session", g.currentSession(), "detail", q.Request, "result", result}
 	if q.Session != "" {
 		attrs = append(attrs, "target", q.Session)
 	}
-	if a.Refusal != "" {
-		attrs = append(attrs, "error", a.Refusal)
+	if refusal != nil {
+		attrs = append(attrs, "error", refusal)
 	}
 	logger.Debug("request", attrs...)
 }

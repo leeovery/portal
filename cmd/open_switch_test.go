@@ -3,65 +3,116 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/attachkeys"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/tui"
 )
 
+// leading is a leader's tracked environment carrying the runner token.
+func leading(token string) backend.ClientEnv {
+	return backend.ClientEnv{{Name: "DISPLAY", Unset: true}, {Name: runnerreg.TokenVar, Value: token}}
+}
+
 func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
-	t.Run("the runner the command was typed in switches, and Portal exits 0 with nothing exec'd", func(t *testing.T) {
+	t.Run("the runner whose terminal leads the session switches, and Portal exits 0 with nothing exec'd", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		fake.SetCurrent("blog-c3d4")
+		fake.SetLeaderEnv("blog-c3d4", leading("lead01"))
 		rec.runners.switchErr = nil
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession = %v, want nil", err)
 		}
 		rec.assertNone(t)
-		if want := []switchCall{{"blog-c3d4", "api-x7Kd9a"}}; !slices.Equal(rec.runners.switches, want) {
+		if want := []switchCall{{"lead01", "blog-c3d4", "api-x7Kd9a"}}; !slices.Equal(rec.runners.switches, want) {
 			t.Errorf("switches = %+v, want %+v", rec.runners.switches, want)
 		}
 	})
 
-	for name, why := range map[string]error{
-		"with no runner":    runnerreg.ErrNoRunner,
-		"on a refusal":      fmt.Errorf("ask runner 4242 to switch: %w: the runner is not attached", runnerreg.ErrRefused),
-		"when it can't ask": errors.New("reach runner 4242: connection refused"),
+	for name, leader := range map[string]backend.ClientEnv{
+		"a raw zmx client leading":      {{Name: "DISPLAY", Value: ":0"}},
+		"a leader lacking the token":    {{Name: runnerreg.TokenVar, Unset: true}},
+		"no client leading the session": nil,
 	} {
-		t.Run(name+" it execs the attach command, which zmx routes to the client that typed it", func(t *testing.T) {
+		t.Run(name+" asks no runner by token, and execs the attach command, which zmx routes to the leader", func(t *testing.T) {
 			fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 			fake.SetCurrent("blog-c3d4")
-			rec.runners.switchErr = why
+			fake.SetLeaderEnv("blog-c3d4", leader)
 
 			if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 				t.Fatalf("openSession = %v, want nil", err)
 			}
-			if len(rec.runners.switches) != 1 {
-				t.Errorf("switches = %+v, want the registry asked once first", rec.runners.switches)
+			if want := []switchCall{{"", "blog-c3d4", "api-x7Kd9a"}}; !slices.Equal(rec.runners.switches, want) {
+				t.Errorf("switches = %+v, want %+v: no token to ask by", rec.runners.switches, want)
 			}
 			assertExeced(t, rec, "api-x7Kd9a")
 		})
 	}
 
-	t.Run("outside a session the registry is never asked to switch", func(t *testing.T) {
-		_, rec := stageAttach(t, "api-x7Kd9a")
+	t.Run("a leader the backend can't tell is no runner, with a WARN, and the attach command is exec'd", func(t *testing.T) {
+		sink := logtest.Install(t)
+		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		fake.SetCurrent("blog-c3d4")
+		fake.SetLeaderEnv("blog-c3d4", leading("lead01"))
+		fake.Fail(backendtest.OpLeaderEnv, errors.New("the daemon did not answer"))
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession = %v, want nil", err)
+		}
+		if want := []switchCall{{"", "blog-c3d4", "api-x7Kd9a"}}; !slices.Equal(rec.runners.switches, want) {
+			t.Errorf("switches = %+v, want %+v", rec.runners.switches, want)
+		}
+		assertExeced(t, rec, "api-x7Kd9a")
+		warn := sink.Records().Matching("attach", "leader unknown").AtExactLevel(slog.LevelWarn).Only(t, "leader unknown record")
+		if got := warn.AttrString(t, "session"); got != "blog-c3d4" || !strings.Contains(warn.AttrString(t, "error"), "did not answer") {
+			t.Errorf("leader unknown = %+v, want the session and why", warn)
+		}
+	})
+
+	for name, why := range map[string]error{
+		"refuses":          fmt.Errorf("ask runner 4242 to switch: %w: the runner is not attached", runnerreg.ErrRefused),
+		"can't be reached": errors.New("reach runner 4242: connection refused"),
+		"is gone":          fmt.Errorf("%w: runner 4242 has exited", runnerreg.ErrNoRunner),
+	} {
+		t.Run("a leading runner that "+name+" leaves the switch to the attach command, exec'd", func(t *testing.T) {
+			fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+			fake.SetCurrent("blog-c3d4")
+			fake.SetLeaderEnv("blog-c3d4", leading("lead01"))
+			rec.runners.switchErr = why
+
+			if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+				t.Fatalf("openSession = %v, want nil", err)
+			}
+			if want := []switchCall{{"lead01", "blog-c3d4", "api-x7Kd9a"}}; !slices.Equal(rec.runners.switches, want) {
+				t.Errorf("switches = %+v, want the leading runner asked first, %+v", rec.runners.switches, want)
+			}
+			assertExeced(t, rec, "api-x7Kd9a")
+		})
+	}
+
+	t.Run("outside a session neither the leader nor the registry is asked", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
 		rec.runners.switchErr = nil
 
 		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
 		assertAttached(t, rec, "api-x7Kd9a")
-		if len(rec.runners.switches) != 0 {
-			t.Errorf("switches = %+v, want none", rec.runners.switches)
+		if len(rec.runners.switches) != 0 || len(fake.CallsTo(backendtest.OpLeaderEnv)) != 0 {
+			t.Errorf("switches = %+v, leader reads = %+v; want neither", rec.runners.switches, fake.CallsTo(backendtest.OpLeaderEnv))
 		}
 	})
 
@@ -69,6 +120,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 		fake, rec := stageAttach(t, "blog-c3d4")
 		stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
 		fake.SetCurrent("blog-c3d4")
+		fake.SetLeaderEnv("blog-c3d4", leading("lead01"))
 		rec.runners.switchErr = nil
 		dir := t.TempDir()
 
@@ -79,7 +131,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 		if len(creates) != 1 {
 			t.Fatalf("Create calls = %+v, want one", creates)
 		}
-		if want := []switchCall{{"blog-c3d4", creates[0].Name}}; !slices.Equal(rec.runners.switches, want) {
+		if want := []switchCall{{"lead01", "blog-c3d4", creates[0].Name}}; !slices.Equal(rec.runners.switches, want) {
 			t.Errorf("switches = %+v, want %+v: the session made, then switched to", rec.runners.switches, want)
 		}
 		rec.assertNone(t)
@@ -88,6 +140,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 	t.Run("a pick in a picker inside a session switches through the registry", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		fake.SetCurrent("api-x7Kd9a")
+		fake.SetLeaderEnv("api-x7Kd9a", leading("lead01"))
 		rec.runners.switchErr = nil
 		t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(t.TempDir(), "projects.json"))
 		t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "aliases"))
@@ -104,7 +157,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); err != nil {
 			t.Fatalf("openTUI: %v", err)
 		}
-		if want := []switchCall{{"api-x7Kd9a", "blog-c3d4"}}; !slices.Equal(rec.runners.switches, want) {
+		if want := []switchCall{{"lead01", "api-x7Kd9a", "blog-c3d4"}}; !slices.Equal(rec.runners.switches, want) {
 			t.Errorf("switches = %+v, want %+v", rec.runners.switches, want)
 		}
 		rec.assertNone(t)
@@ -131,16 +184,22 @@ func TestAttach_ASwitchAttachesTheSessionItNames(t *testing.T) {
 		}
 	})
 
-	t.Run("a switch to a session gone meanwhile ends Portal with the attach's error", func(t *testing.T) {
-		_, rec := stageAttach(t, "api-x7Kd9a")
+	t.Run("a switch to a session gone meanwhile brings the picker, showing why, and its pick attaches", func(t *testing.T) {
+		_, rec := stageAttach(t, "api-x7Kd9a", "docs-e5f6")
 		rec.answer(runResult{out: runner.Outcome{Switch: "gone-a1b2c3"}})
-		stagePicker(t)
+		picker := stagePicker(t, "docs-e5f6")
 
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err == nil {
-			t.Fatal("openSession = nil, want the failed attach of the session switched to")
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession = %v, want the picker's pick attached", err)
 		}
-		if want := []string{"listed api-x7Kd9a", "ended", "unlisted"}; !slices.Equal(rec.runners.events, want) {
-			t.Errorf("listing = %q, want %q: unlisted on the way out", rec.runners.events, want)
+		if len(picker.flashes) != 1 || !strings.Contains(picker.flashes[0], "gone-a1b2c3") || !strings.Contains(picker.flashes[0], backend.ErrNoSuchSession.Error()) {
+			t.Errorf("the picker's flashes = %q, want one saying gone-a1b2c3 is no session", picker.flashes)
+		}
+		if want := []string{"api-x7Kd9a", "docs-e5f6"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want %q", ranSessions(rec), want)
+		}
+		if want := []string{"listed api-x7Kd9a", "ended", "unlisted", "listed docs-e5f6", "ended", "unlisted"}; !slices.Equal(rec.runners.events, want) {
+			t.Errorf("listing = %q, want %q: unlisted while the picker shows", rec.runners.events, want)
 		}
 	})
 
@@ -186,19 +245,22 @@ func TestStateRunners_LivesInTheStateDirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	listing := stateRunners{}.Listing()
+	listing := stateRunners{}.Listing(backendtest.New())
 	cfg := runner.Config{Session: "api-x7Kd9a"}
 	listing.Attach(&cfg)
 	cfg.Began()
-	cfg.Forwarded()
 	t.Cleanup(listing.Close)
 
-	runners, err := runnerreg.New(dir).On(t.Context(), "api-x7Kd9a")
-	if err != nil || len(runners) != 1 || runners[0].PID != os.Getpid() {
-		t.Fatalf("runners on api-x7Kd9a under %s = %+v, %v; want this one", dir, runners, err)
+	var token string
+	for _, kv := range cfg.Command.Env {
+		token, _ = strings.CutPrefix(kv, runnerreg.TokenVar+"=")
+	}
+	entry := filepath.Join(dir, "runners", token+".json")
+	if data, err := os.ReadFile(entry); token == "" || err != nil || !strings.Contains(string(data), `"session":"api-x7Kd9a"`) {
+		t.Fatalf("the entry of the token %q the attach carries, %s = %s, %v; want it on api-x7Kd9a", token, entry, data, err)
 	}
 	listing.Ended()
-	if err := (stateRunners{}).SwitchFrom(t.Context(), "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
-		t.Errorf("SwitchFrom = %v, want the refusal of the runner listed there, its attach ended", err)
+	if err := (stateRunners{}).Switch(t.Context(), token, "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) {
+		t.Errorf("Switch = %v, want the refusal of the runner listed there, its attach ended", err)
 	}
 }

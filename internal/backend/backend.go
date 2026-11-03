@@ -117,6 +117,28 @@ type Command struct {
 	Switches bool
 }
 
+// ClientEnv is the environment a backend tracks for one client attached to a
+// session: each variable it tracks for that client, in the backend's order,
+// set or unset.
+type ClientEnv []EnvVar
+
+// EnvVar is one tracked variable.
+type EnvVar struct {
+	Name, Value string
+	// Unset reports that the client's environment lacked the variable.
+	Unset bool
+}
+
+// Lookup is name's value, and whether it is tracked and set.
+func (e ClientEnv) Lookup(name string) (string, bool) {
+	for _, v := range e {
+		if v.Name == name && !v.Unset {
+			return v.Value, true
+		}
+	}
+	return "", false
+}
+
 // Backend is the session backend. Every call that reaches the backend takes a
 // context and fails with its cause once it ends; each also has a ceiling of
 // its own, past which it fails with ErrTimeout. List differs on both counts.
@@ -151,6 +173,14 @@ type Backend interface {
 	// live session of exactly this name, or, run inside a session, switches
 	// that session's clients to it, as its Switches says.
 	AttachCommand(ctx context.Context, name string) (Command, error)
+	// Track is command, an attach command, with name set to value in its
+	// environment and tracked: LeaderEnv reports it while the client the
+	// command attaches leads the session. The given command is unchanged.
+	Track(command Command, name, value string) Command
+	// LeaderEnv is the tracked environment of the client leading the
+	// session: the one that last sent it keyboard input, or one that attached
+	// while no client led it. It is empty when no client leads.
+	LeaderEnv(ctx context.Context, name string) (ClientEnv, error)
 	// Kill ends the session. On ErrTimeout the kill may still land later.
 	Kill(ctx context.Context, name string) error
 	// Detach detaches every client of the session. On ErrTimeout the detach

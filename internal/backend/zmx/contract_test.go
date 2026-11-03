@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,9 @@ type daemonSubject struct {
 	dir     string
 	info    []byte
 	current string
+
+	mu      sync.Mutex
+	leaders map[string][]byte
 }
 
 func (s *daemonSubject) Backend() backend.Backend {
@@ -27,7 +31,7 @@ func (s *daemonSubject) Backend() backend.Backend {
 func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	switch state {
 	case backendtest.Answering:
-		serve(t, s.dir, name, anyRequest(s.info, []byte("screen")))
+		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }))
 	case backendtest.Historyless:
 		serve(t, s.dir, name, anyRequest(s.info, nil))
 	case backendtest.Silent:
@@ -44,6 +48,20 @@ func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State)
 }
 
 func (s *daemonSubject) SetCurrent(name string) { s.current = name }
+
+// Lead has the session's daemon answer EnvGet as zmx does for a client that
+// tracks the variable alongside one its environment lacks.
+func (s *daemonSubject) Lead(_ *testing.T, session, variable, value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.leaders[session] = []byte("-DISPLAY\n" + variable + "=" + value + "\n")
+}
+
+func (s *daemonSubject) leader(session string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.leaders[session]
+}
 
 func (s *daemonSubject) Lacks(b backendtest.Behaviour) string {
 	if b == backendtest.Creating {
@@ -99,6 +117,6 @@ func folds(t *testing.T, dir, made, other, why string) string {
 
 func TestContract(t *testing.T) {
 	backendtest.Contract(t, func(t *testing.T) backendtest.Subject {
-		return &daemonSubject{t: t, dir: socketDir(t), info: infoFrame(t)}
+		return &daemonSubject{t: t, dir: socketDir(t), info: infoFrame(t), leaders: map[string][]byte{}}
 	})
 }

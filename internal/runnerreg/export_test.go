@@ -14,6 +14,12 @@ func SetTimeout(t testing.TB, d time.Duration) {
 	t.Cleanup(func() { timeout = old })
 }
 
+// Timeout and AnswerGrace are the bound of a request and how long past its
+// deadline a caller waits for the answer.
+func Timeout() time.Duration { return timeout }
+
+const AnswerGrace = answerGrace
+
 // MaxSocketPath is the longest socket path the registry binds.
 func MaxSocketPath() int { return maxSocketPath }
 
@@ -27,6 +33,3 @@ func (g *Registration) Socket() string { return g.registry.socketPath(g.token) }
 // live.
 func (r Registry) EntryPath(token string) string  { return r.entryPath(token) }
 func (r Registry) SocketPath(token string) string { return r.socketPath(token) }
-
-// Socket is the path the runner was found at.
-func (rn Runner) Socket() string { return rn.socket }

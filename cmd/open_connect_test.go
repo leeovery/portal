@@ -139,26 +139,35 @@ func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRe
 }
 
 // runnersFake stands in for the runner registry. It answers each switch with
-// switchErr, and records the switches asked for and, in order, what each
-// attach did to the listing: listed or moved to a session as it began, ended,
-// and unlisted.
+// switchErr, marks each attach's command with runnerToken through the tracker
+// its listing was given, and records the switches asked for and, in order,
+// what each attach did to the listing: listed or moved to a session as it
+// began, ended, and unlisted.
 type runnersFake struct {
 	switchErr error
 	switches  []switchCall
 	events    []string
 	listed    bool
+	tracker   runnerreg.Tracker
 }
 
-type switchCall struct{ current, target string }
+// runnerToken is the token runnersFake lists every runner under.
+const runnerToken = "tok123"
 
-func (f *runnersFake) Listing() runnerListing { return f }
+type switchCall struct{ token, current, target string }
 
-func (f *runnersFake) SwitchFrom(_ context.Context, current, target string) error {
-	f.switches = append(f.switches, switchCall{current, target})
+func (f *runnersFake) Listing(t runnerreg.Tracker) runnerListing {
+	f.tracker = t
+	return f
+}
+
+func (f *runnersFake) Switch(_ context.Context, token, current, target string) error {
+	f.switches = append(f.switches, switchCall{token, current, target})
 	return f.switchErr
 }
 
 func (f *runnersFake) Attach(cfg *runner.Config) {
+	cfg.Command = f.tracker.Track(cfg.Command, runnerreg.TokenVar, runnerToken)
 	session := cfg.Session
 	cfg.Began = func() {
 		if f.listed {
@@ -186,8 +195,8 @@ func contextCommand() *cobra.Command {
 }
 
 // assertAttached checks the one attach ran the session's attach command, its
-// environment and all, on Portal's own terminal, watching for keys and able to
-// kill.
+// environment and all, marked with the runner's token through the backend, on
+// Portal's own terminal, watching for keys and able to kill.
 func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	t.Helper()
 	cfg := rec.onlyRun(t)
@@ -197,8 +206,8 @@ func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 	if want := []string{backendtest.AttachProgram, name}; !slices.Equal(cfg.Command.Argv, want) {
 		t.Errorf("argv = %q, want %q", cfg.Command.Argv, want)
 	}
-	if !slices.Equal(cfg.Command.Env, attachEnv) {
-		t.Errorf("env = %q, want the attach command's own %q", cfg.Command.Env, attachEnv)
+	if want := append(slices.Clone(attachEnv), runnerreg.TokenVar+"="+runnerToken); !slices.Equal(cfg.Command.Env, want) {
+		t.Errorf("env = %q, want the attach command's own, marked, %q", cfg.Command.Env, want)
 	}
 	if cfg.In != os.Stdin || cfg.Out != os.Stdout {
 		t.Errorf("terminal = %v, %v; want Portal's stdin and stdout", cfg.In, cfg.Out)
@@ -209,7 +218,7 @@ func assertAttached(t *testing.T, rec *attachRecorder, name string) {
 }
 
 // assertExeced checks the one attach exec'd the session's attach command with
-// its environment.
+// its environment, unmarked: an exec'd client is no runner.
 func assertExeced(t *testing.T, rec *attachRecorder, name string) {
 	t.Helper()
 	call := rec.onlyExec(t)

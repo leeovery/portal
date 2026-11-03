@@ -1,15 +1,15 @@
 package runnerreg_test
 
 import (
-	"bufio"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -30,39 +30,33 @@ func stateDir(t *testing.T) string {
 	return dir
 }
 
-// handler is a Handler recording what it is asked, which accepts every
-// request unless refuse is set.
+// handler is a Handler recording what it is asked and each request's
+// deadline, which accepts every request unless refuse is set.
 type handler struct {
 	mu        sync.Mutex
-	lastInput time.Time
 	refuse    error
 	switches  []string
 	detaches  int
+	deadlines []time.Time
 }
 
-func (h *handler) LastInput() time.Time {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.lastInput
+func (h *handler) Switch(ctx context.Context, session string) error {
+	return h.take(ctx, func() { h.switches = append(h.switches, session) })
 }
 
-func (h *handler) Switch(_ context.Context, session string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.refuse != nil {
-		return h.refuse
-	}
-	h.switches = append(h.switches, session)
-	return nil
+func (h *handler) DetachToPicker(ctx context.Context) error {
+	return h.take(ctx, func() { h.detaches++ })
 }
 
-func (h *handler) DetachToPicker(context.Context) error {
+func (h *handler) take(ctx context.Context, record func()) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.refuse != nil {
 		return h.refuse
 	}
-	h.detaches++
+	deadline, _ := ctx.Deadline()
+	h.deadlines = append(h.deadlines, deadline)
+	record()
 	return nil
 }
 
@@ -74,16 +68,13 @@ func (h *handler) asked() ([]string, int) {
 	return slices.Clone(h.switches), h.detaches
 }
 
-// inputAt is a handler whose runner last forwarded input at at.
-func inputAt(at time.Time) *handler { return &handler{lastInput: at} }
-
-// register registers a runner on session, unregistered at the end of the
-// test.
-func register(t *testing.T, r runnerreg.Registry, session string, h runnerreg.Handler) *runnerreg.Registration {
+// register registers a runner under token on session, unregistered at the
+// end of the test.
+func register(t *testing.T, r runnerreg.Registry, token, session string, h runnerreg.Handler) *runnerreg.Registration {
 	t.Helper()
-	g, err := r.Register(session, h)
+	g, err := r.Register(token, session, h)
 	if err != nil {
-		t.Fatalf("Register %s: %v", session, err)
+		t.Fatalf("Register %s on %s: %v", token, session, err)
 	}
 	t.Cleanup(func() { _ = g.Close() })
 	return g
@@ -100,9 +91,14 @@ func writeEntry(t *testing.T, r runnerreg.Registry, token, body string) {
 	}
 }
 
-// staleSocket leaves a socket file nothing listens on, as a runner that died
-// leaves one.
-func staleSocket(t *testing.T, path string) {
+// entryFor is an entry naming pid on session.
+func entryFor(pid int, session string) string {
+	return `{"pid":` + strconv.Itoa(pid) + `,"session":"` + session + `"}`
+}
+
+// refusingSocket leaves a socket file nothing listens on, as a runner that
+// died leaves one.
+func refusingSocket(t *testing.T, path string) {
 	t.Helper()
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -112,18 +108,18 @@ func staleSocket(t *testing.T, path string) {
 	_ = ln.Close()
 }
 
-// silentSocket listens on path, taking connections and never answering.
-func silentSocket(t *testing.T, path string) {
+// listen serves path, handing each connection to handle, until the test
+// ends.
+func listen(t *testing.T, path string, handle func(net.Conn)) {
 	t.Helper()
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("bind %s: %v", path, err)
 	}
-	var held []net.Conn
 	var mu sync.Mutex
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	var held []net.Conn
+	var served sync.WaitGroup
+	served.Go(func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
@@ -132,42 +128,46 @@ func silentSocket(t *testing.T, path string) {
 			mu.Lock()
 			held = append(held, conn)
 			mu.Unlock()
+			served.Go(func() { handle(conn) })
 		}
-	}()
+	})
 	t.Cleanup(func() {
 		_ = ln.Close()
-		<-done
 		mu.Lock()
-		defer mu.Unlock()
 		for _, c := range held {
 			_ = c.Close()
 		}
+		mu.Unlock()
+		served.Wait()
 	})
 }
 
-// answeringSocket listens on path and answers each request with answer.
-func answeringSocket(t *testing.T, path, answer string) {
+// silentSocket listens on path, taking connections and never answering.
+func silentSocket(t *testing.T, path string) {
 	t.Helper()
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("bind %s: %v", path, err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			_, _ = bufio.NewReader(conn).ReadBytes('\n')
-			_, _ = conn.Write([]byte(answer + "\n"))
-			_ = conn.Close()
+	listen(t, path, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
+}
+
+// answeringSocket listens on path, reads each request whole, and answers it
+// with answer. Each request read is sent on requests, when it is set.
+func answeringSocket(t *testing.T, path, answer string, requests chan<- string) {
+	t.Helper()
+	listen(t, path, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		line, _ := io.ReadAll(conn)
+		if requests != nil {
+			requests <- string(line)
 		}
-	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		<-done
+		_, _ = conn.Write([]byte(answer + "\n"))
+	})
+}
+
+// hangingUpSocket listens on path, and closes each connection unanswered.
+func hangingUpSocket(t *testing.T, path string) {
+	t.Helper()
+	listen(t, path, func(conn net.Conn) {
+		_, _ = io.ReadAll(conn)
+		_ = conn.Close()
 	})
 }
 
@@ -220,18 +220,8 @@ func files(t *testing.T, dir string) []string {
 	return names
 }
 
-// live is the registry's live runners, failing the test on an error.
-func live(t *testing.T, r runnerreg.Registry) []runnerreg.Runner {
-	t.Helper()
-	runners, err := r.Live(t.Context())
-	if err != nil {
-		t.Fatalf("Live: %v", err)
-	}
-	return runners
-}
-
-// stem is a file name without its extension.
-func stem(path string) string {
-	base := filepath.Base(path)
-	return base[:len(base)-len(filepath.Ext(base))]
+// ourAnswer is an answer from this process, which registers the runners the
+// tests ask.
+func ourAnswer(body string) string {
+	return `{"version":1,` + body + `,"pid":` + strconv.Itoa(os.Getpid()) + `}`
 }

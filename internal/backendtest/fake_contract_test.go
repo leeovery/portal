@@ -38,6 +38,12 @@ func (s fakeSubject) Hold(_ *testing.T, name string, state backendtest.State) ba
 
 func (s fakeSubject) SetCurrent(name string) { s.f.SetCurrent(name) }
 
+// Lead has the Fake report the variable for the session's leader: it runs no
+// client to mark.
+func (s fakeSubject) Lead(_ *testing.T, session, variable, value string) {
+	s.f.SetLeaderEnv(session, backend.ClientEnv{{Name: variable, Value: value}})
+}
+
 func (s fakeSubject) Lacks(b backendtest.Behaviour) string {
 	switch b {
 	case backendtest.FoldsNormalisation:

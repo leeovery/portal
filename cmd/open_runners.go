@@ -11,11 +11,13 @@ import (
 // runnerRegistry is the registry of attach runners as opening a session uses
 // it.
 type runnerRegistry interface {
-	// Listing keeps one attach loop's runner listed while it is attached.
-	Listing() runnerListing
-	// SwitchFrom asks the runner on session current whose terminal last took
-	// input to switch to target, returning nil once it has accepted.
-	SwitchFrom(ctx context.Context, current, target string) error
+	// Listing keeps one attach loop's runner listed while it is attached,
+	// marking each attach's client through t.
+	Listing(t runnerreg.Tracker) runnerListing
+	// Switch asks the runner registered under token, whose terminal leads
+	// session current, to switch to target, returning nil once it has
+	// accepted.
+	Switch(ctx context.Context, token, current, target string) error
 }
 
 // runnerListing is runnerreg.Listing's surface.
@@ -28,21 +30,21 @@ type runnerListing interface {
 // stateRunners is the registry under Portal's state directory.
 type stateRunners struct{}
 
-func (stateRunners) Listing() runnerListing {
+func (stateRunners) Listing(t runnerreg.Tracker) runnerListing {
 	dir, err := state.Dir()
 	if err != nil {
 		attachLogger.Warn("register failed", "error", err)
 		return unlisted{}
 	}
-	return runnerreg.New(dir).Listing()
+	return runnerreg.New(dir).Listing(t)
 }
 
-func (stateRunners) SwitchFrom(ctx context.Context, current, target string) error {
+func (stateRunners) Switch(ctx context.Context, token, current, target string) error {
 	dir, err := state.Dir()
 	if err != nil {
 		return err
 	}
-	return runnerreg.New(dir).SwitchFrom(ctx, current, target)
+	return runnerreg.New(dir).Switch(ctx, token, current, target)
 }
 
 // unlisted lists nothing, for a state directory that won't resolve: the

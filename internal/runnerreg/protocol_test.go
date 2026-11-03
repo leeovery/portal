@@ -1,14 +1,13 @@
 package runnerreg_test
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,15 +18,15 @@ import (
 
 // reply is an answer as it comes over the socket.
 type reply struct {
-	Version   int       `json:"version"`
-	OK        bool      `json:"ok"`
-	Refusal   string    `json:"refusal"`
-	PID       int       `json:"pid"`
-	LastInput time.Time `json:"last_input"`
+	Version int    `json:"version"`
+	OK      bool   `json:"ok"`
+	Refusal string `json:"refusal"`
+	PID     int    `json:"pid"`
 }
 
-// send writes line to the socket as one request and reads its answer.
-func send(t *testing.T, socket, line string) reply {
+// call writes raw to the socket as a request, ending what it writes, and
+// reads the answer.
+func call(t *testing.T, socket, raw string) reply {
 	t.Helper()
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
@@ -35,61 +34,50 @@ func send(t *testing.T, socket, line string) reply {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if _, err := conn.Write([]byte(line + "\n")); err != nil {
-		t.Fatalf("write %q: %v", line, err)
+	if _, err := conn.Write([]byte(raw)); err != nil {
+		t.Fatalf("write %q: %v", raw, err)
 	}
-	raw, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err := conn.(*net.UnixConn).CloseWrite(); err != nil {
+		t.Fatalf("end the request: %v", err)
+	}
+	answer, err := io.ReadAll(conn)
 	if err != nil {
-		t.Fatalf("read the answer to %q: %v (read %q)", line, err, raw)
+		t.Fatalf("read the answer to %q: %v (read %q)", raw, err, answer)
 	}
 	var r reply
-	if err := json.Unmarshal(raw, &r); err != nil {
-		t.Fatalf("decode the answer %q: %v", raw, err)
+	if err := json.Unmarshal(answer, &r); err != nil {
+		t.Fatalf("decode the answer %q: %v", answer, err)
 	}
 	return r
 }
 
+// due is a deadline field still ahead.
+func due() string {
+	return `"deadline":"` + time.Now().Add(time.Minute).Format(time.RFC3339Nano) + `"`
+}
+
 func TestProtocol_Requests(t *testing.T) {
-	at := time.Date(2026, 11, 3, 9, 30, 0, 123456789, time.UTC)
-
-	t.Run("last-input answers when the runner last forwarded input, and its pid", func(t *testing.T) {
-		h := inputAt(at)
-		g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", h)
-
-		r := send(t, g.Socket(), `{"version":1,"request":"last-input"}`)
-
-		if !r.OK || r.Version != runnerreg.Version || r.PID != os.Getpid() || !r.LastInput.Equal(at) {
-			t.Errorf("answer = %+v; want version 1 accepting, pid %d, last input %v", r, os.Getpid(), at)
-		}
-	})
-
-	t.Run("last-input from a runner that has forwarded none answers no time", func(t *testing.T) {
-		g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", &handler{})
-
-		r := send(t, g.Socket(), `{"version":1,"request":"last-input"}`)
-
-		if !r.OK || !r.LastInput.IsZero() {
-			t.Errorf("answer = %+v; want acceptance with no last input", r)
-		}
-	})
-
-	t.Run("switch hands the handler the session named", func(t *testing.T) {
+	t.Run("switch hands the handler the session named, by the caller's deadline, and answers with its pid", func(t *testing.T) {
 		h := &handler{}
-		g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", h)
+		g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", h)
+		deadline := time.Now().Add(time.Minute).Round(time.Millisecond)
 
-		r := send(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4"}`)
+		r := call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4","deadline":"`+deadline.Format(time.RFC3339Nano)+`"}`+"\n")
 
 		switches, detaches := h.asked()
-		if !r.OK || r.PID != os.Getpid() || !slices.Equal(switches, []string{"blog-c3d4"}) || detaches != 0 {
-			t.Errorf("answer = %+v, switches %q, detaches %d; want one switch to blog-c3d4 accepted", r, switches, detaches)
+		if !r.OK || r.Version != runnerreg.Version || r.PID != os.Getpid() || !slices.Equal(switches, []string{"blog-c3d4"}) || detaches != 0 {
+			t.Errorf("answer = %+v, switches %q, detaches %d; want one switch to blog-c3d4 accepted by pid %d", r, switches, detaches, os.Getpid())
+		}
+		if len(h.deadlines) != 1 || !h.deadlines[0].Equal(deadline) {
+			t.Errorf("the handler's deadlines = %v, want the caller's, %v", h.deadlines, deadline)
 		}
 	})
 
 	t.Run("detach-to-picker asks the handler to detach", func(t *testing.T) {
 		h := &handler{}
-		g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", h)
+		g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", h)
 
-		r := send(t, g.Socket(), `{"version":1,"request":"detach-to-picker"}`)
+		r := call(t, g.Socket(), `{"version":1,"request":"detach-to-picker",`+due()+`}`+"\n")
 
 		switches, detaches := h.asked()
 		if !r.OK || len(switches) != 0 || detaches != 1 {
@@ -97,36 +85,59 @@ func TestProtocol_Requests(t *testing.T) {
 		}
 	})
 
-	t.Run("a handler that won't is a refusal saying why", func(t *testing.T) {
+	t.Run("a handler that won't is a refusal saying why, with the runner's pid", func(t *testing.T) {
 		h := &handler{refuse: errors.New("the runner is not attached")}
-		g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", h)
+		g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", h)
 
-		r := send(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4"}`)
+		r := call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4",`+due()+`}`+"\n")
 
-		if r.OK || r.Version != runnerreg.Version || r.Refusal != "the runner is not attached" {
-			t.Errorf("answer = %+v; want a version 1 refusal saying the runner is not attached", r)
+		if r.OK || r.Version != runnerreg.Version || r.Refusal != "the runner is not attached" || r.PID != os.Getpid() {
+			t.Errorf("answer = %+v; want a version 1 refusal from pid %d saying the runner is not attached", r, os.Getpid())
+		}
+	})
+
+	t.Run("a request past its deadline is refused, the handler never asked", func(t *testing.T) {
+		h := &handler{}
+		g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", h)
+		past := time.Now().Add(-time.Millisecond).Format(time.RFC3339Nano)
+
+		r := call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4","deadline":"`+past+`"}`+"\n")
+
+		if r.OK || !strings.Contains(r.Refusal, "deadline") {
+			t.Errorf("answer = %+v; want a refusal past the deadline", r)
+		}
+		if switches, _ := h.asked(); len(switches) != 0 {
+			t.Errorf("the handler was asked to switch to %q", switches)
 		}
 	})
 }
 
 func TestProtocol_RefusesWhatItDoesNotUnderstand(t *testing.T) {
+	d := due()
 	for _, tc := range []struct {
-		name, line, says string
+		name, raw, says string
 	}{
-		{"a newer version", `{"version":2,"request":"switch","session":"blog-c3d4"}`, "protocol version 2"},
-		{"no version", `{"request":"switch","session":"blog-c3d4"}`, "protocol version 0"},
-		{"an unknown request", `{"version":1,"request":"rename","session":"blog-c3d4"}`, `unknown request "rename"`},
-		{"a field it doesn't know", `{"version":1,"request":"switch","session":"blog-c3d4","window":2}`, "window"},
-		{"a switch naming no session", `{"version":1,"request":"switch"}`, "switch names no session"},
-		{"a last-input naming a session", `{"version":1,"request":"last-input","session":"blog-c3d4"}`, "last-input takes no session"},
-		{"a detach-to-picker naming a session", `{"version":1,"request":"detach-to-picker","session":"blog-c3d4"}`, "detach-to-picker takes no session"},
-		{"no JSON", `switch blog-c3d4`, "unreadable request"},
+		{"a newer version", `{"version":2,"request":"switch","session":"blog-c3d4",` + d + "}\n", "protocol version 2"},
+		{"no version", `{"request":"switch","session":"blog-c3d4",` + d + "}\n", "protocol version 0"},
+		{"an unknown request", `{"version":1,"request":"rename","session":"blog-c3d4",` + d + "}\n", `unknown request "rename"`},
+		{"a field it doesn't know", `{"version":1,"request":"switch","session":"blog-c3d4","window":2,` + d + "}\n", `unknown field "window"`},
+		{"a key in another case", `{"version":1,"request":"switch","Session":"blog-c3d4",` + d + "}\n", `unknown field "Session"`},
+		{"a key given twice", `{"version":1,"request":"switch","session":"blog-c3d4","session":"docs-e5f6",` + d + "}\n", `field "session" given twice`},
+		{"a switch naming no session", `{"version":1,"request":"switch",` + d + "}\n", "switch names no session"},
+		{"a detach-to-picker naming a session", `{"version":1,"request":"detach-to-picker","session":"blog-c3d4",` + d + "}\n", "detach-to-picker takes no session"},
+		{"no deadline", `{"version":1,"request":"switch","session":"blog-c3d4"}` + "\n", "names no deadline"},
+		{"a deadline that is no time", `{"version":1,"request":"switch","session":"blog-c3d4","deadline":5}` + "\n", `field "deadline"`},
+		{"anything after the line", `{"version":1,"request":"switch","session":"blog-c3d4",` + d + "}\n{}\n", "not one line"},
+		{"anything after the object", `{"version":1,"request":"switch","session":"blog-c3d4",` + d + "} {}\n", "follows the object"},
+		{"no end of line", `{"version":1,"request":"switch","session":"blog-c3d4",` + d + "}", "not one line"},
+		{"too long a line", `{"version":1,"request":"switch","session":"` + strings.Repeat("s", 5000) + `",` + d + "}\n", "over"},
+		{"no JSON", "switch blog-c3d4\n", "unreadable request"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &handler{}
-			g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", h)
+			g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", h)
 
-			r := send(t, g.Socket(), tc.line)
+			r := call(t, g.Socket(), tc.raw)
 
 			if r.OK || r.Version != runnerreg.Version || !strings.Contains(r.Refusal, tc.says) {
 				t.Errorf("answer = %+v; want a version 1 refusal saying %q", r, tc.says)
@@ -138,52 +149,94 @@ func TestProtocol_RefusesWhatItDoesNotUnderstand(t *testing.T) {
 	}
 }
 
-func TestProtocol_RunnerCalls(t *testing.T) {
-	t.Run("a refusal is ErrRefused, saying why", func(t *testing.T) {
+func TestProtocol_Asking(t *testing.T) {
+	t.Run("a request carries a deadline the bound from now, ends with its line, and keys its fields exactly", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
-		register(t, r, "api-x7Kd9a", &handler{lastInput: time.Now(), refuse: errors.New("the runner is not attached")})
-		rn := live(t, r)[0]
+		writeEntry(t, r, "tok123", entryFor(os.Getpid(), "api-x7Kd9a"))
+		requests := make(chan string, 1)
+		answeringSocket(t, r.SocketPath("tok123"), ourAnswer(`"ok":true`), requests)
 
-		for name, call := range map[string]func() error{
-			"switch":           func() error { return rn.Switch(t.Context(), "blog-c3d4") },
-			"detach-to-picker": func() error { return rn.DetachToPicker(t.Context()) },
-		} {
-			if err := call(); !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), "the runner is not attached") {
-				t.Errorf("%s = %v, want ErrRefused saying the runner is not attached", name, err)
+		before := time.Now()
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); err != nil {
+			t.Fatalf("Switch = %v", err)
+		}
+
+		raw := <-requests
+		if !strings.HasSuffix(raw, "}\n") || strings.Count(raw, "\n") != 1 {
+			t.Errorf("the request was %q, want one line, ended", raw)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(raw), &got); err != nil {
+			t.Fatalf("decode %q: %v", raw, err)
+		}
+		keys := slices.Sorted(func(yield func(string) bool) {
+			for k := range got {
+				if !yield(k) {
+					return
+				}
 			}
+		})
+		if !slices.Equal(keys, []string{"deadline", "request", "session", "version"}) || got["request"] != "switch" || got["session"] != "blog-c3d4" {
+			t.Errorf("the request was %q, want a switch to blog-c3d4 with version and deadline", raw)
+		}
+		deadline, err := time.Parse(time.RFC3339Nano, got["deadline"].(string))
+		if err != nil || deadline.Before(before.Add(runnerreg.Timeout())) || deadline.After(time.Now().Add(runnerreg.Timeout())) {
+			t.Errorf("deadline = %v, %v; want %v from the ask", deadline, err, runnerreg.Timeout())
+		}
+	})
+
+	t.Run("a caller's context that ends sooner brings the deadline in, so its answer still comes in time", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		writeEntry(t, r, "tok123", entryFor(os.Getpid(), "api-x7Kd9a"))
+		requests := make(chan string, 1)
+		answeringSocket(t, r.SocketPath("tok123"), ourAnswer(`"ok":true`), requests)
+		ctx, cancel := contextWithin(t, runnerreg.Timeout()/2+runnerreg.AnswerGrace)
+		defer cancel()
+		end, _ := ctx.Deadline()
+
+		if err := r.Switch(ctx, "tok123", "api-x7Kd9a", "blog-c3d4"); err != nil {
+			t.Fatalf("Switch = %v", err)
+		}
+
+		var got struct{ Deadline time.Time }
+		if err := json.Unmarshal([]byte(<-requests), &got); err != nil || !got.Deadline.Equal(end.Add(-runnerreg.AnswerGrace)) {
+			t.Errorf("deadline = %v, %v; want the caller's end less the grace for the answer, %v", got.Deadline, err, end.Add(-runnerreg.AnswerGrace))
 		}
 	})
 
 	t.Run("an answer in another version is a refusal, though it accepts", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
-		g := register(t, r, "api-x7Kd9a", &handler{lastInput: time.Now()})
-		rn := live(t, r)[0]
-		_ = g.Close()
-		answeringSocket(t, rn.Socket(), `{"version":2,"ok":true,"pid":`+strconv.Itoa(os.Getpid())+`}`)
+		writeEntry(t, r, "tok123", entryFor(os.Getpid(), "api-x7Kd9a"))
+		answeringSocket(t, r.SocketPath("tok123"), strings.Replace(ourAnswer(`"ok":true`), `"version":1`, `"version":2`, 1), nil)
 
-		if err := rn.Switch(t.Context(), "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), "protocol version 2") {
+		if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); !errors.Is(err, runnerreg.ErrRefused) || !strings.Contains(err.Error(), "protocol version 2") {
 			t.Errorf("Switch = %v, want ErrRefused naming protocol version 2", err)
 		}
 	})
 
-	t.Run("a runner gone since it was found fails, and is no refusal", func(t *testing.T) {
-		r := runnerreg.New(stateDir(t))
-		g := register(t, r, "api-x7Kd9a", &handler{lastInput: time.Now()})
-		rn := live(t, r)[0]
-		_ = g.Close()
+	for name, answer := range map[string]string{
+		"a key in another case":  strings.Replace(ourAnswer(`"ok":true`), `"ok"`, `"OK"`, 1),
+		"a key given twice":      ourAnswer(`"ok":false,"ok":true`),
+		"an acceptance unsigned": `{"version":1,"ok":true}`,
+	} {
+		t.Run("an answer with "+name+" is no acceptance", func(t *testing.T) {
+			r := runnerreg.New(stateDir(t))
+			writeEntry(t, r, "tok123", entryFor(os.Getpid(), "api-x7Kd9a"))
+			answeringSocket(t, r.SocketPath("tok123"), answer, nil)
 
-		if err := rn.Switch(t.Context(), "blog-c3d4"); err == nil || errors.Is(err, runnerreg.ErrRefused) {
-			t.Errorf("Switch = %v, want a failure to reach the runner", err)
-		}
-	})
+			if err := r.Switch(t.Context(), "tok123", "api-x7Kd9a", "blog-c3d4"); err == nil {
+				t.Errorf("Switch = nil for the answer %s, want a failure", answer)
+			}
+		})
+	}
 }
 
 func TestProtocol_LogsEachRequestServed(t *testing.T) {
 	sink := logtest.Install(t)
-	g := register(t, runnerreg.New(stateDir(t)), "api-x7Kd9a", &handler{})
+	g := register(t, runnerreg.New(stateDir(t)), "tok123", "api-x7Kd9a", &handler{})
 
-	send(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4"}`)
-	send(t, g.Socket(), `{"version":1,"request":"rename"}`)
+	call(t, g.Socket(), `{"version":1,"request":"switch","session":"blog-c3d4",`+due()+`}`+"\n")
+	call(t, g.Socket(), `{"version":1,"request":"rename",`+due()+`}`+"\n")
 
 	recs := sink.Records().Matching("attach", "request").AtExactLevel(slog.LevelDebug)
 	if len(recs) != 2 {

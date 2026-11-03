@@ -32,3 +32,16 @@ func AbandonCatching(sig os.Signal) {
 	a.signals <- sig
 	a.abandon()
 }
+
+// ScanForSwitch feeds reads, in turn, to the watch the runner keeps on its
+// child's output, and returns the index of the read in which zmx's switch
+// ends, -1 for none.
+func ScanForSwitch(reads ...string) int {
+	var w switchWatch
+	for i, r := range reads {
+		if w.scan([]byte(r)) {
+			return i
+		}
+	}
+	return -1
+}

@@ -53,6 +53,10 @@ var perSession = []struct {
 		_, err := b.ProtocolVersion(ctx, name)
 		return err
 	}},
+	{"LeaderEnv", func(ctx context.Context, b *zmx.Backend, name string) error {
+		_, err := b.LeaderEnv(ctx, name)
+		return err
+	}},
 }
 
 func TestPerSessionCalls(t *testing.T) {
@@ -115,10 +119,17 @@ func TestPerSessionCalls(t *testing.T) {
 	}
 }
 
-// anyRequest answers every request as a zmx daemon would: Info with info,
-// History and Capture with screen, Kill by unlinking its socket and hanging
-// up, DetachAll by hanging up.
+// anyRequest answers every request as a zmx daemon no client leads would:
+// Info with info, History and Capture with screen, EnvGet with no
+// environment, Kill by unlinking its socket and hanging up, DetachAll by
+// hanging up.
 func anyRequest(info, screen []byte) func(*daemon, net.Conn) {
+	return ledRequest(info, screen, func() []byte { return nil })
+}
+
+// ledRequest is anyRequest answering EnvGet with what leader returns then:
+// the tracked environment of the client leading the session.
+func ledRequest(info, screen []byte, leader func() []byte) func(*daemon, net.Conn) {
 	return func(d *daemon, c net.Conn) {
 		r, err := d.read(c)
 		if err != nil {
@@ -129,6 +140,8 @@ func anyRequest(info, screen []byte) func(*daemon, net.Conn) {
 			_, _ = c.Write(info)
 		case 8, 22:
 			_, _ = c.Write(frame(r.tag, 1, screen))
+		case 19:
+			_, _ = c.Write(frame(21, 1, leader()))
 		case 5:
 			_ = os.Remove(d.path)
 			return

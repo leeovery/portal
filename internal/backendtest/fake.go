@@ -28,6 +28,7 @@ const (
 	OpKill          Op = "Kill"
 	OpDetach        Op = "Detach"
 	OpHistory       Op = "History"
+	OpLeaderEnv     Op = "LeaderEnv"
 )
 
 // AttachProgram is Argv[0] of every command AttachCommand returns.
@@ -61,6 +62,7 @@ type Fake struct {
 	mu       sync.Mutex
 	sessions map[string]backend.Session
 	history  map[string][]byte
+	leaders  map[string]backend.ClientEnv
 	current  string
 	failures map[Op]error
 	calls    []Call
@@ -74,6 +76,7 @@ func New(sessions ...backend.Session) *Fake {
 	f := &Fake{
 		sessions: map[string]backend.Session{},
 		history:  map[string][]byte{},
+		leaders:  map[string]backend.ClientEnv{},
 		failures: map[Op]error{},
 		lastPID:  1000,
 	}
@@ -115,8 +118,7 @@ func (f *Fake) StopAnswering(name string) {
 func (f *Fake) Remove(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.sessions, name)
-	delete(f.history, name)
+	f.forget(name)
 }
 
 // Held returns the named session as the Fake holds it, without recording a
@@ -151,6 +153,14 @@ func (f *Fake) SetHistory(name string, vt []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.history[name] = slices.Clone(vt)
+}
+
+// SetLeaderEnv sets what LeaderEnv returns for a session: the tracked
+// environment of the client leading it, none for no client leading.
+func (f *Fake) SetLeaderEnv(name string, env backend.ClientEnv) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.leaders[name] = slices.Clone(env)
 }
 
 // Calls returns every recorded call in order.
@@ -273,8 +283,7 @@ func (f *Fake) Kill(ctx context.Context, name string) error {
 	if err := f.beginHeld(ctx, Call{Op: OpKill, Name: name}, zmx.CheckLookup); err != nil {
 		return err
 	}
-	delete(f.sessions, name)
-	delete(f.history, name)
+	f.forget(name)
 	return nil
 }
 
@@ -306,6 +315,26 @@ func (f *Fake) History(ctx context.Context, name string, rows int) ([]byte, erro
 	return slices.Clone(vt), nil
 }
 
+// Track sets name to value in the command's environment. The Fake runs no
+// client, so tracks nothing: SetLeaderEnv says who leads.
+func (f *Fake) Track(command backend.Command, name, value string) backend.Command {
+	command.Env = append(slices.DeleteFunc(slices.Clone(command.Env), func(kv string) bool {
+		return strings.HasPrefix(kv, name+"=")
+	}), name+"="+value)
+	return command
+}
+
+// LeaderEnv returns what SetLeaderEnv gave the session, none when it gave
+// nothing.
+func (f *Fake) LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.beginHeld(ctx, Call{Op: OpLeaderEnv, Name: name}, zmx.CheckLookup); err != nil {
+		return nil, err
+	}
+	return slices.Clone(f.leaders[name]), nil
+}
+
 func (f *Fake) Current() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,6 +345,14 @@ func (f *Fake) ValidateName(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.validate(name)
+}
+
+// forget drops all the Fake keeps for a session that has ended. The caller
+// holds mu.
+func (f *Fake) forget(name string) {
+	delete(f.sessions, name)
+	delete(f.history, name)
+	delete(f.leaders, name)
 }
 
 // record records the call and returns the failure injected for its op. The

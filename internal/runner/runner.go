@@ -27,6 +27,14 @@ var logger = log.For("attach")
 // the attach command itself.
 var ErrNoTerminal = errors.New("the attach needs a terminal")
 
+// ErrSwitchedAway is why Run refuses the kill key and every request once zmx
+// has switched the attach to another session outside Portal: it no longer
+// knows which session the terminal shows.
+var ErrSwitchedAway = errors.New("the terminal was switched to another session outside Portal")
+
+// errPastDeadline refuses a request its asker has given up on.
+var errPastDeadline = errors.New("the request is past its deadline")
+
 // grace bounds each of the runner's waits but the one for the terminal: for
 // the child to read what it was sent, to exit after a detach, a kill or each
 // signal that ends it, and for its last output to reach the terminal.
@@ -55,16 +63,19 @@ type Config struct {
 	// without one.
 	Kill func(ctx context.Context, name string) error
 	// Requests carries the ends of the attach asked for from outside it. Run
-	// takes a request only while it waits for the attach's end, so one it
-	// takes is one it carries out: taking it is accepting it. Nil asks for
-	// none.
+	// reads a request only while it waits for the attach's end, and answers
+	// each it reads: nil when it takes it, which is accepting it, or why it
+	// won't. Nil asks for none.
 	Requests <-chan Request
-	// Began, when set, is called once the attach has begun, before Run takes
+	// Began, when set, is called once the attach has begun, before Run reads
 	// any request.
 	Began func()
-	// Forwarded, when set, is called each time input reaches the child, on
-	// the loop that forwards it, so it must not block.
-	Forwarded func()
+	// SwitchedAway, when set, is called on Run's goroutine once the child's
+	// output shows zmx has switched it to another session outside Portal, as
+	// an attach typed by hand in the session does. From then on Run refuses
+	// the kill key, ending the attach for the picker to show why, and every
+	// request; the detach keys still detach.
+	SwitchedAway func()
 }
 
 // Request ends the attach from outside it as the detach key does: to the
@@ -72,6 +83,12 @@ type Config struct {
 type Request struct {
 	// Switch is the session to attach next, empty to ask for the picker.
 	Switch string
+	// Deadline is when the asker stops waiting: Run refuses the request from
+	// then on. Zero is none.
+	Deadline time.Time
+	// Answer takes Run's answer to the request, sent without waiting: an
+	// answer it has no room for is dropped.
+	Answer chan<- error
 }
 
 // Outcome is how an attach ended.
@@ -111,8 +128,8 @@ func (o Outcome) Picker() bool {
 // to take that last write however long it takes.
 //
 // The attach is torn down however Run's goroutine leaves it, and a panic on
-// that goroutine, in Kill or Began say, is raised again once it is. A command that
-// switches sessions rather than attaching, or a config with no Kill, is
+// that goroutine, in Kill or Began say, is raised again once it is. A command
+// that switches sessions rather than attaching, or a config with no Kill, is
 // refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	if err := check(cfg); err != nil {
@@ -217,13 +234,23 @@ func (e ending) report(session string) {
 
 // await is the one place an attach ends.
 func (a *attach) await(ctx context.Context) ending {
+	away := a.away
 	for {
 		select {
 		case <-a.winch:
 			a.resize()
+		case <-away:
+			away = nil
+			logger.Info("switched away", "session", a.cfg.Session)
+			a.cfg.SwitchedAway()
 		case action := <-a.keys:
 			return a.act(ctx, action)
 		case req := <-a.cfg.Requests:
+			if err := a.admit(req); err != nil {
+				answer(req, err)
+				continue
+			}
+			answer(req, nil)
 			return a.request(ctx, req)
 		case <-a.exited:
 			return ending{out: Outcome{ExitCode: exitCode(a.child.ProcessState)}, reason: "exit"}
@@ -241,12 +268,16 @@ func (a *attach) await(ctx context.Context) ending {
 }
 
 // act carries out an action, whatever asked for it. A kill that succeeds
-// leaves the child to end with the session; one that fails detaches it, so
-// the picker can show why. A context that ends during the kill ends the
-// attach as it would anywhere else.
+// leaves the child to end with the session; one that fails, or that Run
+// refuses because zmx switched the attach away, detaches it, so the picker
+// can show why. A context that ends during the kill ends the attach as it
+// would anywhere else.
 func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	end := ending{out: Outcome{Action: action}, reason: action.String()}
-	if action == attachkeys.Kill {
+	switch {
+	case action == attachkeys.Kill && a.switchedAway.Load():
+		end.out.Err = fmt.Errorf("kill refused: %w", ErrSwitchedAway)
+	case action == attachkeys.Kill:
 		end.out.Err = a.cfg.Kill(ctx, a.cfg.Session)
 		if ctx.Err() != nil {
 			end = cancelled(ctx)
@@ -256,6 +287,26 @@ func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	}
 	a.detach()
 	return end
+}
+
+// admit is why Run won't take req, nil when it will: zmx has switched the
+// attach away, or the request's asker has stopped waiting.
+func (a *attach) admit(req Request) error {
+	switch {
+	case a.switchedAway.Load():
+		return ErrSwitchedAway
+	case !req.Deadline.IsZero() && !time.Now().Before(req.Deadline):
+		return errPastDeadline
+	}
+	return nil
+}
+
+// answer sends Run's answer to req, dropping one it has no room for.
+func answer(req Request, err error) {
+	select {
+	case req.Answer <- err:
+	default:
+	}
 }
 
 // request carries out a request from outside the attach. A switch detaches
