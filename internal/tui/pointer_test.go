@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const (
@@ -393,17 +392,11 @@ func dispatchPanelArrow(t *testing.T, m Model, press tea.KeyPressMsg) Model {
 // a finger drawn down pulls older lines into view.
 func TestSwipeScrollsThePreviewWithTheFinger(t *testing.T) {
 	sessions := pointerSessions("alpha")
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
 	lines := make([]string, 0, 200)
 	for i := range 200 {
 		lines = append(lines, fmt.Sprintf("line %d", i))
 	}
-	reader := &recordingReader{bytes: []byte(strings.Join(lines, "\n"))}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, strings.Join(lines, "\n"), sessions))
 	m, _ = pointerUpdate(t, m, keySpaceMsg())
 	if m.activePage != pagePreview {
 		t.Fatal("fixture: Space did not open the preview")

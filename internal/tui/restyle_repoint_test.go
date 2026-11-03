@@ -9,7 +9,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const (
@@ -203,7 +202,7 @@ func TestRestylePath_RepointsPreviewChrome(t *testing.T) {
 	before, after := probeThemeBefore(t), probeThemeAfter(t)
 	m := newRestyleProbeModel(t, before)
 
-	pv := newPreviewModelForHelpers(t, "alpha", []tmux.WindowGroup{{WindowIndex: 0, Panes: []tmux.WindowPane{{Index: 0}}}}, 0, 0)
+	pv := newPreviewModelForHelpers(t, "alpha")
 	pv.th = before
 	m.preview = pv
 

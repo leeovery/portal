@@ -224,6 +224,44 @@ func TestInfoFixture(t *testing.T) {
 	})
 }
 
+// historyScript draws what the preview has to lay out: scrollback above the
+// screen, colours, a tab and a background run to the edge, wide runes, a
+// hyperlink, an erased line, modes and a cwd, and a last row filled to the
+// right edge, which leaves the cursor's wrap pending.
+const historyScript = `i=1; while [ $i -le 30 ]; do printf 'scrollback %d\n' $i; i=$((i+1)); done
+printf '\033]7;file://example-host/srv/demo\033\\'
+printf '\033[1;31mbold red\033[0m \033[38;2;10;200;30mtruecolour\033[0m\n'
+printf 'gap\tafter-tab\n'
+printf '\033[44mblue to the edge\033[K\033[0m\n'
+printf 'wide 中文 end\n'
+printf '\033]8;;https://example.com\033\\link\033]8;;\033\\ text\n'
+printf 'erase-me\r\033[2Kerased\n'
+printf '\033[?2004h\033[>4;2m'
+printf 'last row %0111d' 0
+sleep 1000`
+
+func TestHistoryFixture(t *testing.T) {
+	t.Run("it is the pinned build's own answer to History", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "fixture", t.TempDir(), "sh", "-c", historyScript)
+		vt := awaitHistory(t, b, "fixture", "last row "+strings.Repeat("0", 111))
+
+		path := filepath.Join("testdata", "history.vt")
+		if *update {
+			if err := os.WriteFile(path, vt, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(vt, want) {
+			t.Errorf("History = %q, want %q; run with -update if zmx's pin moved", vt, want)
+		}
+	})
+}
+
 func TestBackendAgainstZmx(t *testing.T) {
 	t.Run("it creates a detached session that lists with its details", func(t *testing.T) {
 		b := zmxtest.New(t)

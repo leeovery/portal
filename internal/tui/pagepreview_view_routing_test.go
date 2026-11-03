@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
@@ -12,13 +10,7 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 		{Name: "alpha", Attached: false},
 		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hello-from-preview\n")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hello-from-preview", sessions))
 	m.termWidth = 120
 
 	updated, _ := m.Update(keySpaceMsg())
@@ -32,12 +24,6 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 
 	rendered := stripANSI(got.View().Content)
 
-	if !strings.Contains(rendered, "Window 1/1") {
-		t.Errorf("expected rendered output to contain chrome 'Window 1/1', got:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "Pane 1/1") {
-		t.Errorf("expected rendered output to contain chrome 'Pane 1/1', got:\n%s", rendered)
-	}
 	if !strings.Contains(rendered, "◉ preview") {
 		t.Errorf("expected rendered output to contain the '◉ preview' marker, got:\n%s", rendered)
 	}
@@ -57,7 +43,7 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 		t.Errorf("expected first content row to be the preview panel top border ╭…╮, got %q", topContentRow)
 	}
 	headerContentRow := contentRows[Vinset+1]
-	if !strings.Contains(headerContentRow, "Window 1/1") {
-		t.Errorf("expected the header content row to carry the preview chrome counters, got %q", headerContentRow)
+	if !strings.Contains(headerContentRow, "◉ preview alpha") {
+		t.Errorf("expected the header content row to carry the preview marker and session, got %q", headerContentRow)
 	}
 }

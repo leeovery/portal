@@ -41,12 +41,6 @@ type SessionLister interface {
 	ListSessions() ([]Session, error)
 }
 
-// Run's tea.Cmd emits a previewAttachSelectedMsg or previewAttachBailMsg; the
-// connector handoff happens post-TUI, not here.
-type PreviewAttacher interface {
-	Run(session string, window, pane int) tea.Cmd
-}
-
 type ProjectStore interface {
 	List() ([]project.Project, error)
 	CleanStale() ([]project.Project, error)
@@ -259,10 +253,8 @@ type Model struct {
 	// it back. Async and non-gating; empty if no response arrived.
 	originalBg string
 
-	enumerator      TmuxEnumerator
-	reader          ScrollbackReader
-	previewAttacher PreviewAttacher
-	preview         previewModel
+	history previewHistory
+	preview previewModel
 
 	// The derived directory is never stamped back to tmux — a pane's cwd can drift
 	// from the origin dir, and freezing that drift would permanently mis-group the
@@ -691,21 +683,11 @@ func WithProgressReceiver(receiver tea.Cmd) Option {
 	}
 }
 
-func WithEnumerator(e TmuxEnumerator) Option {
+// WithHistory is where the preview reads a session's screen and scrollback.
+// Without it, Space opens no preview.
+func WithHistory(r HistoryReader) Option {
 	return func(m *Model) {
-		m.enumerator = e
-	}
-}
-
-func WithScrollbackReader(r ScrollbackReader) Option {
-	return func(m *Model) {
-		m.reader = r
-	}
-}
-
-func WithPreviewAttachPipeline(p PreviewAttacher) Option {
-	return func(m *Model) {
-		m.previewAttacher = p
+		m.history = newPreviewHistory(r)
 	}
 }
 
@@ -1406,7 +1388,7 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 }
 
 func (m Model) newSessionPreview(session string) (previewModel, bool) {
-	pmodel, ok := NewPreviewModel(session, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
+	pmodel, ok := NewPreviewModel(session, m.history, m.contentWidth(), m.contentHeight())
 	if !ok {
 		return previewModel{}, false
 	}
@@ -1418,7 +1400,7 @@ func (m Model) newSessionPreview(session string) (previewModel, bool) {
 // Steps the preview to the next session in the list's visible order, wrapping as
 // the list's arrows do and skipping group headings. The list cursor moves with
 // it, so a dismiss lands on the session last previewed and the filter is never
-// touched. A session that no longer enumerates is passed over, as Space passes
+// touched. A session the backend no longer holds is passed over, as Space passes
 // over it; with no other session to open, the preview stays where it is.
 func (m *Model) stepPreviewSession(delta int) {
 	visible := m.sessionList.VisibleItems()
@@ -1830,13 +1812,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 		m.stepPreviewSession(msg.delta)
 		return m, nil
-	case previewAttachBailMsg:
-		// Batch, not Sequence: the flash must render on the same frame as the
-		// page flip, with list consistency converging a render or two later.
-		refreshCmd := m.exitPreviewToSessions(msg.Session)
-		m.setFlash(formatSessionGoneFlash(msg.Session))
-		return m, tea.Batch(refreshCmd, flashTickCmd(m.flashGen))
-	case previewAttachSelectedMsg:
+	case previewOpenMsg:
 		m.selected = msg.Session
 		return m, tea.Quit
 	case previewSessionsRefreshedMsg:

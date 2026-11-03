@@ -7,11 +7,11 @@
 package capture
 
 import (
+	"context"
 	"maps"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -111,29 +111,16 @@ func (fakeAliasEditor) SetAndSave(string, string, string) error { return nil }
 
 func (fakeAliasEditor) DeleteAndSave(string, string) (bool, error) { return true, nil }
 
-type fakeEnumerator struct {
-	groups []tmux.WindowGroup
-}
-
-func (e fakeEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	if e.groups != nil {
-		return e.groups, nil
-	}
-	return []tmux.WindowGroup{
-		{WindowIndex: 1, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 1}, {Index: 2}}},
-		{WindowIndex: 2, WindowName: "server", Panes: []tmux.WindowPane{{Index: 1}}},
-	}, nil
-}
-
-// Seeded content stays generic terminal output — Portal's preview is
-// tool-agnostic, so no fixture references any specific tool.
-type fakeScrollbackReader struct {
+// fakeHistory answers every session's History with the same content. Seeded
+// content stays generic terminal output — Portal's preview is tool-agnostic,
+// so no fixture references any specific tool.
+type fakeHistory struct {
 	content string
 }
 
-func (r fakeScrollbackReader) Tail(tui.PaneScrollback) ([]byte, error) {
-	if r.content != "" {
-		return []byte(r.content), nil
+func (h fakeHistory) History(context.Context, string, int) ([]byte, error) {
+	if h.content != "" {
+		return []byte(h.content), nil
 	}
-	return []byte("$ portal open\n(canned preview scrollback)\n"), nil
+	return []byte("$ portal open\n(canned preview history)\n"), nil
 }

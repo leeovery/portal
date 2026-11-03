@@ -349,22 +349,22 @@ A session row ends in up to two status dots, packed to the right: the attached d
 ### Scrollback Preview
 
 `Space` on the highlighted session opens a Quick Look-style preview of that
-session's saved scrollback, so you can tell similarly-named sessions apart
-without attaching. The preview is read-only: opening and closing it changes
-nothing about the session.
+session's screen and scrollback, read live from the session, so you can tell
+similarly-named sessions apart without attaching. The preview is read-only:
+opening and closing it changes nothing about the session.
 
 | Key | Action |
 |---|---|
-| `←` / `→` | Previous / next window (wraps) |
-| `Tab` | Next pane within the current window (wraps) |
-| `↑` / `↓`, `Ctrl+↑` / `Ctrl+↓` | Scroll within the loaded buffer |
-| `Enter` | Attach to this pane |
+| `↑` / `↓` | Previous / next session in the list (wraps) |
+| `j` / `k`, `Ctrl+↑` / `Ctrl+↓`, `Home` / `End` | Scroll the history |
+| `Enter` | Attach to this session |
 | `Space` / `Esc` | Return to the sessions list |
 
-Each pane shows the last ~1000 lines of saved scrollback. The frame shows the session
-name, the current `Window x/y · Pane x/y`, and a footer of key hints, styled in a cyan
-"peek mode" so a preview never looks like a live session. A pane with no saved content
-yet renders `(no saved content)`.
+The preview shows the session's screen with up to 10,000 lines of history above it,
+drawn as the terminal would draw it. The frame shows the session name and a footer of
+key hints, styled in a cyan "peek mode" so a preview never looks like the session
+itself. A session that doesn't answer in time renders `(session not answering)`; one
+whose history can't be read renders `(history unavailable)`.
 
 ### Multi-Select Mode
 

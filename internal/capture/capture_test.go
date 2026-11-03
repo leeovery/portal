@@ -1,6 +1,7 @@
 package capture_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -559,24 +560,16 @@ func TestPreviewScreenFixture(t *testing.T) {
 		t.Fatalf("first session = %+v, want first to be tessera-proxy-Vb3kQw", sessions)
 	}
 
-	groups, err := fx.Deps(darkBuiltinTheme(t)).Enumerator.ListWindowsAndPanesInSession("tessera-proxy-Vb3kQw")
+	body, err := fx.Deps(darkBuiltinTheme(t)).History.History(context.Background(), "tessera-proxy-Vb3kQw", 0)
 	if err != nil {
-		t.Fatalf("Enumerator: %v", err)
-	}
-	if len(groups) != 1 || len(groups[0].Panes) != 1 {
-		t.Errorf("enumerator groups = %+v, want a single window with a single pane (Window 1/1 · Pane 1/1)", groups)
-	}
-
-	body, err := fx.Deps(darkBuiltinTheme(t)).Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"})
-	if err != nil {
-		t.Fatalf("Reader.Tail: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	if len(body) == 0 {
-		t.Error("preview-screen scrollback is empty; the overlay would render the (no saved content) placeholder")
+		t.Error("preview-screen history is empty; the backend never answers with an empty history")
 	}
 	for _, banned := range []string{"Claude", "Fable", "Brewed"} {
 		if strings.Contains(string(body), banned) {
-			t.Errorf("preview-screen scrollback references %q; the captured content must be generic, tool-agnostic example output", banned)
+			t.Errorf("preview-screen history references %q; the captured content must be generic, tool-agnostic example output", banned)
 		}
 	}
 }
@@ -898,15 +891,8 @@ func TestFakeSeamsAreInert(t *testing.T) {
 		t.Errorf("Creator.CreateFromDir returned %v, want nil (no-op)", err)
 	}
 
-	groups, err := d.Enumerator.ListWindowsAndPanesInSession("orchard-pipeline-code-based")
-	if err != nil {
-		t.Errorf("Enumerator returned %v, want nil", err)
-	}
-	if len(groups) == 0 {
-		t.Error("Enumerator returned no window groups, want canned data")
-	}
-	if _, err := d.Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"}); err != nil {
-		t.Errorf("Reader.Tail returned %v, want nil", err)
+	if body, err := d.History.History(context.Background(), "orchard-pipeline-code-based", 0); err != nil || len(body) == 0 {
+		t.Errorf("History returned (%q, %v), want canned data", body, err)
 	}
 }
 

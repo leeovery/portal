@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func killDispatchModel(t *testing.T) (Model, *killerStub) {
@@ -13,14 +12,8 @@ func killDispatchModel(t *testing.T) (Model, *killerStub) {
 		{Name: "alpha", Attached: true},
 		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
-	m := modelWithSeamsAndLister(t, sessions, enum, reader, lister)
+	m := modelWithSeamsAndLister(t, sessions, historyFor(t, "hi", sessions), lister)
 	killer := &killerStub{}
 	m.sessionKiller = killer
 	return m, killer

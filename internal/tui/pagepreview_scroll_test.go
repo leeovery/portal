@@ -5,22 +5,17 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 )
 
-func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *recordingReader) {
+func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *backendtest.Fake) {
 	t.Helper()
 	var b strings.Builder
 	for range lineCount {
-		b.WriteString("line\n")
+		b.WriteString("line\r\n")
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte(b.String())}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 10)
+	reader := historyFake(t, b.String(), "work")
+	m, ok := NewPreviewModel("work", newPreviewHistory(reader), 80, 10)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}
@@ -126,31 +121,31 @@ func TestPreviewEndJumpsToBottomViaPreviewOwnedBinding(t *testing.T) {
 	}
 }
 
-func TestPreviewWindowSizeMsgDoesNotCallTail(t *testing.T) {
+func TestPreviewWindowSizeMsgDoesNotReadHistory(t *testing.T) {
 	m, reader := newPreviewModelWithLines(t, 50)
-	if len(reader.calls) != 1 {
-		t.Fatalf("setup: expected 1 Tail call from initial-open, got %d", len(reader.calls))
+	if len(reader.CallsTo(backendtest.OpHistory)) != 1 {
+		t.Fatalf("setup: expected 1 History read from initial-open, got %d", len(reader.CallsTo(backendtest.OpHistory)))
 	}
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	if len(reader.calls) != 1 {
-		t.Errorf("expected Tail calls unchanged at 1 after WindowSizeMsg, got %d", len(reader.calls))
+	if len(reader.CallsTo(backendtest.OpHistory)) != 1 {
+		t.Errorf("expected History reads unchanged at 1 after WindowSizeMsg, got %d", len(reader.CallsTo(backendtest.OpHistory)))
 	}
 }
 
-func TestPreviewResizeDoesNotCallTailAcross100Events(t *testing.T) {
+func TestPreviewResizeDoesNotReadHistoryAcross100Events(t *testing.T) {
 	m, reader := newPreviewModelWithLines(t, 50)
-	if len(reader.calls) != 1 {
-		t.Fatalf("setup: expected 1 Tail call from initial-open, got %d", len(reader.calls))
+	if len(reader.CallsTo(backendtest.OpHistory)) != 1 {
+		t.Fatalf("setup: expected 1 History read from initial-open, got %d", len(reader.CallsTo(backendtest.OpHistory)))
 	}
 
 	for i := range 100 {
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 80 + i, Height: 24 + (i % 5)})
 	}
 
-	if len(reader.calls) != 1 {
-		t.Errorf("expected Tail calls still 1 after 100 WindowSizeMsg events, got %d", len(reader.calls))
+	if len(reader.CallsTo(backendtest.OpHistory)) != 1 {
+		t.Errorf("expected History reads still 1 after 100 WindowSizeMsg events, got %d", len(reader.CallsTo(backendtest.OpHistory)))
 	}
 }
 
@@ -190,16 +185,8 @@ func TestPreviewPreservesScrollOffsetAcrossResizeWhenAccommodating(t *testing.T)
 }
 
 func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: nil, err: nil}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true on (nil, nil) Tail, got false")
-	}
+	// A blank screen: nothing drawn but the cursor's position.
+	m := newTestPreview(t, "\x1b[1;1H\x1b[0m", 80, 24)
 	if m.viewport.YOffset() != 0 {
 		t.Fatalf("setup: expected YOffset=0 on empty content, got %d", m.viewport.YOffset())
 	}
@@ -217,16 +204,7 @@ func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
 }
 
 func TestPreviewSingleLineContentDownIsNoOp(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("only one line\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
+	m := newTestPreview(t, "only one line", 80, 24)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 

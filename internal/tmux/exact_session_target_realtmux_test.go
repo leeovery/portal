@@ -3,7 +3,6 @@ package tmux_test
 import (
 	"errors"
 	"maps"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -101,15 +100,6 @@ var goneSessionRouteCases = map[string]func(*testing.T){
 		coords, err := client.ListPanesInSession(goneSession)
 		if err == nil {
 			t.Fatalf("ListPanesInSession(%q) succeeded with %v, want a tmux failure", goneSession, coords)
-		}
-	},
-
-	"ListWindowsAndPanesInSession": func(t *testing.T) {
-		_, client, _ := seedRealTmuxServer(t, prefixSiblingFixture)
-
-		groups, err := client.ListWindowsAndPanesInSession(goneSession)
-		if err == nil {
-			t.Fatalf("ListWindowsAndPanesInSession(%q) succeeded with %v, want a tmux failure", goneSession, groups)
 		}
 	},
 
@@ -217,23 +207,6 @@ var liveSessionRouteCases = map[string]func(*testing.T){
 		}
 		if !slices.Equal(coords, siblingAllCoords) {
 			t.Errorf("ListPanesInSession(%q) = %v, want %v — every pane of every window", prefixSibling, coords, siblingAllCoords)
-		}
-	},
-
-	"ListWindowsAndPanesInSession": func(t *testing.T) {
-		_, client, _ := seedRealTmuxServer(t, prefixSiblingFixture)
-
-		groups, err := client.ListWindowsAndPanesInSession(prefixSibling)
-		if err != nil {
-			t.Fatalf("ListWindowsAndPanesInSession(%q): %v", prefixSibling, err)
-		}
-		if len(groups) != 2 {
-			t.Fatalf("ListWindowsAndPanesInSession(%q) returned %d windows, want 2: %+v", prefixSibling, len(groups), groups)
-		}
-		for i, group := range groups {
-			if group.WindowIndex != i || !reflect.DeepEqual(group.Panes, []tmux.WindowPane{{Index: 0}, {Index: 1}}) {
-				t.Errorf("window %d = %+v, want index %d holding panes [0 1]", i, group, i)
-			}
 		}
 	},
 

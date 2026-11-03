@@ -142,8 +142,7 @@ func TestSearchDirColumn(t *testing.T) {
 	t.Run("it keeps the column after a preview and back", func(t *testing.T) {
 		dir, sessions, projects := dirColumnFixture(t)
 		m := searchColumnModel(t, prefs.ModeFlat, "portal", sessions, projects)
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m.history = newPreviewHistory(keymapParityHistory{})
 
 		m = pressSettled(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 		if m.activePage != pagePreview {

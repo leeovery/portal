@@ -68,9 +68,9 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-not-answering", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "not answering", "orchard-pipeline-codify"}, absent: []string{"No sessions yet"}},
 		{fixture: "projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects"}},
 		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"relay-v1-api", "Pick a project to run", "npm run dev"}},
-		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "Window 1/1", "kubectl rollout"}},
+		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "kubectl rollout"}},
 		// The preview opens at the bottom of the buffer, so the top of it is off the frame.
-		{fixture: "preview-long-scrollback", present: []string{"tessera-proxy-Vb3kQw", "Window 1/1", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
+		{fixture: "preview-long-scrollback", present: []string{"tessera-proxy-Vb3kQw", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
 		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to set @portal-restoring marker"}},
 	}

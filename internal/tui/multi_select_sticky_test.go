@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -148,14 +147,8 @@ func TestMultiSelectPreviewRoundTripKeepsSelection(t *testing.T) {
 		{Name: "bravo"},
 		{Name: "charlie"},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{sessions}}
-	m := modelWithSeamsAndLister(t, sessions, enum, reader, lister)
+	m := modelWithSeamsAndLister(t, sessions, historyFor(t, "hi", sessions), lister)
 
 	m = markTwoFlatSessions(t, m, 0, 2)
 
@@ -189,14 +182,8 @@ func TestMultiSelectPrunesExternallyKilledSession(t *testing.T) {
 		{Name: "bravo"},
 		{Name: "charlie"},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{postKill}}
-	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
+	m := modelWithSeamsAndLister(t, first, historyFor(t, "hi", first), lister)
 
 	m = markTwoFlatSessions(t, m, 0, 2)
 	if !m.IsSessionSelected("alpha") || !m.IsSessionSelected("charlie") {

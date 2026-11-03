@@ -6,14 +6,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func applyBail(t *testing.T, m Model, name string) Model {
-	t.Helper()
-	updated, _ := m.Update(previewAttachBailMsg{Session: name})
-	got, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("Update returned %T after bail, want tui.Model", updated)
-	}
-	return got
+func applyFlash(m Model, text string) Model {
+	m.setFlash(text)
+	return m
 }
 
 func applyTick(t *testing.T, m Model, gen uint64) Model {
@@ -26,32 +21,32 @@ func applyTick(t *testing.T, m Model, gen uint64) Model {
 	return got
 }
 
-func TestFlashReplacement_TwoSuccessiveBailsReflectLatestText(t *testing.T) {
+func TestFlashReplacement_TwoSuccessiveFlashesReflectLatestText(t *testing.T) {
 	var m Model
-	m = applyBail(t, m, "foo")
-	if want, got := `session "foo" no longer exists`, m.flashText; got != want {
-		t.Fatalf("after first bail: flashText=%q, want %q", got, want)
+	m = applyFlash(m, "foo")
+	if want, got := "foo", m.flashText; got != want {
+		t.Fatalf("after first flash: flashText=%q, want %q", got, want)
 	}
 	if m.flashGen != 1 {
-		t.Fatalf("after first bail: flashGen=%d, want 1", m.flashGen)
+		t.Fatalf("after first flash: flashGen=%d, want 1", m.flashGen)
 	}
 
-	m = applyBail(t, m, "bar")
-	if want, got := `session "bar" no longer exists`, m.flashText; got != want {
-		t.Errorf("after second bail: flashText=%q, want %q (latest bail wins)", got, want)
+	m = applyFlash(m, "bar")
+	if want, got := "bar", m.flashText; got != want {
+		t.Errorf("after second flash: flashText=%q, want %q (latest flash wins)", got, want)
 	}
 	if m.flashGen != 2 {
-		t.Errorf("after second bail: flashGen=%d, want 2 (bumped per bail)", m.flashGen)
+		t.Errorf("after second flash: flashGen=%d, want 2 (bumped per flash)", m.flashGen)
 	}
 }
 
 func TestFlashReplacement_PriorTickDoesNotClearNewerFlash(t *testing.T) {
 	var m Model
-	m = applyBail(t, m, "foo")
-	m = applyBail(t, m, "bar")
+	m = applyFlash(m, "foo")
+	m = applyFlash(m, "bar")
 	m = applyTick(t, m, 1)
 
-	if want, got := `session "bar" no longer exists`, m.flashText; got != want {
+	if want, got := "bar", m.flashText; got != want {
 		t.Errorf("stale tick must not clear newer flash: flashText=%q, want %q", got, want)
 	}
 	if m.flashGen != 2 {
@@ -61,8 +56,8 @@ func TestFlashReplacement_PriorTickDoesNotClearNewerFlash(t *testing.T) {
 
 func TestFlashReplacement_CurrentTickClearsItsOwnFlash(t *testing.T) {
 	var m Model
-	m = applyBail(t, m, "foo")
-	m = applyBail(t, m, "bar")
+	m = applyFlash(m, "foo")
+	m = applyFlash(m, "bar")
 	m = applyTick(t, m, 2)
 
 	if m.flashText != "" {
@@ -73,22 +68,22 @@ func TestFlashReplacement_CurrentTickClearsItsOwnFlash(t *testing.T) {
 	}
 }
 
-func TestFlashReplacement_FiveSuccessiveBailsOnlyLatestSurvives(t *testing.T) {
+func TestFlashReplacement_FiveSuccessiveFlashesOnlyLatestSurvives(t *testing.T) {
 	var m Model
 	names := []string{"a", "b", "c", "d", "e"}
 	for _, n := range names {
-		m = applyBail(t, m, n)
+		m = applyFlash(m, n)
 	}
-	if want, got := `session "e" no longer exists`, m.flashText; got != want {
-		t.Fatalf("after 5 bails: flashText=%q, want %q (latest wins)", got, want)
+	if want, got := "e", m.flashText; got != want {
+		t.Fatalf("after 5 flashes: flashText=%q, want %q (latest wins)", got, want)
 	}
 	if m.flashGen != 5 {
-		t.Fatalf("after 5 bails: flashGen=%d, want 5", m.flashGen)
+		t.Fatalf("after 5 flashes: flashGen=%d, want 5", m.flashGen)
 	}
 
 	for gen := uint64(1); gen <= 4; gen++ {
 		m = applyTick(t, m, gen)
-		if want, got := `session "e" no longer exists`, m.flashText; got != want {
+		if want, got := "e", m.flashText; got != want {
 			t.Errorf("stale tick Gen=%d cleared the live flash: flashText=%q, want %q", gen, got, want)
 		}
 		if m.flashGen != 5 {
@@ -105,9 +100,9 @@ func TestFlashReplacement_FiveSuccessiveBailsOnlyLatestSurvives(t *testing.T) {
 	}
 }
 
-func TestFlashReplacement_ManualClearBetweenBailsLeavesStaleTicksAsNoOps(t *testing.T) {
+func TestFlashReplacement_ManualClearBetweenFlashesLeavesStaleTicksAsNoOps(t *testing.T) {
 	var m Model
-	m = applyBail(t, m, "foo")
+	m = applyFlash(m, "foo")
 	m.clearFlash()
 	if m.flashText != "" {
 		t.Fatalf("manual clear: flashText=%q, want %q", m.flashText, "")
@@ -116,17 +111,17 @@ func TestFlashReplacement_ManualClearBetweenBailsLeavesStaleTicksAsNoOps(t *test
 		t.Fatalf("manual clear must preserve flashGen: got %d, want 1", m.flashGen)
 	}
 
-	m = applyBail(t, m, "bar")
-	if want, got := `session "bar" no longer exists`, m.flashText; got != want {
-		t.Fatalf("post-manual-clear bail: flashText=%q, want %q", got, want)
+	m = applyFlash(m, "bar")
+	if want, got := "bar", m.flashText; got != want {
+		t.Fatalf("post-manual-clear flash: flashText=%q, want %q", got, want)
 	}
 	if m.flashGen != 2 {
-		t.Fatalf("post-manual-clear bail: flashGen=%d, want 2", m.flashGen)
+		t.Fatalf("post-manual-clear flash: flashGen=%d, want 2", m.flashGen)
 	}
 
 	m = applyTick(t, m, 1)
-	if want, got := `session "bar" no longer exists`, m.flashText; got != want {
-		t.Errorf("stale tick (Gen=1) after manual clear + new bail must not clear: flashText=%q, want %q", got, want)
+	if want, got := "bar", m.flashText; got != want {
+		t.Errorf("stale tick (Gen=1) after manual clear + new flash must not clear: flashText=%q, want %q", got, want)
 	}
 	if m.flashGen != 2 {
 		t.Errorf("stale tick must not touch flashGen: got %d, want 2", m.flashGen)
@@ -148,30 +143,30 @@ func TestFlashReplacement_SetFlashBumpsGenByExactlyOnePerCall(t *testing.T) {
 		t.Errorf("after setFlash #2: flashGen=%d, want 2", m.flashGen)
 	}
 
-	m = applyBail(t, m, "foo")
+	m = applyFlash(m, "foo")
 	if m.flashGen != 3 {
-		t.Errorf("after bail #1 post-setFlash: flashGen=%d, want 3", m.flashGen)
+		t.Errorf("after flash #1 post-setFlash: flashGen=%d, want 3", m.flashGen)
 	}
-	m = applyBail(t, m, "bar")
+	m = applyFlash(m, "bar")
 	if m.flashGen != 4 {
-		t.Errorf("after bail #2 post-setFlash: flashGen=%d, want 4", m.flashGen)
+		t.Errorf("after flash #2 post-setFlash: flashGen=%d, want 4", m.flashGen)
 	}
 }
 
-func TestFlashReplacement_SameNameBailsStillBumpGen(t *testing.T) {
+func TestFlashReplacement_SameNameFlashesStillBumpGen(t *testing.T) {
 	var m Model
-	m = applyBail(t, m, "foo")
-	m = applyBail(t, m, "foo")
+	m = applyFlash(m, "foo")
+	m = applyFlash(m, "foo")
 	if m.flashGen != 2 {
-		t.Fatalf("same-name bail #2: flashGen=%d, want 2", m.flashGen)
+		t.Fatalf("same-name flash #2: flashGen=%d, want 2", m.flashGen)
 	}
 
 	m = applyTick(t, m, 1)
-	if want, got := `session "foo" no longer exists`, m.flashText; got != want {
-		t.Errorf("stale tick on same-name bail: flashText=%q, want %q", got, want)
+	if want, got := "foo", m.flashText; got != want {
+		t.Errorf("stale tick on same-name flash: flashText=%q, want %q", got, want)
 	}
 	if m.flashGen != 2 {
-		t.Errorf("stale tick on same-name bail mutated flashGen: got %d, want 2", m.flashGen)
+		t.Errorf("stale tick on same-name flash mutated flashGen: got %d, want 2", m.flashGen)
 	}
 
 	m = applyTick(t, m, 2)

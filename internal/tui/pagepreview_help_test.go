@@ -6,18 +6,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func newPreviewHelpModel(t *testing.T, th theme.Theme, colourless bool) previewModel {
 	t.Helper()
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hello scrollback line")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
+	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, "hello scrollback line", "work")), 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}
@@ -52,9 +45,7 @@ func TestPreviewHelpOpensOnQuestionMark(t *testing.T) {
 		"Scroll down / up",
 		"Page up / down",
 		"Prev / next session",
-		"Prev / next window",
-		"Next pane",
-		"Attach this pane",
+		"Attach this session",
 		"Back to sessions",
 	} {
 		if !strings.Contains(view, action) {
@@ -143,9 +134,6 @@ func TestPreviewHelpConsumesOtherKeysWhileOpen(t *testing.T) {
 		name string
 		msg  tea.KeyPressMsg
 	}{
-		{"left window", tea.KeyPressMsg{Code: tea.KeyLeft}},
-		{"right window", tea.KeyPressMsg{Code: tea.KeyRight}},
-		{"tab pane", tea.KeyPressMsg{Code: tea.KeyTab}},
 		{"enter attach", tea.KeyPressMsg{Code: tea.KeyEnter}},
 		{"up session", tea.KeyPressMsg{Code: tea.KeyUp}},
 		{"down session", tea.KeyPressMsg{Code: tea.KeyDown}},
@@ -158,7 +146,7 @@ func TestPreviewHelpConsumesOtherKeysWhileOpen(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newPreviewHelpModel(t, testDarkTheme(t), false)
 			m, _ = pressPreviewKey(t, m, keyQuestionMark())
-			windowBefore, paneBefore := m.windowIdx, m.paneIdx
+			offsetBefore := m.viewport.YOffset()
 
 			m, cmd := pressPreviewKey(t, m, tc.msg)
 
@@ -168,9 +156,8 @@ func TestPreviewHelpConsumesOtherKeysWhileOpen(t *testing.T) {
 			if cmd != nil {
 				t.Errorf("%s while help is open must be inert (no cmd); got non-nil", tc.name)
 			}
-			if m.windowIdx != windowBefore || m.paneIdx != paneBefore {
-				t.Errorf("%s while help is open must not move focus; window %d→%d pane %d→%d",
-					tc.name, windowBefore, m.windowIdx, paneBefore, m.paneIdx)
+			if m.viewport.YOffset() != offsetBefore {
+				t.Errorf("%s while help is open must not scroll; YOffset %d→%d", tc.name, offsetBefore, m.viewport.YOffset())
 			}
 		})
 	}

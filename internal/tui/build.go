@@ -21,15 +21,13 @@ type Deps struct {
 	Renamer SessionRenamer
 	Creator SessionCreator
 
-	ProjectStore    ProjectStore
-	ProjectEditor   ProjectEditor
-	AliasEditor     AliasEditor
-	Enumerator      TmuxEnumerator
-	Reader          ScrollbackReader
-	PreviewAttacher PreviewAttacher
-	DirReader       session.PaneCurrentPathReader
-	DirRunner       resolver.CommandRunner
-	PendingReader   PendingResumeReader
+	ProjectStore  ProjectStore
+	ProjectEditor ProjectEditor
+	AliasEditor   AliasEditor
+	History       HistoryReader
+	DirReader     session.PaneCurrentPathReader
+	DirRunner     resolver.CommandRunner
+	PendingReader PendingResumeReader
 	// SkeletonMarkers keeps the cold route re-reading the pending set until no
 	// restored pane is still hydrating, for at most PendingSettleBound.
 	SkeletonMarkers    SkeletonMarkerReader
@@ -130,14 +128,8 @@ func Build(deps Deps) Model {
 	if deps.AliasEditor != nil {
 		opts = append(opts, WithAliasEditor(deps.AliasEditor))
 	}
-	if deps.Enumerator != nil {
-		opts = append(opts, WithEnumerator(deps.Enumerator))
-	}
-	if deps.Reader != nil {
-		opts = append(opts, WithScrollbackReader(deps.Reader))
-	}
-	if deps.PreviewAttacher != nil {
-		opts = append(opts, WithPreviewAttachPipeline(deps.PreviewAttacher))
+	if deps.History != nil {
+		opts = append(opts, WithHistory(deps.History))
 	}
 	if deps.DirReader != nil && deps.DirRunner != nil {
 		opts = append(opts, WithDirResolver(deps.DirReader, deps.DirRunner))

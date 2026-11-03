@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func keyRune(r rune) tea.KeyPressMsg {
@@ -45,13 +44,8 @@ func TestSpaceDuringSettingFilterInsertsLiteralSpaceIntoFilterValue(t *testing.T
 		{Name: "pigeon-fly", Attached: false},
 		{Name: "alpha", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
 
 	m = startFiltering(t, m)
 	m = typeFilter(t, m, "pigeon")
@@ -68,8 +62,8 @@ func TestSpaceDuringSettingFilterInsertsLiteralSpaceIntoFilterValue(t *testing.T
 	if got.activePage == pagePreview {
 		t.Errorf("activePage must NOT be pagePreview while SettingFilter, got pagePreview")
 	}
-	if enum.calls != 0 {
-		t.Errorf("expected NewPreviewModel NOT called while SettingFilter, got enumerator.calls=%d", enum.calls)
+	if len(historyCalls(history)) != 0 {
+		t.Errorf("expected NewPreviewModel NOT called while SettingFilter, got History reads=%d", len(historyCalls(history)))
 	}
 }
 
@@ -77,13 +71,7 @@ func TestSpaceDuringSettingFilterDoesNotChangeActivePage(t *testing.T) {
 	sessions := []Session{
 		{Name: "pigeon-fly", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 
 	m = startFiltering(t, m)
 	m = typeFilter(t, m, "pigeon")
@@ -103,13 +91,8 @@ func TestSpaceAtStartOfFilterInputPassesThroughAsLiteralSpace(t *testing.T) {
 	sessions := []Session{
 		{Name: "alpha", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{}
-	m := modelWithSeams(t, sessions, enum, reader)
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
 
 	m = startFiltering(t, m)
 
@@ -125,8 +108,8 @@ func TestSpaceAtStartOfFilterInputPassesThroughAsLiteralSpace(t *testing.T) {
 	if got.activePage == pagePreview {
 		t.Errorf("activePage must NOT be pagePreview, got pagePreview")
 	}
-	if enum.calls != 0 {
-		t.Errorf("expected NewPreviewModel NOT called, got enumerator.calls=%d", enum.calls)
+	if len(historyCalls(history)) != 0 {
+		t.Errorf("expected NewPreviewModel NOT called, got History reads=%d", len(historyCalls(history)))
 	}
 }
 
@@ -135,13 +118,8 @@ func TestSpaceAfterEnterCommitOpensPreviewOnHighlightedMatch(t *testing.T) {
 		{Name: "pigeon-fly", Attached: false},
 		{Name: "alpha", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
 
 	m = startFiltering(t, m)
 	m = typeFilter(t, m, "pigeon")
@@ -171,11 +149,11 @@ func TestSpaceAfterEnterCommitOpensPreviewOnHighlightedMatch(t *testing.T) {
 	if got2.activePage != pagePreview {
 		t.Errorf("expected activePage=pagePreview after Enter-commit + Space, got %v", got2.activePage)
 	}
-	if enum.calls != 1 {
-		t.Errorf("expected NewPreviewModel called once after Enter-commit + Space, got enumerator.calls=%d", enum.calls)
+	if len(historyCalls(history)) != 1 {
+		t.Errorf("expected NewPreviewModel called once after Enter-commit + Space, got History reads=%d", len(historyCalls(history)))
 	}
-	if enum.lastArg != "pigeon-fly" {
-		t.Errorf("expected enumerator called for highlighted match %q, got %q", "pigeon-fly", enum.lastArg)
+	if historyCalls(history)[0] != "pigeon-fly" {
+		t.Errorf("expected History read for highlighted match %q, got %q", "pigeon-fly", historyCalls(history)[0])
 	}
 }
 

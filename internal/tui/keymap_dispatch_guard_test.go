@@ -74,8 +74,7 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 		}},
 		"␣": {press: tea.KeyPressMsg{Code: tea.KeySpace}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
-			m.enumerator = keymapParityEnumerator{}
-			m.reader = keymapParityReader{}
+			m.history = newPreviewHistory(keymapParityHistory{})
 			m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 			return m.activePage == pagePreview
 		}},
@@ -217,17 +216,6 @@ func TestPreviewDescriptorDispatchParity(t *testing.T) {
 			homeHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyHome})
 			endHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 			return homeHandled && endHandled
-		}},
-		"←→": {press: tea.KeyPressMsg{Code: tea.KeyLeft}, honour: func(t *testing.T) bool {
-			m := previewGuardModel(t)
-			leftHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyLeft})
-			rightHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyRight})
-			return leftHandled && rightHandled
-		}},
-		"⇥": {press: tea.KeyPressMsg{Code: tea.KeyTab}, honour: func(t *testing.T) bool {
-			m := previewGuardModel(t)
-			handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyTab})
-			return handled
 		}},
 		"⏎": {press: tea.KeyPressMsg{Code: tea.KeyEnter}, honour: func(t *testing.T) bool {
 			m := previewGuardModel(t)

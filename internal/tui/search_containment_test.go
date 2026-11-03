@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -171,10 +172,14 @@ func TestSearchContainmentMatchesASpacedNameOnItsOwnFields(t *testing.T) {
 	assertVisible(t, m, nil, "term spanning the joined filter value")
 }
 
-type containmentEnumerator struct{ groups []tmux.WindowGroup }
-
-func (e containmentEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	return e.groups, nil
+// containmentHistory holds every one of sessions, each with a one-line history.
+func containmentHistory(sessions []tui.Session) *backendtest.Fake {
+	f := backendtest.New()
+	for _, s := range sessions {
+		f.Add(backend.Session{Name: s.Name})
+		f.SetHistory(s.Name, []byte("hi"))
+	}
+	return f
 }
 
 func containmentVisibleHeadings(m tui.Model) []string {
@@ -274,8 +279,7 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 		m := containmentPicker(t, tui.Deps{
 			InitialMode: prefs.ModeFlat,
 			Search:      &tui.SearchForm{Term: "port"},
-			Enumerator:  containmentEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}}},
-			Reader:      stubScrollbackReader{bytes: []byte("hi")},
+			History:     containmentHistory(sessions),
 		}, sessions, projects)
 
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})

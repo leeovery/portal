@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type killerStub struct {
@@ -28,16 +27,10 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 		{Name: "alpha", Attached: false},
 		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]Session{postKill}}
 	killer := &killerStub{}
 
-	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
+	m := modelWithSeamsAndLister(t, first, historyFor(t, "hi", first), lister)
 	m.sessionKiller = killer
 
 	m.sessionList.SetFilterText("alpha")

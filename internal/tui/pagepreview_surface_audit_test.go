@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"go/ast"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
 func repoRelative(parts ...string) string {
@@ -44,96 +48,58 @@ func readSourceFiles(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-func TestSurfaceAudit_TmuxNoNewCaptureWrapper(t *testing.T) {
-	tmuxPath := repoRelative("internal", "tmux", "tmux.go")
-	b, err := os.ReadFile(tmuxPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", tmuxPath, err)
-	}
-	src := string(b)
-
-	forbiddenSymbols := []string{
-		"CapturePaneTail",
-		"CapturePaneN",
-		"CaptureTail",
-		"CapturePaneLastN",
-		"CapturePaneRange",
-		"CapturePaneBounded",
-	}
-
-	for _, sym := range forbiddenSymbols {
-		t.Run(sym, func(t *testing.T) {
-			methodForm := "func (c *Client) " + sym + "("
-			funcForm := "func " + sym + "("
-			if strings.Contains(src, methodForm) || strings.Contains(src, funcForm) {
-				t.Errorf(
-					"%s declares forbidden capture-wrapper symbol %q; "+
-						"preview must not introduce new tmux capture wrappers — "+
-						"the read pipeline is always-disk via "+
-						"state.ScrollbackFile + tail-N helper.",
-					tmuxPath, sym,
-				)
+// The preview's body is the session's live history, read through the history
+// seam: the one History call in the package asks for all of it, rows 0.
+func TestSurfaceAudit_PreviewReadsTheWholeHistoryThroughTheSeam(t *testing.T) {
+	var calls []string
+	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
+		sourceguardtest.ForEachFuncCall(source.File, func(funcName string, call *ast.CallExpr) bool {
+			if sourceguardtest.CalleeName(call) != "History" {
+				return true
 			}
+			where := filepath.Base(source.Path) + ":" + funcName
+			calls = append(calls, where)
+			if len(call.Args) != 3 {
+				t.Errorf("%s calls History with %d arguments, want ctx, name and rows", where, len(call.Args))
+				return true
+			}
+			if rows, ok := call.Args[2].(*ast.BasicLit); !ok || rows.Value != strconv.Itoa(0) {
+				t.Errorf("%s asks History for a bounded number of rows; the preview shows the whole history, rows 0", where)
+			}
+			return true
 		})
+	}
+	if len(calls) != 1 || calls[0] != "preview_history.go:body" {
+		t.Errorf("History is called from %v, want exactly once, from previewHistory.body in preview_history.go", calls)
 	}
 }
 
-func TestSurfaceAudit_TmuxCapturePaneSignatureUnchanged(t *testing.T) {
-	tmuxPath := repoRelative("internal", "tmux", "tmux.go")
-	b, err := os.ReadFile(tmuxPath)
+// The saved scrollback files belong to internal/state, and window and pane
+// enumeration to internal/tmux. The preview's files reach neither.
+func TestSurfaceAudit_PreviewReadsNoSavedScrollbackAndNoTmux(t *testing.T) {
+	forbidden := map[string]string{
+		`"github.com/leeovery/portal/internal/state"`: "saved scrollback",
+		`"github.com/leeovery/portal/internal/tmux"`:  "tmux",
+	}
+	files, err := filepath.Glob("*preview*.go")
 	if err != nil {
-		t.Fatalf("read %s: %v", tmuxPath, err)
+		t.Fatalf("glob preview sources: %v", err)
 	}
-	src := string(b)
-
-	const wantSignature = "func (c *Client) CapturePane(target Target) (string, error) {"
-	if !strings.Contains(src, wantSignature) {
-		t.Errorf(
-			"%s no longer contains the verbatim CapturePane signature %q. "+
-				"The existing capture path must remain untouched.",
-			tmuxPath, wantSignature,
-		)
-	}
-}
-
-func TestSurfaceAudit_StateExposesExistingWriters(t *testing.T) {
-	stateDir := repoRelative("internal", "state")
-	files := readSourceFiles(t, stateDir)
-
-	var allSrc strings.Builder
-	for _, src := range files {
-		allSrc.WriteString(src)
-		allSrc.WriteByte('\n')
-	}
-	combined := allSrc.String()
-
-	expectedDeclarations := []string{
-		"func SetSkeletonMarker(",
-		"func UnsetSkeletonMarker(",
-		"func WriteScrollbackIfChanged(",
-		"func Commit(",
-	}
-
-	for _, decl := range expectedDeclarations {
-		t.Run(decl, func(t *testing.T) {
-			if !strings.Contains(combined, decl) {
-				t.Errorf(
-					"internal/state no longer declares %q. "+
-						"Existing writers must remain present alongside the new "+
-						"tail-N helper.",
-					decl,
-				)
+	var scanned int
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		scanned++
+		source := sourceguardtest.PackageSource(t, ".", path)
+		for _, imp := range source.File.Imports {
+			if what, ok := forbidden[imp.Path.Value]; ok {
+				t.Errorf("%s imports %s; the preview reads the session's history, never %s", path, imp.Path.Value, what)
 			}
-		})
+		}
 	}
-
-	const tailDecl = "func TailScrollback("
-	if !strings.Contains(combined, tailDecl) {
-		t.Errorf(
-			"internal/state does not declare %q — the tail-N helper the "+
-				"preview read pipeline depends on is missing.",
-			tailDecl,
-		)
+	if scanned == 0 {
+		t.Fatalf("no preview production sources matched; the audit scanned nothing")
 	}
 }
 
@@ -141,8 +107,8 @@ func TestSurfaceAudit_StateExposesExistingWriters(t *testing.T) {
 var previewTokens = []string{
 	"pagePreview",
 	"previewModel",
-	"TmuxEnumerator",
-	"ScrollbackReader",
+	"previewHistory",
+	"HistoryReader",
 }
 
 func auditNoPreviewTokens(t *testing.T, dir string) {
@@ -153,13 +119,16 @@ func auditNoPreviewTokens(t *testing.T, dir string) {
 			if strings.Contains(src, tok) {
 				t.Errorf(
 					"%s contains forbidden preview token %q. "+
-						"This directory must remain untouched by the "+
-						"session-scrollback-preview feature.",
+						"The preview lives in internal/tui alone.",
 					path, tok,
 				)
 			}
 		}
 	}
+}
+
+func TestSurfaceAudit_StateNoPreviewTokens(t *testing.T) {
+	auditNoPreviewTokens(t, repoRelative("internal", "state"))
 }
 
 func TestSurfaceAudit_RestoreNoPreviewTokens(t *testing.T) {
@@ -242,10 +211,8 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		name := e.Name()
 		if _, forbidden := forbiddenNames[name]; forbidden {
 			t.Errorf(
-				"new package internal/%s/ exists; the feature must live "+
-					"entirely in pre-existing packages (internal/tui, "+
-					"internal/tmux, internal/state). Forbidden name pinned "+
-					"by audit.",
+				"new package internal/%s/ exists; the preview lives in "+
+					"internal/tui. Forbidden name pinned by audit.",
 				name,
 			)
 			continue
@@ -254,55 +221,11 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 			t.Errorf(
 				"new package internal/%s/ exists and is not on the "+
 					"pre-existing allow-list. If this addition is unrelated "+
-					"to the session-scrollback-preview feature, update the "+
-					"audit's preExistingPackages map. Otherwise, preview "+
-					"must not introduce a new internal/ package.",
+					"to the preview, update the audit's preExistingPackages "+
+					"map. Otherwise, the preview must not introduce a new "+
+					"internal/ package.",
 				name,
 			)
 		}
-	}
-}
-
-func TestSurfaceAudit_SaveFormatConstantsUnchanged(t *testing.T) {
-	pathsFile := repoRelative("internal", "state", "paths.go")
-	b, err := os.ReadFile(pathsFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", pathsFile, err)
-	}
-	src := string(b)
-
-	type pin struct {
-		name    string
-		literal string
-		why     string
-	}
-	pins := []pin{
-		{
-			name:    "scrollbackSubdir",
-			literal: `scrollbackSubdir  = "scrollback"`,
-			why:     "scrollback subdirectory name is part of the save format; preview reads from this exact subdir",
-		},
-		{
-			name:    "ScrollbackFile suffix",
-			literal: `paneKey+".bin"`,
-			why:     `.bin extension is part of the save-format contract — daemon writes and preview reads must agree`,
-		},
-		{
-			name:    "FIFOPath prefix",
-			literal: `"hydrate-"+paneKey+".fifo"`,
-			why:     "hydration FIFO naming is part of the save format; the surface audit pins it even though preview itself does not touch FIFOs",
-		},
-	}
-
-	for _, p := range pins {
-		t.Run(p.name, func(t *testing.T) {
-			if !strings.Contains(src, p.literal) {
-				t.Errorf(
-					"%s no longer contains %q (%s); the save format and "+
-						"`.bin` file shape must remain unchanged.",
-					pathsFile, p.literal, p.why,
-				)
-			}
-		})
 	}
 }

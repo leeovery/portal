@@ -7,7 +7,7 @@ import (
 )
 
 func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *testing.T) {
-	m := newFramePreviewModelAt(t, "main", nil, 80, 24)
+	m := newTestPreview(t, "", 80, 24)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -26,7 +26,7 @@ func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *tes
 }
 
 func TestPreviewWindowSizeMsg_ClampsViewportDimensionsNonNegative(t *testing.T) {
-	m := newFramePreviewModelAt(t, "main", nil, 80, 24)
+	m := newTestPreview(t, "", 80, 24)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 1, Height: 0})
 
