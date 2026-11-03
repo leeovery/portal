@@ -1,9 +1,9 @@
 // Package zmxtest gives a test its own zmx directory and a zmx Backend bound
-// to it, driving the zmx build pinned in scripts/zmx-commit, and at the end
-// of the test kills every process started for that directory. The
-// developer's live sessions sit in their own zmx directory; a test reaches
-// zmx only through a directory from New. Test-only: production code must not
-// import this package.
+// to it, driving the zmx build pinned in scripts/zmx-commit or the one
+// BinaryEnv names, and at the end of the test kills every process started for
+// that directory. The developer's live sessions sit in their own zmx
+// directory; a test reaches zmx only through a directory from New. Test-only:
+// production code must not import this package.
 package zmxtest
 
 import (
@@ -43,9 +43,9 @@ const settle = 5 * time.Second
 // session reads the developer's shell config.
 var passedEnv = []string{"PATH", "TERM", "USER", "TMPDIR"}
 
-// New returns a Backend on the pinned zmx build, bound to a fresh directory
-// under /tmp. It fails the test, rather than skipping it, when the build is
-// missing or ZMX_DIR is not poisoned. At cleanup every session in the
+// New returns a Backend on the zmx build Binary finds, bound to a fresh
+// directory under /tmp. It fails the test, rather than skipping it, when the
+// build is missing or ZMX_DIR is not poisoned. At cleanup every session in the
 // directory is killed, any process still holding the directory in its
 // environment fails the test and is killed, and the directory is removed.
 func New(t *testing.T) *zmx.Backend {
@@ -80,19 +80,44 @@ func New(t *testing.T) *zmx.Backend {
 	return b
 }
 
-// Binary is the path of the pinned zmx build. It fails the test, naming the
-// command that builds it, when the build is missing.
+// BinaryEnv names a zmx build the tests drive in place of the pinned one,
+// such as one scripts/zmx-build <ref> made.
+const BinaryEnv = "PORTAL_TEST_ZMX_BINARY"
+
+// Binary is the path of the zmx build the tests drive: the one BinaryEnv
+// names, or else the pinned build. It fails the test when that build is
+// missing or cannot run.
 func Binary(t *testing.T) string {
 	t.Helper()
-	repo, err := portalbintest.ProjectRoot()
-	if err != nil {
-		t.Fatalf("find the repository: %v", err)
-	}
-	binary, err := pinnedBinary(repo)
+	binary, err := resolveBinary(os.Getenv, portalbintest.ProjectRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return binary
+}
+
+func resolveBinary(getenv func(string) string, projectRoot func() (string, error)) (string, error) {
+	if binary := getenv(BinaryEnv); binary != "" {
+		return namedBinary(binary)
+	}
+	repo, err := projectRoot()
+	if err != nil {
+		return "", fmt.Errorf("find the repository: %w", err)
+	}
+	return pinnedBinary(repo)
+}
+
+// namedBinary refuses a relative path, which each package's tests would read
+// from their own directory, and any name but zmx: some tests put the build's
+// directory on PATH and run zmx from it.
+func namedBinary(binary string) (string, error) {
+	if !filepath.IsAbs(binary) || filepath.Base(binary) != "zmx" {
+		return "", fmt.Errorf("%s=%q: want an absolute path to a file named zmx", BinaryEnv, binary)
+	}
+	if !runnable(binary) {
+		return "", fmt.Errorf("%s=%q is not an executable file", BinaryEnv, binary)
+	}
+	return binary, nil
 }
 
 // pinnedBinary is where scripts/zmx-build puts the commit scripts/zmx-commit
@@ -104,11 +129,15 @@ func pinnedBinary(repo string) (string, error) {
 	}
 	commit := strings.TrimSpace(string(pin))
 	binary := filepath.Join(repo, ".cache", "zmx", commit, "zmx")
-	info, err := os.Stat(binary)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+	if !runnable(binary) {
 		return "", fmt.Errorf("the pinned zmx build %s is missing; run scripts/zmx-build", binary)
 	}
 	return binary, nil
+}
+
+func runnable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 func checkPoisoned(getenv func(string) string) error {

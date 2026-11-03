@@ -108,6 +108,65 @@ func TestPinnedBinary(t *testing.T) {
 	})
 }
 
+func TestResolveBinary(t *testing.T) {
+	env := func(binary string) func(string) string {
+		return func(key string) string {
+			if key == BinaryEnv {
+				return binary
+			}
+			return ""
+		}
+	}
+	noRepo := func() (string, error) { return "", errors.New("no repository") }
+
+	t.Run("it drives the build BinaryEnv names over the pinned one", func(t *testing.T) {
+		binary := filepath.Join(t.TempDir(), "zmx")
+		write(t, binary, "", 0o755)
+
+		if got, err := resolveBinary(env(binary), noRepo); err != nil || got != binary {
+			t.Errorf("resolveBinary = %q, %v; want %q", got, err, binary)
+		}
+	})
+
+	t.Run("it refuses a named build that is missing, not runnable, a directory, relative or not named zmx", func(t *testing.T) {
+		dir := t.TempDir()
+		notRunnable := filepath.Join(dir, "plain", "zmx")
+		write(t, notRunnable, "", 0o644)
+		misnamed := filepath.Join(dir, "zmx-main")
+		write(t, misnamed, "", 0o755)
+		directory := filepath.Join(dir, "d", "zmx")
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, binary := range map[string]string{
+			"missing":      filepath.Join(dir, "absent", "zmx"),
+			"not runnable": notRunnable,
+			"directory":    directory,
+			"relative":     filepath.Join(".cache", "zmx", "abc123", "zmx"),
+			"misnamed":     misnamed,
+		} {
+			t.Run(name, func(t *testing.T) {
+				got, err := resolveBinary(env(binary), noRepo)
+				if err == nil || !strings.Contains(err.Error(), BinaryEnv) || !strings.Contains(err.Error(), binary) {
+					t.Errorf("resolveBinary with %s=%q = %q, %v; want an error naming both", BinaryEnv, binary, got, err)
+				}
+			})
+		}
+	})
+
+	t.Run("it drives the pinned build when BinaryEnv is unset", func(t *testing.T) {
+		repo := t.TempDir()
+		pin(t, repo, "abc123")
+		binary := filepath.Join(repo, ".cache", "zmx", "abc123", "zmx")
+		write(t, binary, "", 0o755)
+
+		got, err := resolveBinary(env(""), func() (string, error) { return repo, nil })
+		if err != nil || got != binary {
+			t.Errorf("resolveBinary = %q, %v; want %q", got, err, binary)
+		}
+	})
+}
+
 func pin(t *testing.T, repo, commit string) {
 	t.Helper()
 	write(t, filepath.Join(repo, "scripts", "zmx-commit"), commit, 0o644)

@@ -1,0 +1,81 @@
+name: zmx check
+
+# Portal's formula depends on official zmx, which Homebrew upgrades freely, so
+# this runs the zmx-backed tests against zmx's latest release and its main
+# branch. A failed run is the alert: GitHub emails it.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zmx:
+    name: zmx ${{ matrix.leg }}
+    # zmxtest proves which processes it owns through kern.procargs2, so the
+    # tests run on macOS only.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [release, main]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve zmx
+        id: zmx
+        env:
+          LEG: ${{ matrix.leg }}
+        run: |
+          pin=$(tr -d '[:space:]' < scripts/zmx-commit)
+          ref=main
+          if [ "$LEG" = release ]; then
+            ref=$(gh api repos/neurosnap/zmx/releases/latest --jq .tag_name)
+            status=$(gh api "repos/neurosnap/zmx/compare/$pin...$ref" --jq .status)
+            if [ "$status" = behind ] || [ "$status" = identical ]; then
+              echo "::notice title=zmx release not tested::zmx $ref is no newer than the pinned commit $pin ($status), so it cannot speak socket protocol 1"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          commit=$(gh api "repos/neurosnap/zmx/commits/$ref" --jq .sha)
+          zig=$(gh api "repos/neurosnap/zmx/contents/build.zig.zon?ref=$commit" -H 'Accept: application/vnd.github.raw' \
+            | sed -n 's/.*\.minimum_zig_version *= *"\([^"]*\)".*/\1/p')
+          if [ -z "$zig" ]; then
+            echo "::error::no minimum_zig_version in zmx $ref ($commit) build.zig.zon"
+            exit 1
+          fi
+          echo "zmx $ref is $commit, built with Zig $zig"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "zig=$zig" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Zig
+        if: steps.zmx.outputs.skip != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zmx.outputs.zig }}
+
+      - name: Setup Go
+        if: steps.zmx.outputs.skip != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build zmx
+        if: steps.zmx.outputs.skip != 'true'
+        env:
+          COMMIT: ${{ steps.zmx.outputs.commit }}
+        run: |
+          binary=$(scripts/zmx-build "$COMMIT")
+          echo "PORTAL_TEST_ZMX_BINARY=$binary" >> "$GITHUB_ENV"
+
+      - name: Test
+        if: steps.zmx.outputs.skip != 'true'
+        run: |
+          go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/zmxtest/...
+          go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd
