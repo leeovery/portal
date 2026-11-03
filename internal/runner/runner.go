@@ -90,8 +90,9 @@ func (o Outcome) Picker() bool {
 // known to have reached the terminal, Run resets it, waiting for the terminal
 // to take that last write however long it takes.
 //
-// A panic in Kill is raised again once the attach is torn down. A command
-// that switches sessions rather than attaching, or a config with no Kill, is
+// The attach is torn down however Run's goroutine leaves it, and a panic on
+// that goroutine, in Kill say, is raised again once it is. A command that
+// switches sessions rather than attaching, or a config with no Kill, is
 // refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	if err := check(cfg); err != nil {
@@ -101,12 +102,41 @@ func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("attach session %q: %w", cfg.Session, err)
 	}
-	end := a.tearDown(a.attend(ctx))
-	end.report(cfg.Session)
-	if end.panicked != nil {
-		panic(end.panicked)
+	return a.run(ctx)
+}
+
+// run awaits the end of the attach and tears it down, however Run's
+// goroutine leaves await: returning, panicking, or exiting through
+// runtime.Goexit.
+func (a *attach) run(ctx context.Context) (out Outcome, err error) {
+	var awaited *ending
+	defer func() {
+		if awaited == nil {
+			awaited = a.interrupted(recover())
+		}
+		end := a.tearDown(*awaited)
+		end.report(a.cfg.Session)
+		if end.panicked != nil {
+			panic(end.panicked)
+		}
+		out, err = end.out, end.err
+	}()
+	end := a.await(ctx)
+	awaited = &end
+	return
+}
+
+// interrupted is the end of an attach whose goroutine left await without one:
+// panicking with r, or, with r nil, exiting through runtime.Goexit. Like
+// every end but the child's own and a kill's, it detaches the child.
+func (a *attach) interrupted(r any) *ending {
+	end := ending{err: fmt.Errorf("attach session %q: Run's goroutine exited", a.cfg.Session), reason: "goexit"}
+	if r != nil {
+		end = a.panicked(r)
+		end.panicked = r
 	}
-	return end.out, end.err
+	a.detach()
+	return &end
 }
 
 // check refuses a config Run cannot attach with.
@@ -121,6 +151,9 @@ func check(cfg Config) error {
 	}
 	return nil
 }
+
+// reasonPanic is the reason of an end a panic made.
+const reasonPanic = "panic"
 
 // ending is how an attach ended: its outcome, or the error that ended it,
 // and why, for the log.
@@ -156,19 +189,6 @@ func (e ending) report(session string) {
 		attrs = append(attrs, "error", err)
 	}
 	logger.Info("outcome", attrs...)
-}
-
-// attend awaits the end of the attach, taking a panic on Run's goroutine,
-// such as Kill's, as an end that raises it again once the attach is torn
-// down.
-func (a *attach) attend(ctx context.Context) (end ending) {
-	defer func() {
-		if r := recover(); r != nil {
-			end = a.panicked(r)
-			end.panicked = r
-		}
-	}()
-	return a.await(ctx)
 }
 
 // await is the one place an attach ends.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -431,6 +432,21 @@ func TestRun_SignalToPortalDetachesAndRestores(t *testing.T) {
 }
 
 func TestRun_StopsCatchingSignalsOnReturn(t *testing.T) {
+	if state, out := runSelf(t, afterRunEnv); !endedBy(state, syscall.SIGINT) {
+		t.Errorf("a SIGINT after Run returned left the process %v, want it ended: %s", state, out)
+	}
+}
+
+func TestRun_RaisesAgainASignalCaughtByAnAttachThatFailedToBegin(t *testing.T) {
+	if state, out := runSelf(t, abandonEnv); !endedBy(state, syscall.SIGTERM) {
+		t.Errorf("a SIGTERM caught while the attach began left the process %v, want it ended: %s", state, out)
+	}
+}
+
+// runSelf runs the test binary in the mode env switches on, and returns how
+// it ended and what it wrote.
+func runSelf(t *testing.T, env string) (*os.ProcessState, []byte) {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("find the test binary: %v", err)
@@ -438,13 +454,14 @@ func TestRun_StopsCatchingSignalsOnReturn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*settle)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe)
-	cmd.Env = append(os.Environ(), afterRunEnv+"=1")
-
+	cmd.Env = append(os.Environ(), env+"=1")
 	out, _ := cmd.CombinedOutput()
+	return cmd.ProcessState, out
+}
 
-	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !status.Signaled() || status.Signal() != syscall.SIGINT {
-		t.Errorf("a SIGINT after Run returned left the process %v, want it ended: %s", cmd.ProcessState, out)
-	}
+func endedBy(state *os.ProcessState, sig syscall.Signal) bool {
+	status, ok := state.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && status.Signal() == sig
 }
 
 func TestRun_PanicInACopyLoopDetachesAndRestores(t *testing.T) {
@@ -464,8 +481,86 @@ func TestRun_PanicInACopyLoopDetachesAndRestores(t *testing.T) {
 	assertPanicLogged(t, sink, "scanner exploded")
 }
 
-func TestRun_PanicInKillTearsDownTheAttachThenPropagates(t *testing.T) {
-	runner.SetGrace(t, shortGrace)
+func TestRun_PanicEndOutranksASignal(t *testing.T) {
+	t.Run("a copy loop's panic after a signal ended the attach", func(t *testing.T) {
+		sink := logtest.Install(t)
+		scanning, explode := make(chan struct{}), make(chan struct{})
+		h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
+			cfg.Scanner = holdThenPanic{scanning, explode}
+		})
+		h.ready(t)
+
+		h.term.typeIn(t, "x")
+		<-scanning
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			t.Fatalf("signal Portal: %v", err)
+		}
+		// The signal ends the attach, which waits for the scan to finish.
+		time.Sleep(100 * time.Millisecond)
+		close(explode)
+		out, err := h.finish(t)
+
+		if err == nil || !strings.Contains(err.Error(), "scanner exploded") {
+			t.Errorf("Run = %+v, %v; want the panic as an error", out, err)
+		}
+		assertPanicLogged(t, sink, "scanner exploded")
+	})
+
+	t.Run("a signal while a copy loop's panic tears the attach down", func(t *testing.T) {
+		runner.SetGrace(t, shortGrace)
+		sink := logtest.Install(t)
+		h := attach(t, modeDeaf, func(_ *harness, cfg *runner.Config) { cfg.Scanner = panicking{} })
+		h.ready(t)
+
+		h.term.typeIn(t, "x")
+		// The deaf child keeps the teardown waiting while Portal is signalled.
+		h.term.await(t, "in:1c")
+		signalDuringTeardown(t)
+		out, err := h.finish(t)
+
+		if err == nil || !strings.Contains(err.Error(), "scanner exploded") {
+			t.Errorf("Run = %+v, %v; want the panic as an error, not the signal's outcome", out, err)
+		}
+		assertPanicLogged(t, sink, "scanner exploded")
+	})
+
+	t.Run("a signal while Kill's panic tears the attach down", func(t *testing.T) {
+		runner.SetGrace(t, shortGrace)
+		h := attach(t, modeDeaf, func(_ *harness, cfg *runner.Config) {
+			cfg.Kill = func(context.Context, string) error { panic("kill exploded") }
+		})
+		h.ready(t)
+
+		h.term.typeIn(t, keyKill)
+		h.term.await(t, "in:1c")
+		signalDuringTeardown(t)
+		r := h.end(t)
+
+		if r.panicked != "kill exploded" {
+			t.Errorf("Run = %+v, %v, panicking with %v; want Kill's panic raised again", r.out, r.err, r.panicked)
+		}
+	})
+}
+
+// signalDuringTeardown signals Portal while an attach is torn down.
+func signalDuringTeardown(t *testing.T) {
+	t.Helper()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatalf("signal Portal: %v", err)
+	}
+}
+
+// holdThenPanic is a Scanner that says when it is scanning, then panics once
+// told to.
+type holdThenPanic struct{ scanning, explode chan struct{} }
+
+func (s holdThenPanic) Scan([]byte) ([]byte, attachkeys.Action, bool) {
+	close(s.scanning)
+	<-s.explode
+	panic("scanner exploded")
+}
+
+func TestRun_PanicInKillDetachesThenPropagates(t *testing.T) {
 	sink := logtest.Install(t)
 	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
 		cfg.Kill = func(context.Context, string) error { panic("kill exploded") }
@@ -478,11 +573,46 @@ func TestRun_PanicInKillTearsDownTheAttachThenPropagates(t *testing.T) {
 	if r.panicked != "kill exploded" {
 		t.Errorf("Run = %+v, %v, panicking with %v; want Kill's panic raised again", r.out, r.err, r.panicked)
 	}
+	assertDetachedCleanly(t, h, sink)
+	assertPanicLogged(t, sink, "kill exploded")
+}
+
+func TestRun_GoexitInKillDetachesAndRestores(t *testing.T) {
+	sink := logtest.Install(t)
+	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
+		cfg.Kill = func(context.Context, string) error {
+			runtime.Goexit() // as a test's fake Kill calling t.FailNow does
+			return nil
+		}
+	})
+	h.ready(t)
+
+	h.term.typeIn(t, keyKill)
+	r := h.end(t) // the terminal's settings and flags are checked restored
+
+	if !r.goexited {
+		t.Errorf("Run = %+v, %v, panicking with %v; want its goroutine to have exited", r.out, r.err, r.panicked)
+	}
+	assertDetachedCleanly(t, h, sink)
+	assertErrorOutcome(t, sink, "goexit", "goroutine exited")
+}
+
+// assertDetachedCleanly checks the attach detached the child with ctrl+\,
+// which ended it by its own hand: never signalled, and with no reset of the
+// runner's.
+func assertDetachedCleanly(t *testing.T, h *harness, sink *logtest.Sink) {
+	t.Helper()
+	if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
+		t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
+	}
 	if err := syscall.Kill(h.child(), 0); !errors.Is(err, syscall.ESRCH) {
 		t.Errorf("the child %d outlived Run: %v", h.child(), err)
 	}
-	h.term.await(t, terminalReset)
-	assertPanicLogged(t, sink, "kill exploded")
+	for _, msg := range []string{"child did not exit", "terminal reset"} {
+		if recs := sink.Records().Matching("attach", msg); len(recs) > 0 {
+			t.Errorf("the attach logged %q: %+v", msg, recs)
+		}
+	}
 }
 
 // assertPanicLogged checks the attach logged a panic with value, and its end.
@@ -575,7 +705,7 @@ func TestRun_ResetsATerminalTheChildsLastOutputNeverReached(t *testing.T) {
 	sink := logtest.Install(t)
 	tm := openTerminal(t)
 	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill))
-	tm.readUntil(t, "ready:")
+	h.readyUnrecorded(t)
 
 	// The terminal stalls, then the child writes its last output and exits
 	// by its own hand, as zmx does with its own reset last.
@@ -594,6 +724,7 @@ func TestRun_ResetsATerminalTheChildsLastOutputNeverReached(t *testing.T) {
 	if got := reset.AttrString(t, "reason"); got != "drain" {
 		t.Errorf("reset reason = %q, want drain", got)
 	}
+	tm.await(t, terminalReset)
 	shown := tm.output()
 	if bytes.Contains(shown, []byte(lastOutput)) {
 		t.Errorf("the child's last output reached the terminal, want it cut by the grace")
@@ -608,7 +739,7 @@ func TestRun_StopsWaitingForATerminalThatHangsUp(t *testing.T) {
 	sink := logtest.Install(t)
 	tm := openTerminal(t)
 	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill))
-	tm.readUntil(t, "ready:")
+	h.readyUnrecorded(t)
 	tm.fill(t)
 	tm.typeIn(t, "x")
 	waitForReset(t, sink)
@@ -619,6 +750,76 @@ func TestRun_StopsWaitingForATerminalThatHangsUp(t *testing.T) {
 
 	if err != nil || out != (runner.Outcome{}) {
 		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
+	}
+}
+
+func TestRun_DeliversOutputThatOutlivesTheChild(t *testing.T) {
+	sink := logtest.Install(t)
+	tm := openTerminal(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill))
+	h.readyUnrecorded(t)
+	tm.fill(t)
+	tm.typeIn(t, "x")
+
+	// The child exits by its own hand with its last output still on its way,
+	// and the terminal takes it within the grace.
+	if !harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
+		return errors.Is(syscall.Kill(h.child(), 0), syscall.ESRCH)
+	}) {
+		t.Fatal("the child never exited")
+	}
+	tm.record()
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{}) {
+		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
+	}
+	tm.await(t, lastOutput)
+	if shown := tm.output(); !bytes.HasSuffix(shown, []byte(lastOutput)) {
+		t.Errorf("the terminal shows %q last, want the child's last output", shown[max(len(shown)-64, 0):])
+	}
+	if recs := sink.Records().Matching("attach", "terminal reset"); len(recs) > 0 {
+		t.Errorf("the runner reset a terminal the child's last output reached: %+v", recs)
+	}
+}
+
+func TestRun_ResetsTheTerminalForAChildThatExitedOnlyWhenSignalled(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	sink := logtest.Install(t)
+	h := attach(t, modeHungUpClean)
+	h.ready(t)
+
+	h.term.typeIn(t, keyDetach)
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{Action: attachkeys.Detach}) {
+		t.Errorf("Run = %+v, %v; want the detach", out, err)
+	}
+	// Its status is 0, but the runner's SIGHUP ended it, so zmx would have
+	// written no reset.
+	if got := waitForReset(t, sink).AttrString(t, "reason"); got != "exit" {
+		t.Errorf("reset reason = %q, want exit", got)
+	}
+	h.term.await(t, terminalReset)
+}
+
+func TestRun_ResetsATerminalThatRefusedTheChildsOutput(t *testing.T) {
+	sink := logtest.Install(t)
+	tm, screen := newTerminal(t), openTerminal(t)
+	h := attachOn(t, t.Context(), tm, fakeChildCommand(t, modeSpill), func(_ *harness, cfg *runner.Config) { cfg.Out = screen.tty })
+	h.started(screen.readUntil(t, readyLine))
+
+	// The output's terminal refuses what it is sent, while the input's lives
+	// on.
+	_ = screen.user.Close()
+	tm.typeIn(t, "x")
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{}) {
+		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
+	}
+	if got := waitForReset(t, sink).AttrString(t, "reason"); got != "drain" {
+		t.Errorf("reset reason = %q, want drain", got)
 	}
 }
 
@@ -644,6 +845,7 @@ func TestRun_StalledTerminalLeavesNoCopyLoop(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Run error = %v, want the context's", err)
 	}
+	tm.await(t, terminalReset)
 	if shown := tm.output(); !bytes.HasSuffix(shown, []byte(terminalReset)) {
 		t.Errorf("the terminal shows %q last, want the reset", shown[max(len(shown)-64, 0):])
 	}
@@ -748,6 +950,33 @@ func TestSameDevice(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := runner.SameDevice(tty, fdOf(t, tc.f)); got != tc.want {
 				t.Errorf("SameDevice = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSameNode(t *testing.T) {
+	node := func(change func(*unix.Stat_t)) *unix.Stat_t {
+		s := &unix.Stat_t{Mode: unix.S_IFCHR | 0o620, Dev: 7, Ino: 1201, Rdev: 0x10000003}
+		change(s)
+		return s
+	}
+	same := node(func(*unix.Stat_t) {})
+
+	for _, tc := range []struct {
+		name   string
+		change func(*unix.Stat_t)
+		want   bool
+	}{
+		{"the same node", func(*unix.Stat_t) {}, true},
+		{"another device number", func(s *unix.Stat_t) { s.Rdev++ }, false},
+		{"the same number on another devpts", func(s *unix.Stat_t) { s.Dev++ }, false},
+		{"another node of the same number", func(s *unix.Stat_t) { s.Ino++ }, false},
+		{"not a character device", func(s *unix.Stat_t) { s.Mode = unix.S_IFREG | 0o620 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runner.SameNode(same, node(tc.change)); got != tc.want {
+				t.Errorf("SameNode = %v, want %v", got, tc.want)
 			}
 		})
 	}

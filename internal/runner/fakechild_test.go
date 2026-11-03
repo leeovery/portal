@@ -36,6 +36,9 @@ const (
 	modeDeaf = "deaf"
 	// modeStubborn is modeDeaf ignoring SIGHUP as well.
 	modeStubborn = "stubborn"
+	// modeHungUpClean is modeDeaf exiting with status 0 on SIGHUP, as a child
+	// that tidies up after a hang-up does.
+	modeHungUpClean = "hupclean"
 	// modeExit writes "bye" and exits with status 3 at once.
 	modeExit = "exit"
 	// modeSelfKill dies of SIGKILL at once.
@@ -80,7 +83,7 @@ func fakeChild(mode string) int {
 	switch mode {
 	case modeStubborn:
 		signal.Ignore(syscall.SIGHUP)
-	case modeFrozen:
+	case modeFrozen, modeHungUpClean:
 		hup = notified(syscall.SIGHUP)
 	}
 	go func() {
@@ -103,13 +106,18 @@ func fakeChild(mode string) int {
 		_, _ = os.Stdout.Write(childBlob)
 	case modeFlood:
 		go flood()
+	case modeHungUpClean:
+		go func() {
+			<-hup
+			os.Exit(0)
+		}()
 	case modeSpill:
 		await(0, unix.POLLIN)
 		_, _ = unix.Write(1, []byte(lastOutput))
 		return 0
 	}
 	go reportSizes(winch)
-	return readInput(mode != modeDeaf && mode != modeStubborn)
+	return readInput(mode != modeDeaf && mode != modeStubborn && mode != modeHungUpClean)
 }
 
 // setUpTerminal makes the child's terminal raw and, as zmx's is, its input

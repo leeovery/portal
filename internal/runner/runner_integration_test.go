@@ -26,7 +26,7 @@ func TestRunOverZmx(t *testing.T) {
 
 		z.h.detach(t)
 
-		z.assertDetachedByZmx(t)
+		z.assertEndedByZmx(t)
 		z.awaitClients(t, 0)
 	})
 
@@ -35,7 +35,7 @@ func TestRunOverZmx(t *testing.T) {
 
 		z.h.detach(t)
 
-		z.assertDetachedByZmx(t)
+		z.assertEndedByZmx(t)
 		// ctrl+\ reaching the session would be SIGQUIT for cat and its shell.
 		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || !alive {
 			t.Fatalf("Exists = %v, %v after the detach, want the session alive", alive, err)
@@ -56,7 +56,7 @@ func TestRunOverZmx(t *testing.T) {
 		if err != nil || out != (runner.Outcome{Action: attachkeys.Detach}) {
 			t.Errorf("Run = %+v, %v; want a detach", out, err)
 		}
-		z.assertDetachedByZmx(t)
+		z.assertEndedByZmx(t)
 		var history []byte
 		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
 			history, _ = z.b.History(t.Context(), sessionName, 0)
@@ -75,7 +75,7 @@ func TestRunOverZmx(t *testing.T) {
 		if err != nil || out != (runner.Outcome{Action: attachkeys.Kill}) {
 			t.Errorf("Run = %+v, %v; want a kill with no error", out, err)
 		}
-		z.assertDetachedByZmx(t)
+		z.assertEndedByZmx(t)
 		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || alive {
 			t.Errorf("Exists = %v, %v after the kill, want the session gone", alive, err)
 		}
@@ -90,6 +90,7 @@ func TestRunOverZmx(t *testing.T) {
 		if err != nil || out != (runner.Outcome{}) {
 			t.Errorf("Run = %+v, %v; want the shell with status 0", out, err)
 		}
+		z.assertEndedByZmx(t)
 		z.awaitClients(t, 0)
 	})
 
@@ -102,6 +103,7 @@ func TestRunOverZmx(t *testing.T) {
 		if err != nil || out != (runner.Outcome{}) {
 			t.Errorf("Run = %+v, %v; want the shell with status 0", out, err)
 		}
+		z.assertEndedByZmx(t)
 		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
 			alive, err := z.b.Exists(t.Context(), sessionName)
 			return err == nil && !alive
@@ -175,11 +177,23 @@ func (z *zmxAttach) awaitClients(t *testing.T, want int) {
 	}
 }
 
-// assertDetachedByZmx checks the attach ended without signalling the child:
-// zmx itself ended it.
-func (z *zmxAttach) assertDetachedByZmx(t *testing.T) {
+// assertEndedByZmx checks zmx attach ended by its own hand and reset the
+// terminal itself: the runner neither signalled it nor wrote a reset, and
+// zmx's reset is the last the terminal shows. The runner leaves the reset to
+// zmx on that strength alone.
+func (z *zmxAttach) assertEndedByZmx(t *testing.T) {
 	t.Helper()
 	if signalled := z.sink.Records().Matching("attach", "child did not exit").AtExactLevel(slog.LevelWarn); len(signalled) > 0 {
 		t.Errorf("zmx attach had to be signalled: %+v", signalled)
+	}
+	if reset := z.sink.Records().Matching("attach", "terminal reset"); len(reset) > 0 {
+		t.Errorf("the runner reset the terminal in zmx's place: %+v", reset)
+	}
+	var shown []byte
+	if !harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
+		shown = z.h.term.output()
+		return bytes.HasSuffix(shown, []byte(terminalReset))
+	}) {
+		t.Errorf("the terminal shows %q last, want zmx's own reset", shown[max(len(shown)-64, 0):])
 	}
 }

@@ -42,7 +42,16 @@ func sameDevice(a, b int) bool {
 	if unix.Fstat(a, &sa) != nil || unix.Fstat(b, &sb) != nil {
 		return false
 	}
-	return sa.Mode&unix.S_IFMT == unix.S_IFCHR && sb.Mode&unix.S_IFMT == unix.S_IFCHR && sa.Rdev == sb.Rdev
+	return sameNode(&sa, &sb)
+}
+
+// sameNode reports whether a and b are the same character device node. The
+// device number alone is not enough: on Linux each devpts instance numbers
+// its terminals afresh, so a terminal from another, in a container say,
+// shares its number with a stranger's.
+func sameNode(a, b *unix.Stat_t) bool {
+	return a.Mode&unix.S_IFMT == unix.S_IFCHR && b.Mode&unix.S_IFMT == unix.S_IFCHR &&
+		a.Rdev == b.Rdev && a.Dev == b.Dev && a.Ino == b.Ino
 }
 
 // restoreTermios puts saved back on the terminal once it has taken all its

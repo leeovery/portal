@@ -61,3 +61,14 @@ func detachOnceReady(user *os.File) {
 	_, _ = user.Write([]byte(keyDetach))
 	_, _ = io.Copy(io.Discard, user)
 }
+
+// abandonEnv switches the test binary into an attach that catches SIGTERM
+// while it begins, then fails to begin. Unless the runner raises the signal
+// again, it is lost; the binary exits 0 only if it survives.
+const abandonEnv = "PORTAL_RUNNER_TEST_ABANDON"
+
+func abandonCatchingTerm() int {
+	runner.AbandonCatching(syscall.SIGTERM)
+	time.Sleep(settle)
+	return 0
+}

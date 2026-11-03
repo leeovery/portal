@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
-	"slices"
 	"syscall"
 	"time"
 
@@ -40,11 +39,15 @@ type attach struct {
 	// descriptions of the user's terminal that are Portal's alone, and ptmxFd
 	// and ttyFd the two sides of the child's.
 	inFd, outFd, ptmxFd, ttyFd int
-	// forced is set once the runner signals the child.
-	forced bool
+	// forced is set once the runner signals the child, and detached once it
+	// detaches it.
+	forced, detached bool
 	// drained is set once the child's output has ended with all of it on the
 	// terminal.
 	drained bool
+	// caught is the signal caught and not yet acted on when the runner
+	// stopped catching them.
+	caught os.Signal
 
 	stopIn, stopOut *stopper
 	inDone, outDone chan struct{}
@@ -58,8 +61,8 @@ type attach struct {
 	undo           []func()
 }
 
-func start(cfg Config) (*attach, error) {
-	a := &attach{
+func newAttach(cfg Config) *attach {
+	return &attach{
 		cfg:      cfg,
 		began:    time.Now(),
 		inDone:   make(chan struct{}),
@@ -70,13 +73,19 @@ func start(cfg Config) (*attach, error) {
 		signals:  make(chan os.Signal, 1),
 		winch:    make(chan os.Signal, 1),
 	}
-	if err := a.setUp(); err != nil {
-		a.release()
-		if sig := a.stopSignals(); sig != nil {
-			// Caught for an attach that never began: it does what it would
-			// have done had the runner not caught it.
-			_ = syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+}
+
+// start begins an attach. One that fails to begin, by an error or a panic,
+// is abandoned.
+func start(cfg Config) (*attach, error) {
+	a := newAttach(cfg)
+	begun := false
+	defer func() {
+		if !begun {
+			a.abandon()
 		}
+	}()
+	if err := a.setUp(); err != nil {
 		return nil, err
 	}
 	logger.Debug("started", "session", cfg.Session, "target_pid", a.child.Process.Pid)
@@ -86,17 +95,28 @@ func start(cfg Config) (*attach, error) {
 	}()
 	a.goCopy(a.copyInput, a.inDone)
 	a.goCopy(a.copyOutput, a.outDone)
+	begun = true
 	return a, nil
 }
 
+// abandon releases an attach that never began. A signal caught meanwhile
+// does what it would have done had the runner not caught it.
+func (a *attach) abandon() {
+	a.release()
+	if a.caught != nil {
+		_ = syscall.Kill(os.Getpid(), a.caught.(syscall.Signal))
+	}
+}
+
 // setUp acquires what an attach holds, recording how to release each. The
-// signals are caught before the pseudo-terminal is sized and the terminal
-// goes raw, so no resize is missed and no signal ends Portal with the
-// terminal left raw.
+// signals are caught first: before the pseudo-terminal is sized and the
+// terminal goes raw, so no resize is missed and no signal ends Portal with
+// the terminal left raw, and released last, so one that lands until the
+// terminal is restored still decides how the attach ends.
 func (a *attach) setUp() error {
 	steps := []func() error{
-		a.openTerminal,
 		a.catchSignals,
+		a.openTerminal,
 		a.openPty,
 		a.size,
 		a.makeStoppers,
@@ -132,23 +152,20 @@ func (a *attach) reopen(f *os.File) (int, error) {
 	return fd, nil
 }
 
+// catchSignals catches the signals that end an attach until it is released,
+// keeping the one caught and not yet acted on, if any, in caught.
 func (a *attach) catchSignals() error {
 	signal.Notify(a.signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
 	signal.Notify(a.winch, syscall.SIGWINCH)
+	a.onRelease(func() {
+		signal.Stop(a.signals)
+		signal.Stop(a.winch)
+		select {
+		case a.caught = <-a.signals:
+		default:
+		}
+	})
 	return nil
-}
-
-// stopSignals stops catching signals, and returns the one caught and not yet
-// acted on, if any.
-func (a *attach) stopSignals() os.Signal {
-	signal.Stop(a.signals)
-	signal.Stop(a.winch)
-	select {
-	case sig := <-a.signals:
-		return sig
-	default:
-		return nil
-	}
 }
 
 func (a *attach) openPty() error {
@@ -234,41 +251,66 @@ func (a *attach) startChild() error {
 	if err := a.child.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", c.Argv[0], err)
 	}
+	// A child still running when the attach is released, as one is after a
+	// panic in tearDown, ends with it. A reaped child is not signalled.
+	a.onRelease(func() { _ = a.child.Process.Kill() })
 	return nil
 }
 
 func (a *attach) onRelease(f func()) { a.undo = append(a.undo, f) }
 
 // release lets go of what the attach holds, in the reverse of the order it
-// took them: the terminal's settings come back before its descriptions
-// close.
+// took them: the child, the terminal's settings, then its descriptions, and
+// the signals last. Each is let go once, so release can run again after a
+// panic part-way through.
 func (a *attach) release() {
-	for _, f := range slices.Backward(a.undo) {
+	for len(a.undo) > 0 {
+		last := len(a.undo) - 1
+		f := a.undo[last]
+		a.undo = a.undo[:last]
 		f()
 	}
 }
 
 // tearDown ends the attach in one order, however it ended: the input stops;
 // the child ends while its last output drains; the terminal is reset unless
-// zmx's own reset reached it; the terminal is restored and released. A signal
-// caught at any point until Portal stops catching them decides the outcome,
-// unless a panic is to be raised again.
+// zmx's own reset reached it; the attach is released, the terminal restored.
+// A panic part-way through releases the attach all the same.
 func (a *attach) tearDown(end ending) ending {
+	defer a.release()
 	a.stopIn.stop()
 	<-a.inDone
 	a.endChild()
-	// Until every holder of the child's side closes it, the copy may never
-	// see the end of the child's output.
+	// Load-bearing on Linux only, so the macOS suite cannot pin it: darwin
+	// ends the child's terminal when the child exits, but Linux shows its
+	// output's end only once every holder of its side, this one too, closes.
 	_ = a.tty.Close()
 	within(a.outDone, grace)
 	a.stopOut.stop()
 	<-a.outDone
 	a.reset()
 	a.release()
-	if sig := a.stopSignals(); sig != nil && end.panicked == nil {
-		end = signalled(sig)
-	}
 	logger.Debug("ended", "session", a.cfg.Session, log.Took(a.began))
+	return a.final(end)
+}
+
+// final is how the attach ended, decided in this one place once it is torn
+// down, whatever came in meanwhile. A panic comes first, Run's own and then a
+// copy loop's, even one after await returned, so its error always reaches
+// the caller; then a signal caught at any point until the runner stopped
+// catching them; then the end await came to.
+func (a *attach) final(end ending) ending {
+	if end.reason == reasonPanic {
+		return end
+	}
+	select {
+	case broken := <-a.broken:
+		return broken
+	default:
+	}
+	if a.caught != nil {
+		return signalled(a.caught)
+	}
 	return end
 }
 
@@ -322,7 +364,12 @@ func (a *attach) exitedCleanly() bool {
 // and it has read what it was sent: zmx takes ctrl+\ only as the first byte
 // of a read, so one queued behind unread input would reach the session. A
 // child that reads nothing within the grace is left for endChild to signal.
+// The child is detached once, however many ends ask for it.
 func (a *attach) detach() {
+	if a.detached {
+		return
+	}
+	a.detached = true
 	a.stopIn.stop()
 	<-a.inDone
 	if a.awaitRead() {
@@ -372,7 +419,7 @@ func (a *attach) goCopy(loop func(), done chan<- struct{}) {
 // panicked logs a recovered panic, and is the end of the attach it makes.
 func (a *attach) panicked(r any) ending {
 	logger.Warn("panic", "session", a.cfg.Session, "error", r, "detail", string(debug.Stack()))
-	return ending{err: fmt.Errorf("attach session %q: panic: %v", a.cfg.Session, r), reason: "panic"}
+	return ending{err: fmt.Errorf("attach session %q: panic: %v", a.cfg.Session, r), reason: reasonPanic}
 }
 
 // copyInput passes the terminal's input to the child until a bound key, which
@@ -416,11 +463,10 @@ func (a *attach) copyOutput() {
 	refused := false
 	for {
 		n, err := readReady(a.ptmxFd, buf, a.stopOut.wait)
-		if errors.Is(err, errStopped) {
-			return
-		}
-		if n == 0 || err != nil {
-			a.drained = !refused
+		if err != nil || n == 0 {
+			// The child's output ends at EOF, or EIO on Linux; any other
+			// error leaves its end unseen.
+			a.drained = !refused && (err == nil || errors.Is(err, unix.EIO))
 			return
 		}
 		if refused {

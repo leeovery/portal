@@ -184,16 +184,20 @@ func (tm *terminal) await(t *testing.T, want string) {
 	}
 }
 
-// readUntil reads the terminal's output, unrecorded, until it shows want.
-func (tm *terminal) readUntil(t *testing.T, want string) {
+// readUntil reads the terminal's output, unrecorded, until it matches
+// pattern, and returns the match.
+func (tm *terminal) readUntil(t *testing.T, pattern *regexp.Regexp) [][]byte {
 	t.Helper()
 	user := fdOf(t, tm.user)
 	var shown []byte
 	buf := make([]byte, 4096)
 	deadline := time.Now().Add(settle)
-	for !bytes.Contains(shown, []byte(want)) {
+	for {
+		if m := pattern.FindSubmatch(shown); m != nil {
+			return m
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the terminal never showed %q; it shows %q", want, shown)
+			t.Fatalf("the terminal never showed %s; it shows %q", pattern, shown)
 		}
 		if !unread(user) {
 			time.Sleep(5 * time.Millisecond)
@@ -328,6 +332,8 @@ type result struct {
 	out      runner.Outcome
 	err      error
 	panicked any
+	// goexited is set when Run's goroutine exited through runtime.Goexit.
+	goexited bool
 	returned time.Time
 }
 
@@ -384,12 +390,14 @@ func attachOn(t *testing.T, ctx context.Context, tm *terminal, command backend.C
 	h.in, h.out, h.before = cfg.In, cfg.Out, stateOf(t, cfg.In)
 	h.inFlags, h.outFlags = flagsOf(t, cfg.In), flagsOf(t, cfg.Out)
 	go func() {
-		var r result
+		r := result{goexited: true}
 		defer func() {
 			r.panicked, r.returned = recover(), time.Now()
+			r.goexited = r.goexited && r.panicked == nil
 			h.result <- r
 		}()
 		r.out, r.err = runner.Run(ctx, cfg)
+		r.goexited = false
 	}()
 	t.Cleanup(func() {
 		select {
@@ -423,9 +431,21 @@ func (h *harness) ready(t *testing.T) string {
 	}) {
 		t.Fatalf("the fake child never started; the terminal shows %q", h.term.output())
 	}
-	pid, _ := strconv.Atoi(string(m[1]))
+	return h.started(m)
+}
+
+// readyUnrecorded is ready for a terminal the test does not record.
+func (h *harness) readyUnrecorded(t *testing.T) string {
+	t.Helper()
+	return h.started(h.term.readUntil(t, readyLine))
+}
+
+// started takes the child's pid from its ready line, and returns its
+// terminal's size.
+func (h *harness) started(ready [][]byte) string {
+	pid, _ := strconv.Atoi(string(ready[1]))
 	h.pid.Store(int64(pid))
-	return string(m[2])
+	return string(ready[2])
 }
 
 // child is the fake child's pid, once it is ready.
@@ -446,8 +466,8 @@ func (h *harness) detach(t *testing.T) {
 func (h *harness) finish(t *testing.T) (runner.Outcome, error) {
 	t.Helper()
 	r := h.end(t)
-	if r.panicked != nil {
-		t.Fatalf("Run panicked: %v", r.panicked)
+	if r.panicked != nil || r.goexited {
+		t.Fatalf("Run panicked with %v, or its goroutine exited (%v), want it to return", r.panicked, r.goexited)
 	}
 	return r.out, r.err
 }
