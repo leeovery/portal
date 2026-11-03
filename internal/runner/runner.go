@@ -79,58 +79,96 @@ func (o Outcome) Picker() bool {
 // action, a signal to Portal or the context's end detaches the child by
 // sending it zmx's own ctrl+\, except a kill that succeeds, whose session's
 // end ends the child. A child still running after the grace is sent SIGHUP,
-// then SIGKILL.
+// then SIGKILL. A signal to Portal, or the terminal hanging up, at any point
+// ends the attach with that signal's outcome. A command that switches
+// sessions rather than attaching is refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
-	if !term.IsTerminal(cfg.In.Fd()) {
+	in, err := fdOf(cfg.In)
+	if err != nil || !term.IsTerminal(uintptr(in)) {
 		return Outcome{}, ErrNoTerminal
 	}
 	if len(cfg.Command.Argv) == 0 {
 		return Outcome{}, fmt.Errorf("attach session %q: the backend gave no command to run", cfg.Session)
 	}
-	a, err := start(cfg)
+	if cfg.Command.Switches {
+		return Outcome{}, fmt.Errorf("attach session %q: the command switches sessions instead of attaching", cfg.Session)
+	}
+	a, err := start(cfg, in)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("attach session %q: %w", cfg.Session, err)
 	}
-	defer a.close()
-	return a.await(ctx)
+	defer a.shutDown() // restores the terminal however Run ends, a panic included
+	end := a.finish(a.await(ctx))
+	if end.err != nil {
+		return Outcome{}, end.err
+	}
+	end.report(cfg.Session)
+	return end.out, nil
+}
+
+// ending is how an attach ended: its outcome, or the error that ended it,
+// and why, for the log.
+type ending struct {
+	out            Outcome
+	err            error
+	reason, detail string
+}
+
+func signalled(sig os.Signal) ending {
+	s := sig.(syscall.Signal)
+	return ending{out: Outcome{ExitCode: 128 + int(s)}, reason: "signal", detail: unix.SignalName(s)}
+}
+
+func (e ending) report(session string) {
+	attrs := []any{"session", session, "reason", e.reason, "code", e.out.ExitCode}
+	if e.detail != "" {
+		attrs = append(attrs, "detail", e.detail)
+	}
+	if e.out.Err != nil {
+		attrs = append(attrs, "error", e.out.Err)
+	}
+	logger.Info("outcome", attrs...)
 }
 
 // await is the one place an attach ends.
-func (a *attach) await(ctx context.Context) (Outcome, error) {
+func (a *attach) await(ctx context.Context) ending {
 	for {
 		select {
 		case <-a.winch:
 			a.resize()
 		case action := <-a.requests:
-			return a.act(ctx, action), nil
+			return a.act(ctx, action)
 		case <-a.exited:
-			return a.report(Outcome{ExitCode: exitCode(a.child.ProcessState)}, "exit", ""), nil
+			return ending{out: Outcome{ExitCode: exitCode(a.child.ProcessState)}, reason: "exit"}
 		case sig := <-a.signals:
 			a.detach()
-			s := sig.(syscall.Signal)
-			return a.report(Outcome{ExitCode: 128 + int(s)}, "signal", unix.SignalName(s)), nil
+			return signalled(sig)
 		case err := <-a.broken:
 			a.detach()
-			return Outcome{}, fmt.Errorf("attach session %q: %w", a.cfg.Session, err)
+			return ending{err: fmt.Errorf("attach session %q: %w", a.cfg.Session, err)}
 		case <-ctx.Done():
 			a.detach()
-			return Outcome{}, context.Cause(ctx)
+			return ending{err: context.Cause(ctx)}
 		}
 	}
 }
 
 // act carries out an action, whatever asked for it. A kill that succeeds
 // leaves the child to end with the session; one that fails detaches it, so
-// the picker can show why.
-func (a *attach) act(ctx context.Context, action attachkeys.Action) Outcome {
-	out := Outcome{Action: action}
+// the picker can show why. A context that ends during the kill ends the
+// attach as it would anywhere else.
+func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
+	end := ending{out: Outcome{Action: action}, reason: actionNames[action]}
 	if action == attachkeys.Kill {
-		out.Err = a.cfg.Kill(ctx, a.cfg.Session)
+		end.out.Err = a.cfg.Kill(ctx, a.cfg.Session)
+		if ctx.Err() != nil {
+			end = ending{err: context.Cause(ctx)}
+		} else if end.out.Err == nil {
+			return end
+		}
 	}
-	if action != attachkeys.Kill || out.Err != nil {
-		a.detach()
-	}
-	return a.report(out, actionNames[action], "")
+	a.detach()
+	return end
 }
 
 // actionNames match the actions' keys in prefs.json.
@@ -138,18 +176,6 @@ var actionNames = map[attachkeys.Action]string{
 	attachkeys.Detach:        "detach",
 	attachkeys.DetachToShell: "detach_to_shell",
 	attachkeys.Kill:          "kill",
-}
-
-func (a *attach) report(out Outcome, reason, detail string) Outcome {
-	attrs := []any{"session", a.cfg.Session, "reason", reason, "code", out.ExitCode}
-	if detail != "" {
-		attrs = append(attrs, "detail", detail)
-	}
-	if out.Err != nil {
-		attrs = append(attrs, "error", out.Err)
-	}
-	logger.Info("outcome", attrs...)
-	return out
 }
 
 // exitCode is the status a shell would report for the child.

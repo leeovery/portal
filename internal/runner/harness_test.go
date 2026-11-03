@@ -7,7 +7,9 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -28,6 +30,10 @@ const settle = 10 * time.Second
 // shortGrace stands in for the runner's grace where a test waits it out: long
 // enough for a signalled child to act on its signal under load.
 const shortGrace = 500 * time.Millisecond
+
+// terminalReset is what zmx writes to the terminal on its way out, and what
+// the runner writes in its place when zmx could not.
+const terminalReset = "\x1bc\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\"
 
 // Portal's keys as the fake scanner knows them: Alt+D, Alt+Shift+D and Alt+Q
 // in their legacy escape forms.
@@ -73,7 +79,18 @@ type terminal struct {
 	done      chan struct{}
 }
 
+// newTerminal opens a terminal whose output the test reads as it comes.
 func newTerminal(t *testing.T) *terminal {
+	t.Helper()
+	tm := openTerminal(t)
+	tm.done = make(chan struct{})
+	go tm.record()
+	return tm
+}
+
+// openTerminal opens a terminal whose output nobody reads, as a terminal
+// over a stalled network takes none.
+func openTerminal(t *testing.T) *terminal {
 	t.Helper()
 	user, tty, err := pty.Open()
 	if err != nil {
@@ -82,14 +99,19 @@ func newTerminal(t *testing.T) *terminal {
 	if err := pty.Setsize(user, &pty.Winsize{Cols: 80, Rows: 24}); err != nil {
 		t.Fatalf("size the user's terminal: %v", err)
 	}
-	tm := &terminal{user: user, tty: tty, done: make(chan struct{})}
-	go tm.record()
+	// Blocking, as a shell's terminal is.
+	if err := unix.SetNonblock(fdOf(t, tty), false); err != nil {
+		t.Fatalf("make the user's terminal blocking: %v", err)
+	}
+	tm := &terminal{user: user, tty: tty}
 	t.Cleanup(func() {
 		_ = tty.Close()
-		select {
-		case <-tm.done:
-		case <-time.After(settle):
-			t.Error("the user's terminal was still being read after its tty closed")
+		if tm.done != nil {
+			select {
+			case <-tm.done:
+			case <-time.After(settle):
+				t.Error("the user's terminal was still being read after its tty closed")
+			}
 		}
 		_ = user.Close()
 	})
@@ -138,30 +160,28 @@ func (tm *terminal) await(t *testing.T, want string) {
 // does once the runner stops taking it.
 func (tm *terminal) awaitBacklog(t *testing.T) {
 	t.Helper()
+	tty := fdOf(t, tm.tty)
 	if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
-		if !unread(tm.tty) {
+		if !unread(tty) {
 			return false
 		}
 		time.Sleep(50 * time.Millisecond)
-		return unread(tm.tty)
+		return unread(tty)
 	}) {
 		t.Fatal("the runner never stopped taking the terminal's input")
 	}
 }
 
-func unread(f *os.File) bool {
-	fds := []unix.PollFd{{Fd: int32(f.Fd()), Events: unix.POLLIN}}
-	n, err := unix.Poll(fds, 0)
-	return err == nil && n > 0
-}
-
-func (tm *terminal) state(t *testing.T) *term.State {
+// next reads what typed input waits on the terminal for its next reader.
+func (tm *terminal) next(t *testing.T) string {
 	t.Helper()
-	state, err := term.GetState(tm.tty.Fd())
-	if err != nil {
-		t.Fatalf("read the terminal's settings: %v", err)
+	tty := fdOf(t, tm.tty)
+	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(tty), Events: unix.POLLIN}}, int(time.Second.Milliseconds())); n == 0 || err != nil {
+		return ""
 	}
-	return state
+	buf := make([]byte, 64)
+	n, _ := unix.Read(tty, buf)
+	return string(buf[:max(n, 0)])
 }
 
 var readLine = regexp.MustCompile(`in:([0-9a-f]*)\r+\n`)
@@ -180,6 +200,46 @@ func (tm *terminal) reads(t *testing.T) []string {
 	return reads
 }
 
+// unread reports whether input waits on the terminal fd.
+func unread(fd int) bool {
+	n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 0)
+	return err == nil && n > 0
+}
+
+// fdOf is f's descriptor, taken without the blocking mode os.File.Fd would
+// set on the description the runner made non-blocking.
+func fdOf(t *testing.T, f *os.File) int {
+	t.Helper()
+	raw, err := f.SyscallConn()
+	if err != nil {
+		t.Fatalf("take %s's descriptor: %v", f.Name(), err)
+	}
+	fd := -1
+	if err := raw.Control(func(u uintptr) { fd = int(u) }); err != nil {
+		t.Fatalf("take %s's descriptor: %v", f.Name(), err)
+	}
+	return fd
+}
+
+func stateOf(t *testing.T, f *os.File) *term.State {
+	t.Helper()
+	state, err := term.GetState(uintptr(fdOf(t, f)))
+	if err != nil {
+		t.Fatalf("read %s's settings: %v", f.Name(), err)
+	}
+	return state
+}
+
+// nonblockingOf reports whether f's open file description is non-blocking.
+func nonblockingOf(t *testing.T, f *os.File) bool {
+	t.Helper()
+	flags, err := unix.FcntlInt(uintptr(fdOf(t, f)), unix.F_GETFL, 0)
+	if err != nil {
+		t.Fatalf("read %s's flags: %v", f.Name(), err)
+	}
+	return flags&unix.O_NONBLOCK != 0
+}
+
 type result struct {
 	out runner.Outcome
 	err error
@@ -187,7 +247,9 @@ type result struct {
 
 // harness runs runner.Run on a terminal of its own.
 type harness struct {
-	term   *terminal
+	term *terminal
+	// in is the runner's input, and before its settings before the attach.
+	in     *os.File
 	before *term.State
 	result chan result
 	// pid is the fake child's, once it is ready. Run's goroutine reads it
@@ -195,25 +257,28 @@ type harness struct {
 	pid atomic.Int64
 }
 
+// option changes an attach's config. It is handed the attach's harness, made
+// before Run starts, so a fake kill can reach the child through it.
+type option func(h *harness, cfg *runner.Config)
+
 // attach starts runner.Run on a fake child in mode, scanning for keys, with
 // each of opts applied to its config. Its context ends with the test, so a
 // test that stops early still ends the attach.
-func attach(t *testing.T, mode string, opts ...func(*runner.Config)) *harness {
+func attach(t *testing.T, mode string, opts ...option) *harness {
 	t.Helper()
 	return attachWithin(t, t.Context(), mode, opts...)
 }
 
-func attachWithin(t *testing.T, ctx context.Context, mode string, opts ...func(*runner.Config)) *harness {
+func attachWithin(t *testing.T, ctx context.Context, mode string, opts ...option) *harness {
 	t.Helper()
-	return attachCommand(t, ctx, fakeChildCommand(t, mode), opts...)
+	return attachOn(t, ctx, newTerminal(t), fakeChildCommand(t, mode), opts...)
 }
 
-// attachCommand starts runner.Run on command, for a session named fake
-// unless opts say otherwise.
-func attachCommand(t *testing.T, ctx context.Context, command backend.Command, opts ...func(*runner.Config)) *harness {
+// attachOn starts runner.Run on command and the terminal tm, for a session
+// named fake unless opts say otherwise.
+func attachOn(t *testing.T, ctx context.Context, tm *terminal, command backend.Command, opts ...option) *harness {
 	t.Helper()
-	tm := newTerminal(t)
-	h := &harness{term: tm, before: tm.state(t), result: make(chan result, 1)}
+	h := &harness{term: tm, result: make(chan result, 1)}
 	cfg := runner.Config{
 		Session: "fake",
 		Command: command,
@@ -226,8 +291,9 @@ func attachCommand(t *testing.T, ctx context.Context, command backend.Command, o
 		},
 	}
 	for _, opt := range opts {
-		opt(&cfg)
+		opt(h, &cfg)
 	}
+	h.in, h.before = cfg.In, stateOf(t, cfg.In)
 	go func() {
 		out, err := runner.Run(ctx, cfg)
 		h.result <- result{out, err}
@@ -282,18 +348,37 @@ func (h *harness) detach(t *testing.T) {
 	}
 }
 
-// finish waits for Run to return, and checks it restored the terminal.
+// finish waits for Run to return, and checks it restored the terminal and
+// left no copy loop running.
 func (h *harness) finish(t *testing.T) (runner.Outcome, error) {
 	t.Helper()
 	select {
 	case r := <-h.result:
 		h.result <- r
-		if after := h.term.state(t); !reflect.DeepEqual(after, h.before) {
+		if after := stateOf(t, h.in); !reflect.DeepEqual(after, h.before) {
 			t.Errorf("the terminal's settings are %+v after the attach, want them restored to %+v", after, h.before)
 		}
+		if nonblockingOf(t, h.in) {
+			t.Errorf("the terminal is non-blocking after the attach, want it blocking again")
+		}
+		assertNoCopyLoops(t)
 		return r.out, r.err
 	case <-time.After(settle):
 		t.Fatalf("Run did not return; the terminal shows %q", h.term.output())
 		return runner.Outcome{}, nil
+	}
+}
+
+// assertNoCopyLoops fails the test if a copy loop of the runner's outlives
+// Run. One that has closed its done channel is let finish returning.
+func assertNoCopyLoops(t *testing.T) {
+	t.Helper()
+	var stacks string
+	if !harnesstest.PollUntil(t, time.Second, 10*time.Millisecond, func() bool {
+		buf := make([]byte, 1<<20)
+		stacks = string(buf[:runtime.Stack(buf, true)])
+		return !strings.Contains(stacks, "runner.(*attach).copy")
+	}) {
+		t.Errorf("a copy loop outlived Run:\n%s", stacks)
 	}
 }

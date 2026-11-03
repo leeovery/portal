@@ -26,6 +26,8 @@ const (
 	envPrefix   = "ZMX_SESSION_PREFIX"
 	envTmux     = "TMUX"
 	envTmuxPane = "TMUX_PANE"
+	// envNoDetachKey turns off zmx's ctrl+\ detach.
+	envNoDetachKey = "ZMX_NO_DETACH_KEY"
 )
 
 // ceilings bound each operation beneath its caller's context. A probe gets
@@ -139,8 +141,10 @@ func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 // reach, or another directory's session of the same name. It drops TMUX and
 // TMUX_PANE, as Create does: a session that ends between the probe and the
 // attach is made afresh by zmx attach, and must not take itself to be inside
-// the caller's tmux. Each session is asked within a probe ceiling of its own,
-// so a slow one cannot starve the other.
+// the caller's tmux. It drops ZMX_NO_DETACH_KEY: Portal's attach runner ends
+// an attach with zmx's ctrl+\, which that turns into input for the session.
+// Each session is asked within a probe ceiling of its own, so a slow one
+// cannot starve the other.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	if err := CheckAttach(name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
@@ -154,9 +158,9 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 	}
 	cmd := backend.Command{Argv: []string{b.binary, "attach", name}, Switches: switches}
 	if switches {
-		cmd.Env = b.env(envPrefix, envTmux, envTmuxPane)
+		cmd.Env = b.env(envPrefix, envTmux, envTmuxPane, envNoDetachKey)
 	} else {
-		cmd.Env = b.env(envPrefix, envSession, envTmux, envTmuxPane)
+		cmd.Env = b.env(envPrefix, envSession, envTmux, envTmuxPane, envNoDetachKey)
 	}
 	return cmd, nil
 }

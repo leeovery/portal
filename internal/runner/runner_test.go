@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
-	"reflect"
+	"os/exec"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
+	"golang.org/x/sys/unix"
 )
 
 func TestRun_CopiesBothWaysUnchanged(t *testing.T) {
@@ -27,8 +28,7 @@ func TestRun_CopiesBothWaysUnchanged(t *testing.T) {
 	h.ready(t)
 	h.term.await(t, string(childBlob))
 
-	duringAttach := h.term.state(t)
-	if reflect.DeepEqual(duringAttach, h.before) {
+	if during := stateOf(t, h.in); *during == *h.before {
 		t.Errorf("the terminal's settings are unchanged during the attach, want raw mode")
 	}
 
@@ -48,6 +48,18 @@ func TestRun_CopiesBothWaysUnchanged(t *testing.T) {
 	}
 
 	h.detach(t)
+}
+
+func TestRun_LeavesLaterInputForTheNextReader(t *testing.T) {
+	h := attach(t, modeZmx)
+	h.ready(t)
+	h.detach(t)
+
+	h.term.typeIn(t, "next\r")
+
+	if got := h.term.next(t); got != "next\n" {
+		t.Errorf("the next reader found %q, want the keys typed after the attach", got)
+	}
 }
 
 func TestRun_BoundKey(t *testing.T) {
@@ -82,6 +94,10 @@ func TestRun_BoundKey(t *testing.T) {
 			if got, want := h.term.reads(t), []string{"abc", "\x1c"}; !slices.Equal(got, want) {
 				t.Errorf("the child read %q, want the input before the key, then ctrl+\\ alone", got)
 			}
+			h.term.await(t, "nonblock:true")
+			if bytes.Contains(h.term.output(), []byte("\x1bc")) {
+				t.Errorf("the terminal was reset after a child that exited by its own hand")
+			}
 			rec := sink.Records().Matching("attach", "outcome").AtExactLevel(slog.LevelInfo).Only(t, "outcome record")
 			if got := rec.AttrString(t, "session"); got != "fake" {
 				t.Errorf("outcome session = %q, want fake", got)
@@ -99,8 +115,7 @@ func TestRun_BoundKey(t *testing.T) {
 func TestRun_Kill(t *testing.T) {
 	t.Run("a kill that succeeds waits for the session's end to end the child", func(t *testing.T) {
 		var killed []string
-		var h *harness
-		h = attach(t, modeZmx, func(cfg *runner.Config) {
+		h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
 			cfg.Kill = func(_ context.Context, name string) error {
 				killed = append(killed, name)
 				return syscall.Kill(h.child(), syscall.SIGUSR1)
@@ -123,12 +138,15 @@ func TestRun_Kill(t *testing.T) {
 		if slices.Contains(h.term.reads(t), "\x1c") {
 			t.Errorf("the child was sent ctrl+\\ after a kill that succeeded")
 		}
+		if err := syscall.Kill(h.child(), 0); !errors.Is(err, syscall.ESRCH) {
+			t.Errorf("the child %d outlived Run: %v", h.child(), err)
+		}
 	})
 
 	t.Run("a kill that fails detaches the child and carries the error", func(t *testing.T) {
 		refused := errors.New("kill refused")
 		sink := logtest.Install(t)
-		h := attach(t, modeZmx, func(cfg *runner.Config) {
+		h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) {
 			cfg.Kill = func(context.Context, string) error { return refused }
 		})
 		h.ready(t)
@@ -150,18 +168,58 @@ func TestRun_Kill(t *testing.T) {
 			t.Errorf("outcome error = %v, want %v", got, refused)
 		}
 	})
+
+	t.Run("a signal to Portal during the kill ends the attach as that signal", func(t *testing.T) {
+		h := attach(t, modeZmx, func(h *harness, cfg *runner.Config) {
+			cfg.Kill = func(context.Context, string) error {
+				_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				time.Sleep(100 * time.Millisecond) // the signal lands while the kill runs
+				return syscall.Kill(h.child(), syscall.SIGUSR1)
+			}
+		})
+		h.ready(t)
+
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{ExitCode: 128 + int(syscall.SIGTERM)}) {
+			t.Errorf("Run = %+v, %v; want the SIGTERM's outcome", out, err)
+		}
+	})
+
+	t.Run("a context that ends during the kill ends the attach with its error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		h := attachWithin(t, ctx, modeZmx, func(_ *harness, cfg *runner.Config) {
+			cfg.Kill = func(ctx context.Context, _ string) error {
+				cancel()
+				return ctx.Err()
+			}
+		})
+		h.ready(t)
+
+		h.term.typeIn(t, keyKill)
+		out, err := h.finish(t)
+
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run = %+v, %v; want the context's error", out, err)
+		}
+		if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
+			t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
+		}
+	})
 }
 
 func TestRun_ChildEndingOnItsOwnExitsToTheShell(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		mode     string
-		typed    string
-		wantCode int
+		name      string
+		mode      string
+		typed     string
+		wantCode  int
+		wantReset bool
 	}{
-		{"the user's own ctrl+\\", modeZmx, "\x1c", 0},
-		{"an error exit", modeExit, "", 3},
-		{"a death by signal", modeSelfKill, "", 128 + int(syscall.SIGKILL)},
+		{"the user's own ctrl+\\", modeZmx, "\x1c", 0, false},
+		{"an error exit", modeExit, "", 3, false},
+		{"a death by signal, which leaves the reset to the runner", modeSelfKill, "", 128 + int(syscall.SIGKILL), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := attach(t, tc.mode)
@@ -178,6 +236,11 @@ func TestRun_ChildEndingOnItsOwnExitsToTheShell(t *testing.T) {
 			}
 			if out.Picker() {
 				t.Errorf("Picker() = true when the child ended on its own, want the shell")
+			}
+			if tc.wantReset {
+				h.term.await(t, terminalReset)
+			} else if bytes.Contains(h.term.output(), []byte("\x1bc")) {
+				t.Errorf("the terminal was reset after a child that exited by its own hand")
 			}
 		})
 	}
@@ -228,6 +291,8 @@ func TestRun_BoundsTheWaitForTheChild(t *testing.T) {
 			if err := syscall.Kill(h.child(), 0); !errors.Is(err, syscall.ESRCH) {
 				t.Errorf("the child %d is still running: %v", h.child(), err)
 			}
+			// zmx resets the terminal on its way out, which a signal stops.
+			h.term.await(t, terminalReset)
 		})
 	}
 }
@@ -250,6 +315,54 @@ func TestRun_LeavesAChildThatReadsNothingToItsSignals(t *testing.T) {
 	reads := h.term.reads(t)
 	if len(reads) != 1 || reads[0] == "" || strings.Trim(reads[0], "x") != "" {
 		t.Errorf("the child found %q waiting, want only what was typed: no ctrl+\\ behind it", reads)
+	}
+}
+
+func TestRun_DetachingAChildThatHasExitedIsQuick(t *testing.T) {
+	runner.SetGrace(t, 5*time.Second)
+	refused := errors.New("kill refused")
+	var killReturned atomic.Int64
+	h := attach(t, modeFrozen, func(h *harness, cfg *runner.Config) {
+		// The kill ends the child, input still unread in its terminal, and
+		// fails, so the child is detached after its end.
+		cfg.Kill = func(context.Context, string) error {
+			_ = syscall.Kill(h.child(), syscall.SIGUSR1)
+			harnesstest.PollUntil(t, settle, 5*time.Millisecond, func() bool {
+				return errors.Is(syscall.Kill(h.child(), 0), syscall.ESRCH)
+			})
+			killReturned.Store(time.Now().UnixNano())
+			return refused
+		}
+	})
+	h.ready(t)
+
+	h.term.typeIn(t, "abc"+keyKill)
+	out, err := h.finish(t)
+
+	if err != nil || !errors.Is(out.Err, refused) {
+		t.Errorf("Run = %+v, %v; want the failed kill", out, err)
+	}
+	if took := time.Since(time.Unix(0, killReturned.Load())); took > time.Second {
+		t.Errorf("Run took %v after the child had gone, want no wait for it to read its input", took)
+	}
+}
+
+func TestRun_CtrlBackslashIsAByteBeforeTheChildMakesItsTerminalRaw(t *testing.T) {
+	sink := logtest.Install(t)
+	h := attach(t, modeCooked)
+	h.ready(t)
+
+	h.term.typeIn(t, "abc"+keyDetach)
+	out, err := h.finish(t)
+
+	if err != nil || out != (runner.Outcome{Action: attachkeys.Detach}) {
+		t.Errorf("Run = %+v, %v; want a detach", out, err)
+	}
+	if got, want := h.term.reads(t), []string{"abc", "\x1c"}; !slices.Equal(got, want) {
+		t.Errorf("the child read %q, want the input before the key, then ctrl+\\ alone", got)
+	}
+	if signalled := sink.Records().Matching("attach", "child did not exit"); len(signalled) > 0 {
+		t.Errorf("the child had to be signalled: %+v", signalled)
 	}
 }
 
@@ -298,9 +411,26 @@ func TestRun_SignalToPortalDetachesAndRestores(t *testing.T) {
 	}
 }
 
+func TestRun_StopsCatchingSignalsOnReturn(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find the test binary: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*settle)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe)
+	cmd.Env = append(os.Environ(), afterRunEnv+"=1")
+
+	out, _ := cmd.CombinedOutput()
+
+	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !status.Signaled() || status.Signal() != syscall.SIGINT {
+		t.Errorf("a SIGINT after Run returned left the process %v, want it ended: %s", cmd.ProcessState, out)
+	}
+}
+
 func TestRun_PanicInACopyLoopDetachesAndRestores(t *testing.T) {
 	sink := logtest.Install(t)
-	h := attach(t, modeZmx, func(cfg *runner.Config) { cfg.Scanner = panicking{} })
+	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) { cfg.Scanner = panicking{} })
 	h.ready(t)
 
 	h.term.typeIn(t, "x")
@@ -315,21 +445,25 @@ func TestRun_PanicInACopyLoopDetachesAndRestores(t *testing.T) {
 	sink.Records().Matching("attach", "panic").AtExactLevel(slog.LevelError).Only(t, "panic record")
 }
 
-func TestRun_TerminalInputEndingDetaches(t *testing.T) {
+func TestRun_TerminalHangingUpEndsTheAttachAsSIGHUP(t *testing.T) {
 	keyboard, input, err := pty.Open()
 	if err != nil {
 		t.Fatalf("open the input terminal: %v", err)
 	}
 	t.Cleanup(func() { _, _ = keyboard.Close(), input.Close() })
-	h := attach(t, modeZmx, func(cfg *runner.Config) { cfg.In = input })
+	if err := unix.SetNonblock(fdOf(t, input), false); err != nil {
+		t.Fatal(err)
+	}
+	h := attach(t, modeZmx, func(_ *harness, cfg *runner.Config) { cfg.In = input })
 	h.ready(t)
 
-	// The input terminal hangs up, as one whose window closed does.
+	// The input terminal hangs up, as one whose window closed does, with no
+	// SIGHUP to Portal, which is not its process.
 	_ = keyboard.Close()
-	_, err = h.finish(t)
+	out, err := h.finish(t)
 
-	if err == nil || !strings.Contains(err.Error(), "read the terminal") {
-		t.Errorf("Run error = %v, want the end of the terminal's input", err)
+	if err != nil || out != (runner.Outcome{ExitCode: 128 + int(syscall.SIGHUP)}) {
+		t.Errorf("Run = %+v, %v; want SIGHUP's outcome", out, err)
 	}
 	if got := h.term.reads(t); !slices.Equal(got, []string{"\x1c"}) {
 		t.Errorf("the child read %q, want ctrl+\\ to detach it", got)
@@ -352,9 +486,29 @@ func TestRun_ContextEndDetachesAndRestores(t *testing.T) {
 	}
 }
 
+func TestRun_StalledTerminalLeavesNoCopyLoop(t *testing.T) {
+	runner.SetGrace(t, shortGrace)
+	ctx, cancel := context.WithCancel(t.Context())
+	tm := openTerminal(t)
+	h := attachOn(t, ctx, tm, fakeChildCommand(t, modeFlood))
+
+	// The terminal takes none of the flood, so the runner's copy waits on it.
+	user := fdOf(t, tm.user)
+	if !harnesstest.PollUntil(t, settle, 10*time.Millisecond, func() bool { return unread(user) }) {
+		t.Fatal("the flood never reached the terminal")
+	}
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	_, err := h.finish(t)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run error = %v, want the context's", err)
+	}
+}
+
 func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 	tm := newTerminal(t)
-	before := tm.state(t)
+	before := stateOf(t, tm.tty)
 
 	_, err := runner.Run(t.Context(), runner.Config{
 		Session: "fake",
@@ -367,37 +521,45 @@ func TestRun_FailedStartRestoresTheTerminal(t *testing.T) {
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Run error = %v, want the failed start", err)
 	}
-	if after := tm.state(t); !reflect.DeepEqual(after, before) {
+	if after := stateOf(t, tm.tty); *after != *before {
 		t.Errorf("the terminal's settings are %+v after a failed start, want %+v", after, before)
+	}
+	if nonblockingOf(t, tm.tty) {
+		t.Errorf("the terminal is non-blocking after a failed start, want it blocking again")
 	}
 }
 
-func TestRun_RefusesInputThatIsNotATerminal(t *testing.T) {
+func TestRun_RefusesWithoutStarting(t *testing.T) {
 	in, typed, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	shown, out, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _, _ = in.Close(), typed.Close(), shown.Close() })
-
+	t.Cleanup(func() { _, _ = in.Close(), typed.Close() })
+	tm := newTerminal(t)
 	// A start would fail on this command, with an error of its own.
-	_, err = runner.Run(t.Context(), runner.Config{
-		Session: "fake",
-		Command: backend.Command{Argv: []string{"/nonexistent/zmx", "attach", "fake"}},
-		In:      in,
-		Out:     out,
-		Scanner: keys,
-	})
+	missing := backend.Command{Argv: []string{"/nonexistent/zmx", "attach", "fake"}}
 
-	if !errors.Is(err, runner.ErrNoTerminal) {
-		t.Errorf("Run error = %v, want ErrNoTerminal", err)
+	for _, tc := range []struct {
+		name    string
+		in      *os.File
+		command backend.Command
+		want    func(error) bool
+	}{
+		{"input that is not a terminal", in, missing, func(err error) bool { return errors.Is(err, runner.ErrNoTerminal) }},
+		{"a command that switches sessions", tm.tty, backend.Command{Argv: missing.Argv, Switches: true}, func(err error) bool {
+			return err != nil && strings.Contains(err.Error(), "switches sessions")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := runner.Run(t.Context(), runner.Config{Session: "fake", Command: tc.command, In: tc.in, Out: tm.tty, Scanner: keys})
+
+			if !tc.want(err) || errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Run error = %v, want the refusal before any start", err)
+			}
+		})
 	}
-	_ = out.Close()
-	if written, _ := io.ReadAll(shown); len(written) > 0 {
-		t.Errorf("Run wrote %q to its output", written)
+	if got := tm.output(); len(got) > 0 {
+		t.Errorf("Run wrote %q to its output", got)
 	}
 }
 
