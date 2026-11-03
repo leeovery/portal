@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // slugs records every commit whatever its shape; the rest separate the two
@@ -54,7 +53,7 @@ func TestBuild_NilThemePersisterIsTolerated(t *testing.T) {
 		var model tea.Model = Build(Deps{Lister: fakeLister{}})
 
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-		model, _ = model.Update(SessionsMsg{Sessions: []tmux.Session{{Name: "dev", Windows: 1}}})
+		model, _ = model.Update(SessionsMsg{Sessions: []Session{{Name: "dev"}}})
 		model, _ = model.Update(ProjectsLoadedMsg{})
 		for _, key := range []tea.KeyPressMsg{
 			{Code: 's', Text: "s"},

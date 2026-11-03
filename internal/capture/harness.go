@@ -82,11 +82,11 @@ func pendingSessionsOf(r tui.PendingResumeReader) map[string]struct{} {
 	if r == nil {
 		return nil
 	}
-	view, err := r.ListPendingResumePanes()
+	pending, err := r.ListPendingResumeSessions()
 	if err != nil {
 		return nil
 	}
-	return view.Sessions
+	return pending
 }
 
 // renderSize substitutes whichever dimension the fixture declares for the

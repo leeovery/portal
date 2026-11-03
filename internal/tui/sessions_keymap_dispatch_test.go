@@ -27,10 +27,10 @@ func (keymapParityReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil
 
 func sessionsDispatchModel(t *testing.T) Model {
 	t.Helper()
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 	return m
 }
@@ -149,7 +149,7 @@ func TestSessionsKeymapRevision(t *testing.T) {
 
 func TestSessionsRetainedActionParity(t *testing.T) {
 	t.Run("k routes to kill (opens the kill confirm modal)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionKiller = keymapParityKiller{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: 'k', Text: "k"})
 		if m.modal != modalKillConfirm {
@@ -161,7 +161,7 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 	})
 
 	t.Run("r routes to rename (opens the rename modal)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionRenamer = keymapParityRenamer{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if m.modal != modalRename {
@@ -173,7 +173,7 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 	})
 
 	t.Run("space routes to preview", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.enumerator = keymapParityEnumerator{}
 		m.reader = keymapParityReader{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
@@ -183,7 +183,7 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 	})
 
 	t.Run("Enter routes to attach (handleSessionListEnter)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		if m.activePage != PageSessions {
 			t.Errorf("Enter must stay on Sessions in the no-attacher path; active page = %d", m.activePage)

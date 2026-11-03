@@ -38,7 +38,7 @@ const (
 const paginationDotGlyph = "•"
 
 type SessionLister interface {
-	ListSessions() ([]tmux.Session, error)
+	ListSessions() ([]Session, error)
 }
 
 // Run's tea.Cmd emits a previewAttachSelectedMsg or previewAttachBailMsg; the
@@ -112,7 +112,7 @@ const (
 // Pending is the pending-resume set read with Sessions. Err never carries the
 // pending read's failure, so a failed pending read never quits the picker.
 type SessionsMsg struct {
-	Sessions []tmux.Session
+	Sessions []Session
 	Pending  map[string]struct{}
 	Err      error
 
@@ -165,7 +165,7 @@ type ProjectsLoadedMsg struct {
 
 type Model struct {
 	sessionList list.Model
-	sessions    []tmux.Session
+	sessions    []Session
 	projects    []project.Project
 	// projectIndex is a derived cache: it must be rebuilt whenever projects
 	// changes, so always mutate both via setProjects.
@@ -207,18 +207,17 @@ type Model struct {
 	searchErr            error
 	// searchItems holds the session fields the containment filter ranks its
 	// targets by; nil for every picker a search term did not open.
-	searchItems        *searchItemSource
-	insideTmux         bool
-	currentSession     string
-	modal              modalState
-	pendingKillName    string
-	pendingKillWindows int
-	renameInput        textinput.Model
-	renameTarget       string
-	pendingDeletePath  string
-	pendingDeleteName  string
-	command            []string
-	commandPending     bool
+	searchItems *searchItemSource
+	// currentSession is the session the picker runs inside, empty outside one.
+	currentSession    string
+	modal             modalState
+	pendingKillName   string
+	renameInput       textinput.Model
+	renameTarget      string
+	pendingDeletePath string
+	pendingDeleteName string
+	command           []string
+	commandPending    bool
 
 	serverStarted     bool
 	minElapsed        bool
@@ -517,10 +516,6 @@ func (m Model) Command() []string {
 	return m.command
 }
 
-func (m Model) InsideTmux() bool {
-	return m.insideTmux
-}
-
 func (m Model) CurrentSession() string {
 	return m.currentSession
 }
@@ -550,9 +545,9 @@ func (m Model) WithCommand(command []string) Model {
 	return m
 }
 
-// The current session is excluded from the session list and named in the title.
-func (m Model) WithInsideTmux(currentSession string) Model {
-	m.insideTmux = true
+// WithCurrentSession names the session the picker runs inside, which the list
+// leaves out and the title names; empty, outside a session, does neither.
+func (m Model) WithCurrentSession(currentSession string) Model {
 	m.currentSession = currentSession
 	// Routed through rebuildSessionList so exclusion composes with grouping. The
 	// cmd is discarded: m.sessions is empty here, so SetItems yields no real cmd.
@@ -829,7 +824,7 @@ func centrePaginationRow(l *list.Model, base lipgloss.Style) {
 	l.Styles.PaginationStyle = base.Width(l.Width()).Align(lipgloss.Center)
 }
 
-func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, currentSession string) string {
+func sessionListTitleForMode(mode prefs.SessionListMode, currentSession string) string {
 	var base string
 	switch mode {
 	case prefs.ModeByProject:
@@ -839,7 +834,7 @@ func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, curren
 	default:
 		base = "Sessions"
 	}
-	if insideTmux && currentSession != "" {
+	if currentSession != "" {
 		return fmt.Sprintf("%s (current: %s)", base, currentSession)
 	}
 	return base
@@ -905,9 +900,9 @@ func New(lister SessionLister, opts ...Option) Model {
 	for _, opt := range opts {
 		opt(&m)
 	}
-	// Recompute now that mode / inside-tmux are known (newSessionList set the Flat
+	// Recompute now that mode / current session are known (newSessionList set the Flat
 	// default), so the first frame paints the correct mode heading.
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSession)
 	// The NO_COLOR carve-out wins over every nomination shape: no canvas to
 	// select, so the gate is colourless and detection is skipped.
 	if m.colourless {
@@ -1088,7 +1083,7 @@ func (m *Model) styleListFilterInput(l *list.Model) {
 	l.FilterInput.SetStyles(styles)
 }
 
-func NewModelWithSessions(sessions []tmux.Session) Model {
+func NewModelWithSessions(sessions []Session) Model {
 	items := ToListItems(sessions)
 	l := newSessionList(items)
 	pl := newProjectList()
@@ -1165,14 +1160,11 @@ func (m Model) projectBandHeight() int {
 	return lipgloss.Height(slot)
 }
 
-func (m Model) filteredSessions() []tmux.Session {
-	if !m.insideTmux {
-		return m.sessions
-	}
+func (m Model) filteredSessions() []Session {
 	return PickerSessions(m.sessions, m.currentSession)
 }
 
-func (m *Model) applySessions(sessions []tmux.Session, pending map[string]struct{}) tea.Cmd {
+func (m *Model) applySessions(sessions []Session, pending map[string]struct{}) tea.Cmd {
 	m.sessions = sessions
 	// A guess derived for the previous list must not outlive it.
 	m.derivedDirs = nil
@@ -1239,7 +1231,7 @@ func (m *Model) setProjects(projects []project.Project) {
 // Best-effort: an unresolvable session is not negative-cached — nothing is
 // stored and the next grouped rebuild tries again. Call it only from the grouped
 // arms — Flat must pay zero pane reads.
-func (m *Model) resolveDerivedDirs(sessions []tmux.Session) map[string]string {
+func (m *Model) resolveDerivedDirs(sessions []Session) map[string]string {
 	if m.dirReader == nil || m.dirRunner == nil {
 		return m.derivedDirs
 	}
@@ -1289,7 +1281,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	}
 	cmd := m.sessionList.SetItems(items)
 
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSession)
 
 	// Without this re-apply the list keeps sizing against pre-load defaults
 	// and overflows under the footer once items populate.
@@ -2836,7 +2828,6 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 	}
 	m.modal = modalKillConfirm
 	m.pendingKillName = si.Session.Name
-	m.pendingKillWindows = si.Session.Windows
 	return m, nil
 }
 
@@ -2886,13 +2877,11 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		name := m.pendingKillName
 		m.modal = modalNone
 		m.pendingKillName = ""
-		m.pendingKillWindows = 0
 		return m, m.killAndRefresh(name)
 	case keyIsCode(keyMsg, tea.KeyEscape):
 		// Cancel is Esc only; `n` falls through to the ignore-all tail.
 		m.modal = modalNone
 		m.pendingKillName = ""
-		m.pendingKillWindows = 0
 		return m, nil
 	}
 	return m, nil
@@ -3499,7 +3488,7 @@ func (m Model) renderProjectsFooterForFilterState() string {
 func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
-		return renderKillModalOnClearedCanvas(m.pendingKillName, m.pendingKillWindows, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderKillModalOnClearedCanvas(m.pendingKillName, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
@@ -3676,7 +3665,6 @@ func (m Model) applySectionHeader(listView string) string {
 	}
 	return replaceHeaderLine(listView, renderSectionHeader(
 		m.sessionListMode,
-		m.insideTmux,
 		m.currentSession,
 		m.visibleSessionRowCount(),
 		m.contentWidth(),
@@ -3685,7 +3673,7 @@ func (m Model) applySectionHeader(listView string) string {
 	))
 }
 
-// Excludes group headers, so the count tracks the inside-tmux exclusion, an
+// Excludes group headers, so the count tracks the current-session exclusion, an
 // applied filter, and By-Tag's per-tag row repeats alike.
 func (m Model) visibleSessionRowCount() int {
 	count := 0

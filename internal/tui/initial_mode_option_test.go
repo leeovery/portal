@@ -5,12 +5,11 @@ import (
 
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type fakeLister struct{}
 
-func (fakeLister) ListSessions() ([]tmux.Session, error) { return nil, nil }
+func (fakeLister) ListSessions() ([]Session, error) { return nil, nil }
 
 func TestWithInitialMode(t *testing.T) {
 	t.Run("sets the mode field on construction", func(t *testing.T) {
@@ -22,7 +21,7 @@ func TestWithInitialMode(t *testing.T) {
 
 	t.Run("paints the mode-aware title on the first frame", func(t *testing.T) {
 		m := New(fakeLister{}, WithInitialMode(prefs.ModeByTag))
-		want := sessionListTitleForMode(prefs.ModeByTag, false, "")
+		want := sessionListTitleForMode(prefs.ModeByTag, "")
 		if got := m.sessionList.Title; got != want {
 			t.Errorf("sessionList.Title = %q, want %q", got, want)
 		}
@@ -38,7 +37,7 @@ func TestWithInitialMode(t *testing.T) {
 	t.Run("groups the first SessionsMsg ingestion by the injected mode", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := New(fakeLister{}, WithInitialMode(prefs.ModeByTag))
 		m.setProjects(projects)

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // markerReaderStub answers each read with the next step's marker keys, holding
@@ -37,10 +36,10 @@ func (r *markerReaderStub) ListSkeletonMarkers() (map[string]struct{}, error) {
 	return set, nil
 }
 
-var settleSessions = []tmux.Session{
-	{Name: "alpha", Windows: 1},
-	{Name: "bravo", Windows: 1},
-	{Name: "charlie", Windows: 1},
+var settleSessions = []Session{
+	{Name: "alpha"},
+	{Name: "bravo"},
+	{Name: "charlie"},
 }
 
 const generousSettleBound = time.Minute
@@ -98,7 +97,7 @@ func settleStep(t *testing.T, m Model) (Model, tea.Cmd) {
 }
 
 func TestPendingSettle_ColdRoute_GainsTheDotWithNoKeypressOnceTheHelperMarksThePane(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}}}
 	markers := &markerReaderStub{steps: [][]string{{}}}
 	m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -114,7 +113,7 @@ func TestPendingSettle_ColdRoute_GainsTheDotWithNoKeypressOnceTheHelperMarksTheP
 }
 
 func TestPendingSettle_ColdRoute_EachPaneGainsItsDotAsItIsMarked(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}, {"alpha", "bravo"}}}
 	markers := &markerReaderStub{steps: [][]string{{"bravo:0.0"}, {}}}
 	m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -161,7 +160,7 @@ func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeA
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var log []string
-			lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+			lister := &stepListerStub{steps: [][]Session{settleSessions}}
 			pending := &pendingReaderStub{steps: tt.pending, log: &log}
 			markers := &markerReaderStub{steps: tt.markers, log: &log}
 			m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -188,7 +187,7 @@ func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeA
 }
 
 func TestPendingSettle_ColdRoute_AFailedMarkerReadCountsAsMarkersRemaining(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {}, {"alpha"}}}
 	markers := &markerReaderStub{steps: [][]string{{}}, err: errors.New("show-options: server busy"), errStep: 0}
 	m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -212,7 +211,7 @@ func TestPendingSettle_ColdRoute_AFailedMarkerReadCountsAsMarkersRemaining(t *te
 }
 
 func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoMarkerRemains(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}}}
 	markers := &markerReaderStub{steps: [][]string{{}}}
 	m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -250,7 +249,7 @@ func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoMarkerRemains(t *testin
 }
 
 func TestPendingSettle_ColdRoute_StopsAtTheBoundWhenAMarkerNeverClears(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"bravo"}}}
 	markers := &markerReaderStub{steps: [][]string{{"alpha:0.0"}}}
 	m := coldSettleModel(lister, pending, markers, time.Nanosecond)
@@ -298,7 +297,7 @@ func TestPendingSettle_ColdRoute_ReReadChangesOnlyWhichRowsCarryTheDot(t *testin
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+			lister := &stepListerStub{steps: [][]Session{settleSessions}}
 			pending := &pendingReaderStub{steps: [][]string{{}, {"charlie"}}}
 			markers := &markerReaderStub{steps: [][]string{{}}}
 			m := coldSettleModel(lister, pending, markers, generousSettleBound)
@@ -326,7 +325,7 @@ func TestPendingSettle_ColdRoute_ReReadChangesOnlyWhichRowsCarryTheDot(t *testin
 }
 
 func TestPendingSettle_WarmRoute_TakesNoMarkerRead(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	markers := &markerReaderStub{steps: [][]string{{"alpha:0.0"}}}
 	m := Build(Deps{Lister: lister, PendingReader: pending, SkeletonMarkers: markers, PendingSettleBound: generousSettleBound})
@@ -350,7 +349,7 @@ func TestPendingSettle_WarmRoute_TakesNoMarkerRead(t *testing.T) {
 }
 
 func TestPendingSettle_ColdRoute_UnwiredMarkerSeamSchedulesNoReRead(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{settleSessions}}
+	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := coldSettleModel(lister, pending, nil, generousSettleBound)
 

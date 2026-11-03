@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -15,7 +14,7 @@ var errFatalSentinel = errors.New("fatal cold-boot abort sentinel")
 
 func fatalModelOnLoading(t *testing.T) tea.Model {
 	t.Helper()
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m

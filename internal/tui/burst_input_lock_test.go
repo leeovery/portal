@@ -11,7 +11,6 @@ import (
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func burstPendingModel(t *testing.T, names ...string) (Model, *spawntest.FakeAdapter) {
@@ -125,7 +124,7 @@ func TestBurstInputLock_CtrlCAndEscStayLive(t *testing.T) {
 }
 
 func TestBurstInputLock_AdvancesOpeningCounter(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}})
 	m.termWidth = 80
 	m.termHeight = 24
 	m.burstPending = true
@@ -152,7 +151,7 @@ func TestBurstInputLock_AdvancesOpeningCounter(t *testing.T) {
 }
 
 func TestBurstInputLock_HoldsDenominatorAtN(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+	m := NewModelWithSessions([]Session{{Name: "alpha"}})
 	m.termWidth = 80
 	m.termHeight = 24
 	m.burstPending = true
@@ -177,10 +176,10 @@ func TestBurstInputLock_HoldsDenominatorAtN(t *testing.T) {
 
 func TestBurstInputLock_OpeningBandPrecedence(t *testing.T) {
 	newOpeningModel := func() Model {
-		m := NewModelWithSessions([]tmux.Session{
-			{Name: "alpha", Windows: 1},
-			{Name: "bravo", Windows: 2},
-			{Name: "charlie", Windows: 3},
+		m := NewModelWithSessions([]Session{
+			{Name: "alpha"},
+			{Name: "bravo"},
+			{Name: "charlie"},
 		})
 		m.termWidth = 80
 		m.termHeight = 24

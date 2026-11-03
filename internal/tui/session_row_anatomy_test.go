@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func renderRow(d SessionDelegate, width int, items []list.Item, index, selIndex int) string {
@@ -34,7 +33,7 @@ func selectionBgParams(t *testing.T, th theme.Theme) string {
 	return sgrParams(t, lipgloss.NewStyle().Background(th.BgSelection.Color()))
 }
 
-func flatItems(specs ...tmux.Session) []list.Item {
+func flatItems(specs ...Session) []list.Item {
 	items := make([]list.Item, len(specs))
 	for i, s := range specs {
 		items[i] = SessionItem{Session: s}
@@ -44,23 +43,20 @@ func flatItems(specs ...tmux.Session) []list.Item {
 
 func TestSessionRow_FlexNameFixedTrailingSlots(t *testing.T) {
 	const w = 80
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	out := renderRow(SessionDelegate{}, w, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha") {
 		t.Errorf("row missing name 'alpha': %q", vis)
 	}
-	if !strings.Contains(vis, "3 windows") {
-		t.Errorf("row missing window count '3 windows': %q", vis)
-	}
 	if !strings.Contains(vis, rowIndicatorGlyph) {
 		t.Errorf("row missing the attached indicator %q: %q", rowIndicatorGlyph, vis)
 	}
 	nameCol := visibleColOf(out, "alpha")
-	countCol := visibleColOf(out, "3 windows")
-	if countCol <= nameCol {
-		t.Errorf("count slot (col %d) must sit right of the name (col %d): %q", countCol, nameCol, vis)
+	indicatorCol := visibleColOf(out, rowIndicatorGlyph)
+	if indicatorCol <= nameCol {
+		t.Errorf("indicator slot (col %d) must sit right of the name (col %d): %q", indicatorCol, nameCol, vis)
 	}
 	if got := lipgloss.Width(out); got != w {
 		t.Errorf("row width = %d, want exactly %d (trailing slots right-pinned to the list width)", got, w)
@@ -70,20 +66,11 @@ func TestSessionRow_FlexNameFixedTrailingSlots(t *testing.T) {
 func TestSessionRow_ColumnAlignsRegardlessOfNameLength(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "a", Windows: 1, Attached: true},
-		tmux.Session{Name: "a-much-longer-session-name-here", Windows: 5, Attached: true},
+		Session{Name: "a", Attached: true},
+		Session{Name: "a-much-longer-session-name-here", Attached: true},
 	)
 	short := renderRow(SessionDelegate{}, w, items, 0, 0)
 	long := renderRow(SessionDelegate{}, w, items, 1, 0)
-
-	shortCount := visibleColOf(short, "window")
-	longCount := visibleColOf(long, "window")
-	if shortCount < 0 || longCount < 0 {
-		t.Fatalf("a count column is missing: short=%q long=%q", ansi.Strip(short), ansi.Strip(long))
-	}
-	if shortCount != longCount {
-		t.Errorf("window counts not column-aligned: short name count col %d, long name count col %d", shortCount, longCount)
-	}
 
 	shortBullet := visibleColOf(short, "●")
 	longBullet := visibleColOf(long, "●")
@@ -98,17 +85,14 @@ func TestSessionRow_ColumnAlignsRegardlessOfNameLength(t *testing.T) {
 func TestSessionRow_EmptyAttachedSlotPreservesAlignment(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "attached-one", Windows: 2, Attached: true},
-		tmux.Session{Name: "detached-one", Windows: 2, Attached: false},
+		Session{Name: "attached-one", Attached: true},
+		Session{Name: "detached-one", Attached: false},
 	)
 	attached := renderRow(SessionDelegate{}, w, items, 0, 0)
 	detached := renderRow(SessionDelegate{}, w, items, 1, 0)
 
 	if strings.Contains(ansi.Strip(detached), rowIndicatorGlyph) {
 		t.Errorf("unattached row must not render the attached indicator: %q", ansi.Strip(detached))
-	}
-	if a, d := visibleColOf(attached, "window"), visibleColOf(detached, "window"); a != d {
-		t.Errorf("count columns misaligned across attached/unattached: %d vs %d", a, d)
 	}
 	if a, d := lipgloss.Width(attached), lipgloss.Width(detached); a != d {
 		t.Errorf("row widths differ across attached/unattached: %d vs %d (empty slot must match the indicator slot)", a, d)
@@ -118,7 +102,7 @@ func TestSessionRow_EmptyAttachedSlotPreservesAlignment(t *testing.T) {
 func TestSessionRow_SelectedShowsVioletBarTintAndOnSelectionName(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
-		items := flatItems(tmux.Session{Name: "selected-row", Windows: 2, Attached: false})
+		items := flatItems(Session{Name: "selected-row", Attached: false})
 		out := renderRow(d, 80, items, 0, 0)
 
 		if !strings.Contains(ansi.Strip(out), "▌") {
@@ -140,8 +124,8 @@ func TestSessionRow_UnselectedHasNoBarOrTint(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
 		items := flatItems(
-			tmux.Session{Name: "row-zero", Windows: 1, Attached: false},
-			tmux.Session{Name: "row-one", Windows: 1, Attached: false},
+			Session{Name: "row-zero", Attached: false},
+			Session{Name: "row-one", Attached: false},
 		)
 		out := renderRow(d, 80, items, 1, 0)
 
@@ -161,8 +145,8 @@ func TestSessionRow_AttachedKeepsStateGreenWhenSelected(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
 		items := flatItems(
-			tmux.Session{Name: "attached-selected", Windows: 1, Attached: true},
-			tmux.Session{Name: "attached-unselected", Windows: 1, Attached: true},
+			Session{Name: "attached-selected", Attached: true},
+			Session{Name: "attached-unselected", Attached: true},
 		)
 
 		green := tokenFgSeq(t, th.StatePositive)
@@ -183,33 +167,10 @@ func TestSessionRow_AttachedKeepsStateGreenWhenSelected(t *testing.T) {
 	}
 }
 
-func TestSessionRow_SelectedCountInTextStrong(t *testing.T) {
-	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		d := SessionDelegate{Theme: th}
-		items := flatItems(
-			tmux.Session{Name: "row-zero", Windows: 4, Attached: false},
-			tmux.Session{Name: "row-one", Windows: 4, Attached: false},
-		)
-
-		sel := renderRow(d, 80, items, 0, 0)
-		uns := renderRow(d, 80, items, 1, 0)
-
-		strong := tokenFgSeq(t, th.TextSecondary)
-		detail := tokenFgSeq(t, th.TextMuted)
-
-		if !strings.Contains(sel, strong) {
-			t.Errorf("[%v] selected-row count missing text.secondary fg %q", themeLabel(th), strong)
-		}
-		if !strings.Contains(uns, detail) {
-			t.Errorf("[%v] unselected-row count missing text.muted fg %q", themeLabel(th), detail)
-		}
-	}
-}
-
 func TestSessionRow_OverLongNameTruncatesWithoutPushingSlots(t *testing.T) {
 	const w = 40
 	longName := "this-is-a-really-very-long-session-name-that-overflows"
-	items := flatItems(tmux.Session{Name: longName, Windows: 7, Attached: true})
+	items := flatItems(Session{Name: longName, Attached: true})
 	out := renderRow(SessionDelegate{}, w, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -218,9 +179,6 @@ func TestSessionRow_OverLongNameTruncatesWithoutPushingSlots(t *testing.T) {
 	}
 	if !strings.Contains(vis, "…") {
 		t.Errorf("truncated name should carry the ellipsis glyph: %q", vis)
-	}
-	if !strings.Contains(vis, "7 windows") {
-		t.Errorf("window-count slot pushed off-row by the long name: %q", vis)
 	}
 	if !strings.Contains(vis, rowIndicatorGlyph) {
 		t.Errorf("attached indicator pushed off-row by the long name: %q", vis)
@@ -232,9 +190,9 @@ func TestSessionRow_OverLongNameTruncatesWithoutPushingSlots(t *testing.T) {
 
 func TestSessionRow_NeverOverflowsAtNarrowWidths(t *testing.T) {
 	for _, w := range []int{1, 5, 10, 20, 25, 26, 29, 40, 80} {
-		for _, sess := range []tmux.Session{
-			{Name: "x", Windows: 1, Attached: false},
-			{Name: "agentic-workflows-code-based-that-is-quite-long", Windows: 12, Attached: true},
+		for _, sess := range []Session{
+			{Name: "x", Attached: false},
+			{Name: "agentic-workflows-code-based-that-is-quite-long", Attached: true},
 		} {
 			items := flatItems(sess)
 			for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -248,9 +206,8 @@ func TestSessionRow_NeverOverflowsAtNarrowWidths(t *testing.T) {
 }
 
 func TestSessionRow_FlatIsNameOnly(t *testing.T) {
-	items := flatItems(tmux.Session{
+	items := flatItems(Session{
 		Name:     "flat-name",
-		Windows:  2,
 		Attached: false,
 		Dir:      "/home/user/code/some-project",
 	})
@@ -268,7 +225,7 @@ func TestSessionRow_FlatIsNameOnly(t *testing.T) {
 func TestSessionRow_NoRawAnsiColourLiterals(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Theme: th}
-		items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: true})
+		items := flatItems(Session{Name: "alpha", Attached: true})
 		out := renderRow(d, 80, items, 0, 0)
 
 		for _, banned := range []string{"38;5;212", "38;5;76", "48;5;212", "48;5;76"} {
@@ -287,7 +244,7 @@ func TestSessionRow_HeightStaysOne(t *testing.T) {
 	if d.Height() != 1 {
 		t.Fatalf("Height() = %d, want 1", d.Height())
 	}
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	out := renderRow(d, 80, items, 0, 0)
 	if strings.Contains(out, "\n") {
 		t.Errorf("session row emitted more than one line: %q", out)
@@ -309,7 +266,7 @@ func TestSessionRow_DirColumnSitsOneSpaceAfterTheName(t *testing.T) {
 	home := t.TempDir()
 
 	for _, name := range []string{"a", "alpha-one", "a-considerably-longer-session-name"} {
-		items := flatItems(tmux.Session{Name: name, Windows: 2, Dir: home + "/Code/portal"})
+		items := flatItems(Session{Name: name, Dir: home + "/Code/portal"})
 		out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 80, items, 0, 0)
 
 		nameCol := visibleColOf(out, name)
@@ -328,8 +285,8 @@ func TestSessionRow_DirColumnOffRendersTodaysRow(t *testing.T) {
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		d := SessionDelegate{Home: home, Theme: th}
-		withDir := renderRow(d, 80, flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal"}), 0, 0)
-		without := renderRow(d, 80, flatItems(tmux.Session{Name: "alpha", Windows: 2}), 0, 0)
+		withDir := renderRow(d, 80, flatItems(Session{Name: "alpha", Dir: home + "/Code/portal"}), 0, 0)
+		without := renderRow(d, 80, flatItems(Session{Name: "alpha"}), 0, 0)
 
 		if withDir != without {
 			t.Errorf("[%v] with the column off a recorded directory changed the row:\n got %q\nwant %q", themeLabel(th), escSeq(withDir), escSeq(without))
@@ -339,7 +296,7 @@ func TestSessionRow_DirColumnOffRendersTodaysRow(t *testing.T) {
 
 func TestSessionRow_DirColumnRendersNoSeparatorWithoutARecordedDirectory(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		items := flatItems(tmux.Session{Name: "alpha", Windows: 2})
+		items := flatItems(Session{Name: "alpha"})
 		on := renderRow(SessionDelegate{Theme: th, ShowDir: true}, 80, items, 0, 0)
 		off := renderRow(SessionDelegate{Theme: th}, 80, items, 0, 0)
 
@@ -359,12 +316,12 @@ func TestSessionRow_DirColumnKeepsTheRowExactlyTheListWidth(t *testing.T) {
 	}{
 		{"whole directory", home + "/Code/portal", 80},
 		{"no recorded directory", "", 80},
-		{"left-truncated directory", home + "/Code/portal/internal/tui", 41},
-		{"directory dropped below the floor", home + "/Code/portal/internal/tui", 25},
+		{"left-truncated directory", home + "/Code/portal/internal/tui", 30},
+		{"directory dropped below the floor", home + "/Code/portal/internal/tui", 14},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: true, Dir: tc.dir})
+			items := flatItems(Session{Name: "alpha", Attached: true, Dir: tc.dir})
 			for _, sel := range []int{0, 1} {
 				for _, colourless := range []bool{false, true} {
 					d := SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: colourless}
@@ -382,26 +339,22 @@ func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 	home := t.TempDir()
 
 	items := flatItems(
-		tmux.Session{Name: "a", Windows: 1, Attached: true, Dir: home + "/Code/portal"},
-		tmux.Session{Name: "a-much-longer-session-name", Windows: 5, Attached: true, Dir: home + "/x"},
-		tmux.Session{Name: "mid-name", Windows: 2, Attached: true},
+		Session{Name: "a", Attached: true, Dir: home + "/Code/portal"},
+		Session{Name: "a-much-longer-session-name", Attached: true, Dir: home + "/x"},
+		Session{Name: "mid-name", Attached: true},
 	)
 	d := SessionDelegate{Home: home, ShowDir: true}
 
-	var wantCount, wantBullet int
+	var wantBullet int
 	for i := range items {
 		out := renderRow(d, 80, items, i, 0)
-		count := visibleColOf(out, "window")
 		bullet := visibleColOf(out, "●")
-		if count < 0 || bullet < 0 {
+		if bullet < 0 {
 			t.Fatalf("row %d missing a trailing slot: %q", i, ansi.Strip(out))
 		}
 		if i == 0 {
-			wantCount, wantBullet = count, bullet
+			wantBullet = bullet
 			continue
-		}
-		if count != wantCount {
-			t.Errorf("row %d count col %d, want %d", i, count, wantCount)
 		}
 		if bullet != wantBullet {
 			t.Errorf("row %d attached bullet col %d, want %d", i, bullet, wantBullet)
@@ -412,8 +365,8 @@ func TestSessionRow_DirColumnKeepsTrailingSlotsAligned(t *testing.T) {
 func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
-	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 41, items, 0, 0)
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
+	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 30, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha") {
@@ -430,8 +383,8 @@ func TestSessionRow_DirColumnLeftTruncatesTheDirectoryAndNeverTheName(t *testing
 func TestSessionRow_DirColumnDropsTheDirectoryBelowTheFloor(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
-	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 25, items, 0, 0)
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
+	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 14, items, 0, 0)
 	vis := ansi.Strip(out)
 
 	if !strings.Contains(vis, "alpha") {
@@ -445,9 +398,8 @@ func TestSessionRow_DirColumnDropsTheDirectoryBelowTheFloor(t *testing.T) {
 func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff(t *testing.T) {
 	home := t.TempDir()
 
-	sess := tmux.Session{
+	sess := Session{
 		Name:     "this-is-a-really-very-long-session-name-that-overflows",
-		Windows:  7,
 		Attached: true,
 		Dir:      home + "/Code/portal",
 	}
@@ -462,14 +414,14 @@ func TestSessionRow_DirColumnLeavesAnOverLongNameTruncatedAsItIsWithTheColumnOff
 	}
 }
 
-func TestSessionRow_DirColumnTakesTheWindowCountsToken(t *testing.T) {
+func TestSessionRow_DirColumnTakesTheMutedToken(t *testing.T) {
 	home := t.TempDir()
 	const dirText = "~/Code/portal"
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		items := flatItems(
-			tmux.Session{Name: "row-zero", Windows: 2, Dir: home + "/Code/portal"},
-			tmux.Session{Name: "row-one", Windows: 2, Dir: home + "/Code/portal"},
+			Session{Name: "row-zero", Dir: home + "/Code/portal"},
+			Session{Name: "row-one", Dir: home + "/Code/portal"},
 		)
 		d := SessionDelegate{Home: home, Theme: th, ShowDir: true}
 
@@ -497,7 +449,7 @@ func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T
 	home := t.TempDir()
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal"})
+		items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal"})
 		out := renderRow(SessionDelegate{Home: home, Theme: th, ShowDir: true}, 80, items, 0, 0)
 
 		cells := scanCellBackgrounds(out)
@@ -518,7 +470,7 @@ func TestSessionRow_DirColumnSeparatingSpaceCarriesTheSelectionTint(t *testing.T
 func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: true, Dir: home + "/Code/portal"})
+	items := flatItems(Session{Name: "alpha", Attached: true, Dir: home + "/Code/portal"})
 	coloured := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true}, 80, items, 0, 0)
 	colourless := renderRow(SessionDelegate{Home: home, Theme: testDarkTheme(t), ShowDir: true, Colourless: true}, 80, items, 0, 0)
 
@@ -530,11 +482,11 @@ func TestSessionRow_DirColumnRendersTheSameSingleSpaceWhenColourless(t *testing.
 func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 	home := t.TempDir()
 
-	sess := tmux.Session{Name: "s", Windows: 2, Dir: home + "/Code/portal/internal/tui"}
+	sess := Session{Name: "s", Dir: home + "/Code/portal/internal/tui"}
 	d := SessionDelegate{Home: home, ShowDir: true}
 
-	flat := renderRow(d, 42, []list.Item{SessionItem{Session: sess}}, 0, 0)
-	grouped := renderRow(d, 42, []list.Item{SessionItem{Session: sess, GroupKey: "k"}}, 0, 0)
+	flat := renderRow(d, 31, []list.Item{SessionItem{Session: sess}}, 0, 0)
+	grouped := renderRow(d, 31, []list.Item{SessionItem{Session: sess, GroupKey: "k"}}, 0, 0)
 
 	if want := "…/portal/internal/tui"; !strings.Contains(ansi.Strip(flat), want) {
 		t.Errorf("flat row directory = %q, want it to carry %q", ansi.Strip(flat), want)
@@ -550,7 +502,7 @@ func TestSessionRow_DirColumnNarrowsByAGroupedRowsIndent(t *testing.T) {
 func TestSessionRow_DirColumnRendersWholeOnAnUnsizedList(t *testing.T) {
 	home := t.TempDir()
 
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Dir: home + "/Code/portal/internal/tui"})
+	items := flatItems(Session{Name: "alpha", Dir: home + "/Code/portal/internal/tui"})
 	out := renderRow(SessionDelegate{Home: home, ShowDir: true}, 0, items, 0, 0)
 	vis := ansi.Strip(out)
 
@@ -563,9 +515,9 @@ func TestSessionRow_DirColumnNeverOverflowsAtNarrowWidths(t *testing.T) {
 	home := t.TempDir()
 
 	for _, w := range []int{1, 5, 10, 20, 25, 26, 29, 40, 80} {
-		for _, sess := range []tmux.Session{
-			{Name: "x", Windows: 1, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
-			{Name: "agentic-workflows-code-based-that-is-quite-long", Windows: 12, Attached: true, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
+		for _, sess := range []Session{
+			{Name: "x", Dir: home + "/Code/portal/internal/tui/deeply/nested"},
+			{Name: "agentic-workflows-code-based-that-is-quite-long", Attached: true, Dir: home + "/Code/portal/internal/tui/deeply/nested"},
 		} {
 			items := flatItems(sess)
 			for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -585,7 +537,7 @@ func TestSessionRow_DirColumnNeverLeansOnThePathologicalWidthBackstop(t *testing
 	home := t.TempDir()
 
 	margin := strings.Repeat(" ", rowRightMargin)
-	narrowest := leftBarColumnWidth + nameGap + countSlotWidth + indicatorSlotWidth + rowRightMargin + 1
+	narrowest := leftBarColumnWidth + nameGap + indicatorSlotWidth + rowRightMargin + 1
 
 	for _, dir := range []string{
 		home + "/Code",
@@ -594,7 +546,7 @@ func TestSessionRow_DirColumnNeverLeansOnThePathologicalWidthBackstop(t *testing
 	} {
 		for _, name := range []string{"a", "portal-a1b2", "a-considerably-longer-session-name"} {
 			for _, attached := range []bool{false, true} {
-				items := flatItems(tmux.Session{Name: name, Windows: 3, Attached: attached, Dir: dir})
+				items := flatItems(Session{Name: name, Attached: attached, Dir: dir})
 				for w := narrowest; w <= 120; w++ {
 					out := renderRow(SessionDelegate{Home: home, ShowDir: true}, w, items, 0, 0)
 					if vis := ansi.Strip(out); !strings.HasSuffix(vis, margin) {
@@ -620,24 +572,24 @@ func sgrOpeningGlyph(line, glyph string) string {
 
 func TestSessionRow_AttachedIndicatorRendersWithoutItsWord(t *testing.T) {
 	const w = 80
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		vis := ansi.Strip(renderRow(SessionDelegate{Theme: th}, w, items, 0, 0))
 
 		if strings.Contains(vis, "attached") {
 			t.Errorf("[%v] attached row still renders the word: %q", themeLabel(th), vis)
 		}
-		if want := "3 windows" + strings.Repeat(" ", 2+indicatorSlotWidth-1) + rowIndicatorGlyph; !strings.Contains(vis, want) {
-			t.Errorf("[%v] attached row missing the bare dot after the count: %q", themeLabel(th), vis)
+		if want := strings.Repeat(" ", nameGap+indicatorSlotWidth-1) + rowIndicatorGlyph; !strings.Contains(vis, want) {
+			t.Errorf("[%v] attached row missing the bare dot after the gap: %q", themeLabel(th), vis)
 		}
 	}
 }
 
 func TestSessionRow_SameWidthAttachedUnattachedAndGone(t *testing.T) {
 	items := flatItems(
-		tmux.Session{Name: "attached-one", Windows: 2, Attached: true},
-		tmux.Session{Name: "unattached-one", Windows: 2, Attached: false},
-		tmux.Session{Name: "gone-one", Windows: 2, Attached: true},
+		Session{Name: "attached-one", Attached: true},
+		Session{Name: "unattached-one", Attached: false},
+		Session{Name: "gone-one", Attached: true},
 	)
 	for _, w := range []int{40, 60, 80, 120} {
 		for _, colourless := range []bool{false, true} {
@@ -657,8 +609,8 @@ func TestSessionRow_ReclaimedCellsGoToTheName(t *testing.T) {
 	const w = 40
 	longName := "this-is-a-really-very-long-session-name-that-overflows"
 	items := flatItems(
-		tmux.Session{Name: longName, Windows: 7, Attached: true},
-		tmux.Session{Name: longName, Windows: 7, Attached: true},
+		Session{Name: longName, Attached: true},
+		Session{Name: longName, Attached: true},
 	)
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, GoneFlagged: markedSet()}
 	attached := renderRow(d, w, items, 0, 0)
@@ -684,25 +636,26 @@ func TestSessionRow_ReclaimedCellsGoToTheName(t *testing.T) {
 
 	vis := ansi.Strip(attached)
 	nameEnd := visibleColOf(attached, "…") + 1
-	if countCol := visibleColOf(attached, "7 windows"); countCol != nameEnd+nameGap {
-		t.Errorf("count starts at col %d, want %d (name end + gap, no hole): %q", countCol, nameEnd+nameGap, vis)
+	want := nameEnd + nameGap + indicatorSlotWidth - 1
+	if dotCol := visibleColOf(attached, rowIndicatorGlyph); dotCol != want {
+		t.Errorf("indicator at col %d, want %d (name end + gap + slot, no hole): %q", dotCol, want, vis)
 	}
 }
 
 func TestSessionRow_GoneBadgeReplacesTheWholeTrailingRegion(t *testing.T) {
 	const w = 60
 	items := flatItems(
-		tmux.Session{Name: "fab-flowx-explore", Windows: 2, Attached: true},
-		tmux.Session{Name: "designlab-web-r8suyU", Windows: 3, Attached: false},
+		Session{Name: "fab-flowx-explore", Attached: true},
+		Session{Name: "designlab-web-r8suyU", Attached: false},
 	)
 	goldens := map[bool][2]string{
 		false: {
-			"\x1b[48;2;40;36;58m\x1b[m\x1b[38;2;247;118;142;48;2;40;36;58m⚠\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58mfab-flowx-explore\x1b[m\x1b[48;2;40;36;58m                \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;169;177;214;48;2;40;36;58m2 windows\x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;247;118;142;48;2;40;36;58msession gone\x1b[m\x1b[48;2;40;36;58m\x1b[m",
-			"\x1b[48;2;11;12;20m\x1b[m\x1b[38;2;247;118;142;48;2;11;12;20m⚠\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mdesignlab-web-r8suyU\x1b[m\x1b[48;2;11;12;20m             \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m3 windows\x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;247;118;142;48;2;11;12;20msession gone\x1b[m\x1b[48;2;11;12;20m\x1b[m",
+			"\x1b[48;2;40;36;58m\x1b[m\x1b[38;2;247;118;142;48;2;40;36;58m⚠\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58mfab-flowx-explore\x1b[m\x1b[48;2;40;36;58m                           \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;247;118;142;48;2;40;36;58msession gone\x1b[m",
+			"\x1b[48;2;11;12;20m\x1b[m\x1b[38;2;247;118;142;48;2;11;12;20m⚠\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mdesignlab-web-r8suyU\x1b[m\x1b[48;2;11;12;20m                        \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;247;118;142;48;2;11;12;20msession gone\x1b[m",
 		},
 		true: {
-			"⚠ \x1b[1mfab-flowx-explore\x1b[m                  2 windows  session gone",
-			"⚠ \x1b[1mdesignlab-web-r8suyU\x1b[m               3 windows  session gone",
+			"⚠ \x1b[1mfab-flowx-explore\x1b[m                             session gone",
+			"⚠ \x1b[1mdesignlab-web-r8suyU\x1b[m                          session gone",
 		},
 	}
 	for colourless, want := range goldens {
@@ -725,8 +678,8 @@ func TestSessionRow_GoneBadgeReplacesTheWholeTrailingRegion(t *testing.T) {
 func TestSessionRow_IndicatorKeepsPositiveTokenWhenSelected(t *testing.T) {
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		items := flatItems(
-			tmux.Session{Name: "attached-selected", Windows: 1, Attached: true},
-			tmux.Session{Name: "attached-unselected", Windows: 1, Attached: true},
+			Session{Name: "attached-selected", Attached: true},
+			Session{Name: "attached-unselected", Attached: true},
 		)
 		green := tokenFgSeq(t, th.StatePositive)
 		for i, wantBg := range []string{selectionBgParams(t, th), wantCanvasBgParams(t, th)} {
@@ -741,14 +694,14 @@ func TestSessionRow_IndicatorKeepsPositiveTokenWhenSelected(t *testing.T) {
 func TestSessionRow_ColourlessAttachedRendersLetterNotDot(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 3, Attached: true},
-		tmux.Session{Name: "bravo", Windows: 3, Attached: false},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo", Attached: false},
 	)
 	d := SessionDelegate{Theme: testDarkTheme(t), Colourless: true}
 	margin := strings.Repeat(" ", rowRightMargin)
 
 	attached := ansi.Strip(renderRow(d, w, items, 0, 0))
-	if !strings.HasSuffix(attached, "3 windows"+strings.Repeat(" ", 2+indicatorSlotWidth-1)+attachedIndicatorLetter+margin) {
+	if !strings.HasSuffix(attached, strings.Repeat(" ", nameGap+indicatorSlotWidth-1)+attachedIndicatorLetter+margin) {
 		t.Errorf("colourless attached row must render %q in the indicator cell: %q", attachedIndicatorLetter, attached)
 	}
 	if strings.Contains(attached, rowIndicatorGlyph) {
@@ -756,18 +709,18 @@ func TestSessionRow_ColourlessAttachedRendersLetterNotDot(t *testing.T) {
 	}
 
 	unattached := ansi.Strip(renderRow(d, w, items, 1, 0))
-	if !strings.HasSuffix(unattached, "3 windows"+strings.Repeat(" ", 2+indicatorSlotWidth)+margin) {
+	if !strings.HasSuffix(unattached, "bravo"+strings.Repeat(" ", w-leftBarColumnWidth-len("bravo"))) {
 		t.Errorf("colourless unattached row must leave the indicator cell blank: %q", unattached)
 	}
 }
 
 func TestSessionRow_UnattachedRendersNothingInTheIndicatorCell(t *testing.T) {
 	const w = 80
-	items := flatItems(tmux.Session{Name: "bravo", Windows: 3, Attached: false})
+	items := flatItems(Session{Name: "bravo", Attached: false})
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 		out := renderRow(SessionDelegate{Theme: th}, w, items, 0, 0)
 		vis := ansi.Strip(out)
-		if !strings.HasSuffix(vis, "3 windows"+strings.Repeat(" ", 2+indicatorSlotWidth+rowRightMargin)) {
+		if !strings.HasSuffix(vis, "bravo"+strings.Repeat(" ", w-leftBarColumnWidth-len("bravo"))) {
 			t.Errorf("[%v] unattached row must leave the indicator cell blank: %q", themeLabel(th), vis)
 		}
 		if seq := tokenFgSeq(t, th.StatePositive); strings.Contains(out, seq) {
@@ -777,7 +730,7 @@ func TestSessionRow_UnattachedRendersNothingInTheIndicatorCell(t *testing.T) {
 }
 
 func TestSessionRow_IndicatorPacksHardRight(t *testing.T) {
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 3, Attached: true})
+	items := flatItems(Session{Name: "alpha", Attached: true})
 	for _, w := range []int{40, 80, 120} {
 		for _, d := range []SessionDelegate{{Theme: testDarkTheme(t)}, {Theme: testDarkTheme(t), Colourless: true}} {
 			glyph := rowIndicatorGlyph

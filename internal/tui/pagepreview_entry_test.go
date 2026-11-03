@@ -12,7 +12,7 @@ func keySpaceMsg() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 }
 
-func modelWithSeams(t *testing.T, sessions []tmux.Session, enum TmuxEnumerator, reader ScrollbackReader) Model {
+func modelWithSeams(t *testing.T, sessions []Session, enum TmuxEnumerator, reader ScrollbackReader) Model {
 	t.Helper()
 	items := ToListItems(sessions)
 	l := newSessionList(items)
@@ -33,9 +33,9 @@ func modelWithSeams(t *testing.T, sessions []tmux.Session, enum TmuxEnumerator, 
 }
 
 func TestSpaceOnSessionsPageTransitionsToPagePreviewWhenHighlighted(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 2, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -92,8 +92,8 @@ func TestSpaceOnSessionsPageNoOpWhenListEmpty(t *testing.T) {
 }
 
 func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -127,8 +127,8 @@ func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
 }
 
 func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationFails(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{err: errStub("boom")}
 	reader := &recordingReader{}
@@ -152,8 +152,8 @@ func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationFails(t *testing.T) 
 }
 
 func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationEmpty(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{groups: nil}
 	reader := &recordingReader{}
@@ -174,8 +174,8 @@ func TestSpaceOnSessionsPageRemainsOnSessionsWhenEnumerationEmpty(t *testing.T) 
 }
 
 func TestSpaceDuringSettingFilterDoesNotCallNewPreviewModel(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -254,8 +254,8 @@ func TestSpaceOnProjectsPageDoesNotCallNewPreviewModel(t *testing.T) {
 }
 
 func TestPagePreviewRoutesUpdateToPreviewModel(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

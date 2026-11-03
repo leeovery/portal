@@ -129,7 +129,7 @@ func TestBootstrapWarningsSink_ConcurrentAddAndDrainAreSafe(t *testing.T) {
 func TestStageBootstrapWarningsOnModel(t *testing.T) {
 	t.Run("empty sink leaves model pending warnings nil", func(t *testing.T) {
 		bootstrapWarnings = &BootstrapWarningsSink{}
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(asPickerLister(&mockSessionLister{}))
 
 		stageBootstrapWarningsOnModel(&m)
 
@@ -142,7 +142,7 @@ func TestStageBootstrapWarningsOnModel(t *testing.T) {
 		bootstrapWarnings = &BootstrapWarningsSink{}
 		bootstrapWarnings.Add(bootstrap.SaverDownWarning())
 		bootstrapWarnings.Add(bootstrap.CorruptSessionsJSONWarning())
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(asPickerLister(&mockSessionLister{}))
 
 		stageBootstrapWarningsOnModel(&m)
 

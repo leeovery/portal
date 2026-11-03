@@ -498,6 +498,46 @@ func (r skeletonMarkerReader) ListSkeletonMarkers() (map[string]struct{}, error)
 	return state.ListSkeletonMarkers(r.lister)
 }
 
+// pickerSessions maps tmux's sessions onto the picker's. tmux answers for every
+// session it lists, and no label is recorded anywhere yet, so each row shows its
+// name. The picker resolves a session's directory from Dir as it always has,
+// falling back to the pane's git root when grouping.
+func pickerSessions(sessions []tmux.Session) []tui.Session {
+	out := make([]tui.Session, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, tui.Session{Name: s.Name, Dir: s.Dir, Attached: s.Attached})
+	}
+	return out
+}
+
+type tmuxSessionLister interface {
+	ListSessions() ([]tmux.Session, error)
+}
+
+type tmuxPendingResumeReader interface {
+	ListPendingResumePanes() (tmux.PendingResumeView, error)
+}
+
+// pickerSessionSource serves the picker's session and pending-resume reads from
+// tmux.
+type pickerSessionSource struct {
+	sessions tmuxSessionLister
+	pending  tmuxPendingResumeReader
+}
+
+func (p pickerSessionSource) ListSessions() ([]tui.Session, error) {
+	sessions, err := p.sessions.ListSessions()
+	return pickerSessions(sessions), err
+}
+
+func (p pickerSessionSource) ListPendingResumeSessions() (map[string]struct{}, error) {
+	view, err := p.pending.ListPendingResumePanes()
+	if err != nil {
+		return nil, err
+	}
+	return view.Sessions, nil
+}
+
 type tuiConfig struct {
 	lister           tui.SessionLister
 	killer           tui.SessionKiller
@@ -527,7 +567,6 @@ type tuiConfig struct {
 	spawnGetenv      func(string) string
 	spawnLogger      *slog.Logger
 	cwd              string
-	insideTmux       bool
 	currentSession   string
 	serverStarted    bool
 	progressReceiver tea.Cmd
@@ -598,7 +637,6 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ThemeSource:        cfg.themeSource,
 		Command:            command,
 		ServerStarted:      cfg.serverStarted,
-		InsideTmux:         cfg.insideTmux,
 		CurrentSession:     cfg.currentSession,
 		NoColor:            cfg.noColor,
 		ProgressReceiver:   cfg.progressReceiver,
@@ -707,8 +745,10 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 
 	spawnSeams := buildProductionSpawnSeams(client)
 
+	sessionSource := pickerSessionSource{sessions: client, pending: client}
+
 	cfg := tuiConfig{
-		lister:          client,
+		lister:          sessionSource,
 		killer:          client,
 		renamer:         client,
 		projectStore:    store,
@@ -720,7 +760,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		previewAttacher: previewAttacher,
 		dirReader:       client,
 		dirRunner:       &resolver.RealCommandRunner{},
-		pendingReader:   client,
+		pendingReader:   sessionSource,
 		skeletonMarkers: skeletonMarkerReader{lister: client},
 		initialMode:     initialMode,
 		theme:           resolution.Nomination,
@@ -750,10 +790,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		cfg.themePersister = newThemePersister(prefsStore)
 	}
 
-	if sessionName := currentPickerSession(client); sessionName != "" {
-		cfg.insideTmux = true
-		cfg.currentSession = sessionName
-	}
+	cfg.currentSession = currentPickerSession(client)
 
 	m := buildTUIModel(cfg, landing, command)
 	// Staged rather than written: a direct write while the TUI holds the screen

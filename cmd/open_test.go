@@ -1606,7 +1606,7 @@ func stubTmuxCommander() *commandertest.Scripted {
 
 func defaultTestTUIConfig() tuiConfig {
 	return tuiConfig{
-		lister:         &mockSessionLister{},
+		lister:         asPickerLister(&mockSessionLister{}),
 		killer:         &stubSessionKiller{},
 		renamer:        &stubSessionRenamer{},
 		projectStore:   &stubProjectStore{},
@@ -1630,8 +1630,8 @@ func TestBuildTUIModel(t *testing.T) {
 		if m.CommandPending() {
 			t.Error("CommandPending() = true, want false")
 		}
-		if m.InsideTmux() {
-			t.Error("InsideTmux() = true, want false")
+		if m.CurrentSession() != "" {
+			t.Errorf("CurrentSession() = %q, want empty", m.CurrentSession())
 		}
 		if m.ActivePage() != tui.PageSessions {
 			t.Errorf("ActivePage() = %d, want PageSessions (0)", m.ActivePage())
@@ -1690,16 +1690,12 @@ func TestBuildTUIModel(t *testing.T) {
 		}
 	})
 
-	t.Run("inside tmux detection passes session name to model", func(t *testing.T) {
+	t.Run("the current session name passes to the model", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.insideTmux = true
 		cfg.currentSession = "my-session"
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
-		if !m.InsideTmux() {
-			t.Error("InsideTmux() = false, want true")
-		}
 		if m.CurrentSession() != "my-session" {
 			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "my-session")
 		}
@@ -1789,7 +1785,6 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 	t.Run("serverStarted true preserves other options", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.insideTmux = true
 		cfg.currentSession = "dev"
 		cfg.serverStarted = true
 
@@ -1797,9 +1792,6 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 		if !m.ServerStarted() {
 			t.Error("ServerStarted() = false, want true")
-		}
-		if !m.InsideTmux() {
-			t.Error("InsideTmux() = false, want true")
 		}
 		if m.CurrentSession() != "dev" {
 			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "dev")
@@ -1809,7 +1801,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 func TestProcessTUIResult(t *testing.T) {
 	t.Run("clean exit without selection returns nil", func(t *testing.T) {
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(asPickerLister(&mockSessionLister{}))
 		connector := &mockSessionConnector{}
 
 		err := processTUIResult(m, connector)
@@ -1823,8 +1815,8 @@ func TestProcessTUIResult(t *testing.T) {
 	})
 
 	t.Run("selected session name forwarded to connector", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 3},
+		sessions := []tui.Session{
+			{Name: "dev"},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

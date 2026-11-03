@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const referenceFooterWidth = 120
@@ -197,9 +196,9 @@ func TestSessionsFooter_NarrowTruncationKeepsHighestPriority(t *testing.T) {
 
 func TestSessionsFooterHeight_SubtractedFromListBudget(t *testing.T) {
 	const w, h = 120, 24
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
@@ -222,9 +221,9 @@ func TestSessionsFooterHeight_SubtractedFromListBudget(t *testing.T) {
 
 func TestSessionsFooterHeight_CountedAtEverySizeApplySite(t *testing.T) {
 	const w, h = 120, 20
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
@@ -242,7 +241,7 @@ func TestSessionsFooterHeight_CountedAtEverySizeApplySite(t *testing.T) {
 
 func TestSessionsFooter_OmittedKeysStillDispatchable(t *testing.T) {
 	t.Run("k still opens the kill confirm modal", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionKiller = keymapParityKiller{}
 		updated, _ := m.updateSessionList(tea.KeyPressMsg{Code: 'k', Text: "k"})
 		if updated.(Model).modal != modalKillConfirm {
@@ -250,7 +249,7 @@ func TestSessionsFooter_OmittedKeysStillDispatchable(t *testing.T) {
 		}
 	})
 	t.Run("r still opens the rename modal", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionRenamer = keymapParityRenamer{}
 		updated, _ := m.updateSessionList(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if updated.(Model).modal != modalRename {
@@ -258,7 +257,7 @@ func TestSessionsFooter_OmittedKeysStillDispatchable(t *testing.T) {
 		}
 	})
 	t.Run("q still quits", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		_, cmd := m.updateSessionList(tea.KeyPressMsg{Code: 'q', Text: "q"})
 		if cmd == nil {
 			t.Fatalf("q must still produce a quit cmd after the footer swap")

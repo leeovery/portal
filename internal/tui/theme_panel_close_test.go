@@ -13,7 +13,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func newClosePanelModel(t *testing.T, dir string, keys theme.RawKeys) (Model, *countingThemeSource, *logtest.Sink) {
@@ -30,11 +29,11 @@ func closePanelForTest(t *testing.T, m Model) (Model, tea.Cmd) {
 	return updated.(Model), cmd
 }
 
-func closePanelSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1},
-		{Name: "charlie", Windows: 2},
+func closePanelSessions() []Session {
+	return []Session{
+		{Name: "alpha", Attached: true},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 }
 

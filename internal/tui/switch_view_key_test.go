@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type fakeModePersister struct {
@@ -26,7 +25,7 @@ func (f *fakeModePersister) Save(mode prefs.SessionListMode) error {
 
 var keyS = tea.KeyPressMsg{Code: 's', Text: "s"}
 
-func newSwitchViewTestModel(t *testing.T, mode prefs.SessionListMode, persister ModePersister, sessions []tmux.Session, projects []project.Project) Model {
+func newSwitchViewTestModel(t *testing.T, mode prefs.SessionListMode, persister ModePersister, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	m := Model{
 		themeState:      themeState{active: testDarkTheme(t)},
@@ -93,7 +92,7 @@ func TestSwitchViewKey(t *testing.T) {
 	t.Run("cycles unconditionally with zero tags", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 		persister := &fakeModePersister{}
 
 		m := newSwitchViewTestModel(t, prefs.ModeByProject, persister, sessions, projects)
@@ -175,7 +174,7 @@ func TestSwitchViewKey(t *testing.T) {
 	t.Run("re-renders the list into the new mode on press", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 		persister := &fakeModePersister{}
 
 		m := newSwitchViewTestModel(t, prefs.ModeFlat, persister, sessions, projects)
@@ -197,9 +196,9 @@ func TestSwitchViewKey(t *testing.T) {
 	})
 
 	t.Run("resets to the first page and first session row on view switch", func(t *testing.T) {
-		var sessions []tmux.Session
+		var sessions []Session
 		for i := range 60 {
-			sessions = append(sessions, tmux.Session{Name: fmt.Sprintf("sess-%02d", i)})
+			sessions = append(sessions, Session{Name: fmt.Sprintf("sess-%02d", i)})
 		}
 		persister := &fakeModePersister{}
 		m := newSwitchViewTestModel(t, prefs.ModeFlat, persister, sessions, nil)

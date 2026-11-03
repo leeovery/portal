@@ -7,10 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func ingestLanding(t *testing.T, m Model, sessions []tmux.Session, projects []project.Project) Model {
+func ingestLanding(t *testing.T, m Model, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	var model tea.Model = m
 	model, _ = model.Update(SessionsMsg{Sessions: sessions})
@@ -18,7 +17,7 @@ func ingestLanding(t *testing.T, m Model, sessions []tmux.Session, projects []pr
 	return model.(Model)
 }
 
-func searchLanding(t *testing.T, mode prefs.SessionListMode, term string, sessions []tmux.Session, projects []project.Project) Model {
+func searchLanding(t *testing.T, mode prefs.SessionListMode, term string, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	m := Build(Deps{
 		Lister:       fakeLister{},
@@ -40,7 +39,7 @@ func sessionNames(items []list.Item) []string {
 }
 
 func TestSearchFormLanding(t *testing.T) {
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "myapp-dev"},
 		{Name: "other"},
 		{Name: "myapp-prod"},
@@ -94,7 +93,7 @@ func TestSearchFormLanding(t *testing.T) {
 				{Path: dirA, Name: "Alpha", Tags: []string{"work"}},
 				{Path: dirB, Name: "Bravo", Tags: []string{"play"}},
 			}
-			grouped := []tmux.Session{
+			grouped := []Session{
 				{Name: "myapp-alpha", Dir: dirA},
 				{Name: "other", Dir: dirB},
 				{Name: "myapp-bravo", Dir: dirB},
@@ -212,7 +211,7 @@ func TestSearchFormLanding(t *testing.T) {
 }
 
 func TestSearchFormPrecedenceOverInitialFilter(t *testing.T) {
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "myapp-dev"},
 		{Name: "other"},
 	}

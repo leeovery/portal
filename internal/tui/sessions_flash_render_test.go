@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func lineIndexContaining(lines []string, substr string) int {
@@ -23,9 +22,9 @@ func renderedSessionLines(t *testing.T, m Model) []string {
 }
 
 func flashModelWithSessions(names ...string) Model {
-	sessions := make([]tmux.Session, 0, len(names))
+	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, tmux.Session{Name: n, Windows: 1, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80

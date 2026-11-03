@@ -11,7 +11,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -425,9 +424,9 @@ func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamp
 	deps.DirRunner = &fakeDirRunner{gitRoot: reader.path}
 
 	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := Build(deps)
@@ -621,7 +620,7 @@ func TestPanelArrow_ColourlessStaysColourless(t *testing.T) {
 		deps.NoColor = colourless
 		m := Build(deps)
 		m.termWidth, m.termHeight = arrowTermW, arrowTermH
-		m.applySessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 2}}, nil)
+		m.applySessions([]Session{{Name: "alpha"}, {Name: "bravo"}}, nil)
 		if colourless {
 			m = armPanelUnderNoColorForTest(t, m)
 		} else {

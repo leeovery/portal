@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -26,7 +25,7 @@ func (stubCreator) CreateFromDir(string, []string) (string, error) { return "", 
 
 func TestBuild(t *testing.T) {
 	t.Run("wires the seam set and applies the initial mode", func(t *testing.T) {
-		lister := &mockSessionLister{sessions: []tmux.Session{{Name: "dev", Windows: 2}}}
+		lister := &mockSessionLister{sessions: []tui.Session{{Name: "dev"}}}
 
 		m := tui.Build(tui.Deps{
 			Lister:      lister,
@@ -78,18 +77,31 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
-	t.Run("inside-tmux excludes the current session and decorates the title", func(t *testing.T) {
+	t.Run("a current session name decorates the title", func(t *testing.T) {
 		m := tui.Build(tui.Deps{
 			Lister:         &mockSessionLister{},
 			InitialMode:    prefs.ModeFlat,
-			InsideTmux:     true,
 			CurrentSession: "current",
 		})
 
-		if !m.InsideTmux() {
-			t.Error("InsideTmux() = false, want true")
+		if got, want := m.CurrentSession(), "current"; got != want {
+			t.Errorf("CurrentSession() = %q, want %q", got, want)
 		}
 		if got, want := m.SessionListTitle(), "Sessions (current: current)"; got != want {
+			t.Errorf("SessionListTitle() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no current session name leaves the title undecorated", func(t *testing.T) {
+		m := tui.Build(tui.Deps{
+			Lister:      &mockSessionLister{},
+			InitialMode: prefs.ModeFlat,
+		})
+
+		if got := m.CurrentSession(); got != "" {
+			t.Errorf("CurrentSession() = %q, want empty", got)
+		}
+		if got, want := m.SessionListTitle(), "Sessions"; got != want {
 			t.Errorf("SessionListTitle() = %q, want %q", got, want)
 		}
 	})
@@ -124,10 +136,10 @@ func TestBuild(t *testing.T) {
 
 	t.Run("initial gone-flagged seeds the abort banner over a multi-select model", func(t *testing.T) {
 		m := tui.Build(tui.Deps{
-			Lister: &mockSessionLister{sessions: []tmux.Session{
-				{Name: "agentic-workflows-codify", Windows: 1},
-				{Name: "fab-flowx-explore", Windows: 2},
-				{Name: "designlab-web-r8suyU", Windows: 3},
+			Lister: &mockSessionLister{sessions: []tui.Session{
+				{Name: "agentic-workflows-codify"},
+				{Name: "fab-flowx-explore"},
+				{Name: "designlab-web-r8suyU"},
 			}},
 			InitialMode: prefs.ModeFlat,
 			Capture: tui.CaptureSeeds{
@@ -142,10 +154,10 @@ func TestBuild(t *testing.T) {
 
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{
-			{Name: "agentic-workflows-codify", Windows: 1},
-			{Name: "fab-flowx-explore", Windows: 2},
-			{Name: "designlab-web-r8suyU", Windows: 3},
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{
+			{Name: "agentic-workflows-codify"},
+			{Name: "fab-flowx-explore"},
+			{Name: "designlab-web-r8suyU"},
 		}})
 		model, _ = model.Update(tui.ProjectsLoadedMsg{})
 

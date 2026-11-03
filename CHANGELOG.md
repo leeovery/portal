@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.6] - 2026-11-03
+
+🐛 Fixed
+
+- The first swipe or scroll in terminals that read mouse state only when the screen changes (such as Rootshell on iOS) is no longer dropped — mouse input is now enabled as the app enters the alternate screen.
+
 ## [0.12.5] - 2026-11-02
 
 ✨ Added

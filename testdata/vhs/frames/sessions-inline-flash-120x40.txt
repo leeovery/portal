@@ -6,10 +6,10 @@
 
   Sessions 4                                                                                               / to filter
 
-  ▌ kiln-relayx-explore                                                                                3 windows   ●
-    orchard-pipeline-codify                                                                            1 window
-    relayx-3RJDWA                                                                                      2 windows
-    tessera-proxy-Vb3kQw                                                                               1 window
+  ▌ kiln-relayx-explore                                                                                            ●
+    orchard-pipeline-codify
+    relayx-3RJDWA
+    tessera-proxy-Vb3kQw
 
 
 

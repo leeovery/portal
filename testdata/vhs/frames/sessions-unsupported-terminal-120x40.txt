@@ -4,18 +4,18 @@
 
   ⚠ unsupported terminal — Apple Terminal · com.apple.Terminal                                                see docs
 
-  ▌ orchard-pipeline-code-based                                                                        3 windows   ●
-    orchard-pipeline-codify                                                                            2 windows
-    kiln-relayx-explore                                                                                1 window
-    lumen webhooks and watchers                                                                        4 windows
-    tessera-proxy-Vb3kQw                                                                               1 window
-    atelier-web-m4TzpD                                                                                 2 windows
-    lumen-sync-engine                                                                                  1 window
-    kiln-aws-migration                                                                                 5 windows
-    relay-v1-api-Hq7wNe                                                                                1 window
-    relayx-3RJDWA                                                                                      2 windows
-    loom-p84cXa                                                                                        1 window
-    quill-Ue9fLr                                                                                       1 window
+  ▌ orchard-pipeline-code-based                                                                                    ●
+    orchard-pipeline-codify
+    kiln-relayx-explore
+    lumen webhooks and watchers
+    tessera-proxy-Vb3kQw
+    atelier-web-m4TzpD
+    lumen-sync-engine
+    kiln-aws-migration
+    relay-v1-api-Hq7wNe
+    relayx-3RJDWA
+    loom-p84cXa
+    quill-Ue9fLr
 
 
 

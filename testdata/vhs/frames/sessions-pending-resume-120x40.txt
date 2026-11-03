@@ -4,10 +4,10 @@
 
   Sessions 4                                                                                               / to filter
 
-  ▌ orchard-pipeline-codify                                                                            2 windows   ●
-    lumen-sync-engine                                                                                  1 window    ●
-    loom-p84cXa                                                                                        1 window
-    quill-Ue9fLr                                                                                       3 windows  ●●
+  ▌ orchard-pipeline-codify                                                                                        ●
+    lumen-sync-engine                                                                                              ●
+    loom-p84cXa
+    quill-Ue9fLr                                                                                                  ●●
 
 
 

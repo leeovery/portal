@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func pressEnter(t *testing.T, m Model) (Model, tea.Cmd) {
@@ -14,9 +13,9 @@ func pressEnter(t *testing.T, m Model) (Model, tea.Cmd) {
 }
 
 func TestMultiSelectEnterN0(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = enterMultiSelectEmpty(t, m)
@@ -42,9 +41,9 @@ func TestMultiSelectEnterN0(t *testing.T) {
 }
 
 func TestMultiSelectEnterN1(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -63,9 +62,9 @@ func TestMultiSelectEnterN1(t *testing.T) {
 }
 
 func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)
@@ -92,9 +91,9 @@ func TestMultiSelectEnterN1IgnoresCursor(t *testing.T) {
 }
 
 func TestMultiSelectEnterN2DetectionUnwired(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 
 	m = pressSession(t, m, pressM)

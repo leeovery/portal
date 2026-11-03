@@ -5,10 +5,9 @@ import (
 
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func newProjectsLoadedRegroupModel(t *testing.T, mode prefs.SessionListMode, sessions []tmux.Session) Model {
+func newProjectsLoadedRegroupModel(t *testing.T, mode prefs.SessionListMode, sessions []Session) Model {
 	t.Helper()
 	m := Model{
 		themeState:      themeState{active: testDarkTheme(t)},
@@ -27,7 +26,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByProject, sessions)
 
@@ -53,7 +52,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("re-groups By Tag when ProjectsLoadedMsg arrives after sessions", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByTag, sessions)
 
@@ -73,7 +72,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("batches the project-list SetItems command with the rebuild command", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeByProject, sessions)
 		m.termWidth, m.termHeight = 80, 24
@@ -93,7 +92,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 	t.Run("does NOT re-group in Flat mode", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 		m := newProjectsLoadedRegroupModel(t, prefs.ModeFlat, sessions)
 		m.rebuildSessionList()
@@ -116,7 +115,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		dirA := t.TempDir()
 		dirB := t.TempDir()
 		keyB := project.CanonicalDirKey(dirB)
-		sessions := []tmux.Session{
+		sessions := []Session{
 			{Name: "alpha", Dir: dirA},
 			{Name: "bravo", Dir: dirB},
 		}

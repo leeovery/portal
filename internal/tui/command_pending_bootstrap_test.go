@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -15,7 +14,7 @@ import (
 // run, and on the cold route a receiver for the concurrent orchestrator.
 func commandPendingDeps(receiver tea.Cmd) tui.Deps {
 	return tui.Deps{
-		Lister:           &mockSessionLister{sessions: []tmux.Session{}},
+		Lister:           &mockSessionLister{sessions: []tui.Session{}},
 		Command:          []string{"npm", "run", "dev"},
 		ServerStarted:    receiver != nil,
 		ProgressReceiver: receiver,
@@ -171,7 +170,7 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 		warnings := []tui.BootstrapWarning{{Lines: []string{"Portal's session saver is not running."}}}
 
 		m := tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{sessions: []tmux.Session{}},
+			Lister:           &mockSessionLister{sessions: []tui.Session{}},
 			ServerStarted:    true,
 			ProgressReceiver: receiver,
 		})
