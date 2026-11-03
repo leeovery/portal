@@ -43,13 +43,20 @@ var tmuxTestOnlyPackages = []string{
 	"internal/transienttest",
 }
 
-// zmxOnlyPackages are the packages the phase 1 surfaces run on. They are never
-// allow-listed: nothing tmux-shaped survives above the driver.
+// zmxOnlyPackages are the packages the phase 1 surfaces and the phase 2
+// attach run on. They are never allow-listed: nothing tmux-shaped survives
+// above the driver.
 var zmxOnlyPackages = []string{
+	"internal/attachkeys",
 	"internal/backend",
+	"internal/proctable",
 	"internal/resolver",
+	"internal/runner",
+	"internal/runnerreg",
+	"internal/runnertoken",
 	"internal/session",
 	"internal/sessionindex",
+	"internal/spawn",
 	"internal/tui",
 }
 
@@ -73,6 +80,16 @@ func TestTmuxImportAllowList_NamesFilesInCmdAndPackagesElsewhere(t *testing.T) {
 			if entry == pkg || strings.HasPrefix(entry, pkg+"/") {
 				t.Errorf("allow-list entry %s is in %s, which runs on zmx alone", entry, pkg)
 			}
+		}
+	}
+}
+
+// A zmx-only entry that names no package would guard nothing.
+func TestZmxOnlyPackages_NameProductionPackages(t *testing.T) {
+	root := sourceguardtest.ProjectRoot(t)
+	for _, pkg := range zmxOnlyPackages {
+		if files, err := sourceguardtest.PackageGoFiles(filepath.Join(root, filepath.FromSlash(pkg)), false); err != nil || len(files) == 0 {
+			t.Errorf("zmx-only entry %s holds no production source (%v)", pkg, err)
 		}
 	}
 }
