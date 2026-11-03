@@ -11,9 +11,19 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/zmxtest"
 	"github.com/spf13/cobra"
 )
+
+func TestWithBackendDeps_RefusesANilBackend(t *testing.T) {
+	rec := &harnesstest.Recorder{}
+	rec.Run(func() { requireStagedBackend(rec, BackendDeps{}) })
+
+	if len(rec.Fatals) != 1 || !strings.Contains(rec.Fatals[0], "Backend is nil") {
+		t.Errorf("fatals = %q, want one naming the nil Backend", rec.Fatals)
+	}
+}
 
 // pathWithoutZmx leaves PATH holding nothing at all.
 func pathWithoutZmx(t *testing.T) {

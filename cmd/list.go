@@ -26,11 +26,14 @@ func isTTY() bool {
 
 const listColumnGap = "    "
 
+const listNotAnswering = "not answering"
+
 // formatSessionLong is name, label, attached state and dir. A session that
-// did not answer is known only by its name, so that is all it shows.
+// did not answer is known only by its name, so it says so rather than leave
+// its other fields to read as missing.
 func formatSessionLong(s backend.Session, idx *sessionindex.Index) string {
 	if !s.Answered {
-		return s.Name
+		return s.Name + listColumnGap + listNotAnswering
 	}
 	status := "detached"
 	if s.Attached() {
@@ -69,7 +72,7 @@ var listCmd = &cobra.Command{
 		useLong := (listToTTY() || longFlag) && !shortFlag
 		format := func(s backend.Session) string { return s.Name }
 		if useLong {
-			idx, err := readSessionIndex()
+			idx, err := listLabels(longFlag)
 			if err != nil {
 				return err
 			}
@@ -84,6 +87,17 @@ var listCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// listLabels is the index the long form takes its labels from. Asked for
+// with --long, an index that cannot be read fails the listing. A terminal's
+// default long form loses only its labels to one, so it reads as empty.
+func listLabels(asked bool) (sessionindex.Index, error) {
+	idx, err := readSessionIndex()
+	if err != nil && !asked {
+		return sessionindex.Index{}, nil
+	}
+	return idx, err
 }
 
 func listToTTY() bool {

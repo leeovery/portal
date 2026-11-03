@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -115,7 +116,7 @@ func TestListCommand(t *testing.T) {
 		assertListed(t, fake)
 	})
 
-	t.Run("it lists a session that does not answer by its name alone", func(t *testing.T) {
+	t.Run("it lists a session that does not answer by its name, marked not answering in the long form", func(t *testing.T) {
 		fake := twoSessions()
 		fake.StopAnswering("claude-lab")
 		stateDir := stageList(t, fake, false)
@@ -124,9 +125,29 @@ func TestListCommand(t *testing.T) {
 		if got, want := runList(t, "--short"), "claude-lab\nflowx-dev\n"; got != want {
 			t.Errorf("--short output = %q, want %q", got, want)
 		}
-		want := "claude-lab\nflowx-dev    flowx-dev    attached    /work/flowx\n"
+		want := "claude-lab    not answering\nflowx-dev    flowx-dev    attached    /work/flowx\n"
 		if got := runList(t, "--long"); got != want {
 			t.Errorf("--long output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it drops only the labels on a terminal when the index cannot be read", func(t *testing.T) {
+		stageList(t, twoSessions(), true)
+		blockStateDir(t)
+
+		want := "claude-lab    claude-lab    detached    /work/lab\n" +
+			"flowx-dev    flowx-dev    attached    /work/flowx\n"
+		if got := runList(t); got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it fails --long when the index cannot be read", func(t *testing.T) {
+		stageList(t, twoSessions(), true)
+		blockStateDir(t)
+
+		if _, _, err := runRootCmd(t, "list", "--long"); err == nil || !strings.Contains(err.Error(), "sessions.json") {
+			t.Errorf("error = %v, want the index read failure", err)
 		}
 	})
 

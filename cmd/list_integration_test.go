@@ -61,10 +61,10 @@ func TestPortalListAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("it adds label, attached state and dir with --long, and only the name of one that does not answer", func(t *testing.T) {
+	t.Run("it adds label, attached state and dir with --long, and marks one that does not answer", func(t *testing.T) {
 		want := "api-x7Kd9a    api-x7Kd9a    detached    " + workDir + "\n" +
 			"web-Qm3pLz    web · checkout    attached    " + workDir + "\n" +
-			"wedged-Lp4s\n"
+			"wedged-Lp4s    not answering\n"
 		if got := list("--long"); got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}

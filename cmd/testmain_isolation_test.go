@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -50,6 +51,12 @@ func pinToolchainCaches() error {
 		os.Setenv(name, value)
 	}
 	return nil
+}
+
+const refusedDefaultTmuxClient = "tmuxClient: no client staged — stage one in the command's context; the default client would reach the real tmux server"
+
+func refuseDefaultTmuxClient() *tmux.Client {
+	panic(refusedDefaultTmuxClient)
 }
 
 func TestMain(m *testing.M) {
@@ -96,6 +103,9 @@ func TestMain(m *testing.M) {
 	// Neutralised package-wide: production dispatches this on its own goroutine, so
 	// a test reaching loadPrefsStore would leave a write racing its own teardown.
 	persistTranslation = func(*prefs.Store, string) {}
+	// A test that sets TMUX="" to stand outside tmux would otherwise reach the
+	// developer's live server through a missed seam.
+	defaultTmuxClient = refuseDefaultTmuxClient
 
 	code := m.Run()
 	if err := os.RemoveAll(homeDir); err != nil {

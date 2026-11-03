@@ -19,6 +19,17 @@ func isolateStateDir(t *testing.T) string {
 	return dir
 }
 
+// blockStateDir points the state directory beneath a regular file, so
+// sessions.json can be neither found nor read.
+func blockStateDir(t *testing.T) {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+	t.Setenv("PORTAL_STATE_DIR", filepath.Join(blocker, "state"))
+}
+
 // seedSessionsJSON writes body as sessions.json in a state directory of the
 // test's own, and returns the directory.
 func seedSessionsJSON(t *testing.T, body string) string {
@@ -33,8 +44,17 @@ func seedSessionsJSON(t *testing.T, body string) string {
 const legacyIndexBody = `{"version": 1, "saved_at": "2026-10-01T00:00:00Z", "sessions": []}`
 
 func TestLegacyIndexStop(t *testing.T) {
-	// Exempt commands are covered too: alias and init are bootstrap-exempt.
-	for _, args := range [][]string{{"list"}, {"open"}, {"alias", "list"}, {"init", "zsh"}} {
+	// Bootstrap-exempt commands are covered too: every row from alias on.
+	for _, args := range [][]string{
+		{"list"},
+		{"open"},
+		{"alias", "list"},
+		{"init", "zsh"},
+		{"__complete", "open", ""},
+		{"hook", "list"},
+		{"doctor"},
+		{"uninstall"},
+	} {
 		t.Run("it stops "+strings.Join(args, " ")+" with one line pointing at portal migrate", func(t *testing.T) {
 			dir := seedSessionsJSON(t, legacyIndexBody)
 			fake := backendtest.New()
@@ -92,11 +112,7 @@ func TestLegacyIndexStop(t *testing.T) {
 	})
 
 	t.Run("it passes a sessions.json that cannot be read", func(t *testing.T) {
-		blocker := filepath.Join(t.TempDir(), "not-a-dir")
-		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-			t.Fatalf("write blocker file: %v", err)
-		}
-		t.Setenv("PORTAL_STATE_DIR", filepath.Join(blocker, "state"))
+		blockStateDir(t)
 		fake := backendtest.New()
 		withBackendDeps(t, BackendDeps{Backend: fake})
 

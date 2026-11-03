@@ -213,7 +213,7 @@ New sessions auto-resolve to the git repository root when applicable.
 
 ### `xctl list`
 
-List running sessions. Portal's own are hidden; a session that does not answer is listed by its name alone.
+List running sessions. Portal's own are hidden; a session that does not answer is listed by its name, marked `not answering` in the long form.
 
 ```bash
 xctl list                            # auto-detect format
