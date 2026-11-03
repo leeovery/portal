@@ -16,10 +16,14 @@ import (
 // environment the reader can't see, and its parent. A pid missing from either
 // map fails that read. reusedAfterArgs stands in for a pid that exits once
 // its args are read and is taken by a process with the parent it names.
+// parentReusedAfterRead stands in for a child whose parent exits once the
+// child's parent is read: the child is reparented to pid 1, and the parent's
+// pid is taken by a process whose ZMX_DIR it names.
 type procTree struct {
-	dirs            map[int]string
-	parents         map[int]int
-	reusedAfterArgs map[int]int
+	dirs                  map[int]string
+	parents               map[int]int
+	reusedAfterArgs       map[int]int
+	parentReusedAfterRead map[int]string
 }
 
 func (p *procTree) List() ([]proctable.Process, error) {
@@ -48,6 +52,10 @@ func (p *procTree) Parent(pid int) (int, error) {
 	ppid, ok := p.parents[pid]
 	if !ok {
 		return 0, errors.New("no such process")
+	}
+	if dir, reused := p.parentReusedAfterRead[pid]; reused {
+		delete(p.parentReusedAfterRead, pid)
+		p.dirs[ppid], p.parents[pid] = dir, 1
 	}
 	return ppid, nil
 }
@@ -123,6 +131,41 @@ func TestOwnership_ReadsEachParentAfterItsArgs(t *testing.T) {
 	mine, err := owned(dir)
 	if err != nil || slices.Contains(mine, 10) || !slices.Contains(mine, 20) {
 		t.Errorf("owned = %v, %v; want the daemon 20 and never the pid a stranger took", mine, err)
+	}
+}
+
+// A proof checks the chain it walked still stands once a parent's args prove
+// the directory: a child whose parent exits, and whose parent's pid a test's
+// own zmx then takes, is never proved through that zmx.
+func TestOwnership_ChecksTheChainStandsAfterTheProof(t *testing.T) {
+	const dir = "/tmp/zx-1"
+	for name, c := range map[string]struct {
+		tree procTree
+		want bool
+	}{
+		"a parent that stood through the proof proves its child": {
+			procTree{dirs: map[int]string{10: "", 20: dir}, parents: map[int]int{10: 20, 20: 1}}, true,
+		},
+		"a parent whose pid a test's zmx took after the child's parent was read does not": {
+			procTree{
+				dirs:                  map[int]string{10: "", 20: ""},
+				parents:               map[int]int{10: 20, 20: 1},
+				parentReusedAfterRead: map[int]string{10: dir},
+			}, false,
+		},
+		"nor does one taken further up the chain": {
+			procTree{
+				dirs:                  map[int]string{10: "", 20: "", 30: ""},
+				parents:               map[int]int{10: 20, 20: 30, 30: 1},
+				parentReusedAfterRead: map[int]string{20: dir},
+			}, false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := ownedThrough(10, dir, &c.tree); got != c.want {
+				t.Errorf("ownedThrough(10) = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

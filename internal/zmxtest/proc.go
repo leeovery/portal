@@ -38,25 +38,40 @@ func ownedBy(pid int, dir string) bool {
 }
 
 // ownedThrough walks from pid up its parents to one whose environment proves
-// dir, reading each process's args, then its parent. A walk that reaches pid
-// 1, fails a read or repeats a pid proves nothing, so an orphan reparented to
-// launchd is never owned: it leaks rather than risk a wrong kill.
+// dir, reading each process's args, then its parent, and then checks the
+// chain it walked still stands. A walk that reaches pid 1, fails a read or
+// repeats a pid proves nothing, so an orphan reparented to launchd is never
+// owned: it leaks rather than risk a wrong kill.
 func ownedThrough(pid int, dir string, r procReader) bool {
-	seen := map[int]bool{}
-	for pid > 1 && !seen[pid] {
-		seen[pid] = true
+	var chain []int
+	for pid > 1 && !slices.Contains(chain, pid) {
+		chain = append(chain, pid)
 		a, err := r.Args(pid)
 		if err != nil {
 			return false
 		}
 		if slices.Contains(a.Env, "ZMX_DIR="+dir) {
-			return true
+			return standing(chain, r)
 		}
 		if pid, err = r.Parent(pid); err != nil {
 			return false
 		}
 	}
 	return false
+}
+
+// standing reports whether each process of chain still has the next as its
+// parent, read after every args read the walk made. A process whose parent
+// exits is reparented and never gets that parent back, so a match proves the
+// parent outlived the read of its args: its pid was not taken by another
+// process, a test's own zmx among them, that the read then proved.
+func standing(chain []int, r procReader) bool {
+	for i := 0; i+1 < len(chain); i++ {
+		if parent, err := r.Parent(chain[i]); err != nil || parent != chain[i+1] {
+			return false
+		}
+	}
+	return true
 }
 
 // owned lists the processes started for dir. The listing only names the pids
