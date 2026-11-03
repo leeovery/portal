@@ -13,6 +13,8 @@ var errLabelRefused = errors.New("label refused: it holds a control or formattin
 var renameCmd = &cobra.Command{
 	Use:   "rename [text...]",
 	Short: "Set the current session's label; no text resets it to the session's name",
+	Example: `  portal rename api work
+  portal rename -- -wip    a label starting with - goes after --`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, err := currentSession()
 		if err != nil {

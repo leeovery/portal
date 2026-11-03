@@ -85,6 +85,46 @@ func TestKillCommand(t *testing.T) {
 		assertIndexed(t, dir, "my-session-abc123", true)
 	})
 
+	t.Run("it removes the entry of a session that ended on its own", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "web-Qm3pLz"})
+		dir := stageKill(t, fake, "api-x7Kd9a", "web-Qm3pLz")
+
+		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+
+		if err == nil || err.Error() != "No session found: api-x7Kd9a" {
+			t.Errorf("error = %v, want %q", err, "No session found: api-x7Kd9a")
+		}
+		assertIndexed(t, dir, "api-x7Kd9a", false)
+		assertIndexed(t, dir, "web-Qm3pLz", true)
+	})
+
+	t.Run("it names the spelling a session is held under", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "dotfiles-PpaTER"})
+		dir := stageKill(t, fake, "dotfiles-PpaTER")
+
+		_, _, err := runRootCmd(t, "kill", "DOTFILES-ppater")
+
+		want := "No session found: DOTFILES-ppater; did you mean dotfiles-PpaTER?"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if _, held := fake.Session("dotfiles-PpaTER"); !held {
+			t.Error("a kill under another spelling ended dotfiles-PpaTER")
+		}
+		assertIndexed(t, dir, "dotfiles-PpaTER", true)
+	})
+
+	t.Run("it reports a missing session whose index entry could not be removed", func(t *testing.T) {
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		blockStateDir(t)
+
+		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "No session found: api-x7Kd9a, and its session index entry could not be removed: ") {
+			t.Errorf("error = %v, want the missing session reported alongside the index failure", err)
+		}
+	})
+
 	t.Run("it says a session that does not answer may still be killed, keeping its entry", func(t *testing.T) {
 		fake := backendtest.New(backend.Session{Name: "wedged-Lp4s"})
 		fake.StopAnswering("wedged-Lp4s")

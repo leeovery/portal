@@ -291,7 +291,7 @@ func (b *Backend) open(ctx context.Context, name string) (*conn, socket, error) 
 		return nil, socket{}, backend.ErrNoSuchSession
 	}
 	if s.name != name {
-		return nil, socket{}, fmt.Errorf("held as %q: %w", s.name, backend.ErrNoSuchSession)
+		return nil, socket{}, &backend.HeldAsError{Held: s.name}
 	}
 	c, err := b.connect(ctx, name)
 	if gone(err) {

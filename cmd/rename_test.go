@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -38,6 +39,24 @@ func TestRenameCommand(t *testing.T) {
 		}
 
 		assertLabel(t, dir, currentSessionName, "api  work")
+	})
+
+	t.Run("it takes a label starting with - after --, as its help shows", func(t *testing.T) {
+		dir := isolateStateDir(t)
+		t.Setenv("ZMX_SESSION", currentSessionName)
+
+		if _, _, err := runRootCmd(t, "rename", "--", "-wip"); err != nil {
+			t.Fatalf("rename -- -wip: %v", err)
+		}
+		assertLabel(t, dir, currentSessionName, "-wip")
+
+		stdout, _, err := runRootCmd(t, "rename", "--help")
+		if err != nil {
+			t.Fatalf("rename --help: %v", err)
+		}
+		if !strings.Contains(stdout.String(), "portal rename -- -wip") {
+			t.Errorf("help = %q, want it to show portal rename -- -wip", stdout)
+		}
 	})
 
 	t.Run("it leaves other sessions' labels alone", func(t *testing.T) {

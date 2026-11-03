@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -14,29 +15,42 @@ var killCmd = &cobra.Command{
 	Short: "Kill a session",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-
 		b, err := sessionBackend()
 		if err != nil {
 			return err
 		}
-		if err := b.Kill(cmd.Context(), name); err != nil {
-			return killError(name, err)
-		}
-
-		if err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
-			idx.Remove(name)
-			return nil
-		}); err != nil {
-			return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, err)
-		}
-		return nil
+		return killSession(cmd.Context(), b, args[0])
 	},
+}
+
+// killSession kills the session and removes its index entry. A session already
+// gone keeps no entry either; one that may still be running keeps its own.
+func killSession(ctx context.Context, b backend.Backend, name string) error {
+	killed := b.Kill(ctx, name)
+	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {
+		return killError(name, killed)
+	}
+	removed := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+		idx.Remove(name)
+		return nil
+	})
+	switch {
+	case killed != nil && removed != nil:
+		return fmt.Errorf("%w, and its session index entry could not be removed: %w", killError(name, killed), removed)
+	case killed != nil:
+		return killError(name, killed)
+	case removed != nil:
+		return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, removed)
+	}
+	return nil
 }
 
 // killError words the backend's refusals for the user; any other failure is
 // returned as the backend gave it.
 func killError(name string, err error) error {
+	if held, ok := errors.AsType[*backend.HeldAsError](err); ok {
+		return fmt.Errorf("No session found: %s; did you mean %s?", name, held.Held) //nolint:staticcheck // user-facing message per spec
+	}
 	switch {
 	case errors.Is(err, backend.ErrNoSuchSession):
 		return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec

@@ -77,4 +77,18 @@ func TestPortalKillAgainstZmx(t *testing.T) {
 			t.Errorf("output = %q, want %q", got, "No session found: gone-Zx81Qa")
 		}
 	})
+
+	t.Run("it names the spelling a live session is held under", func(t *testing.T) {
+		out, err := kill("WEB-qm3PLZ")
+
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("portal kill under another spelling = %v, want exit 1\n%s", err, out)
+		}
+		if got, want := strings.TrimSpace(out), "No session found: WEB-qm3PLZ; did you mean web-Qm3pLz?"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+		if held, err := b.Exists(t.Context(), "web-Qm3pLz"); err != nil || !held {
+			t.Errorf("Exists(web-Qm3pLz) = %v, %v; want it left running", held, err)
+		}
+	})
 }

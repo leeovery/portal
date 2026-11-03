@@ -54,6 +54,20 @@ func (e *SessionExistsError) Error() string {
 
 func (e *SessionExistsError) Unwrap() error { return ErrSessionExists }
 
+// HeldAsError is a per-session call's refusal of a name the backend holds
+// only under another spelling, as a filesystem that folds case or Unicode
+// normalisation holds it. It matches ErrNoSuchSession.
+type HeldAsError struct {
+	// Held is the name as the backend holds it.
+	Held string
+}
+
+func (e *HeldAsError) Error() string {
+	return fmt.Sprintf("held as %q: %v", e.Held, ErrNoSuchSession)
+}
+
+func (e *HeldAsError) Unwrap() error { return ErrNoSuchSession }
+
 // portalPrefix marks Portal's own sessions, such as _portal-saver.
 const portalPrefix = "_"
 

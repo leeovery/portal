@@ -34,10 +34,9 @@ var currentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		idx, err := readSessionIndex()
-		if err != nil {
-			return err
-		}
+		// Footers and Claude's --name read this, so an index that cannot be
+		// read costs only the label: the name still names the session.
+		idx, _ := readSessionIndex()
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), idx.Label(name))
 		return err
 	},

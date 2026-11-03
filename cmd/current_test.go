@@ -45,6 +45,20 @@ func TestCurrentCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("it prints the session's name when the index cannot be read", func(t *testing.T) {
+		blockStateDir(t)
+		t.Setenv("ZMX_SESSION", currentSessionName)
+
+		stdout, _, err := runRootCmd(t, "current")
+
+		if err != nil {
+			t.Fatalf("current: %v", err)
+		}
+		if got, want := stdout.String(), currentSessionName+"\n"; got != want {
+			t.Errorf("stdout = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("it prints nothing and fails in one line outside a session", func(t *testing.T) {
 		isolateStateDir(t)
 
