@@ -177,6 +177,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"resumekeys":       {},
 		"resumemode":       {},
 		"restoretest":      {},
+		"runner":           {},
 		"session":          {},
 		"sessionindex":     {},
 		"shellquote":       {},
