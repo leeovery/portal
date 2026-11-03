@@ -27,7 +27,7 @@ func historyFake(t *testing.T, vt string, names ...string) *backendtest.Fake {
 // landed, as the picker shows it a moment after Space.
 func openedPreview(t *testing.T, session string, history HistoryReader, width, height int) previewModel {
 	t.Helper()
-	return NewPreviewModel(session, bodyOf(t, newPreviewHistory(history), session), width, height)
+	return NewPreviewModel(Session{Name: session}, bodyOf(t, newPreviewHistory(history), session), width, height)
 }
 
 // bodyOf is h's body for session, read for an open that never ends.
@@ -204,7 +204,7 @@ func TestNewPreviewModel_OpensAtTheBottomOfItsBody(t *testing.T) {
 }
 
 func TestPreviewSetBody_ReplacesTheBodyAnchoredAtTheBottom(t *testing.T) {
-	m := NewPreviewModel("work", previewLoading, 80, 24)
+	m := NewPreviewModel(Session{Name: "work"}, previewLoading, 80, 24)
 
 	m.setBody(renderHistory([]byte(strings.Repeat("line\r\n", 50) + "last")))
 

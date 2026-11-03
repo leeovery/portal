@@ -43,9 +43,9 @@ func TestSessionListTitleForMode(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := sessionListTitleForMode(c.mode, c.currentSession)
+			got := sessionListTitleForMode(c.mode, c.currentSession, 0)
 			if got != c.want {
-				t.Errorf("sessionListTitleForMode(%v, %q) = %q, want %q",
+				t.Errorf("sessionListTitleForMode(%v, %q, 0) = %q, want %q",
 					c.mode, c.currentSession, got, c.want)
 			}
 		})

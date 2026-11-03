@@ -24,14 +24,6 @@ func shownSession(s backend.Session, idx *sessionindex.Index) tui.Session {
 	}
 }
 
-func shownSessions(sessions []backend.Session, idx *sessionindex.Index) []tui.Session {
-	out := make([]tui.Session, 0, len(sessions))
-	for _, s := range sessions {
-		out = append(out, shownSession(s, idx))
-	}
-	return out
-}
-
 // listShownSessions is the user's sessions as shown. An index that cannot be
 // read costs only what it records: each session still shows, by its name.
 func listShownSessions(ctx context.Context, b backend.Backend) ([]tui.Session, error) {
@@ -40,7 +32,11 @@ func listShownSessions(ctx context.Context, b backend.Backend) ([]tui.Session, e
 		return nil, err
 	}
 	idx, _ := readSessionIndex()
-	return shownSessions(sessions, &idx), nil
+	out := make([]tui.Session, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, shownSession(s, &idx))
+	}
+	return out, nil
 }
 
 // pickerLister serves the picker its rows.

@@ -160,7 +160,7 @@ func TestRenameCommand(t *testing.T) {
 
 	t.Run("it leaves other sessions' labels alone", func(t *testing.T) {
 		_, dir := stageRename(t)
-		setLabel(t, dir, "web-Qm3pLz", "web · checkout")
+		storedLabel(t, dir, "web-Qm3pLz", "web · checkout")
 
 		if _, _, err := runRootCmd(t, "rename", "dotfiles"); err != nil {
 			t.Fatalf("rename: %v", err)

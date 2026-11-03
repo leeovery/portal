@@ -24,8 +24,9 @@ type change struct {
 	detail string
 }
 
-// Lookup returns a copy of the entry named name. Changes go through Index's
-// own methods, which record them for Update to log.
+// Lookup returns a copy of the entry named name as stored, whatever creation
+// it records; surfaces that show a live session read through LookupLive.
+// Changes go through Index's own methods, which record them for Update to log.
 func (idx *Index) Lookup(name string) (Entry, bool) {
 	i := idx.indexOf(name)
 	if i < 0 {
@@ -39,13 +40,14 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 // entry counts only when it records that same creation; any other belonged to
 // an earlier session under the name, so the live one has none, and shows its
 // name and no dir. A label only a hand-edited file can hold, one SetLabel
-// would refuse, is dropped too, so no surface prints it.
+// would refuse or clear, unprintable or blank, is dropped too, so no surface
+// prints it.
 func (idx *Index) LookupLive(name string, created time.Time) (Entry, bool) {
 	e, ok := idx.Lookup(name)
 	if !ok || !sameCreation(e.CreatedAt, created) {
 		return Entry{}, false
 	}
-	if !printable(e.Label) {
+	if !printable(e.Label) || strings.TrimSpace(e.Label) == "" {
 		e.Label = ""
 	}
 	return e, true

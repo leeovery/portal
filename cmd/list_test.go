@@ -7,7 +7,6 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
-	"github.com/leeovery/portal/internal/sessionindex"
 )
 
 // stageList stages fake as the backend and tty as whether stdout is a
@@ -33,15 +32,6 @@ func assertListed(t *testing.T, fake *backendtest.Fake) {
 	t.Helper()
 	if got := len(fake.CallsTo(backendtest.OpList)); got != 1 {
 		t.Errorf("backend List calls = %d, want 1: %+v", got, fake.Calls())
-	}
-}
-
-func setLabel(t *testing.T, stateDir, name, label string) {
-	t.Helper()
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		return idx.SetLabel(name, label)
-	}); err != nil {
-		t.Fatalf("label %s as %q: %v", name, label, err)
 	}
 }
 

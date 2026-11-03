@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"strings"
@@ -29,9 +30,10 @@ const listColumnGap = "    "
 
 const listNotAnswering = "not answering"
 
-// formatSessionLong is name, label, attached state and dir. A session that
-// did not answer is known only by its name, so it says so rather than leave
-// its other fields to read as missing.
+// formatSessionLong is name, label, attached state and dir: the recorded one,
+// as search and grouping read it, else the session's cwd. A session that did
+// not answer is known only by its name, so it says so rather than leave its
+// other fields to read as missing.
 func formatSessionLong(s tui.Session) string {
 	if s.NotAnswering {
 		return s.Name + listColumnGap + listNotAnswering
@@ -41,8 +43,8 @@ func formatSessionLong(s tui.Session) string {
 		status = "attached"
 	}
 	fields := []string{s.Name, s.DisplayName(), status}
-	if s.Cwd != "" {
-		fields = append(fields, s.Cwd)
+	if dir := cmp.Or(s.Dir, s.Cwd); dir != "" {
+		fields = append(fields, dir)
 	}
 	return strings.Join(fields, listColumnGap)
 }

@@ -30,6 +30,17 @@ func labelSession(t *testing.T, stateDir string, s backend.Session, label string
 	}
 }
 
+// storedLabel writes a label onto an entry recording no creation, which no
+// surface shows: for tests of what the index stores, not what a session shows.
+func storedLabel(t *testing.T, stateDir, name, label string) {
+	t.Helper()
+	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		return idx.SetLabel(name, label)
+	}); err != nil {
+		t.Fatalf("label %s as %q: %v", name, label, err)
+	}
+}
+
 // seedIndex stages a sessions.json holding entries verbatim, unprintable
 // labels included, in a state directory of the test's own.
 func seedIndex(t *testing.T, entries ...sessionindex.Entry) string {
@@ -187,7 +198,7 @@ func TestJoin_ListLong(t *testing.T) {
 	stageJoin(t)
 	withListDeps(t, ListDeps{IsTTY: func() bool { return false }})
 
-	want := "api-x7Kd9a    api work    attached    /work/api/internal\n" +
+	want := "api-x7Kd9a    api work    attached    /work/api\n" +
 		"docs-Lp2Hx9    docs-Lp2Hx9    detached    /work/docs\n" +
 		"lab-Zz9q1w    lab-Zz9q1w    detached    /work/lab\n" +
 		"quiet-Rt5mKe    not answering\n" +

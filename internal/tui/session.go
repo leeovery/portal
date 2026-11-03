@@ -16,8 +16,8 @@ type Session struct {
 	// Dir is the session's recorded directory, empty when none is recorded.
 	Dir string
 	// Cwd is the session's working directory as its backend reports it, empty
-	// when unknown. Grouping alone reads it, for a session with no Dir; it is
-	// never shown or searched.
+	// when unknown. It stands in for a missing Dir — grouping derives its git
+	// root, list --long prints it — and is never searched.
 	Cwd      string
 	Attached bool
 	// NotAnswering marks a session that is listed but did not answer, so

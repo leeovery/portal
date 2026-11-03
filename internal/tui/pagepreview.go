@@ -59,7 +59,8 @@ const chromeSegSpace = " "
 
 const previewFooterGap = "  "
 
-// The marker, then the session name truncated to whatever width is left.
+// The marker, then the text the session shows, truncated to whatever width is
+// left.
 func composePreviewHeaderRow(contentWidth int, session string, th theme.Theme, colourless bool) string {
 	// Degenerate width: the marker alone exceeds the body — clip it so the panel
 	// still fills the terminal width exactly and never overflows.
@@ -130,7 +131,10 @@ func previewFooterFromGroups(groups []footerHintGroup, labelled bool, th theme.T
 // Construct only via NewPreviewModel: the zero value is reserved for "between
 // opens".
 type previewModel struct {
+	// session is the name history is read and stepping keyed by; shown is
+	// the text the header names it by.
 	session  string
+	shown    string
 	viewport viewport.Model
 	width    int
 	height   int
@@ -143,11 +147,12 @@ type previewModel struct {
 
 // NewPreviewModel opens a preview of session showing body, which the
 // session's read replaces once it lands.
-func NewPreviewModel(session, body string, width, height int) previewModel {
+func NewPreviewModel(session Session, body string, width, height int) previewModel {
 	// Mirrors innerWidth/innerHeight, which aren't usable yet — m.width and
 	// m.height are unassigned.
 	m := previewModel{
-		session:  session,
+		session:  session.Name,
+		shown:    session.DisplayName(),
 		viewport: newPreviewViewport(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
 		width:    width,
 		height:   height,
@@ -277,7 +282,7 @@ func (m previewModel) handlePreviewKey(msg tea.KeyPressMsg) (handled bool, next 
 func (m previewModel) View() string {
 	contentWidth := m.innerWidth()
 
-	header := composePreviewHeaderRow(contentWidth, m.session, m.th, m.colourless)
+	header := composePreviewHeaderRow(contentWidth, m.shown, m.th, m.colourless)
 	footer := composePreviewFooterRow(contentWidth, m.th, m.colourless)
 
 	// Split per line so each becomes a compartment row.

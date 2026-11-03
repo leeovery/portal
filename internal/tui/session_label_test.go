@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/portal/internal/prefs"
@@ -144,4 +146,83 @@ func TestNoPendingOrSkeletonReaders(t *testing.T) {
 	if got := rowNames(m.sessionList.Items()); !slices.Equal(got, []string{"api-x7Kd9a"}) {
 		t.Errorf("rows = %v, want the session listed", got)
 	}
+}
+
+// A label is any text: the picker cuts a long current label, as rows are cut,
+// so every line stays within the terminal and the filter hint survives.
+func TestLongCurrentLabelStaysWithinTheScreen(t *testing.T) {
+	const width, height = 63, 20
+	long := strings.Repeat("very long label ", 8)
+	sessions := []Session{
+		{Name: "api-x7Kd9a", Label: long},
+		{Name: "web-Qm3pLz"},
+	}
+	for _, mode := range []prefs.SessionListMode{prefs.ModeFlat, prefs.ModeByProject, prefs.ModeByTag} {
+		t.Run(mode.String(), func(t *testing.T) {
+			m := Build(Deps{Lister: fakeLister{}, CurrentSession: "api-x7Kd9a", InitialMode: mode})
+			m = asModel(t, dropCmd(m.Update(tea.WindowSizeMsg{Width: width, Height: height})))
+			m.applySessions(sessions, nil)
+			m.sessionsLoaded = true
+
+			frame := ansi.Strip(m.View().Content)
+
+			for i, line := range strings.Split(frame, "\n") {
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("line %d is %d cells, wider than the %d-cell screen: %q", i, w, width, line)
+				}
+			}
+			if !strings.Contains(frame, sectionFilterHint) {
+				t.Errorf("the %q hint was pushed off the header:\n%s", sectionFilterHint, frame)
+			}
+			if !strings.Contains(frame, "(current: very long ") || !strings.Contains(frame, "…)") {
+				t.Errorf("the header does not name the current session by its cut label:\n%s", frame)
+			}
+			if lipgloss.Width(m.sessionList.Title) > m.sessionList.Width() {
+				t.Errorf("title %q is wider than the list's %d cells", m.sessionList.Title, m.sessionList.Width())
+			}
+		})
+	}
+}
+
+func TestPreviewHeaderShowsTheLabel(t *testing.T) {
+	long := strings.Repeat("checkout flow ", 10)
+	sessions := []Session{{Name: "api-x7Kd9a", Label: long}, {Name: "web-Qm3pLz", Label: "landing page"}}
+	history := historyFor(t, "hi", sessions)
+	m := openPreviewOn(t, modelWithSeams(t, sessions, history))
+
+	header := previewHeaderLine(t, m)
+
+	if !strings.Contains(header, "checkout flow checkout") || !strings.Contains(header, "…") {
+		t.Errorf("preview header = %q, want the label cut to fit", header)
+	}
+	if strings.Contains(header, "api-x7Kd9a") {
+		t.Errorf("preview header = %q, want the label, not the name", header)
+	}
+	if w := lipgloss.Width(header); w > 80 {
+		t.Errorf("preview header is %d cells, wider than the 80-cell screen", w)
+	}
+	if got := historyCalls(history); !slices.Equal(got, []string{"api-x7Kd9a"}) {
+		t.Errorf("history read for %v, want the session's name", got)
+	}
+
+	updated, step := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, read := asModel(t, updated).Update(step())
+	m = landRead(t, asModel(t, updated), read)
+	if header := previewHeaderLine(t, m); !strings.Contains(header, "landing page") {
+		t.Errorf("stepped preview header = %q, want the next session's label", header)
+	}
+	if got := historyCalls(history); !slices.Equal(got, []string{"api-x7Kd9a", "web-Qm3pLz"}) {
+		t.Errorf("history read for %v, want each session's name", got)
+	}
+}
+
+func previewHeaderLine(t *testing.T, m Model) string {
+	t.Helper()
+	for line := range strings.SplitSeq(ansi.Strip(m.View().Content), "\n") {
+		if strings.Contains(line, previewMarker) {
+			return line
+		}
+	}
+	t.Fatalf("no preview header in:\n%s", ansi.Strip(m.View().Content))
+	return ""
 }

@@ -17,7 +17,7 @@ func stageKill(t *testing.T, fake *backendtest.Fake, names ...string) string {
 	withBackendDeps(t, BackendDeps{Backend: fake})
 	dir := isolateStateDir(t)
 	for _, name := range names {
-		setLabel(t, dir, name, name+" · work")
+		storedLabel(t, dir, name, name+" · work")
 	}
 	return dir
 }

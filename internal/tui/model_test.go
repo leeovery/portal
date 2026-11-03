@@ -1064,18 +1064,21 @@ func TestCurrentSessionExclusion(t *testing.T) {
 		}
 	})
 
-	t.Run("very long current session name in title", func(t *testing.T) {
+	t.Run("very long current session name is cut to the list's width", func(t *testing.T) {
 		longName := "my-extremely-long-project-name-that-goes-on-and-on-forever-x7k2m9"
 		sessions := []tui.Session{
 			{Name: longName, Attached: true},
 			{Name: "other", Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithCurrentSession(longName)
+		width, _ := m.SessionListSize()
 
 		title := m.SessionListTitle()
-		expected := "Sessions (current: " + longName + ")"
-		if title != expected {
-			t.Errorf("SessionListTitle() = %q, want %q", title, expected)
+		if lipgloss.Width(title) > width {
+			t.Errorf("SessionListTitle() = %q, %d cells, wider than the list's %d", title, lipgloss.Width(title), width)
+		}
+		if !strings.HasPrefix(title, "Sessions (current: my-extremely") || !strings.HasSuffix(title, "…)") {
+			t.Errorf("SessionListTitle() = %q, want the name cut with an ellipsis inside the parentheses", title)
 		}
 	})
 }

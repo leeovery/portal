@@ -49,6 +49,13 @@ func TestLookupLive(t *testing.T) {
 			sessionindex.Entry{Name: "api-x7Kd9a", Dir: "/work/api", CreatedAt: created},
 			true,
 		},
+		{
+			"a label of only whitespace is dropped, the rest kept",
+			[]sessionindex.Entry{{Name: "api-x7Kd9a", Label: " \u00a0 ", Dir: "/work/api", CreatedAt: created}},
+			created,
+			sessionindex.Entry{Name: "api-x7Kd9a", Dir: "/work/api", CreatedAt: created},
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

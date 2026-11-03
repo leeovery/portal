@@ -170,7 +170,7 @@ func TestReadSessionIndex(t *testing.T) {
 
 	t.Run("it reads the index in the state directory", func(t *testing.T) {
 		dir := isolateStateDir(t)
-		setLabel(t, dir, "api-x7Kd9a", "api")
+		storedLabel(t, dir, "api-x7Kd9a", "api")
 
 		idx, err := readSessionIndex()
 		if err != nil {

@@ -21,7 +21,7 @@ func stageCompletion(t *testing.T, current string, names ...string) *backendtest
 	t.Helper()
 	fake := backendtest.New()
 	for _, name := range names {
-		fake.Add(backend.Session{Name: name})
+		fake.Add(backend.Session{Name: name, Created: joinCreated})
 	}
 	fake.SetCurrent(current)
 	withBackendDeps(t, BackendDeps{Backend: fake})
@@ -73,14 +73,24 @@ func TestCompleteSessionNames(t *testing.T) {
 	})
 
 	t.Run("it offers a labelled session by its name, never its label", func(t *testing.T) {
-		stageCompletion(t, "", "api-x7Kd9a", "web-Qm3pLz")
-		setLabel(t, isolateStateDir(t), "web-Qm3pLz", "web checkout")
+		fake := stageCompletion(t, "", "api-x7Kd9a", "web-Qm3pLz")
+		web, _ := fake.Held("web-Qm3pLz")
+		labelSession(t, isolateStateDir(t), web, "checkout flow")
+		if shown, _ := listShownSessions(t.Context(), fake); shown[1].DisplayName() != "checkout flow" {
+			t.Fatalf("precondition: web-Qm3pLz shows %q, want its label", shown[1].DisplayName())
+		}
 
 		if names, _ := completeSessionNames("w"); !slices.Equal(names, []string{"web-Qm3pLz"}) {
 			t.Errorf("names = %v, want [web-Qm3pLz]", names)
 		}
+		if names, _ := completeSessionNames("check"); len(names) != 0 {
+			t.Errorf("names for %q = %v, want none: completion offers names, never labels", "check", names)
+		}
 		if names, _ := completeSearchTerm("/web"); !slices.Equal(names, []string{"/web-Qm3pLz"}) {
 			t.Errorf("search names = %v, want [/web-Qm3pLz]", names)
+		}
+		if names, _ := completeSearchTerm("/check"); len(names) != 0 {
+			t.Errorf("search names for %q = %v, want none", "/check", names)
 		}
 	})
 

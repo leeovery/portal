@@ -815,7 +815,16 @@ func centrePaginationRow(l *list.Model, base lipgloss.Style) {
 	l.Styles.PaginationStyle = base.Width(l.Width()).Align(lipgloss.Center)
 }
 
-func sessionListTitleForMode(mode prefs.SessionListMode, currentSession string) string {
+const (
+	currentSessionOpen  = " (current: "
+	currentSessionClose = ")"
+)
+
+// sessionListTitleForMode names the mode and the session the picker runs
+// inside. A label is any text, so it is cut as the rows cut theirs to keep the
+// title within width cells, and left out when not one cell of it fits; a
+// width of zero or less bounds nothing.
+func sessionListTitleForMode(mode prefs.SessionListMode, currentSession string, width int) string {
 	var base string
 	switch mode {
 	case prefs.ModeByProject:
@@ -825,10 +834,21 @@ func sessionListTitleForMode(mode prefs.SessionListMode, currentSession string) 
 	default:
 		base = "Sessions"
 	}
-	if currentSession != "" {
-		return fmt.Sprintf("%s (current: %s)", base, currentSession)
+	if currentSession == "" {
+		return base
 	}
-	return base
+	shown := currentSession
+	if width > 0 {
+		shown = truncateToCells(currentSession, width-lipgloss.Width(base+currentSessionOpen+currentSessionClose))
+	}
+	if shown == "" {
+		return base
+	}
+	return base + currentSessionOpen + shown + currentSessionClose
+}
+
+func (m *Model) setSessionListTitle() {
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown(), m.sessionList.Width())
 }
 
 // The built-in help renderer is disabled — Portal renders its own footer.
@@ -893,7 +913,7 @@ func New(lister SessionLister, opts ...Option) Model {
 	}
 	// Recompute now that mode / current session are known (newSessionList set the Flat
 	// default), so the first frame paints the correct mode heading.
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown())
+	m.setSessionListTitle()
 	// The NO_COLOR carve-out wins over every nomination shape: no canvas to
 	// select, so the gate is colourless and detection is skipped.
 	if m.colourless {
@@ -1110,6 +1130,7 @@ func (m *Model) applyListSize(l *list.Model, width, height, reserved int) {
 func (m *Model) applySessionListSize(width, height int) {
 	reserved := m.sessionBandHeight() + m.headerHeight(width) + m.sessionFooterHeight(width)
 	m.applyListSize(&m.sessionList, width, height, reserved)
+	m.setSessionListTitle()
 }
 
 // Measured against the same entries, width and mode the render uses, so budget
@@ -1281,7 +1302,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	}
 	cmd := m.sessionList.SetItems(items)
 
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown())
+	m.setSessionListTitle()
 
 	// Without this re-apply the list keeps sizing against pre-load defaults
 	// and overflows under the footer once items populate.
@@ -1423,7 +1444,7 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 		open, m.endPreviewRead = context.WithCancel(context.Background())
 		cmd = m.history.read(open, s.Name, m.previewGen)
 	}
-	m.preview = NewPreviewModel(s.Name, body, m.contentWidth(), m.contentHeight())
+	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
 	m.preview.th = m.themeState.active
 	m.preview.colourless = m.colourless
 	return cmd, true

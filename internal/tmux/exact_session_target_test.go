@@ -59,12 +59,6 @@ var perSessionRoutes = []perSessionRoute{
 		invoke:  func(c *tmux.Client) { _ = c.SetSessionOption(exactTargetSession, "@k", "v") },
 	},
 	{
-		name:    "ActivePaneCurrentPath",
-		command: "display-message",
-		want:    coordTargetForm,
-		invoke:  func(c *tmux.Client) { _, _ = c.ActivePaneCurrentPath(exactTargetSession) },
-	},
-	{
 		name:    "ListPanesInSession",
 		command: "list-panes",
 		want:    coordTargetForm,

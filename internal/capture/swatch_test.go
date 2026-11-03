@@ -226,6 +226,8 @@ func TestSwatchCoversForegroundOnTintPairings(t *testing.T) {
 			wantStyle(th.TextOnSelection, th.BgSelection).Bold(true).Render(swatchSessionLabel)},
 		{"text.secondary", selectionBand(th),
 			wantStyle(th.TextSecondary, th.BgSelection).Render(swatchSessionPath)},
+		{"text.tertiary", selectionBand(th),
+			wantStyle(th.TextTertiary, th.BgSelection).Render(swatchProjectPath)},
 		{"state.positive", selectionBand(th),
 			wantStyle(th.StatePositive, th.BgSelection).Render(swatchIndicatorDot) +
 				wantStyle(th.AccentAttention, th.BgSelection).Render(swatchIndicatorDot)},

@@ -34,7 +34,7 @@ func TestSectionHeader_LabelCyanCountGreen(t *testing.T) {
 
 func TestSectionHeader_ModeSuffixFromTitleFn(t *testing.T) {
 	for _, mode := range []prefs.SessionListMode{prefs.ModeByProject, prefs.ModeByTag} {
-		title := sessionListTitleForMode(mode, "")
+		title := sessionListTitleForMode(mode, "", 0)
 		suffix := strings.TrimPrefix(title, "Sessions")
 		if suffix == "" {
 			t.Fatalf("expected a non-empty mode suffix for %v, got title %q", mode, title)
@@ -110,7 +110,7 @@ func TestSectionHeader_CountValueAndSuffixByteIdentical(t *testing.T) {
 		{prefs.ModeByTag, 15},
 	} {
 		header := renderSectionHeader(tc.mode, "", tc.count, sectionHeaderWidth, testDarkTheme(t), false)
-		title := sessionListTitleForMode(tc.mode, "")
+		title := sessionListTitleForMode(tc.mode, "", 0)
 		if suffix := strings.TrimSpace(strings.TrimPrefix(title, "Sessions")); suffix != "" && !strings.Contains(header, suffix) {
 			t.Errorf("section header for %v missing the parity suffix %q from title %q:\n%s", tc.mode, suffix, title, header)
 		}

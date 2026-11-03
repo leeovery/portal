@@ -21,7 +21,7 @@ func TestWithInitialMode(t *testing.T) {
 
 	t.Run("paints the mode-aware title on the first frame", func(t *testing.T) {
 		m := New(fakeLister{}, WithInitialMode(prefs.ModeByTag))
-		want := sessionListTitleForMode(prefs.ModeByTag, "")
+		want := sessionListTitleForMode(prefs.ModeByTag, "", 0)
 		if got := m.sessionList.Title; got != want {
 			t.Errorf("sessionList.Title = %q, want %q", got, want)
 		}

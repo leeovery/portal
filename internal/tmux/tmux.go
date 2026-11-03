@@ -282,30 +282,6 @@ func (c *Client) ResolveHookKey(paneID Target) (string, error) {
 	return c.ReadPaneOption(paneID, state.PortalPaneIDOption)
 }
 
-// ActivePaneCurrentPath returns the named session's active pane current_path in
-// a single tmux read.
-//
-// A session no pane answers to returns ("", nil), NOT an error: tmux answers an
-// unmatched display-message target with an empty expansion at exit 0 and no
-// stderr (measured on 3.7c; the same fact CoordTargetExact's doc states from
-// the target-form side), so there is no "no such session" stderr to classify and
-// no ErrNoSuchSession this path can ever produce. A live session whose pane has
-// no readable path yet returns the same pair, which is why the empty path — not
-// an error — is the unresolvable signal callers must handle. internal/session's
-// ResolveSessionDir reports it as ok==false with a nil error so the grouped
-// render carries on.
-//
-// A non-nil error is therefore a genuine display-message failure — no server to
-// connect to, say — wrapped with the session name and preserving the underlying
-// *CommandError for a caller that wants tmux's own words.
-func (c *Client) ActivePaneCurrentPath(session string) (string, error) {
-	output, err := c.cmd.Run("display-message", "-p", "-t", string(CoordTargetExact(session)), "-F", "#{pane_current_path}")
-	if err != nil {
-		return "", fmt.Errorf("failed to read active pane current path for session %q: %w", session, err)
-	}
-	return output, nil
-}
-
 func (c *Client) KillSession(name string) error {
 	_, err := c.cmd.Run("kill-session", "-t", string(CoordTargetExact(name)))
 	if err != nil {
@@ -692,58 +668,6 @@ func parsePaneHookRows(output string) ([]PaneHookRow, error) {
 	return rows, nil
 }
 
-// PendingResumeRow describes one live pane's resume-pending state and the
-// session holding it.
-type PendingResumeRow struct {
-	Pending bool
-	Session string
-}
-
-// PendingResumeView is one whole-server reading of which panes are waiting on a
-// resume decision. Rows holds every live pane, pending or not; Panes counts the
-// pending ones and Sessions is the set of session names holding at least one,
-// non-nil on every successful read.
-type PendingResumeView struct {
-	Rows     []PendingResumeRow
-	Panes    int
-	Sessions map[string]struct{}
-}
-
-// The marker takes the leading slot because its value can never carry the
-// separator, leaving the trailing unbounded slot to a session name that can.
-const resumePendingRowFormat = "#{" + state.ResumePendingOption + "}" + paneHookRowSeparator + "#{session_name}"
-
-// ListPendingResumePanes reads every live pane's resume-pending marker in one
-// list-panes -a call. A tmux failure returns the zero view and the error, never
-// an empty view: a failed read is not a server with nothing waiting.
-func (c *Client) ListPendingResumePanes() (PendingResumeView, error) {
-	raw, err := c.ListAllPanesWithFormat(resumePendingRowFormat)
-	if err != nil {
-		return PendingResumeView{}, err
-	}
-	return parsePendingResumeRows(raw)
-}
-
-func parsePendingResumeRows(output string) (PendingResumeView, error) {
-	view := PendingResumeView{Rows: []PendingResumeRow{}, Sessions: map[string]struct{}{}}
-	for line := range strings.SplitSeq(output, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		marker, session, ok := strings.Cut(line, paneHookRowSeparator)
-		if !ok {
-			return PendingResumeView{}, fmt.Errorf("failed to parse pending resume row %q: no %q separator", line, paneHookRowSeparator)
-		}
-		row := PendingResumeRow{Pending: state.ResumePendingSet(marker), Session: session}
-		view.Rows = append(view.Rows, row)
-		if row.Pending {
-			view.Panes++
-			view.Sessions[session] = struct{}{}
-		}
-	}
-	return view, nil
-}
-
 // WaitingPane is one pane of a session that is waiting on its resume panel.
 // PID is the pane's own process, which tmux started as the leader of the
 // process group the panel's waiter runs in.
@@ -752,8 +676,8 @@ type WaitingPane struct {
 	PID int
 }
 
-// The marker leads for the same reason it does in resumePendingRowFormat; the
-// pane ID and PID can carry neither the separator nor a line break.
+// The marker leads because its value can never carry the separator; the pane ID
+// and PID can carry neither the separator nor a line break.
 const waitingPaneRowFormat = "#{" + state.ResumePendingOption + "}" + paneHookRowSeparator + "#{pane_pid}" + paneHookRowSeparator + "#{pane_id}"
 
 // ListWaitingPanesInSession returns the panes of session whose resume-pending

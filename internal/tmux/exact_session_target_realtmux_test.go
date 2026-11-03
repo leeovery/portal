@@ -30,17 +30,16 @@ var siblingAllCoords = []tmux.PaneCoord{
 }
 
 // prefixSiblingFixture holds prefixSibling and nothing else, shaped to
-// siblingAllCoords. Every pane sits in the fixture's dir as tmux reports it.
+// siblingAllCoords.
 var prefixSiblingFixture = realTmuxFixture{
 	socketPrefix: "ptl-exacttgt-",
 	sessions:     []string{prefixSibling},
-	topology: func(t *testing.T, ts *tmuxtest.Socket, _ *tmux.Client, dir string) {
-		// -c pins every pane to dir, so the ActivePaneCurrentPath expectation
-		// holds whichever pane the splits leave active. new-window runs
-		// last-but-one, so window 1 is the session's current window.
-		ts.Run(t, "split-window", "-t", "="+prefixSibling+":0.0", "-c", dir)
-		ts.Run(t, "new-window", "-t", "="+prefixSibling+":", "-c", dir)
-		ts.Run(t, "split-window", "-t", "="+prefixSibling+":1.0", "-c", dir)
+	topology: func(t *testing.T, ts *tmuxtest.Socket, _ *tmux.Client, _ string) {
+		// new-window runs last-but-one, so window 1 is the session's current
+		// window.
+		ts.Run(t, "split-window", "-t", "="+prefixSibling+":0.0")
+		ts.Run(t, "new-window", "-t", "="+prefixSibling+":")
+		ts.Run(t, "split-window", "-t", "="+prefixSibling+":1.0")
 	},
 }
 
@@ -79,21 +78,6 @@ func siblingFirstPaneField(t *testing.T, ts *tmuxtest.Socket, format string) str
 // sibling. Keyed by route name so the cases can be matched against
 // perSessionRoutes rather than trusted to stay in step with it.
 var goneSessionRouteCases = map[string]func(*testing.T){
-	"ActivePaneCurrentPath": func(t *testing.T) {
-		_, client, dir := seedRealTmuxServer(t, prefixSiblingFixture)
-
-		got, err := client.ActivePaneCurrentPath(goneSession)
-		if got == dir {
-			t.Fatalf("ActivePaneCurrentPath(%q) returned %q — the live %q session's dir", goneSession, got, prefixSibling)
-		}
-		// tmux answers an unmatched display-message target with an empty
-		// expansion at exit 0, so this site reports a miss as an empty path
-		// rather than an error.
-		if err != nil || got != "" {
-			t.Errorf("ActivePaneCurrentPath(%q) = %q, %v; want an empty path and no error", goneSession, got, err)
-		}
-	},
-
 	"ListPanesInSession": func(t *testing.T) {
 		_, client, _ := seedRealTmuxServer(t, prefixSiblingFixture)
 
@@ -186,18 +170,6 @@ var goneSessionRouteCases = map[string]func(*testing.T){
 // the session must not cost the ordinary case, and a form tmux cannot resolve
 // at all would read as a permanent miss rather than a wrong-session hit.
 var liveSessionRouteCases = map[string]func(*testing.T){
-	"ActivePaneCurrentPath": func(t *testing.T) {
-		_, client, dir := seedRealTmuxServer(t, prefixSiblingFixture)
-
-		got, err := client.ActivePaneCurrentPath(prefixSibling)
-		if err != nil {
-			t.Fatalf("ActivePaneCurrentPath(%q): %v", prefixSibling, err)
-		}
-		if got != dir {
-			t.Errorf("ActivePaneCurrentPath(%q) = %q, want %q", prefixSibling, got, dir)
-		}
-	},
-
 	"ListPanesInSession": func(t *testing.T) {
 		_, client, _ := seedRealTmuxServer(t, prefixSiblingFixture)
 
