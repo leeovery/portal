@@ -183,6 +183,36 @@ func TestAttach_PickerLoop(t *testing.T) {
 		}
 	})
 
+	t.Run("a pick whose session can't be attached for a fault of its own reopens the picker, worded as kill words it", func(t *testing.T) {
+		_, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		rec.answer(outcome(attachkeys.Detach))
+		picker := stagePicker(t, "gone-a1b2c3", "blog-c3d4")
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+			t.Fatalf("openSession = %v, want the second pick attached", err)
+		}
+		if want := []string{"", "No session found: gone-a1b2c3"}; !slices.Equal(picker.flashes, want) {
+			t.Errorf("picker flashes = %q, want %q", picker.flashes, want)
+		}
+		if want := []string{"api-x7Kd9a", "blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
+			t.Errorf("attached %q, want %q", ranSessions(rec), want)
+		}
+	})
+
+	t.Run("a pick whose attach fails other than for its session's fault returns the error", func(t *testing.T) {
+		_, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+		boom := errors.New("pty: boom")
+		rec.answer(outcome(attachkeys.Detach), runResult{err: boom})
+		picker := stagePicker(t, "blog-c3d4")
+
+		if err := openSession(contextCommand(), "api-x7Kd9a"); !errors.Is(err, boom) {
+			t.Errorf("openSession = %v, want the pick's %v", err, boom)
+		}
+		if len(picker.flashes) != 1 {
+			t.Errorf("pickers = %d, want the one the pick came from", len(picker.flashes))
+		}
+	})
+
 	t.Run("a picker that fails returns its error", func(t *testing.T) {
 		_, rec := stageAttach(t, "api-x7Kd9a")
 		rec.answer(outcome(attachkeys.Detach))
@@ -301,6 +331,108 @@ func TestAttach_KillKeyKillsAsPortalKillDoes(t *testing.T) {
 		err := rec.onlyRun(t).Kill(context.Background(), "api-x7Kd9a")
 		if want := "No session found: api-x7Kd9a; did you mean API-x7Kd9a?"; err == nil || err.Error() != want {
 			t.Errorf("Kill = %v, want %q", err, want)
+		}
+	})
+}
+
+// pickerStep is a key typed in a picker, and whether what it asks of the
+// backend is run and its answer delivered, as the program would.
+type pickerStep struct {
+	key   tea.KeyPressMsg
+	lands bool
+}
+
+func typed(r rune) pickerStep        { return pickerStep{key: tea.KeyPressMsg{Code: r, Text: string(r)}} }
+func typedCode(code rune) pickerStep { return pickerStep{key: tea.KeyPressMsg{Code: code}} }
+
+// realPickers runs each picker Portal opens for real but for the terminal:
+// its rows are the backend's sessions as the picker lists them, and each
+// picker in turn types its script. It records what each picker shows once
+// its rows land, and after each of its keys.
+type realPickers struct {
+	scripts [][]pickerStep
+	// opened is each picker's frame once its rows land; shown, its frames
+	// after each key.
+	opened []string
+	shown  [][]string
+	// landed, if set, runs once each picker's rows have landed, before its
+	// keys.
+	landed func()
+}
+
+func stageRealPickers(t *testing.T, b backend.Backend, scripts ...[]pickerStep) *realPickers {
+	t.Helper()
+	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(t.TempDir(), "projects.json"))
+	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "aliases"))
+	// A pinned theme paints from the first frame, with no terminal to answer
+	// the light/dark query.
+	setPrefsFile(t, `{"theme":"nord"}`)
+	p := &realPickers{scripts: scripts}
+	withFuncSeam(t, &runProgramFunc, func(m tui.Model) (tea.Model, error) {
+		n := len(p.opened)
+		if n == len(p.scripts) {
+			t.Fatalf("picker %d opened, want %d", n+1, len(p.scripts))
+		}
+		sessions, err := pickerLister{ctx: context.Background(), b: b}.ListSessions()
+		if err != nil {
+			t.Fatalf("list sessions: %v", err)
+		}
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{})
+		p.opened = append(p.opened, frameOf(model))
+		p.shown = append(p.shown, nil)
+		if p.landed != nil {
+			p.landed()
+		}
+		for _, step := range p.scripts[n] {
+			var cmd tea.Cmd
+			model, cmd = model.Update(step.key)
+			if step.lands {
+				model, _ = model.Update(cmd())
+			}
+			p.shown[n] = append(p.shown[n], frameOf(model))
+		}
+		return model, nil
+	})
+	return p
+}
+
+func frameOf(model tea.Model) string {
+	return ansi.Strip(model.(tui.Model).View().Content)
+}
+
+func TestOpenTUI_APickWhoseSessionCantBeAttachedReopensThePicker(t *testing.T) {
+	t.Run("one gone since the picker listed it brings the picker, worded as kill words it", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)}, []pickerStep{typed('q')})
+		pickers.landed = func() {
+			if len(pickers.opened) == 1 {
+				_ = fake.Kill(context.Background(), "api-x7Kd9a")
+			}
+		}
+
+		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); err != nil {
+			t.Fatalf("openTUI = %v, want the picker", err)
+		}
+		if len(pickers.opened) != 2 || !strings.Contains(pickers.opened[1], "No session found: api-x7Kd9a") {
+			t.Errorf("pickers shown %d, the last:\n%s\nwant a second, saying the session is gone", len(pickers.opened), pickers.opened[len(pickers.opened)-1])
+		}
+		rec.assertNone(t)
+	})
+
+	t.Run("one whose attach fails other than for its session's fault returns the error", func(t *testing.T) {
+		fake, rec := stageAttach(t, "api-x7Kd9a")
+		boom := errors.New("pty: boom")
+		rec.answer(runResult{err: boom})
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)})
+
+		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); !errors.Is(err, boom) {
+			t.Errorf("openTUI = %v, want the attach's %v", err, boom)
+		}
+		if len(pickers.opened) != 1 {
+			t.Errorf("pickers shown %d, want the first alone", len(pickers.opened))
 		}
 	})
 }

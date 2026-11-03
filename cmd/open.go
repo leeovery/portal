@@ -513,7 +513,7 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		serverStarted: serverStarted,
 		bootstrap:     deferredBootstrapFromContext(cmd),
 	}
-	return runPicker(cmd, b, launch, newSessionConnector(cmd, b))
+	return runPicker(cmd, b, launch, connectorFunc(newSessionConnector(cmd, b).ConnectPick))
 }
 
 // pickerLaunch is what one run of the picker opens with.

@@ -37,7 +37,7 @@ type attachConnector struct {
 	acked func()
 }
 
-func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector {
+func newSessionConnector(cmd *cobra.Command, b backend.Backend) attachConnector {
 	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd)}
 	if openDeps != nil && openDeps.Execer != nil {
 		c.execer = openDeps.Execer
@@ -51,28 +51,40 @@ func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector
 	return c
 }
 
+// Connect attaches name, a session the command line named: one that can't be
+// attached ends Portal with why.
 func (c attachConnector) Connect(name string) error {
+	return c.connect(name, c.attach)
+}
+
+// ConnectPick attaches name, a session picked in the picker, as every later
+// session of the loop is attached (see attachOrPicker).
+func (c attachConnector) ConnectPick(name string) error {
+	return c.connect(name, c.attachOrPicker)
+}
+
+// connect attaches name through first, then loops while the picker or a
+// switch follows each attach.
+func (c attachConnector) connect(name string, first func(string, runnerListing) (runner.Outcome, error)) error {
 	listing := c.runners.Listing(c.backend)
 	defer listing.Close()
-	out, err := c.attach(name, listing)
+	out, err := first(name, listing)
 	for err == nil {
 		if out.Switch != "" {
-			out, err = c.attachSwitched(out.Switch, listing)
-			continue
-		}
-		if name, err = c.next(out, listing); err != nil || name == "" {
+			name = out.Switch
+		} else if name, err = c.next(out, listing); err != nil || name == "" {
 			return err
 		}
-		out, err = c.attach(name, listing)
+		out, err = c.attachOrPicker(name, listing)
 	}
 	return err
 }
 
-// attachSwitched attaches the session a switch named. One that can't be
-// attached for a fault of its own, as kill words them, ends as a failed kill
-// does: the picker follows, showing why. Any other failure is returned, as a
-// first attach's is.
-func (c attachConnector) attachSwitched(name string, listing runnerListing) (runner.Outcome, error) {
+// attachOrPicker attaches a session chosen from inside Portal: a pick, or the
+// session a switch named. One that can't be attached for a fault of its own,
+// as kill words them, ends as a failed kill does, the picker following to
+// show why. Any other failure is returned, as a first attach's is.
+func (c attachConnector) attachOrPicker(name string, listing runnerListing) (runner.Outcome, error) {
 	out, err := c.attach(name, listing)
 	if fault, ok := sessionFault(name, err, "nothing was opened"); ok {
 		return runner.Outcome{Action: attachkeys.Detach, Err: fault}, nil
