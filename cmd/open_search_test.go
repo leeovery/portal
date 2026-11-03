@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
@@ -137,7 +138,7 @@ type searchFormCapture struct {
 func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	t.Helper()
 
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	sc := &searchFormCapture{seams: &recordingResolverSeams{}, source: &fakeSearchSource{}}
 

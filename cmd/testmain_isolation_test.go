@@ -1,10 +1,14 @@
 package cmd
 
-// TestMain poisons the PORTAL_* config paths and TMUX package-wide so a test that
-// forgets to isolate fails loudly, and HOME to a per-run temp directory — with
-// XDG_CONFIG_HOME emptied so HOME is what decides — so one that resolves a default
-// config path lands there instead of reading or mutating the developer's real
-// config; subprocesses inherit the poison via os.Environ().
+// TestMain poisons the PORTAL_* config paths, TMUX and ZMX_DIR package-wide so a
+// test that forgets to isolate fails loudly, and HOME to a per-run temp directory
+// — with XDG_CONFIG_HOME emptied so HOME is what decides — so one that resolves a
+// default config path lands there instead of reading or mutating the developer's
+// real config; subprocesses inherit the poison via os.Environ().
+//
+// A missed backend injection under the ZMX_DIR poison lists no sessions rather
+// than failing, since a missing zmx directory holds none, so a test asserts on
+// the fake's calls, never on an empty result alone.
 
 import (
 	"fmt"
@@ -15,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 // pinToolchainCaches re-exports the cache locations the Go toolchain would
@@ -76,6 +81,18 @@ func TestMain(m *testing.M) {
 	os.Setenv("PORTAL_THEMES_DIR", "/nonexistent/portal-test-must-isolate-themes")
 	os.Setenv("PORTAL_PREFS_FILE", "/nonexistent/portal-test-must-isolate-prefs.json")
 	os.Setenv("TMUX", "/nonexistent/portal-test-must-set-tmux-socket,0,0")
+	// ZMX_SESSION would turn an attach into a switch of a live session, and
+	// ZMX_SESSION_PREFIX would rename every session a test names.
+	for _, err := range []error{
+		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
+		os.Unsetenv("ZMX_SESSION"),
+		os.Unsetenv("ZMX_SESSION_PREFIX"),
+	} {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cmd tests: poisoning the zmx environment: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	// Neutralised package-wide: production dispatches this on its own goroutine, so
 	// a test reaching loadPrefsStore would leave a write racing its own teardown.
 	persistTranslation = func(*prefs.Store, string) {}

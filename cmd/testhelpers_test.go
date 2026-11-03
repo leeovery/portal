@@ -96,6 +96,14 @@ func withListDeps(t *testing.T, deps ListDeps) {
 	t.Cleanup(func() { listDeps = nil })
 }
 
+// withBackendDeps installs deps as the package-level backend seam for the rest
+// of the test and registers the restore in the same breath.
+func withBackendDeps(t *testing.T, deps BackendDeps) {
+	t.Helper()
+	backendDeps = &deps
+	t.Cleanup(func() { backendDeps = nil })
+}
+
 // withCommitNowDeps installs deps as the package-level commit-now seam for the
 // rest of the test and registers the restore in the same breath.
 func withCommitNowDeps(t *testing.T, deps CommitNowDeps) {

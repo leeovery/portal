@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -187,10 +189,7 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 	}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
-	withListDeps(t, ListDeps{
-		Lister: &mockSessionLister{sessions: nil},
-		IsTTY:  func() bool { return false },
-	})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	resetRootCmd()
 	var stderr bytes.Buffer
@@ -224,9 +223,18 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 }
 
 func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithNoArgs(t *testing.T) {
+	assertPickerPathWritesNoWarnings(t, "open")
+}
+
+// assertPickerPathWritesNoWarnings pins that a picker launch writes nothing to
+// the terminal the picker claims: its bootstrap is deferred, and the warnings
+// ride the progress pipe's terminal event to the notice band.
+func assertPickerPathWritesNoWarnings(t *testing.T, args ...string) {
+	t.Helper()
 	resetBootstrapOnce(t)
 
 	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error { return nil })
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	runner := &recordingRunner{
 		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},
@@ -236,18 +244,16 @@ func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithNoArgs(t *testing.T) {
 	resetRootCmd()
 	var stderr bytes.Buffer
 	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"open"})
+	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
 	if stderr.Len() != 0 {
-		t.Errorf("stderr must be empty on TUI path (warnings buffered for openTUI); got %q", stderr.String())
+		t.Errorf("stderr must be empty on the picker path; got %q", stderr.String())
 	}
-
-	remaining := bootstrapWarnings.Drain()
-	if len(remaining) != 1 {
-		t.Errorf("sink remaining warnings = %d, want 1 (still buffered for TUI)", len(remaining))
+	if runner.calls != 0 {
+		t.Errorf("orchestrator calls = %d before the picker, want 0 (deferred)", runner.calls)
 	}
 }
 
@@ -257,13 +263,14 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 	runner := &recordingRunner{
 		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},
 	}
-	// The session-domain check at the front of open resolution reads the tmux
-	// client production's PersistentPreRunE always injects into context.
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: tmux.NewClient(stubTmuxCommander())})
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	// Resolution fails on the non-existent path; warning emission happens before
-	// RunE, so that failure is irrelevant here.
+	// RunE, so that failure is irrelevant here. The session-domain check at the
+	// front of open resolution reads the tmux client staged in the context.
 	resetRootCmd()
+	openCmd.SetContext(context.WithValue(context.Background(), tmuxClientKey, tmux.NewClient(stubTmuxCommander())))
 	var stderr bytes.Buffer
 	rootCmd.SetErr(&stderr)
 	rootCmd.SetArgs([]string{"open", "/nonexistent/path-for-test"})
@@ -275,30 +282,6 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 }
 
 func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithSearchForm(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error { return nil })
-
-	runner := &recordingRunner{
-		warnings: []bootstrap.Warning{bootstrap.SaverDownWarning()},
-	}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
-
-	resetRootCmd()
-	var stderr bytes.Buffer
-	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"open", "/port"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-
-	if stderr.Len() != 0 {
-		t.Errorf("stderr must be empty for a search-form line (warnings buffered for the picker); got %q", stderr.String())
-	}
-
-	remaining := bootstrapWarnings.Drain()
-	if len(remaining) != 1 {
-		t.Errorf("sink remaining warnings = %d, want 1 (still buffered for the TUI)", len(remaining))
-	}
+	assertPickerPathWritesNoWarnings(t, "open", "/port")
 }

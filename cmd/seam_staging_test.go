@@ -21,6 +21,7 @@ type seamStagingCase struct {
 
 func seamStagingCases() []seamStagingCase {
 	return []seamStagingCase{
+		{"backendDeps", func(t *testing.T) { withBackendDeps(t, BackendDeps{}) }, func() bool { return backendDeps != nil }},
 		{"bootstrapDeps", func(t *testing.T) { withBootstrapDeps(t, BootstrapDeps{}) }, func() bool { return bootstrapDeps != nil }},
 		{"commitNowDeps", func(t *testing.T) { withCommitNowDeps(t, CommitNowDeps{}) }, func() bool { return commitNowDeps != nil }},
 		{"doctorDeps", func(t *testing.T) { withDoctorDeps(t, DoctorDeps{}) }, func() bool { return doctorDeps != nil }},

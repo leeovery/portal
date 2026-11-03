@@ -378,8 +378,8 @@ func TestDoctorStateDirSaneFailBranches(t *testing.T) {
 }
 
 func TestDoctorRegisteredInSkipTmuxCheck(t *testing.T) {
-	if !skipTmuxCheck["doctor"] {
-		t.Error("skipTmuxCheck[\"doctor\"] = false; want true (Bootstrap Exemption)")
+	if !bootstrapExempt["doctor"] {
+		t.Error("bootstrapExempt[\"doctor\"] = false; want true (Bootstrap Exemption)")
 	}
 }
 

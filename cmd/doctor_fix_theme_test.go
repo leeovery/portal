@@ -330,8 +330,8 @@ func TestDoctorFix_EmitsNoThemeRecords(t *testing.T) {
 }
 
 func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
-	if !skipTmuxCheck["doctor"] {
-		t.Error("skipTmuxCheck[\"doctor\"] = false; want true (Bootstrap Exemption)")
+	if !bootstrapExempt["doctor"] {
+		t.Error("bootstrapExempt[\"doctor\"] = false; want true (Bootstrap Exemption)")
 	}
 
 	t.Run("a --fix run with a full theme surface runs no bootstrap", func(t *testing.T) {

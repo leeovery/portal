@@ -222,8 +222,8 @@ func TestUninstall_TransientProbeFaultSurfacesErrorNotSilentRemoval(t *testing.T
 }
 
 func TestUninstall_RegisteredInSkipTmuxCheck(t *testing.T) {
-	if !skipTmuxCheck["uninstall"] {
-		t.Fatal("uninstall must be registered in skipTmuxCheck (bootstrap-exempt)")
+	if !bootstrapExempt["uninstall"] {
+		t.Fatal("uninstall must be registered in bootstrapExempt (bootstrap-exempt)")
 	}
 }
 

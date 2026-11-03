@@ -127,7 +127,7 @@ func newKillPathFixture(t *testing.T, binary, binDir string, sessions []killPath
 	hookstest.StageStore(t, hookstest.Staging{Dir: stateDir, Entries: entries})
 
 	fixture := symptomFixture{sock: sock, stateDir: stateDir, binary: binary, binDir: binDir}
-	runPortalList(t, binary, fixture)
+	runTmuxBootstrap(t, fixture)
 
 	if !rawSessionPresent(t, sock, tmux.PortalSaverName) {
 		t.Fatalf("_portal-saver not present after bootstrap\n%s", fixture.diagnostic())
