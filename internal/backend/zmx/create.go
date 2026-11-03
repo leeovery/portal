@@ -16,6 +16,9 @@ import (
 // case something it started still holds the pipe.
 const pipeGrace = time.Second
 
+// madeRetry spaces the asks of a session zmx has just made.
+const madeRetry = 10 * time.Millisecond
+
 // created is what zmx attach prints first on stdout once it has made a
 // session, with the name raw between the quotes. It prints no such line when
 // it joins a live session.
@@ -26,27 +29,51 @@ func created(name string) string { return `session "` + name + `" created` + "\n
 // spelling is refused first, and only zmx's created line counts as success,
 // whatever its exit code: when the command exits before the client connects,
 // zmx reports the session made and then fails.
-func (b *Backend) Create(ctx context.Context, name, dir string, command []string) error {
+func (b *Backend) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
 	if err := b.ValidateName(name); err != nil {
-		return err
+		return backend.Session{}, err
 	}
 	ctx, cancel := b.bound(ctx, b.limits.create, "")
 	defer cancel()
 	if err := b.refuseHeld(ctx, name); err != nil {
-		return err
+		return backend.Session{}, err
 	}
 	stdout, runErr := b.attach(ctx, name, dir, command)
 	if strings.HasPrefix(stdout, created(name)) {
-		return nil
+		return b.made(ctx, name), nil
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("create session %q: %w", name, context.Cause(ctx))
+		return backend.Session{}, fmt.Errorf("create session %q: %w", name, context.Cause(ctx))
 	}
 	holder, err := b.holder(ctx, name)
 	if err != nil {
-		return fmt.Errorf("create session %q: %w", name, errors.Join(runErr, err))
+		return backend.Session{}, fmt.Errorf("create session %q: %w", name, errors.Join(runErr, err))
 	}
-	return notCreated(name, runErr, holder)
+	return backend.Session{}, notCreated(name, runErr, holder)
+}
+
+// made reads back the session zmx has just made, asking again while its
+// fresh daemon comes up, for at most a probe ceiling within the create one.
+// A session that has already ended, or does not answer by then, is made all
+// the same, and is returned with only its name.
+func (b *Backend) made(ctx context.Context, name string) backend.Session {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
+	defer cancel()
+	hostname, _ := b.hostname()
+	for {
+		i, err := b.readInfo(ctx, name)
+		if err == nil {
+			return sessionOf(name, i, hostname)
+		}
+		if gone(err) {
+			return backend.Session{Name: name}
+		}
+		select {
+		case <-ctx.Done():
+			return backend.Session{Name: name}
+		case <-time.After(madeRetry):
+		}
+	}
 }
 
 // notCreated explains a run that printed no created line. zmx joined the

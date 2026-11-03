@@ -25,7 +25,7 @@ func TestPortalListAgainstZmx(t *testing.T) {
 
 	workDir := realPath(t, t.TempDir())
 	for _, name := range []string{"_portal-saver", "api-x7Kd9a", "web-Qm3pLz", "wedged-Lp4s"} {
-		if err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(%s): %v", name, err)
 		}
 	}

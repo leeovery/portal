@@ -282,6 +282,5 @@ func TestPersistentPreRunE_EmitsWarningsForOpenWithPositionalArg(t *testing.T) {
 }
 
 func TestPersistentPreRunE_DoesNotEmitWarningsForOpenWithSearchForm(t *testing.T) {
-	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
 	assertPickerPathWritesNoWarnings(t, "open", "/port")
 }

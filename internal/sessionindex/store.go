@@ -86,5 +86,8 @@ func (c change) attrs(via string) []any {
 	if c.value != "" {
 		attrs = append(attrs, "value", c.value)
 	}
+	if c.detail != "" {
+		attrs = append(attrs, "detail", c.detail)
+	}
 	return append(attrs, "via", via)
 }

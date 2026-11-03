@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/prefs"
@@ -350,6 +351,7 @@ func TestOpenTUI_FatalBeforeModelConstruction(t *testing.T) {
 	setPrefsFile(t, `{"theme":"no-such-theme"}`)
 
 	withOpenDeps(t, OpenDeps{ThemeLoader: brokenBuiltinLoader(theme.DefaultDarkSlug)})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	bootstrapWarnings.Drain()
 	staged := bootstrap.Warning{Lines: []string{"staged: must survive the fatal"}}

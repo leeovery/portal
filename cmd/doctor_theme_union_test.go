@@ -80,7 +80,7 @@ func TestThemeAdvisoryUnion_PersistedLineWins(t *testing.T) {
 		out := outBuf.String()
 		want := "" +
 			"  ⚠ theme nord-frost (dark) does not resolve: bad colour\n" +
-			"  7 checks passed · 1 advisory\n"
+			"  6 checks passed · 1 advisory\n"
 		if !strings.HasSuffix(out, want) {
 			t.Errorf("report does not close with the single union line and its summary:\n%s", out)
 		}

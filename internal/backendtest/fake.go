@@ -216,23 +216,23 @@ func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 // Create reports the session as zmx does: its Dir with symlinks resolved, as
 // the session's own working directory reads, and its Command rendered by
 // DisplayCommand.
-func (f *Fake) Create(ctx context.Context, name, dir string, command []string) error {
+func (f *Fake) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.record(Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
-		return err
+		return backend.Session{}, err
 	}
 	if err := f.validate(name); err != nil {
-		return err
+		return backend.Session{}, err
 	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		return backend.Session{}, context.Cause(ctx)
 	}
 	if held, ok := f.heldUnder(name); ok {
-		return &backend.SessionExistsError{Name: name, Held: held}
+		return backend.Session{}, &backend.SessionExistsError{Name: name, Held: held}
 	}
 	f.lastPID++
-	f.sessions[name] = backend.Session{
+	s := backend.Session{
 		Name:     name,
 		Answered: true,
 		Dir:      resolved(dir),
@@ -240,7 +240,8 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string) e
 		Created:  f.now(),
 		Command:  zmx.DisplayCommand(command),
 	}
-	return nil
+	f.sessions[name] = s
+	return s, nil
 }
 
 // AttachCommand switches, as the driver's does, when the current session is
@@ -327,6 +328,9 @@ func (f *Fake) beginHeld(ctx context.Context, c Call, check func(string) error) 
 	s, ok := f.sessions[c.Name]
 	switch {
 	case !ok:
+		if held, folded := f.heldUnder(c.Name); folded {
+			return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, &backend.HeldAsError{Held: held})
+		}
 		return fmt.Errorf("%s session %q: %w", strings.ToLower(string(c.Op)), c.Name, backend.ErrNoSuchSession)
 	case ctx.Err() != nil:
 		return context.Cause(ctx)

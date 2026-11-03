@@ -124,19 +124,16 @@ func TestAdvisories_NeverInterleave(t *testing.T) {
 
 func TestAdvisories_HostTerminalStaysInCatalog(t *testing.T) {
 	deps := healthyDoctorDeps(t)
-	results, err := runDoctorDiagnosis(deps)
+	results, err := runDoctorDiagnosis(t.Context(), deps)
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	if len(results) < 3 {
-		t.Fatalf("catalog = %+v; want at least the three informational lines", results)
+	if len(results) < 2 {
+		t.Fatalf("catalog = %+v; want at least the two informational lines", results)
 	}
-	host, pending, mode := results[len(results)-3], results[len(results)-2], results[len(results)-1]
+	host, mode := results[len(results)-2], results[len(results)-1]
 	if host.name != "host terminal" || host.status != checkInfo {
-		t.Fatalf("third-to-last catalog check = %+v; want the informational host-terminal line", host)
-	}
-	if pending.name != "pending resumes" || pending.status != checkInfo {
-		t.Fatalf("second-to-last catalog check = %+v; want the informational pending-resumes line", pending)
+		t.Fatalf("second-to-last catalog check = %+v; want the informational host-terminal line", host)
 	}
 	if mode.name != "resume mode" || mode.status != checkInfo {
 		t.Fatalf("last catalog check = %+v; want the informational resume-mode line", mode)
@@ -147,12 +144,8 @@ func TestAdvisories_HostTerminalStaysInCatalog(t *testing.T) {
 
 	// Index 0 is the header, so catalog entry i renders at line i+1.
 	hostLine := fmt.Sprintf("  %s %s: %s", checkMarker(host.status), host.name, host.detail)
-	if got := lines[len(results)-2]; got != hostLine {
-		t.Errorf("line[%d] = %q; want the host-terminal line %q inside the catalog", len(results)-2, got, hostLine)
-	}
-	pendingLine := fmt.Sprintf("  %s %s: %s", checkMarker(pending.status), pending.name, pending.detail)
-	if got := lines[len(results)-1]; got != pendingLine {
-		t.Errorf("line[%d] = %q; want the pending-resumes line %q inside the catalog", len(results)-1, got, pendingLine)
+	if got := lines[len(results)-1]; got != hostLine {
+		t.Errorf("line[%d] = %q; want the host-terminal line %q inside the catalog", len(results)-1, got, hostLine)
 	}
 	modeLine := fmt.Sprintf("  %s %s: %s", checkMarker(mode.status), mode.name, mode.detail)
 	if got := lines[len(results)]; got != modeLine {
@@ -230,7 +223,7 @@ func TestAdvisories_NeverDriveExitCode(t *testing.T) {
 		t.Fatalf("Execute err = %v; want nil over an all-passing catalog", err)
 	}
 
-	results, err := runDoctorDiagnosis(deps)
+	results, err := runDoctorDiagnosis(t.Context(), deps)
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
@@ -243,20 +236,20 @@ func TestAdvisories_NeverDriveExitCode(t *testing.T) {
 	if doctorUnhealthy(results) {
 		t.Error("doctorUnhealthy = true after rendering five advisories; an advisory must never reach the exit decision")
 	}
-	if got, want := lines[len(lines)-1], "  7 checks passed · 5 advisories"; got != want {
+	if got, want := lines[len(lines)-1], "  6 checks passed · 5 advisories"; got != want {
 		t.Errorf("rendered summary = %q; want %q — five advisories are counted, and the run is still healthy", got, want)
 	}
 }
 
 func TestAdvisories_FailingCheckAndAdvisoriesShareOneSummary(t *testing.T) {
 	deps := healthyDoctorDeps(t)
-	deps.SaverPresent = func() (bool, error) { return false, nil }
+	deps.LookPath = zmxMissing
 
 	if _, _, err := runDoctorWith(t, deps); err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with a failing saver check", err)
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)
 	}
 
-	results, err := runDoctorDiagnosis(deps)
+	results, err := runDoctorDiagnosis(t.Context(), deps)
 	if err != nil {
 		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
@@ -272,7 +265,7 @@ func TestAdvisories_FailingCheckAndAdvisoriesShareOneSummary(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summary line count = %d, want 1:\n%s", len(summaries), strings.Join(lines, "\n"))
 	}
-	if got, want := summaries[0], "  6 of 7 checks passed · 2 advisories"; got != want {
+	if got, want := summaries[0], "  5 of 6 checks passed · 2 advisories"; got != want {
 		t.Errorf("summary = %q; want %q", got, want)
 	}
 }

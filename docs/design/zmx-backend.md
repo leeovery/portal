@@ -51,7 +51,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 ## State
 
 - The zmx version owns `<config>/portal/state/`. `portal migrate` moves the tmux version's `state/` to `state-tmux/` before anything writes to `state/`.
-- While `state/` still holds a version 1 `sessions.json`, every command except `migrate` and `version` stops with one line pointing at `portal migrate`. Until phase 3 replaces them, the hidden `state` commands are exempt too: they are the tmux saver's own and read version 1 by design.
+- While `state/` still holds a version 1 `sessions.json`, every command except `migrate` and `version` stops with one line pointing at `portal migrate`. Until phase 3 replaces them, the hidden `state` commands are exempt too: they are the tmux saver's own and read version 1 by design. `doctor` is exempt as well, so it can report a version 1, corrupt or newer `sessions.json` itself.
 - `sessions.json` version 2: `{version, saved_at, sessions: [{name, label, dir, created_at, scrollback_file}]}`. `label` is omitted while it's the default. Rename writes through the same locked commit as the saver.
 - `scrollback/<name>.bin`. All positional re-filing goes.
 - Per-session flags, as files named after the session:

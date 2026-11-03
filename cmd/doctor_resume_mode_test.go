@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,6 +36,14 @@ func resumeModeLineIndex(t *testing.T, lines []string) int {
 		t.Fatalf("no resume-mode line in report:\n%s", strings.Join(lines, "\n"))
 	}
 	return found
+}
+
+func reportLines(out string) []string {
+	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+}
+
+func withoutCheck(results []checkResult, name string) []checkResult {
+	return slices.DeleteFunc(slices.Clone(results), func(r checkResult) bool { return r.name == name })
 }
 
 // doctorResumeModeLine runs doctor over a healthy install whose prefs store is
@@ -152,13 +161,13 @@ func TestDoctorResumeMode(t *testing.T) {
 			return lines[len(lines)-1]
 		}
 		for _, stored := range []string{"eager", "lazy"} {
-			if got := summaryFor(stored); got != "  7 checks passed" {
-				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  7 checks passed")
+			if got := summaryFor(stored); got != "  6 checks passed" {
+				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  6 checks passed")
 			}
 		}
 
 		setPrefsFile(t, `{"resume_mode":"eager"}`)
-		results, err := runDoctorDiagnosis(resolveDepsFor(t, healthyDoctorDeps(t)))
+		results, err := runDoctorDiagnosis(t.Context(), resolveDepsFor(t, healthyDoctorDeps(t)))
 		if err != nil {
 			t.Fatalf("runDoctorDiagnosis: %v", err)
 		}
@@ -180,14 +189,15 @@ func TestDoctorResumeMode(t *testing.T) {
 		setPrefsFile(t, `{"resume_mode":"lazy"}`)
 		deps := healthyDoctorDeps(t)
 		seed := `{"` + hookstest.LiveSeedA + `": {"on-resume": {"command": "echo hi", "resume": "eager"}}}`
-		deps.HookStore, _ = hookstest.StageStore(t, hookstest.Staging{Seed: seed})
+		_, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
+		t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
 
 		if got, want := doctorResumeModeLine(t, deps), resumeModeLine("lazy"); got != want {
 			t.Errorf("resume-mode line = %q; want %q — the install default alone", got, want)
 		}
 	})
 
-	t.Run("it trails the pending-resumes line at the end of the catalog", func(t *testing.T) {
+	t.Run("it trails the host-terminal line at the end of the catalog", func(t *testing.T) {
 		setPrefsFile(t, `{"resume_mode":"eager"}`)
 		outBuf, _, err := runDoctorWith(t, healthyDoctorDeps(t))
 		if err != nil {
@@ -195,8 +205,8 @@ func TestDoctorResumeMode(t *testing.T) {
 		}
 		lines := reportLines(outBuf.String())
 		i := resumeModeLineIndex(t, lines)
-		if pending := pendingLineIndex(t, lines); pending != i-1 {
-			t.Errorf("resume-mode line at %d, pending line at %d; want the resume-mode line directly after it:\n%s", i, pending, outBuf.String())
+		if host := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, " host terminal: ") }); host != i-1 {
+			t.Errorf("resume-mode line at %d, host-terminal line at %d; want the resume-mode line directly after it:\n%s", i, host, outBuf.String())
 		}
 		if i != len(lines)-2 {
 			t.Errorf("resume-mode line at %d; want the last line before the summary (%d):\n%s", i, len(lines)-2, outBuf.String())

@@ -104,6 +104,11 @@ func (b *Backend) probe(caller, ctx context.Context, name, hostname string) prob
 	case err != nil:
 		return unanswered(caller, name, err)
 	}
+	return probed{session: sessionOf(name, i, hostname)}
+}
+
+// sessionOf is the session that answered i, on the machine named hostname.
+func sessionOf(name string, i info, hostname string) backend.Session {
 	s := backend.Session{
 		Name:     name,
 		Answered: true,
@@ -115,7 +120,7 @@ func (b *Backend) probe(caller, ctx context.Context, name, hostname string) prob
 	if !i.cwdTruncated() {
 		s.Dir = localDir(i.cwd, hostname)
 	}
-	return probed{session: s}
+	return s
 }
 
 // unanswered is a session that gave no answer, failing with err: cut short

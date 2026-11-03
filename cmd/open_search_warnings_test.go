@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/warning"
@@ -76,7 +77,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the accumulated warnings before a warm single-match attach", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+		sc.live("portal-a1b2", "blog-c3d4")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -102,7 +103,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the same lines as the CLI path", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -117,7 +118,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it drains the sink so a later emit writes nothing", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, soakedWarnings())
 		cmd, _ := warmSearchCommand(t)
 
@@ -134,7 +135,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it writes nothing when no warnings accumulated", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, nil)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -151,7 +152,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 		readErr := errors.New("no server running")
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.listErr = readErr
+		sc.fake.Fail(backendtest.OpList, readErr)
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -168,7 +169,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it leaves the picker branch's warnings for the model", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+		sc.live("portal-a1b2", "port-agent")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 

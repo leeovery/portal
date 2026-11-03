@@ -413,10 +413,11 @@ func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecisi
 // that pane's scrollback; a refused marker lifts the pin, since the pane never
 // waits.
 func markResumePending(cfg hydrateConfig) (parkedPane, error) {
-	pane, err := requireTmuxPane()
-	if err != nil {
-		return parkedPane{}, err
+	paneID := os.Getenv("TMUX_PANE")
+	if paneID == "" {
+		return parkedPane{}, fmt.Errorf("must be run from inside a tmux pane")
 	}
+	pane := tmux.PaneIDTarget(paneID)
 	resolveExe := cfg.ResolveExe
 	if resolveExe == nil {
 		resolveExe = resumeChainExe

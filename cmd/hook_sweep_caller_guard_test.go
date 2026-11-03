@@ -39,7 +39,7 @@ func TestHooksCleanStale_NoBootstrapStepIsAnAutomaticCaller(t *testing.T) {
 		if loc := forbidden.FindIndex(src); loc != nil {
 			line := 1 + strings.Count(string(src[:loc[0]]), "\n")
 			t.Errorf("%s:%d references the hooks CleanStale path; the daemon (maybeRunHookCleanup) "+
-				"and `doctor --fix` (pruneDoctorStaleHooks) are the only permitted callers — a bootstrap step must not clean hooks",
+				"is the only permitted caller — a bootstrap step must not clean hooks",
 				path, line)
 		}
 	}
@@ -48,5 +48,26 @@ func TestHooksCleanStale_NoBootstrapStepIsAnAutomaticCaller(t *testing.T) {
 	// change would leave this guard scanning nothing.
 	if scanned == 0 {
 		t.Fatalf("no production .go files scanned under %q; guard is vacuous", bootstrapDir)
+	}
+}
+
+// The hook commands key by session name, and the staleness rule judges a key
+// against live pane tokens: run from them, it would read every key the tmux
+// version wrote as stale and reap it. Until the zmx saver keys the sweep by
+// session name, none of them may reach it.
+func TestHookCommandsNeverJudgeStaleness(t *testing.T) {
+	forbidden := regexp.MustCompile(`\bStaleKeys\b|\bCleanStale\b|\bhooksweep\b`)
+
+	const source = "hooks.go"
+	src, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatalf("read %s: %v", source, err)
+	}
+	if !strings.Contains(string(src), "hooksSetCmd") {
+		t.Fatalf("%s no longer declares the hook commands; guard is vacuous", source)
+	}
+	if loc := forbidden.FindIndex(src); loc != nil {
+		line := 1 + strings.Count(string(src[:loc[0]]), "\n")
+		t.Errorf("%s:%d reaches the hook staleness sweep; the hook commands must never judge a key stale", source, line)
 	}
 }

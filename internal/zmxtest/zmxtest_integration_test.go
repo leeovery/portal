@@ -38,7 +38,7 @@ func TestNew(t *testing.T) {
 	t.Run("it runs sessions in /bin/sh with HOME in a temp dir and only the allowed environment", func(t *testing.T) {
 		t.Setenv("PORTAL_SECRET_PROBE", "leaked")
 		b := zmxtest.New(t)
-		if err := b.Create(t.Context(), "env", t.TempDir(), []string{"sh", "-c", `echo "shell=$SHELL"; echo "probe=${PORTAL_SECRET_PROBE-unset}"; echo "home=$HOME"; sleep 1000`}); err != nil {
+		if _, err := b.Create(t.Context(), "env", t.TempDir(), []string{"sh", "-c", `echo "shell=$SHELL"; echo "probe=${PORTAL_SECRET_PROBE-unset}"; echo "home=$HOME"; sleep 1000`}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -64,7 +64,7 @@ func TestNew(t *testing.T) {
 		t.Run("inner", func(t *testing.T) {
 			b := zmxtest.New(t)
 			dir = b.Dir()
-			if err := b.Create(t.Context(), "left-running", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+			if _, err := b.Create(t.Context(), "left-running", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 			daemon = zmxtest.Daemon(t, b, "left-running")
@@ -88,7 +88,7 @@ func TestNewIgnoresAnInheritedSession(t *testing.T) {
 		if got := b.Current(); got != "" {
 			t.Errorf("Current = %q, want none", got)
 		}
-		if err := b.Create(t.Context(), "fresh", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(t.Context(), "fresh", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if exists, err := b.Exists(t.Context(), "fresh"); err != nil || !exists {
@@ -130,7 +130,7 @@ func TestPoisonedEnvironment(t *testing.T) {
 func TestAttach(t *testing.T) {
 	t.Run("it holds a client attached until zmx detaches it", func(t *testing.T) {
 		b := zmxtest.New(t)
-		if err := b.Create(t.Context(), "held", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+		if _, err := b.Create(t.Context(), "held", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
