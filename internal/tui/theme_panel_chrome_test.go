@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const (
@@ -22,9 +21,9 @@ func newChromePanelModel(t *testing.T) Model {
 	rows := arrowValidRows(t, 6)
 	m := Build(newArrowPanelDeps(t, rows, rows[0].Slug))
 
-	sessions := make([]tmux.Session, 0, len(chromeSessionNames()))
+	sessions := make([]Session, 0, len(chromeSessionNames()))
 	for _, name := range chromeSessionNames() {
-		sessions = append(sessions, tmux.Session{Name: name, Windows: 1})
+		sessions = append(sessions, Session{Name: name, Answered: true})
 	}
 	m = openPanelForTestWithSessions(t, m, chromeContentW, chromeContentH, sessions)
 
@@ -421,7 +420,7 @@ func newChromeGateModel(t *testing.T, contentH int) Model {
 	rows := arrowValidRows(t, 6)
 	m := Build(newArrowPanelDeps(t, rows, rows[0].Slug))
 	m.termWidth, m.termHeight = geometryTerm(chromeContentW, contentH)
-	m.applySessions([]tmux.Session{{Name: chromeSessionNames()[0], Windows: 1}}, nil)
+	m.applySessions([]Session{{Name: chromeSessionNames()[0], Answered: true}}, nil)
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	if got := m.contentHeight(); got != contentH {
 		t.Fatalf("fixture: the content region is %d rows tall, want %d", got, contentH)

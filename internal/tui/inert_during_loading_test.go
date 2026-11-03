@@ -34,7 +34,7 @@ func (r *mutationRecorder) ListWindowsAndPanesInSession(string) ([]tmux.WindowGr
 	return nil, nil
 }
 
-func (r *mutationRecorder) ListSessions() ([]tmux.Session, error) {
+func (r *mutationRecorder) ListSessions() ([]Session, error) {
 	r.listSessCalls++
 	return nil, errors.New("loading-page ListSessions must not be reached")
 }

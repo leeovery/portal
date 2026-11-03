@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type dispatchProbe struct {
@@ -251,10 +250,10 @@ func TestPreviewDescriptorDispatchParity(t *testing.T) {
 
 func sessionsGuardModel(t *testing.T) Model {
 	t.Helper()
-	return NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	return NewModelWithSessions([]Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
+		{Name: "charlie", Answered: true},
 	})
 }
 

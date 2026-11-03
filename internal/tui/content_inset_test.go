@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func nthLine(t *testing.T, frame string, i int) string {
@@ -159,9 +158,9 @@ func TestContentInset_FoldedIntoBudgets(t *testing.T) {
 func TestContentInset_PaginationInvariantPreserved(t *testing.T) {
 	const w, h = 90, 14
 
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 40 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
@@ -192,9 +191,9 @@ func TestContentInset_PaginationInvariantPreserved(t *testing.T) {
 func TestContentInset_GroupedPaginationInvariant(t *testing.T) {
 	const w, h = 90, 16
 
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 30 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark), WithInitialMode(prefs.ModeByProject))
 	m.termWidth = w

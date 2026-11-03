@@ -22,23 +22,20 @@ type pendingReaderStub struct {
 	log   *[]string
 }
 
-func (r *pendingReaderStub) ListPendingResumePanes() (tmux.PendingResumeView, error) {
+func (r *pendingReaderStub) ListPendingResumeSessions() (map[string]struct{}, error) {
 	idx := r.calls
 	r.calls++
 	if r.log != nil {
 		*r.log = append(*r.log, "pending")
 	}
 	if r.err != nil {
-		return tmux.PendingResumeView{}, r.err
+		return nil, r.err
 	}
-	names := r.steps[min(idx, len(r.steps)-1)]
-	view := tmux.PendingResumeView{Rows: []tmux.PendingResumeRow{}, Sessions: map[string]struct{}{}}
-	for _, n := range names {
-		view.Rows = append(view.Rows, tmux.PendingResumeRow{Pending: true, Session: n})
-		view.Panes++
-		view.Sessions[n] = struct{}{}
+	pending := map[string]struct{}{}
+	for _, n := range r.steps[min(idx, len(r.steps)-1)] {
+		pending[n] = struct{}{}
 	}
-	return view, nil
+	return pending, nil
 }
 
 type loggingLister struct {
@@ -46,7 +43,7 @@ type loggingLister struct {
 	log   *[]string
 }
 
-func (l loggingLister) ListSessions() ([]tmux.Session, error) {
+func (l loggingLister) ListSessions() ([]Session, error) {
 	*l.log = append(*l.log, "sessions")
 	return l.inner.ListSessions()
 }
@@ -132,14 +129,14 @@ func assertDots(t *testing.T, m Model, want map[string]bool) {
 	}
 }
 
-var pendingReadSessions = []tmux.Session{
-	{Name: "alpha", Windows: 1},
-	{Name: "bravo", Windows: 2},
+var pendingReadSessions = []Session{
+	{Name: "alpha", Answered: true},
+	{Name: "bravo", Answered: true},
 }
 
 func TestSessionListLoad_TakesThePendingReadWithTheSessionEnumerationOnFirstLoad(t *testing.T) {
 	var log []string
-	lister := loggingLister{inner: &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}}, log: &log}
+	lister := loggingLister{inner: &stepListerStub{steps: [][]Session{pendingReadSessions}}, log: &log}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}, log: &log}
 	m := Build(Deps{Lister: lister, PendingReader: reader})
 	m.sessionList.SetSize(80, 24)
@@ -160,7 +157,7 @@ func TestSessionListLoad_TakesThePendingReadWithTheSessionEnumerationOnFirstLoad
 }
 
 func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *testing.T) {
-	after := []tmux.Session{{Name: "bravo", Windows: 2}, {Name: "charlie", Windows: 1}}
+	after := []Session{{Name: "bravo", Answered: true}, {Name: "charlie", Answered: true}}
 	tests := []struct {
 		name string
 		run  func(t *testing.T, m Model) Model
@@ -201,7 +198,7 @@ func TestSessionListLoad_ReReadsBothAfterAKillARenameAndOnPreviewDismissal(t *te
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions, after}}
+			lister := &stepListerStub{steps: [][]Session{pendingReadSessions, after}}
 			reader := &pendingReaderStub{steps: [][]string{{"alpha"}, {"charlie"}}}
 			m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
 			m, _ = loadSessions(t, m, m.fetchSessionsCmd())
@@ -221,7 +218,7 @@ type mockRenamerStub struct{}
 func (mockRenamerStub) RenameSession(string, string) error { return nil }
 
 func TestSessionListLoad_DropsADotForASessionNoLongerPending(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}}
+	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha", "bravo"}, {"bravo"}}}
 	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
 
@@ -233,7 +230,7 @@ func TestSessionListLoad_DropsADotForASessionNoLongerPending(t *testing.T) {
 }
 
 func TestSessionListLoad_RendersTheListWithNoDotsWhenThePendingReadFails(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}}
+	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
 	m, _ = loadSessions(t, m, m.fetchSessionsCmd())
@@ -274,7 +271,7 @@ func TestSessionListLoad_NeverCarriesAPendingErrorIntoTheSessionListError(t *tes
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}, err: tt.sessionErr}
+			lister := &stepListerStub{steps: [][]Session{pendingReadSessions}, err: tt.sessionErr}
 			reader := &pendingReaderStub{steps: [][]string{{"alpha"}}, err: pendingErr}
 			m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
 			m.sessionKiller = &killerStub{}
@@ -299,7 +296,7 @@ func TestSessionListLoad_NeverCarriesAPendingErrorIntoTheSessionListError(t *tes
 }
 
 func TestSessionListLoad_MarksNothingWhenTheSeamIsUnwired(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}}
+	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, nil)
 	m.sessionKiller = &killerStub{}
 	m.sessionRenamer = mockRenamerStub{}
@@ -325,8 +322,8 @@ func TestSessionListLoad_MarksNothingWhenTheSeamIsUnwired(t *testing.T) {
 func TestSessionListLoad_IssuesNoSecondReadOnAGroupedRebuild(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Dir: dir}, {Name: "bravo", Windows: 2, Dir: dir}}
-	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
+	sessions := []Session{{Name: "alpha", Answered: true, Dir: dir}, {Name: "bravo", Answered: true, Dir: dir}}
+	lister := &stepListerStub{steps: [][]Session{sessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := pendingReadModel(t, prefs.ModeFlat, projects, lister, reader)
 	m, _ = loadSessions(t, m, m.fetchSessionsCmd())
@@ -363,8 +360,8 @@ func TestSessionListLoad_IssuesNoSecondReadOnAGroupedRebuild(t *testing.T) {
 func TestSessionListLoad_ShowsTheDotOnEveryRowOfAMultiTagPendingSession(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Dir: dir}}
-	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
+	sessions := []Session{{Name: "alpha", Answered: true, Dir: dir}}
+	lister := &stepListerStub{steps: [][]Session{sessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := pendingReadModel(t, prefs.ModeByTag, projects, lister, reader)
 
@@ -382,7 +379,7 @@ func TestSessionListLoad_ShowsTheDotOnEveryRowOfAMultiTagPendingSession(t *testi
 }
 
 func TestSessionListLoad_LeavesMultiSelectMarksAsTheyAre(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{pendingReadSessions}}
+	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"bravo"}}}
 	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
 	m.multiSelectMode = true

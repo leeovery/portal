@@ -4,35 +4,35 @@
 
   Sessions 100                                                                                             / to filter
 
-  ▌ session-00                                                                                         1 window    ●
-    session-01                                                                                         2 windows
-    session-02                                                                                         3 windows
-    session-03                                                                                         4 windows
-    session-04                                                                                         1 window
-    session-05                                                                                         2 windows
-    session-06                                                                                         3 windows
-    session-07                                                                                         4 windows
-    session-08                                                                                         1 window
-    session-09                                                                                         2 windows
-    session-10                                                                                         3 windows
-    session-11                                                                                         4 windows
-    session-12                                                                                         1 window
-    session-13                                                                                         2 windows
-    session-14                                                                                         3 windows
-    session-15                                                                                         4 windows
-    session-16                                                                                         1 window
-    session-17                                                                                         2 windows
-    session-18                                                                                         3 windows
-    session-19                                                                                         4 windows
-    session-20                                                                                         1 window
-    session-21                                                                                         2 windows
-    session-22                                                                                         3 windows
-    session-23                                                                                         4 windows
-    session-24                                                                                         1 window
-    session-25                                                                                         2 windows
-    session-26                                                                                         3 windows
-    session-27                                                                                         4 windows
-    session-28                                                                                         1 window
+  ▌ session-00                                                                                                     ●
+    session-01
+    session-02
+    session-03
+    session-04
+    session-05
+    session-06
+    session-07
+    session-08
+    session-09
+    session-10
+    session-11
+    session-12
+    session-13
+    session-14
+    session-15
+    session-16
+    session-17
+    session-18
+    session-19
+    session-20
+    session-21
+    session-22
+    session-23
+    session-24
+    session-25
+    session-26
+    session-27
+    session-28
 
                                                           ••••
   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔

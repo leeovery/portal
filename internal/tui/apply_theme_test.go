@@ -8,7 +8,6 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const swapProbeSessions = 12
@@ -18,9 +17,9 @@ func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListM
 	const w, h = 120, 40
 
 	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i), Answered: true})
 	}
 
 	m := Build(Deps{
@@ -188,7 +187,7 @@ func (c *countingScrollbackReader) Tail(PaneScrollback) ([]byte, error) { c.call
 
 type countingLister struct{ calls int }
 
-func (c *countingLister) ListSessions() ([]tmux.Session, error) { c.calls++; return nil, nil }
+func (c *countingLister) ListSessions() ([]Session, error) { c.calls++; return nil, nil }
 
 func newCountingStores() countingStores {
 	return countingStores{
@@ -265,10 +264,10 @@ func newSwapFrameModel(t *testing.T, before theme.Theme, colourless bool) Model 
 	t.Helper()
 	const w, h = 120, 40
 
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	sessions := make([]Session, 0, swapProbeSessions)
 	projects := make([]project.Project, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1, Dir: "/Users/leeovery/Code/" + nameN(i)})
+		sessions = append(sessions, Session{Name: nameN(i), Answered: true, Dir: "/Users/leeovery/Code/" + nameN(i)})
 		projects = append(projects, project.Project{Name: nameN(i), Path: "/Users/leeovery/Code/" + nameN(i)})
 	}
 

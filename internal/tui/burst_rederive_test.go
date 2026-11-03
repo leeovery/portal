@@ -6,14 +6,13 @@ import (
 
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
+		{Name: "charlie", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -62,9 +61,9 @@ func TestBurstDispatch_RederivesLiveMarkedSetOnDeferredResolve(t *testing.T) {
 }
 
 func TestBurstDispatch_AllUnmarkedDuringDefer_NoOp(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

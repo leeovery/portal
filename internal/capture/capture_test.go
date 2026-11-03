@@ -33,22 +33,21 @@ func TestFixtureByName(t *testing.T) {
 
 		type want struct {
 			name     string
-			windows  int
 			attached bool
 		}
 		wants := []want{
-			{"orchard-pipeline-code-based", 3, true},
-			{"orchard-pipeline-codify", 2, false},
-			{"kiln-relayx-explore", 1, false},
-			{"lumen webhooks and watchers", 4, false},
-			{"tessera-proxy-Vb3kQw", 1, false},
-			{"atelier-web-m4TzpD", 2, false},
-			{"lumen-sync-engine", 1, false},
-			{"kiln-aws-migration", 5, false},
-			{"relay-v1-api-Hq7wNe", 1, false},
-			{"relayx-3RJDWA", 2, false},
-			{"loom-p84cXa", 1, false},
-			{"quill-Ue9fLr", 1, false},
+			{"orchard-pipeline-code-based", true},
+			{"orchard-pipeline-codify", false},
+			{"kiln-relayx-explore", false},
+			{"lumen webhooks and watchers", false},
+			{"tessera-proxy-Vb3kQw", false},
+			{"atelier-web-m4TzpD", false},
+			{"lumen-sync-engine", false},
+			{"kiln-aws-migration", false},
+			{"relay-v1-api-Hq7wNe", false},
+			{"relayx-3RJDWA", false},
+			{"loom-p84cXa", false},
+			{"quill-Ue9fLr", false},
 		}
 
 		if len(sessions) != len(wants) {
@@ -59,8 +58,8 @@ func TestFixtureByName(t *testing.T) {
 			if got.Name != w.name {
 				t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 			}
-			if got.Windows != w.windows {
-				t.Errorf("session[%d].Windows = %d, want %d (%s)", i, got.Windows, w.windows, w.name)
+			if !got.Answered {
+				t.Errorf("session[%d] does not answer (%s)", i, w.name)
 			}
 			if got.Attached != w.attached {
 				t.Errorf("session[%d].Attached = %t, want %t (%s)", i, got.Attached, w.attached, w.name)
@@ -452,14 +451,13 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 	}
 	type want struct {
 		name     string
-		windows  int
 		attached bool
 	}
 	wants := []want{
-		{"kiln-relayx-explore", 3, true},
-		{"orchard-pipeline-codify", 1, false},
-		{"relayx-3RJDWA", 2, false},
-		{"tessera-proxy-Vb3kQw", 4, false},
+		{"kiln-relayx-explore", true},
+		{"orchard-pipeline-codify", false},
+		{"relayx-3RJDWA", false},
+		{"tessera-proxy-Vb3kQw", false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-no-tags-signpost has %d sessions, want %d (reference set)", len(sessions), len(wants))
@@ -469,8 +467,8 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 		if got.Name != w.name {
 			t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 		}
-		if got.Windows != w.windows {
-			t.Errorf("session[%d].Windows = %d, want %d (%s)", i, got.Windows, w.windows, w.name)
+		if !got.Answered {
+			t.Errorf("session[%d] does not answer (%s)", i, w.name)
 		}
 		if got.Attached != w.attached {
 			t.Errorf("session[%d].Attached = %t, want %t (%s)", i, got.Attached, w.attached, w.name)
@@ -607,30 +605,29 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 	}
 	type want struct {
 		name     string
-		windows  int
 		attached bool
 	}
 	wants := []want{
-		{"orchard-pipeline-code-based", 3, true},
-		{"orchard-pipeline-codify", 2, false},
-		{"kiln-relayx-explore", 1, false},
-		{"lumen webhooks and watchers", 4, false},
-		{"tessera-proxy-Vb3kQw", 1, false},
-		{"atelier-web-m4TzpD", 2, false},
-		{"lumen-sync-engine", 1, false},
-		{"kiln-aws-migration", 5, false},
-		{"relay-v1-api-Hq7wNe", 1, false},
-		{"relayx-3RJDWA", 2, false},
-		{"loom-p84cXa", 1, false},
-		{"quill-Ue9fLr", 1, false},
+		{"orchard-pipeline-code-based", true},
+		{"orchard-pipeline-codify", false},
+		{"kiln-relayx-explore", false},
+		{"lumen webhooks and watchers", false},
+		{"tessera-proxy-Vb3kQw", false},
+		{"atelier-web-m4TzpD", false},
+		{"lumen-sync-engine", false},
+		{"kiln-aws-migration", false},
+		{"relay-v1-api-Hq7wNe", false},
+		{"relayx-3RJDWA", false},
+		{"loom-p84cXa", false},
+		{"quill-Ue9fLr", false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-multi-select-active has %d sessions, want %d (the sessions-flat set)", len(sessions), len(wants))
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		if got.Name != w.name || !got.Answered || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,answered=%t,%t}, want {%q,answered=true,%t}", i, got.Name, got.Answered, got.Attached, w.name, w.attached)
 		}
 	}
 
@@ -682,24 +679,23 @@ func TestFixtureNamesIncludesMultiSelectActive(t *testing.T) {
 
 type flatFixtureWant struct {
 	name     string
-	windows  int
 	attached bool
 }
 
 func flatFixtureWants() []flatFixtureWant {
 	return []flatFixtureWant{
-		{"orchard-pipeline-code-based", 3, true},
-		{"orchard-pipeline-codify", 2, false},
-		{"kiln-relayx-explore", 1, false},
-		{"lumen webhooks and watchers", 4, false},
-		{"tessera-proxy-Vb3kQw", 1, false},
-		{"atelier-web-m4TzpD", 2, false},
-		{"lumen-sync-engine", 1, false},
-		{"kiln-aws-migration", 5, false},
-		{"relay-v1-api-Hq7wNe", 1, false},
-		{"relayx-3RJDWA", 2, false},
-		{"loom-p84cXa", 1, false},
-		{"quill-Ue9fLr", 1, false},
+		{"orchard-pipeline-code-based", true},
+		{"orchard-pipeline-codify", false},
+		{"kiln-relayx-explore", false},
+		{"lumen webhooks and watchers", false},
+		{"tessera-proxy-Vb3kQw", false},
+		{"atelier-web-m4TzpD", false},
+		{"lumen-sync-engine", false},
+		{"kiln-aws-migration", false},
+		{"relay-v1-api-Hq7wNe", false},
+		{"relayx-3RJDWA", false},
+		{"loom-p84cXa", false},
+		{"quill-Ue9fLr", false},
 	}
 }
 
@@ -715,8 +711,8 @@ func assertFlatFixtureSet(t *testing.T, fx *capture.Fixture) {
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		if got.Name != w.name || !got.Answered || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,answered=%t,%t}, want {%q,answered=true,%t}", i, got.Name, got.Answered, got.Attached, w.name, w.attached)
 		}
 	}
 }

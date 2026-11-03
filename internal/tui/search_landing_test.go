@@ -7,10 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func ingestLanding(t *testing.T, m Model, sessions []tmux.Session, projects []project.Project) Model {
+func ingestLanding(t *testing.T, m Model, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	var model tea.Model = m
 	model, _ = model.Update(SessionsMsg{Sessions: sessions})
@@ -18,7 +17,7 @@ func ingestLanding(t *testing.T, m Model, sessions []tmux.Session, projects []pr
 	return model.(Model)
 }
 
-func searchLanding(t *testing.T, mode prefs.SessionListMode, term string, sessions []tmux.Session, projects []project.Project) Model {
+func searchLanding(t *testing.T, mode prefs.SessionListMode, term string, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	m := Build(Deps{
 		Lister:       fakeLister{},
@@ -40,10 +39,10 @@ func sessionNames(items []list.Item) []string {
 }
 
 func TestSearchFormLanding(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "myapp-dev"},
-		{Name: "other"},
-		{Name: "myapp-prod"},
+	sessions := []Session{
+		{Name: "myapp-dev", Answered: true},
+		{Name: "other", Answered: true},
+		{Name: "myapp-prod", Answered: true},
 	}
 
 	t.Run("it lands a search term on the Sessions page with the filter committed", func(t *testing.T) {
@@ -94,10 +93,10 @@ func TestSearchFormLanding(t *testing.T) {
 				{Path: dirA, Name: "Alpha", Tags: []string{"work"}},
 				{Path: dirB, Name: "Bravo", Tags: []string{"play"}},
 			}
-			grouped := []tmux.Session{
-				{Name: "myapp-alpha", Dir: dirA},
-				{Name: "other", Dir: dirB},
-				{Name: "myapp-bravo", Dir: dirB},
+			grouped := []Session{
+				{Name: "myapp-alpha", Answered: true, Dir: dirA},
+				{Name: "other", Answered: true, Dir: dirB},
+				{Name: "myapp-bravo", Answered: true, Dir: dirB},
 			}
 
 			m := searchLanding(t, mode.mode, "myapp", grouped, projects)
@@ -212,9 +211,9 @@ func TestSearchFormLanding(t *testing.T) {
 }
 
 func TestSearchFormPrecedenceOverInitialFilter(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "myapp-dev"},
-		{Name: "other"},
+	sessions := []Session{
+		{Name: "myapp-dev", Answered: true},
+		{Name: "other", Answered: true},
 	}
 
 	t.Run("it lands on the search term when a Deps carries both a search form and an initial filter", func(t *testing.T) {

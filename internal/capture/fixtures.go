@@ -172,6 +172,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsSearchHomeFixture,
 		sessionsPendingResumeFixture,
 		sessionsPendingResumeColourlessFixture,
+		sessionsNotAnsweringFixture,
 		projectsFixture,
 		projectsCommandPendingFixture,
 		themePanelAdaptivePairFixture,
@@ -222,19 +223,19 @@ func FixtureNames() []string {
 // Every session carries a stamped Dir so the grouped-render lazy pane-read
 // fallback never fires (the harness has no tmux server).
 func sessionsFlatFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
-		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "kiln-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "relay-v1-api-Hq7wNe", Windows: 1, Attached: false, Dir: "/home/user/code/relay"},
-		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "loom-p84cXa", Windows: 1, Attached: false, Dir: "/home/user/code/loom"},
-		{Name: "quill-Ue9fLr", Windows: 1, Attached: false, Dir: "/home/user/code/quill"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "relay-v1-api-Hq7wNe", Answered: true, Attached: false, Dir: "/home/user/code/relay"},
+		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "loom-p84cXa", Answered: true, Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Answered: true, Attached: false, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -260,15 +261,15 @@ func sessionsEmptyFixture() *Fixture {
 // The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
 // sides, so the grouping is deterministic without a real filesystem.
 func sessionsByProjectFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
 		// Matches no project → lands in the Unknown catch-all.
-		{Name: "orphan-explore", Windows: 1, Attached: false, Dir: "/home/user/code/untracked-scratch"},
+		{Name: "orphan-explore", Answered: true, Attached: false, Dir: "/home/user/code/untracked-scratch"},
 	}
 
 	projects := []project.Project{
@@ -290,15 +291,15 @@ func sessionsByProjectFixture() *Fixture {
 // The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
 // sides, so the match is deterministic without a real filesystem.
 func sessionsByTagFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "orchard-pipeline-codify", Windows: 2, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "atelier-web-m4TzpD", Windows: 2, Attached: false, Dir: "/home/user/code/atelier"},
-		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "kiln-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/kiln"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Answered: true, Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
 	}
 
 	projects := []project.Project{
@@ -331,11 +332,11 @@ func sessionsPagedFixture() *Fixture {
 		"/home/user/code/atelier",
 		"/home/user/code/relay",
 	}
-	sessions := make([]tmux.Session, 0, count)
+	sessions := make([]tui.Session, 0, count)
 	for i := range count {
-		sessions = append(sessions, tmux.Session{
+		sessions = append(sessions, tui.Session{
 			Name:     fmt.Sprintf("session-%02d", i),
-			Windows:  (i % 4) + 1,
+			Answered: true,
 			Attached: i == 0,
 			Dir:      dirs[i%len(dirs)],
 		})
@@ -350,11 +351,11 @@ func sessionsPagedFixture() *Fixture {
 }
 
 func sessionsInlineFlashFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "kiln-relayx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/kiln"},
-		{Name: "orchard-pipeline-codify", Windows: 1, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore", Answered: true, Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	return &Fixture{
@@ -452,11 +453,11 @@ func sessionsBurstOpeningFixture() *Fixture {
 // The project store is populated deliberately: the zero-tags condition, not a
 // missing store, must drive the signpost.
 func sessionsNoTagsSignpostFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "kiln-relayx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/kiln"},
-		{Name: "orchard-pipeline-codify", Windows: 1, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "relayx-3RJDWA", Windows: 2, Attached: false, Dir: "/home/user/code/relayx"},
-		{Name: "tessera-proxy-Vb3kQw", Windows: 4, Attached: false, Dir: "/home/user/code/tessera"},
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore", Answered: true, Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	projects := []project.Project{
@@ -495,13 +496,13 @@ func sessionsSearchResultsFixture() *Fixture {
 	gatewayDir := filepath.Join(home, "code/portal-gateway")
 	lumenDir := filepath.Join(home, "code/lumen")
 
-	sessions := []tmux.Session{
-		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: portalDir},
-		{Name: "api-work", Windows: 2, Attached: false, Dir: gatewayDir},
-		{Name: "legacy-port-shim", Windows: 1, Attached: false},
-		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames")},
-		{Name: "portal-notes", Windows: 1, Attached: false, Dir: "/opt/portal-tools"},
-		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: lumenDir},
+	sessions := []tui.Session{
+		{Name: "portal-a1b2", Answered: true, Attached: true, Dir: portalDir},
+		{Name: "api-work", Answered: true, Attached: false, Dir: gatewayDir},
+		{Name: "legacy-port-shim", Answered: true, Attached: false},
+		{Name: "portal-design-exports-review", Answered: true, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames/archive/2026-q3")},
+		{Name: "portal-notes", Answered: true, Attached: false, Dir: "/opt/portal-tools"},
+		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: lumenDir},
 	}
 
 	projects := []project.Project{
@@ -533,11 +534,11 @@ func sessionsSearchHomeFixture() *Fixture {
 // One row per attached × pending combination, so the indicators' packing is
 // seen in one frame rather than inferred from rows showing one each.
 func sessionsPendingResumeFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "orchard-pipeline-codify", Windows: 2, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
-		{Name: "loom-p84cXa", Windows: 1, Attached: false, Dir: "/home/user/code/loom"},
-		{Name: "quill-Ue9fLr", Windows: 3, Attached: true, Dir: "/home/user/code/quill"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "loom-p84cXa", Answered: true, Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Answered: true, Attached: true, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -546,6 +547,25 @@ func sessionsPendingResumeFixture() *Fixture {
 		pendingSessions: []string{"lumen-sync-engine", "quill-Ue9fLr"},
 		projectStore:    &fakeProjectStore{projects: nil},
 		initialMode:     prefs.ModeFlat,
+	}
+}
+
+// Sessions that did not answer, each known by its name alone, beside ones that
+// did — one under the cursor, so both the selected and the canvas dimming show.
+func sessionsNotAnsweringFixture() *Fixture {
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore"},
+		{Name: "orchard-pipeline-codify", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Answered: true, Dir: "/home/user/code/lumen"},
+		{Name: "quill-Ue9fLr"},
+		{Name: "loom-p84cXa", Answered: true, Dir: "/home/user/code/loom"},
+	}
+
+	return &Fixture{
+		name:         "sessions-not-answering",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
 	}
 }
 
@@ -791,10 +811,10 @@ func themePanelProjectsFixture() *Fixture {
 // Opens on Sessions (the production no-arg default); `x` reaches the Projects
 // page the capture is of.
 func projectsFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "portal", Windows: 2, Attached: false, Dir: "/home/user/code/portal"},
-		{Name: "relayx-3RJDWA", Windows: 1, Attached: false, Dir: "/home/user/code/loom/relayx"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "portal", Answered: true, Attached: false, Dir: "/home/user/code/portal"},
+		{Name: "relayx-3RJDWA", Answered: true, Attached: false, Dir: "/home/user/code/loom/relayx"},
 	}
 
 	// relay-v1-api's tags render as the edit-project modal's seeded chips.
@@ -844,11 +864,11 @@ func projectsCommandPendingFixture() *Fixture {
 // The scrollback stays generic terminal output: no fixture may reference a
 // specific tool.
 func previewScreenFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "tessera-proxy-Vb3kQw", Windows: 1, Attached: false, Dir: "/home/user/code/tessera"},
-		{Name: "orchard-pipeline-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
-		{Name: "kiln-relayx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/kiln"},
-		{Name: "lumen-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/lumen"},
+	sessions := []tui.Session{
+		{Name: "tessera-proxy-Vb3kQw", Answered: true, Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "orchard-pipeline-code-based", Answered: true, Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Answered: true, Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen-sync-engine", Answered: true, Attached: false, Dir: "/home/user/code/lumen"},
 	}
 
 	scrollback := "$ kubectl rollout status deploy/tessera-proxy\n" +

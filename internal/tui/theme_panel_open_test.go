@@ -12,7 +12,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const fixtureThemesDir = "/fixture/themes"
@@ -63,7 +62,7 @@ func themeOpenTestModel(t *testing.T, enumerator ThemeSource, keys theme.RawKeys
 // row action has to have a row to act on.
 func themeOpenTestPopulatedModel(t *testing.T, enumerator ThemeSource) Model {
 	t.Helper()
-	m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 2}})
+	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
 	m.sessionKiller = keymapParityKiller{}
 	m.projectList.SetItems(ProjectsToListItems([]project.Project{{Path: "/p/one", Name: "one"}}))
 	m.projectList.Select(0)

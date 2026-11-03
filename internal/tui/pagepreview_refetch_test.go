@@ -10,12 +10,12 @@ import (
 )
 
 type stepListerStub struct {
-	steps [][]tmux.Session
+	steps [][]Session
 	err   error
 	calls int
 }
 
-func (s *stepListerStub) ListSessions() ([]tmux.Session, error) {
+func (s *stepListerStub) ListSessions() ([]Session, error) {
 	idx := s.calls
 	s.calls++
 	if s.err != nil {
@@ -27,7 +27,7 @@ func (s *stepListerStub) ListSessions() ([]tmux.Session, error) {
 	return s.steps[idx], nil
 }
 
-func modelWithSeamsAndLister(t *testing.T, sessions []tmux.Session, enum TmuxEnumerator, reader ScrollbackReader, lister SessionLister) Model {
+func modelWithSeamsAndLister(t *testing.T, sessions []Session, enum TmuxEnumerator, reader ScrollbackReader, lister SessionLister) Model {
 	t.Helper()
 	m := modelWithSeams(t, sessions, enum, reader)
 	m.sessionLister = lister
@@ -85,12 +85,12 @@ func drainCmdThroughUpdate(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
 }
 
 func TestPreviewEscRefetchesSessionsList(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -98,7 +98,7 @@ func TestPreviewEscRefetchesSessionsList(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 	m.sessionList.Select(1)
 
@@ -117,12 +117,12 @@ func TestPreviewEscRefetchesSessionsList(t *testing.T) {
 }
 
 func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -130,7 +130,7 @@ func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 
 	got := pressSpaceThenEscWithRefresh(t, m)
@@ -143,12 +143,12 @@ func TestExternallyKilledSessionNotInListAfterDismiss(t *testing.T) {
 }
 
 func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -156,7 +156,7 @@ func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 	m.sessionList.Select(1)
 
@@ -172,12 +172,12 @@ func TestPreviewEscPreservesCursorWhenPreviousSessionStillExists(t *testing.T) {
 }
 
 func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -185,7 +185,7 @@ func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 	m.sessionList.Select(0)
 
@@ -201,9 +201,9 @@ func TestPreviewEscCursorFallsBackToNeighbourWhenPreviousSessionGone(t *testing.
 }
 
 func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -211,7 +211,7 @@ func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{first}}
+	lister := &stepListerStub{steps: [][]Session{first}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 	m.sessionList.Select(1)
 
@@ -228,10 +228,10 @@ func TestPreviewEscRefreshIsObservablyNoOpWhenListUnchanged(t *testing.T) {
 }
 
 func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "alphabet", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alphabet", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -239,7 +239,7 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{first}}
+	lister := &stepListerStub{steps: [][]Session{first}}
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
 	m.sessionList.SetFilterText("alpha")
 	m.sessionList.SetFilterState(list.FilterApplied)
@@ -278,9 +278,9 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 }
 
 func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -288,7 +288,7 @@ func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeamsAndLister(t, first, enum, reader, &stepListerStub{steps: [][]tmux.Session{first}})
+	m := modelWithSeamsAndLister(t, first, enum, reader, &stepListerStub{steps: [][]Session{first}})
 	before := visibleSessionNames(m)
 
 	out := drainCmdThroughUpdate(t, m, nil)
@@ -308,8 +308,8 @@ func TestDrainCmdThroughUpdateNilCmdReturnsModelUnchanged(t *testing.T) {
 }
 
 func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -317,7 +317,7 @@ func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeamsAndLister(t, first, enum, reader, &stepListerStub{steps: [][]tmux.Session{first}})
+	m := modelWithSeamsAndLister(t, first, enum, reader, &stepListerStub{steps: [][]Session{first}})
 
 	probeCmd := func() tea.Msg { return tea.WindowSizeMsg{Width: 137, Height: 41} }
 
@@ -332,9 +332,9 @@ func TestDrainCmdThroughUpdateInvokesCmdAndFeedsResultThroughUpdate(t *testing.T
 }
 
 func TestPreviewEscRefreshSilentOnListerError(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

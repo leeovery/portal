@@ -6,7 +6,6 @@ import (
 
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestAnyTagsExist(t *testing.T) {
@@ -31,7 +30,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("shows the No tags yet signpost in By Tag mode with zero tags anywhere", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -47,7 +46,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("renders the plain flat session list under the signpost (no Untagged heading)", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}, {Name: "portal-def", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}, {Name: "portal-def", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -75,7 +74,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("advances By Tag to Flat with one s press from the signposted state", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 		persister := &fakeModePersister{}
 
 		m := newSwitchViewTestModel(t, prefs.ModeByTag, persister, sessions, projects)
@@ -99,7 +98,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("shows the signpost when reopening in persisted By Tag with zero tags", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -125,7 +124,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("does not show the signpost when at least one tag exists", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -145,7 +144,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 	t.Run("does not show the signpost when tags exist but all live sessions are tagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()

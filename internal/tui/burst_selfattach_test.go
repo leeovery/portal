@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func setupConfirmingBurst(t *testing.T, names []string) (Model, *spawntest.FakeAdapter, *spawntest.FakeAckChannel) {
@@ -185,9 +184,9 @@ func TestBurst_FullSuccess_ConfirmedWhileAttachedElsewhere(t *testing.T) {
 }
 
 func TestBurst_NotAllConfirmed_ClearsPendingWithoutQuit(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack, Results: []spawn.Result{spawn.SpawnFailed("boom")}}

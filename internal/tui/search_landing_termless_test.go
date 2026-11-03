@@ -7,14 +7,13 @@ import (
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestSearchFormLanding_TermlessForm(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "myapp-dev"},
-		{Name: "other"},
-		{Name: "myapp-prod"},
+	sessions := []Session{
+		{Name: "myapp-dev", Answered: true},
+		{Name: "other", Answered: true},
+		{Name: "myapp-prod", Answered: true},
 	}
 
 	t.Run("it lands the term-less form on a focused empty sessions filter", func(t *testing.T) {
@@ -133,13 +132,13 @@ func TestSearchFormLanding_TermlessForm(t *testing.T) {
 	})
 }
 
-func groupedSessions(t *testing.T) ([]tmux.Session, []project.Project) {
+func groupedSessions(t *testing.T) ([]Session, []project.Project) {
 	t.Helper()
 	dirA, dirB := t.TempDir(), t.TempDir()
-	return []tmux.Session{
-		{Name: "myapp-alpha", Dir: dirA},
-		{Name: "other", Dir: dirB},
-		{Name: "myapp-bravo", Dir: dirB},
+	return []Session{
+		{Name: "myapp-alpha", Answered: true, Dir: dirA},
+		{Name: "other", Answered: true, Dir: dirB},
+		{Name: "myapp-bravo", Answered: true, Dir: dirB},
 	}, []project.Project{
 		{Path: dirA, Name: "Alpha", Tags: []string{"work"}},
 		{Path: dirB, Name: "Bravo", Tags: []string{"play"}},

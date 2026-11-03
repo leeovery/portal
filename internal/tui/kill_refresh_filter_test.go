@@ -19,14 +19,14 @@ func (k *killerStub) KillSession(name string) error {
 }
 
 func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "alphabet", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "alphabet", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -34,7 +34,7 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	killer := &killerStub{}
 
 	m := modelWithSeamsAndLister(t, first, enum, reader, lister)

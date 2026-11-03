@@ -8,15 +8,14 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func colourlessTestModel(t *testing.T, w, h int) Model {
 	t.Helper()
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
-		{Name: "charlie", Windows: 2, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Answered: true, Attached: true},
+		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "charlie", Answered: true, Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, NoColor: true})
 	m.termWidth = w
@@ -149,10 +148,13 @@ func TestColourless_StateStaysGlyphDistinct(t *testing.T) {
 	m := colourlessTestModel(t, 90, 24)
 	frame := m.View().Content
 
-	for _, want := range []string{"3 windows" + strings.Repeat(" ", 2+indicatorSlotWidth-1) + attachedIndicatorLetter, "alpha", "bravo", "charlie"} {
+	for _, want := range []string{"alpha", "bravo", "charlie"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("colourless frame missing %q (state must stay glyph-distinct without colour)", want)
 		}
+	}
+	if line := strings.TrimRight(firstLineContaining(strings.Split(ansi.Strip(frame), "\n"), "alpha"), " "); !strings.HasSuffix(line, " "+attachedIndicatorLetter) {
+		t.Errorf("colourless attached row must end in its letter %q; got %q", attachedIndicatorLetter, line)
 	}
 	if !strings.Contains(frame, "▌") {
 		t.Errorf("colourless frame missing the selector bar glyph (state via glyph, not colour)")

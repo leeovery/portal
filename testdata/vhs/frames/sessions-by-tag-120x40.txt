@@ -5,19 +5,19 @@
   Sessions 10 — by tag                                                                                     / to filter
 
     client ··· 3
-    ▌ kiln-aws-migration                                                                               5 windows
-      kiln-relayx-explore                                                                              1 window
-      tessera-proxy-Vb3kQw                                                                             1 window
+    ▌ kiln-aws-migration
+      kiln-relayx-explore
+      tessera-proxy-Vb3kQw
     personal ··· 1
-      atelier-web-m4TzpD                                                                               2 windows
+      atelier-web-m4TzpD
     work ··· 4
-      kiln-aws-migration                                                                               5 windows
-      kiln-relayx-explore                                                                              1 window
-      orchard-pipeline-code-based                                                                      3 windows   ●
-      orchard-pipeline-codify                                                                          2 windows
+      kiln-aws-migration
+      kiln-relayx-explore
+      orchard-pipeline-code-based                                                                                  ●
+      orchard-pipeline-codify
     Untagged ··· 2
-      lumen webhooks and watchers                                                                      4 windows
-      lumen-sync-engine                                                                                1 window
+      lumen webhooks and watchers
+      lumen-sync-engine
 
 
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func wireUnsupportedBurstSeams(m *Model, adapter spawn.Adapter, ack spawn.AckChannelFull) {
@@ -88,9 +87,9 @@ func TestUnsupportedFlashText(t *testing.T) {
 }
 
 func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -115,9 +114,9 @@ func TestBurstUnsupported_NonNullAtomicNoOp(t *testing.T) {
 }
 
 func TestBurstUnsupported_NullFlash(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -142,9 +141,9 @@ func TestBurstUnsupported_NullFlash(t *testing.T) {
 }
 
 func TestBurstUnsupported_DeferredThenUnsupported(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -182,9 +181,9 @@ func TestBurstUnsupported_DeferredThenUnsupported(t *testing.T) {
 }
 
 func TestBurstUnsupported_SupportedStillDispatches(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

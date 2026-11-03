@@ -174,18 +174,18 @@ func currentPickerSession(src currentSessionReader) string {
 
 // searchCandidates returns the sessions a term is counted over: the enumeration
 // less the session the caller is already in, which the picker omits too.
-func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
+func searchCandidates(src SearchSessionSource) ([]tui.Session, error) {
 	sessions, err := src.ListSessionsProbe()
 	if err != nil {
 		return nil, err
 	}
-	return tui.PickerSessions(sessions, currentPickerSession(src)), nil
+	return tui.PickerSessions(pickerSessions(sessions), currentPickerSession(src)), nil
 }
 
 // searchMatches returns, in enumeration order, the sessions the term matches,
 // their directories abbreviated against home as the picker shows them.
-func searchMatches(home, term string, sessions []tmux.Session) []tmux.Session {
-	var matches []tmux.Session
+func searchMatches(home, term string, sessions []tui.Session) []tui.Session {
+	var matches []tui.Session
 	for _, s := range sessions {
 		if resolver.MatchesSearchTerm(home, term, s.Name, s.Dir) {
 			matches = append(matches, s)

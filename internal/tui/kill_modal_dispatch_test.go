@@ -9,9 +9,9 @@ import (
 
 func killDispatchModel(t *testing.T) (Model, *killerStub) {
 	t.Helper()
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Answered: true, Attached: true},
+		{Name: "bravo", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{
@@ -19,14 +19,14 @@ func killDispatchModel(t *testing.T) (Model, *killerStub) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
+	lister := &stepListerStub{steps: [][]Session{sessions}}
 	m := modelWithSeamsAndLister(t, sessions, enum, reader, lister)
 	killer := &killerStub{}
 	m.sessionKiller = killer
 	return m, killer
 }
 
-func TestKillKey_StoresNameAndWindows(t *testing.T) {
+func TestKillKey_StoresName(t *testing.T) {
 	m, _ := killDispatchModel(t)
 	m.sessionList.Select(0)
 
@@ -39,9 +39,6 @@ func TestKillKey_StoresNameAndWindows(t *testing.T) {
 	if got.pendingKillName != "alpha" {
 		t.Errorf("pendingKillName = %q, want %q", got.pendingKillName, "alpha")
 	}
-	if got.pendingKillWindows != 3 {
-		t.Errorf("pendingKillWindows = %d, want 3", got.pendingKillWindows)
-	}
 }
 
 func TestKillConfirm_YConfirmsParity(t *testing.T) {
@@ -50,8 +47,8 @@ func TestKillConfirm_YConfirmsParity(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	afterK := updated.(Model)
-	if afterK.pendingKillName != "bravo" || afterK.pendingKillWindows != 1 {
-		t.Fatalf("setup: expected bravo/1; got %q/%d", afterK.pendingKillName, afterK.pendingKillWindows)
+	if afterK.pendingKillName != "bravo" {
+		t.Fatalf("setup: expected bravo; got %q", afterK.pendingKillName)
 	}
 
 	updated2, cmd := afterK.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
@@ -63,9 +60,6 @@ func TestKillConfirm_YConfirmsParity(t *testing.T) {
 	if afterY.pendingKillName != "" {
 		t.Errorf("y must clear pendingKillName; got %q", afterY.pendingKillName)
 	}
-	if afterY.pendingKillWindows != 0 {
-		t.Errorf("y must clear pendingKillWindows; got %d", afterY.pendingKillWindows)
-	}
 	if cmd == nil {
 		t.Fatalf("y must emit the killAndRefresh cmd; got nil")
 	}
@@ -75,7 +69,7 @@ func TestKillConfirm_YConfirmsParity(t *testing.T) {
 	}
 }
 
-func TestKillConfirm_EscCancelsClearsBoth(t *testing.T) {
+func TestKillConfirm_EscCancelsClearsName(t *testing.T) {
 	m, killer := killDispatchModel(t)
 	m.sessionList.Select(0)
 
@@ -93,9 +87,6 @@ func TestKillConfirm_EscCancelsClearsBoth(t *testing.T) {
 	}
 	if afterEsc.pendingKillName != "" {
 		t.Errorf("Esc must clear pendingKillName; got %q", afterEsc.pendingKillName)
-	}
-	if afterEsc.pendingKillWindows != 0 {
-		t.Errorf("Esc must clear pendingKillWindows; got %d", afterEsc.pendingKillWindows)
 	}
 	if killer.killedName != "" {
 		t.Errorf("Esc must not kill anything; KillSession called with %q", killer.killedName)
@@ -120,9 +111,6 @@ func TestKillConfirm_NIgnored(t *testing.T) {
 	}
 	if afterN.pendingKillName != "alpha" {
 		t.Errorf("n must not clear pendingKillName; got %q", afterN.pendingKillName)
-	}
-	if afterN.pendingKillWindows != 3 {
-		t.Errorf("n must not clear pendingKillWindows; got %d", afterN.pendingKillWindows)
 	}
 	if killer.killedName != "" {
 		t.Errorf("n must not kill anything; KillSession called with %q", killer.killedName)

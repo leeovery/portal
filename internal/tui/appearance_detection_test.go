@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -17,10 +16,10 @@ var (
 
 func detectModel(t *testing.T, n theme.Nomination) Model {
 	t.Helper()
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
-		{Name: "charlie", Windows: 2, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Answered: true, Attached: true},
+		{Name: "bravo", Answered: true, Attached: false},
+		{Name: "charlie", Answered: true, Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, Theme: n})
 	m.termWidth = 90

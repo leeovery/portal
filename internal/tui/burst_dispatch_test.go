@@ -9,7 +9,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func allPresent(string) bool { return true }
@@ -60,10 +59,10 @@ func countName(names []string, name string) int {
 	return n
 }
 
-func sessionsFromNames(names []string) []tmux.Session {
-	sessions := make([]tmux.Session, len(names))
+func sessionsFromNames(names []string) []Session {
+	sessions := make([]Session, len(names))
 	for i, n := range names {
-		sessions[i] = tmux.Session{Name: n, Windows: i + 1}
+		sessions[i] = Session{Name: n, Answered: true}
 	}
 	return sessions
 }
@@ -83,10 +82,10 @@ func markedSupportedBurstModel(t *testing.T, names []string) (Model, *spawntest.
 }
 
 func TestBurstDispatch_OpensExternalInListOrder(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
+		{Name: "charlie", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -153,9 +152,9 @@ func TestBurstDispatch_MultiTagDedup(t *testing.T) {
 		{Path: dir, Name: "Portal", Tags: []string{"infra", "work"}},
 		{Path: dir2, Name: "Other", Tags: []string{"work"}},
 	}
-	sessions := []tmux.Session{
-		{Name: "portal-abc", Dir: dir},
-		{Name: "other-xyz", Dir: dir2},
+	sessions := []Session{
+		{Name: "portal-abc", Answered: true, Dir: dir},
+		{Name: "other-xyz", Answered: true, Dir: dir2},
 	}
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.rebuildSessionList()
@@ -217,10 +216,10 @@ func TestBurstDispatch_MultiTagDedup(t *testing.T) {
 }
 
 func TestBurstDispatch_CursorUnmarkedNeverOpened(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
+		{Name: "charlie", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -258,10 +257,10 @@ func TestBurstDispatch_CursorUnmarkedNeverOpened(t *testing.T) {
 }
 
 func TestBurstDispatch_StreamsProgressThenComplete(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
+		{Name: "charlie", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -310,9 +309,9 @@ func TestBurstDispatch_StreamsProgressThenComplete(t *testing.T) {
 }
 
 func TestBurstDispatch_DefersWhileDetectionInFlight(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -352,9 +351,9 @@ func TestBurstDispatch_DefersWhileDetectionInFlight(t *testing.T) {
 }
 
 func TestBurstDispatch_DetectionNeverDispatched_DefersThenResolves(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -419,9 +418,9 @@ func TestBurstDispatch_SplitDerivesFromSplitNetN(t *testing.T) {
 }
 
 func TestBurstDispatch_ConfigResolveUsesConfigAdapter(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	configAdapter := &spawntest.FakeAdapter{Ack: ack}

@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -17,7 +16,7 @@ func landPicker(t *testing.T, m tui.Model) tui.Model {
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.SessionsMsg{
-		Sessions: []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}},
+		Sessions: []tui.Session{{Name: "portal-a1b2", Answered: true}, {Name: "blog-c3d4", Answered: true}},
 	})
 	model, _ = model.Update(tui.ProjectsLoadedMsg{})
 

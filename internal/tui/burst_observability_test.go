@@ -8,13 +8,12 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func obsTwoSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+func obsTwoSessions() []Session {
+	return []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 }
 

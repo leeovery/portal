@@ -5,7 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type fakeDetector struct {
@@ -39,7 +38,7 @@ func appleTerminalIdentity() spawn.Identity {
 
 func press(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
-func oneNamedSession() []tmux.Session { return []tmux.Session{{Name: "alpha", Windows: 1}} }
+func oneNamedSession() []Session { return []Session{{Name: "alpha", Answered: true}} }
 
 func dispatchWarmDetection(t *testing.T, det TerminalDetector, res spawn.AdapterResolver) (Model, tea.Cmd) {
 	t.Helper()
@@ -204,7 +203,7 @@ func TestDetection_ColdLoadingToSessions_DispatchesOnce(t *testing.T) {
 	res := &countingResolve{fn: nativeResolve()}
 
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 	m := New(lister,
 		WithServerStarted(true),
 		WithProgressReceiver(func() tea.Msg { return nil }),
@@ -213,7 +212,7 @@ func TestDetection_ColdLoadingToSessions_DispatchesOnce(t *testing.T) {
 		WithResolve(res.resolve),
 	)
 
-	interim, completeCmd := driveColdBootToTransition(t, m, []tmux.Session{})
+	interim, completeCmd := driveColdBootToTransition(t, m, []Session{})
 
 	if !interim.DetectDispatched() {
 		t.Fatal("cold loading→Sessions transition must dispatch detection")

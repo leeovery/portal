@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func newProjectsTransitionModel(t *testing.T, lister SessionLister, projects []project.Project, mode prefs.SessionListMode) Model {
@@ -38,8 +37,8 @@ func pressProjectsKey(t *testing.T, m Model, r rune) (Model, tea.Cmd) {
 func TestProjectsTransitionDispatchesRefresh(t *testing.T) {
 	for _, key := range []rune{'x'} {
 		t.Run(string(key), func(t *testing.T) {
-			lister := &stepListerStub{steps: [][]tmux.Session{{
-				{Name: "alpha", Windows: 1, Attached: false},
+			lister := &stepListerStub{steps: [][]Session{{
+				{Name: "alpha", Answered: true, Attached: false},
 			}}}
 			m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 
@@ -66,10 +65,10 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 	projects := []project.Project{
 		{Path: "/p/one", Name: "one", Tags: []string{"work"}},
 	}
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false, Dir: "/p/one"},
+	sessions := []Session{
+		{Name: "alpha", Answered: true, Attached: false, Dir: "/p/one"},
 	}
-	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
+	lister := &stepListerStub{steps: [][]Session{sessions}}
 	m := newProjectsTransitionModel(t, lister, projects, prefs.ModeByTag)
 
 	got, cmd := pressProjectsKey(t, m, 'x')
@@ -122,8 +121,8 @@ func TestProjectsTransitionToleratesNilLister(t *testing.T) {
 func TestProjectsTransitionPreservesCommandPendingGuard(t *testing.T) {
 	for _, key := range []rune{'s', 'x'} {
 		t.Run(string(key), func(t *testing.T) {
-			lister := &stepListerStub{steps: [][]tmux.Session{{
-				{Name: "alpha", Windows: 1, Attached: false},
+			lister := &stepListerStub{steps: [][]Session{{
+				{Name: "alpha", Answered: true, Attached: false},
 			}}}
 			m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 			m.commandPending = true
@@ -144,8 +143,8 @@ func TestProjectsTransitionPreservesCommandPendingGuard(t *testing.T) {
 }
 
 func TestProjectsNonTransitionKeyDoesNotRefresh(t *testing.T) {
-	lister := &stepListerStub{steps: [][]tmux.Session{{
-		{Name: "alpha", Windows: 1, Attached: false},
+	lister := &stepListerStub{steps: [][]Session{{
+		{Name: "alpha", Answered: true, Attached: false},
 	}}}
 	m := newProjectsTransitionModel(t, lister, nil, prefs.ModeFlat)
 

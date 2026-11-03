@@ -8,15 +8,14 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type coldBootStepLister struct {
-	steps [][]tmux.Session
+	steps [][]Session
 	calls int
 }
 
-func (l *coldBootStepLister) ListSessions() ([]tmux.Session, error) {
+func (l *coldBootStepLister) ListSessions() ([]Session, error) {
 	idx := l.calls
 	l.calls++
 	if idx >= len(l.steps) {
@@ -25,7 +24,7 @@ func (l *coldBootStepLister) ListSessions() ([]tmux.Session, error) {
 	return l.steps[idx], nil
 }
 
-func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []tmux.Session) Model {
+func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []Session) Model {
 	t.Helper()
 
 	var model tea.Model = m
@@ -53,10 +52,10 @@ func oneProjectLoaded() []project.Project {
 	return []project.Project{{Path: "/p/one", Name: "one"}}
 }
 
-func twoRestoredSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
+func twoRestoredSessions() []Session {
+	return []Session{
+		{Name: "restored-alpha", Answered: true},
+		{Name: "restored-bravo", Answered: true},
 	}
 }
 
@@ -82,7 +81,7 @@ func assertVisibleSessionNames(t *testing.T, m Model, want []string, context str
 	}
 }
 
-func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []tmux.Session) (Model, tea.Cmd) {
+func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []Session) (Model, tea.Cmd) {
 	t.Helper()
 
 	var model tea.Model = m
@@ -106,7 +105,7 @@ func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []tmux.Sessi
 	return model.(Model), completeCmd
 }
 
-func driveColdBootWithProjects(t *testing.T, m Model, staleSnapshot []tmux.Session) Model {
+func driveColdBootWithProjects(t *testing.T, m Model, staleSnapshot []Session) Model {
 	t.Helper()
 	interim, completeCmd := driveColdBootToTransition(t, m, staleSnapshot)
 	return drainBatchToModel(t, interim, completeCmd)
@@ -141,9 +140,9 @@ func drainBatchToModel(t *testing.T, m Model, cmd tea.Cmd) Model {
 }
 
 func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -169,9 +168,9 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 }
 
 func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
-	stale := []tmux.Session{}
-	restored := []tmux.Session{{Name: "fast-restored", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	stale := []Session{}
+	restored := []Session{{Name: "fast-restored", Answered: true}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -206,9 +205,9 @@ func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
 }
 
 func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -228,8 +227,8 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 }
 
 func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
-	sessions := []tmux.Session{{Name: "warm-already-live", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{sessions}}
+	sessions := []Session{{Name: "warm-already-live", Answered: true}}
+	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister, WithServerStarted(true))
 
@@ -253,8 +252,8 @@ func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
 }
 
 func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
-	stale := []tmux.Session{}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+	stale := []Session{}
+	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -274,9 +273,9 @@ func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
 }
 
 func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -310,7 +309,7 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 }
 
 func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	warm := New(lister, WithServerStarted(true))
 	if cmd := warm.refetchSessionsAfterRestore(); cmd != nil {
@@ -327,7 +326,7 @@ func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
 }
 
 func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -365,8 +364,8 @@ func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
 }
 
 func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
-	sessions := []tmux.Session{{Name: "live-session", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{sessions}}
+	sessions := []Session{{Name: "live-session", Answered: true}}
+	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -389,9 +388,9 @@ func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 }
 
 func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -423,9 +422,9 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 // SessionsMsg is injected directly rather than through drainBatchToModel: the
 // drain would resolve the refetch before the late ProjectsLoadedMsg lands.
 func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
 		WithServerStarted(true),
@@ -466,8 +465,8 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 }
 
 func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
-	stale := []tmux.Session{}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+	stale := []Session{}
+	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	m := New(lister,
 		WithServerStarted(true),

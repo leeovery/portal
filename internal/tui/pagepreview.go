@@ -321,7 +321,7 @@ type previewStepSessionMsg struct {
 // the cursor by name. Err is surfaced rather than swallowed so the handler can
 // keep the pre-refresh list intact.
 type previewSessionsRefreshedMsg struct {
-	Sessions     []tmux.Session
+	Sessions     []Session
 	Pending      map[string]struct{}
 	Err          error
 	PreserveName string

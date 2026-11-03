@@ -35,7 +35,7 @@ func containmentDrain(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
 	return containmentDrain(t, updated, next)
 }
 
-func containmentIngest(t *testing.T, m tui.Model, sessions []tmux.Session, projects []project.Project) tui.Model {
+func containmentIngest(t *testing.T, m tui.Model, sessions []tui.Session, projects []project.Project) tui.Model {
 	t.Helper()
 	var model tea.Model = m
 	model, cmd := model.Update(tui.SessionsMsg{Sessions: sessions})
@@ -45,7 +45,7 @@ func containmentIngest(t *testing.T, m tui.Model, sessions []tmux.Session, proje
 	return model.(tui.Model)
 }
 
-func containmentPicker(t *testing.T, deps tui.Deps, sessions []tmux.Session, projects []project.Project) tui.Model {
+func containmentPicker(t *testing.T, deps tui.Deps, sessions []tui.Session, projects []project.Project) tui.Model {
 	t.Helper()
 	if deps.Lister == nil {
 		deps.Lister = &mockSessionLister{sessions: sessions}
@@ -71,14 +71,14 @@ func assertVisible(t *testing.T, m tui.Model, want []string, context string) {
 
 // scatteredSessions holds a session the fuzzy subsequence rule returns for the
 // term "port" (p·o·r·t across "Projects/rust-tools") but containment does not.
-func scatteredSessions(t *testing.T) []tmux.Session {
+func scatteredSessions(t *testing.T) []tui.Session {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	return []tmux.Session{
-		{Name: "portal-a1b2", Windows: 1},
-		{Name: "rust-tools", Windows: 1, Dir: filepath.Join(home, "Projects", "rust-tools")},
-		{Name: "other", Windows: 1},
+	return []tui.Session{
+		{Name: "portal-a1b2", Answered: true},
+		{Name: "rust-tools", Answered: true, Dir: filepath.Join(home, "Projects", "rust-tools")},
+		{Name: "other", Answered: true},
 	}
 }
 
@@ -108,9 +108,9 @@ func TestSearchContainmentNarrowsTheList(t *testing.T) {
 
 func TestSearchContainmentPreservesListOrder(t *testing.T) {
 	// Fuzzy ranks "portal-a1b2" above "app-port"; the list order is the reverse.
-	sessions := []tmux.Session{
-		{Name: "app-port", Windows: 1},
-		{Name: "portal-a1b2", Windows: 1},
+	sessions := []tui.Session{
+		{Name: "app-port", Answered: true},
+		{Name: "portal-a1b2", Answered: true},
 	}
 
 	t.Run("it keeps the list's own order and re-ranks nothing", func(t *testing.T) {
@@ -143,11 +143,11 @@ func TestSearchContainmentPreservesListOrder(t *testing.T) {
 func TestSearchContainmentMatchesTheRecordedDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	sessions := []tmux.Session{
-		{Name: "api-work", Windows: 1, Dir: filepath.Join(home, "Code", "portal")},
+	sessions := []tui.Session{
+		{Name: "api-work", Answered: true, Dir: filepath.Join(home, "Code", "portal")},
 		// A subsequence match for "portal" and nothing a run of it appears in.
-		{Name: "p-o-r-t-a-l", Windows: 1},
-		{Name: "other", Windows: 1},
+		{Name: "p-o-r-t-a-l", Answered: true},
+		{Name: "other", Answered: true},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -159,8 +159,8 @@ func TestSearchContainmentMatchesTheRecordedDirectory(t *testing.T) {
 }
 
 func TestSearchContainmentMatchesASpacedNameOnItsOwnFields(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "my session", Windows: 1, Dir: "/opt/api"},
+	sessions := []tui.Session{
+		{Name: "my session", Answered: true, Dir: "/opt/api"},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -196,17 +196,17 @@ func assertNoHeadings(t *testing.T, m tui.Model, context string) {
 
 // groupedFixture is three sessions across two tagged projects, of which the
 // term "port" contains-matches the first two.
-func groupedFixture(t *testing.T) ([]tmux.Session, []project.Project) {
+func groupedFixture(t *testing.T) ([]tui.Session, []project.Project) {
 	t.Helper()
 	dirA, dirB := t.TempDir(), t.TempDir()
 	projects := []project.Project{
 		{Path: dirA, Name: "Alpha", Tags: []string{"work"}},
 		{Path: dirB, Name: "Bravo", Tags: []string{"play"}},
 	}
-	sessions := []tmux.Session{
-		{Name: "app-port", Windows: 1, Dir: dirA},
-		{Name: "portal-a1b2", Windows: 1, Dir: dirB},
-		{Name: "other", Windows: 1, Dir: dirA},
+	sessions := []tui.Session{
+		{Name: "app-port", Answered: true, Dir: dirA},
+		{Name: "portal-a1b2", Answered: true, Dir: dirB},
+		{Name: "other", Answered: true, Dir: dirA},
 	}
 	return sessions, projects
 }
@@ -294,7 +294,7 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 		sessions, projects := groupedFixture(t)
 		// Survives the refresh as a subsequence match for "port" (p·o·r·t
 		// scattered across the path) that no run of "port" appears in.
-		sessions = append(sessions, tmux.Session{Name: "rust-tools", Windows: 1, Dir: "/opt/projects/rust-tools"})
+		sessions = append(sessions, tui.Session{Name: "rust-tools", Answered: true, Dir: "/opt/projects/rust-tools"})
 
 		m := containmentPicker(t, tui.Deps{
 			InitialMode: prefs.ModeFlat,
@@ -310,10 +310,10 @@ func TestSearchContainmentSurvivesReRenders(t *testing.T) {
 }
 
 func TestSearchContainmentHoldsOnTheFilterText(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "app-port", Windows: 1},
-		{Name: "portal-a1b2", Windows: 1},
-		{Name: "pro-tools", Windows: 1},
+	sessions := []tui.Session{
+		{Name: "app-port", Answered: true},
+		{Name: "portal-a1b2", Answered: true},
+		{Name: "pro-tools", Answered: true},
 	}
 	searched := func(t *testing.T) tui.Model {
 		t.Helper()
@@ -350,9 +350,9 @@ func TestSearchContainmentHoldsOnTheFilterText(t *testing.T) {
 }
 
 func TestSearchContainmentIsNotInstalledForATermLessForm(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "app-port", Windows: 1},
-		{Name: "pro-tools", Windows: 1},
+	sessions := []tui.Session{
+		{Name: "app-port", Answered: true},
+		{Name: "pro-tools", Answered: true},
 	}
 
 	m := containmentPicker(t, tui.Deps{
@@ -375,10 +375,10 @@ func TestSearchContainmentIsNotInstalledForATermLessForm(t *testing.T) {
 // reads, and the filter must match against it.
 func TestSearchNarrowsAgainstTheHomeTheModelWasGiven(t *testing.T) {
 	t.Setenv("HOME", "/elsewhere")
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Dir: "/home/user/code/alpha"},
-		{Name: "beta", Windows: 1, Dir: "/opt/code/beta"},
-		{Name: "gamma", Windows: 1, Dir: "/elsewhere/code/gamma"},
+	sessions := []tui.Session{
+		{Name: "alpha", Answered: true, Dir: "/home/user/code/alpha"},
+		{Name: "beta", Answered: true, Dir: "/opt/code/beta"},
+		{Name: "gamma", Answered: true, Dir: "/elsewhere/code/gamma"},
 	}
 
 	m := containmentPicker(t, tui.Deps{Home: "/home/user", Search: &tui.SearchForm{Term: "~/code"}}, sessions, nil)

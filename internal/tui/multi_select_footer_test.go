@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestMultiSelectFooter_ExactCopy(t *testing.T) {
@@ -133,7 +132,7 @@ func TestMultiSelectFooter_PaintsCanvasNoEdgeBleed(t *testing.T) {
 }
 
 func TestSessionsFooterResolver_MultiSelectMode(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 1}})
+	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
 	m.termWidth = 120
 	m.multiSelectMode = true
 
@@ -150,7 +149,7 @@ func TestSessionsFooterResolver_MultiSelectMode(t *testing.T) {
 }
 
 func TestSessionsFooterResolver_FilteringOverridesMultiSelect(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 1}})
+	m := NewModelWithSessions([]Session{{Name: "alpha", Answered: true}, {Name: "bravo", Answered: true}})
 	m.termWidth = 120
 	m.multiSelectMode = true
 	m.sessionList.SetFilterState(list.Filtering)

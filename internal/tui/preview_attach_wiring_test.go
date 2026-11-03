@@ -74,8 +74,8 @@ func TestNewPreviewModel_AcceptsNilAttacher(t *testing.T) {
 
 func TestSpaceOnSessionsPage_PassesModelAttacherIntoPreviewModel(t *testing.T) {
 	attacher := &fakePreviewAttacher{}
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Answered: true, Attached: false},
 	}
 	enum := &stubEnumerator{
 		groups: []tmux.WindowGroup{

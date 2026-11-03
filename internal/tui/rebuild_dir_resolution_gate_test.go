@@ -5,15 +5,14 @@ import (
 
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestRebuildSessionListResolutionGate(t *testing.T) {
 	t.Run("Flat (default) performs zero resolutions over un-stamped sessions", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
-			{Name: "portal-c", Dir: ""},
+		sessions := []Session{
+			{Name: "portal-a", Answered: true, Dir: ""},
+			{Name: "portal-b", Answered: true, Dir: ""},
+			{Name: "portal-c", Answered: true, Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: t.TempDir()}
@@ -34,9 +33,9 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 	t.Run("byTagSignpost (ByTag, zero tags anywhere) performs zero resolutions", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
+		sessions := []Session{
+			{Name: "portal-a", Answered: true, Dir: ""},
+			{Name: "portal-b", Answered: true, Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}
@@ -60,10 +59,10 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 	t.Run("ModeByProject resolves every un-stamped session", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
-			{Name: "portal-c", Dir: ""},
+		sessions := []Session{
+			{Name: "portal-a", Answered: true, Dir: ""},
+			{Name: "portal-b", Answered: true, Dir: ""},
+			{Name: "portal-c", Answered: true, Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}
@@ -81,9 +80,9 @@ func TestRebuildSessionListResolutionGate(t *testing.T) {
 	t.Run("ModeByTag (tags present) resolves every un-stamped session", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{
-			{Name: "portal-a", Dir: ""},
-			{Name: "portal-b", Dir: ""},
+		sessions := []Session{
+			{Name: "portal-a", Answered: true, Dir: ""},
+			{Name: "portal-b", Answered: true, Dir: ""},
 		}
 
 		stamper := &fakeStamper{path: dir}

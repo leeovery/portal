@@ -6,7 +6,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func newCursorTestModel(t *testing.T, items []list.Item) Model {
@@ -40,9 +39,9 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dirA, Name: "Alpha"},
 			{Path: dirB, Name: "Bravo"},
 		}
-		sessions := []tmux.Session{
-			{Name: "alpha-1", Dir: dirA},
-			{Name: "bravo-1", Dir: dirB},
+		sessions := []Session{
+			{Name: "alpha-1", Answered: true, Dir: dirA},
+			{Name: "bravo-1", Answered: true, Dir: dirB},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
@@ -68,9 +67,9 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dirA, Name: "Alpha"},
 			{Path: dirB, Name: "Bravo"},
 		}
-		sessions := []tmux.Session{
-			{Name: "alpha-1", Dir: dirA},
-			{Name: "bravo-1", Dir: dirB},
+		sessions := []Session{
+			{Name: "alpha-1", Answered: true, Dir: dirA},
+			{Name: "bravo-1", Answered: true, Dir: dirB},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		m := newCursorTestModel(t, items)
@@ -94,9 +93,9 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dirA, Name: "Alpha"},
 			{Path: dirB, Name: "Bravo"},
 		}
-		sessions := []tmux.Session{
-			{Name: "alpha-1", Dir: dirA},
-			{Name: "bravo-1", Dir: dirB},
+		sessions := []Session{
+			{Name: "alpha-1", Answered: true, Dir: dirA},
+			{Name: "bravo-1", Answered: true, Dir: dirB},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		m := newCursorTestModel(t, items)
@@ -122,10 +121,10 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dirA, Name: "Alpha"},
 			{Path: dirB, Name: "Bravo"},
 		}
-		sessions := []tmux.Session{
-			{Name: "alpha-1", Dir: dirA},
-			{Name: "alpha-2", Dir: dirA},
-			{Name: "bravo-1", Dir: dirB},
+		sessions := []Session{
+			{Name: "alpha-1", Answered: true, Dir: dirA},
+			{Name: "alpha-2", Answered: true, Dir: dirA},
+			{Name: "bravo-1", Answered: true, Dir: dirB},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 		rows := sessionRows(items)
@@ -168,7 +167,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 		projects := []project.Project{
 			{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}},
 		}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 		rows := sessionRows(items)
 		if len(rows) != 2 {
@@ -202,7 +201,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 	t.Run("selectedSessionItem returns false when the cursor is parked on a header", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
 		m := newCursorTestModel(t, items)

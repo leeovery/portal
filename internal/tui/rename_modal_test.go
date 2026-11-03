@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func renameModalContains(content, s string) bool {
@@ -367,13 +366,13 @@ func (r *recordingRenamer) RenameSession(oldName, newName string) error {
 }
 
 type stubLister struct {
-	sessions []tmux.Session
+	sessions []Session
 }
 
-func (l stubLister) ListSessions() ([]tmux.Session, error) { return l.sessions, nil }
+func (l stubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
 func newRenameTestModel(renamer SessionRenamer, target, value string) Model {
-	sessions := []tmux.Session{{Name: target, Windows: 1}}
+	sessions := []Session{{Name: target, Answered: true}}
 	m := NewModelWithSessions(sessions)
 	m.sessionRenamer = renamer
 	m.sessionLister = stubLister{sessions: sessions}

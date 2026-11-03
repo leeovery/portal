@@ -2,8 +2,6 @@ package tui
 
 import (
 	"testing"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestSessionItemsToList(t *testing.T) {
@@ -19,9 +17,9 @@ func TestSessionItemsToList(t *testing.T) {
 
 	t.Run("boxes each SessionItem into list.Item preserving order and identity", func(t *testing.T) {
 		in := []SessionItem{
-			{Session: tmux.Session{Name: "a"}, GroupKey: "k1"},
-			{Session: tmux.Session{Name: "b"}, GroupKey: "k2"},
-			{Session: tmux.Session{Name: "c"}, GroupKey: "k3"},
+			{Session: Session{Name: "a", Answered: true}, GroupKey: "k1"},
+			{Session: Session{Name: "b", Answered: true}, GroupKey: "k2"},
+			{Session: Session{Name: "c", Answered: true}, GroupKey: "k3"},
 		}
 
 		got := sessionItemsToList(in)
@@ -51,9 +49,9 @@ func TestAssembleGroups(t *testing.T) {
 
 	t.Run("sorts resolved by group key then session name", func(t *testing.T) {
 		resolved := []SessionItem{
-			{Session: tmux.Session{Name: "bravo-1"}, GroupKey: "b"},
-			{Session: tmux.Session{Name: "alpha-z"}, GroupKey: "a"},
-			{Session: tmux.Session{Name: "alpha-a"}, GroupKey: "a"},
+			{Session: Session{Name: "bravo-1", Answered: true}, GroupKey: "b"},
+			{Session: Session{Name: "alpha-z", Answered: true}, GroupKey: "a"},
+			{Session: Session{Name: "alpha-a", Answered: true}, GroupKey: "a"},
 		}
 
 		got := assembleGroups(resolved, nil, "Heading")
@@ -97,7 +95,7 @@ func TestAssembleGroups(t *testing.T) {
 
 	t.Run("empty catch-all yields just the sorted resolved (empty-suppression preserved)", func(t *testing.T) {
 		resolved := []SessionItem{
-			{Session: tmux.Session{Name: "s1"}, GroupKey: "a", GroupHeading: "A"},
+			{Session: Session{Name: "s1", Answered: true}, GroupKey: "a", GroupHeading: "A"},
 		}
 
 		got := assembleGroups(resolved, nil, "Heading")
@@ -122,11 +120,11 @@ func TestAssembleGroups(t *testing.T) {
 
 	t.Run("pins catch-all last after sorted resolved, stamping heading and ordering by name", func(t *testing.T) {
 		resolved := []SessionItem{
-			{Session: tmux.Session{Name: "zulu-1"}, GroupKey: "Zulu", GroupHeading: "Zulu"},
+			{Session: Session{Name: "zulu-1", Answered: true}, GroupKey: "Zulu", GroupHeading: "Zulu"},
 		}
 		catchAll := []SessionItem{
-			{Session: tmux.Session{Name: "charlie"}, GroupHeading: "Heading", CatchAll: true},
-			{Session: tmux.Session{Name: "alpha"}, GroupHeading: "Heading", CatchAll: true},
+			{Session: Session{Name: "charlie", Answered: true}, GroupHeading: "Heading", CatchAll: true},
+			{Session: Session{Name: "alpha", Answered: true}, GroupHeading: "Heading", CatchAll: true},
 		}
 
 		got := assembleGroups(resolved, catchAll, "Heading")

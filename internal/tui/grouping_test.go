@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func mustMkdir(t *testing.T, dir string) {
@@ -51,7 +50,7 @@ func TestBuildByProject(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
 
@@ -86,7 +85,7 @@ func TestBuildByProject(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		idx := project.NewIndex(projects)
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		_, matchKey, ok := idx.Match(dir)
 		if !ok {
@@ -117,10 +116,10 @@ func TestBuildByProject(t *testing.T) {
 			{Path: dirA, Name: "Alpha"},
 			{Path: dirB, Name: "Bravo"},
 		}
-		sessions := []tmux.Session{
-			{Name: "bravo-1", Dir: dirB},
-			{Name: "alpha-z", Dir: dirA},
-			{Name: "alpha-a", Dir: dirA},
+		sessions := []Session{
+			{Name: "bravo-1", Answered: true, Dir: dirB},
+			{Name: "alpha-z", Answered: true, Dir: dirA},
+			{Name: "alpha-a", Answered: true, Dir: dirA},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -175,9 +174,9 @@ func TestBuildByProject(t *testing.T) {
 			{Path: dir1, Name: "Portal"},
 			{Path: dir2, Name: "Portal"},
 		}
-		sessions := []tmux.Session{
-			{Name: "s1", Dir: dir1},
-			{Name: "s2", Dir: dir2},
+		sessions := []Session{
+			{Name: "s1", Answered: true, Dir: dir1},
+			{Name: "s2", Answered: true, Dir: dir2},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -212,7 +211,7 @@ func TestBuildByProject(t *testing.T) {
 	})
 
 	t.Run("routes a session with empty Dir to the Unknown bucket", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "no-dir"}}
+		sessions := []Session{{Name: "no-dir", Answered: true}}
 
 		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
@@ -234,7 +233,7 @@ func TestBuildByProject(t *testing.T) {
 
 	t.Run("routes a stamped dir with no matching project record to the Unknown bucket", func(t *testing.T) {
 		dir := t.TempDir()
-		sessions := []tmux.Session{{Name: "orphan", Dir: dir}}
+		sessions := []Session{{Name: "orphan", Answered: true, Dir: dir}}
 
 		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
@@ -254,9 +253,9 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("appends Unknown items after known-project items", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Known"}}
-		sessions := []tmux.Session{
-			{Name: "unknown-1"},
-			{Name: "known-1", Dir: dir},
+		sessions := []Session{
+			{Name: "unknown-1", Answered: true},
+			{Name: "known-1", Answered: true, Dir: dir},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -286,9 +285,9 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("suppresses the Unknown heading when no session is unresolvable", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "s1", Dir: dir},
-			{Name: "s2", Dir: dir},
+		sessions := []Session{
+			{Name: "s1", Answered: true, Dir: dir},
+			{Name: "s2", Answered: true, Dir: dir},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -309,10 +308,10 @@ func TestBuildByProject(t *testing.T) {
 	})
 
 	t.Run("orders Unknown catch-all items by session name", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "charlie"},
-			{Name: "alpha"},
-			{Name: "bravo"},
+		sessions := []Session{
+			{Name: "charlie", Answered: true},
+			{Name: "alpha", Answered: true},
+			{Name: "bravo", Answered: true},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(nil), nil)
@@ -331,7 +330,7 @@ func TestBuildByProject(t *testing.T) {
 	})
 
 	t.Run("stamps each Unknown catch-all item GroupKey with the heading constant", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "no-dir"}}
+		sessions := []Session{{Name: "no-dir", Answered: true}}
 
 		items := buildByProject(sessions, project.NewIndex(nil), nil)
 
@@ -348,9 +347,9 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("pins the Unknown catch-all group last after alphabetical project headings", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Zulu"}}
-		sessions := []tmux.Session{
-			{Name: "orphan"},
-			{Name: "zulu-1", Dir: dir},
+		sessions := []Session{
+			{Name: "orphan", Answered: true},
+			{Name: "zulu-1", Answered: true, Dir: dir},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -383,10 +382,10 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("never drops a session: every input session appears exactly once", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "resolved", Dir: dir},
-			{Name: "unresolvable-dir"},
-			{Name: "deleted-project", Dir: t.TempDir()},
+		sessions := []Session{
+			{Name: "resolved", Answered: true, Dir: dir},
+			{Name: "unresolvable-dir", Answered: true},
+			{Name: "deleted-project", Answered: true, Dir: t.TempDir()},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -405,9 +404,9 @@ func TestBuildByProject(t *testing.T) {
 	t.Run("routes both an unresolvable-dir and a deleted-project session to Unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "unresolvable-dir"},
-			{Name: "deleted-project", Dir: t.TempDir()},
+		sessions := []Session{
+			{Name: "unresolvable-dir", Answered: true},
+			{Name: "deleted-project", Answered: true, Dir: t.TempDir()},
 		}
 
 		items := buildByProject(sessions, project.NewIndex(projects), nil)
@@ -435,7 +434,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("emits one item per tag for a multi-tag session", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -494,10 +493,10 @@ func TestBuildByTag(t *testing.T) {
 			{Path: dir2, Name: "P2", Tags: []string{"Work"}},
 			{Path: dir3, Name: "P3", Tags: []string{"WORK"}},
 		}
-		sessions := []tmux.Session{
-			{Name: "s1", Dir: dir1},
-			{Name: "s2", Dir: dir2},
-			{Name: "s3", Dir: dir3},
+		sessions := []Session{
+			{Name: "s1", Answered: true, Dir: dir1},
+			{Name: "s2", Answered: true, Dir: dir2},
+			{Name: "s3", Answered: true, Dir: dir3},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
@@ -526,7 +525,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("emits exactly one Untagged item for a zero-tag session", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "no-tags", Dir: dir}}
+		sessions := []Session{{Name: "no-tags", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -548,7 +547,7 @@ func TestBuildByTag(t *testing.T) {
 
 	t.Run("emits one Untagged item for a session whose dir has no project record", func(t *testing.T) {
 		dir := t.TempDir()
-		sessions := []tmux.Session{{Name: "orphan", Dir: dir}}
+		sessions := []Session{{Name: "orphan", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
@@ -566,7 +565,7 @@ func TestBuildByTag(t *testing.T) {
 	})
 
 	t.Run("emits one Untagged item for a session with empty Dir", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "no-dir"}}
+		sessions := []Session{{Name: "no-dir", Answered: true}}
 
 		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
@@ -586,7 +585,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("skips a junk non-canonical stored tag without emitting an item", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   ", "work"}}}
-		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
+		sessions := []Session{{Name: "s1", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -606,7 +605,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("routes a project whose only tag is junk to Untagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   "}}}
-		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
+		sessions := []Session{{Name: "s1", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -633,9 +632,9 @@ func TestBuildByTag(t *testing.T) {
 			{Path: dir1, Name: "P1", Tags: []string{"work", "alpha"}},
 			{Path: dir2, Name: "P2", Tags: []string{"alpha"}},
 		}
-		sessions := []tmux.Session{
-			{Name: "z-sess", Dir: dir1},
-			{Name: "a-sess", Dir: dir2},
+		sessions := []Session{
+			{Name: "z-sess", Answered: true, Dir: dir1},
+			{Name: "a-sess", Answered: true, Dir: dir2},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
@@ -682,9 +681,9 @@ func TestBuildByTag(t *testing.T) {
 		tagged := filepath.Join(base, "tagged")
 		mustMkdir(t, tagged)
 		projects := []project.Project{{Path: tagged, Name: "Tagged", Tags: []string{"work"}}}
-		sessions := []tmux.Session{
-			{Name: "untagged-1"},
-			{Name: "tagged-1", Dir: tagged},
+		sessions := []Session{
+			{Name: "untagged-1", Answered: true},
+			{Name: "tagged-1", Answered: true, Dir: tagged},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
@@ -706,7 +705,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("shares the underlying session across a multi-tag session's instances", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir, Windows: 3, Attached: true}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir, Answered: true, Attached: true}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -727,7 +726,7 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("sum of items exceeds live session count when a session is multi-tagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal", "urgent"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
 
@@ -748,9 +747,9 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("suppresses the Untagged heading when every session is tagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{
-			{Name: "s1", Dir: dir},
-			{Name: "s2", Dir: dir},
+		sessions := []Session{
+			{Name: "s1", Answered: true, Dir: dir},
+			{Name: "s2", Answered: true, Dir: dir},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
@@ -771,10 +770,10 @@ func TestBuildByTag(t *testing.T) {
 	})
 
 	t.Run("orders Untagged catch-all items by session name", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "charlie"},
-			{Name: "alpha"},
-			{Name: "bravo"},
+		sessions := []Session{
+			{Name: "charlie", Answered: true},
+			{Name: "alpha", Answered: true},
+			{Name: "bravo", Answered: true},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(nil), nil)
@@ -793,7 +792,7 @@ func TestBuildByTag(t *testing.T) {
 	})
 
 	t.Run("stamps each Untagged catch-all item GroupKey with the heading constant", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "no-dir"}}
+		sessions := []Session{{Name: "no-dir", Answered: true}}
 
 		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
@@ -810,9 +809,9 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("pins the Untagged catch-all group last after alphabetical tag headings", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"zeta"}}}
-		sessions := []tmux.Session{
-			{Name: "orphan"},
-			{Name: "zeta-1", Dir: dir},
+		sessions := []Session{
+			{Name: "orphan", Answered: true},
+			{Name: "zeta-1", Answered: true, Dir: dir},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)
@@ -843,7 +842,7 @@ func TestBuildByTag(t *testing.T) {
 	})
 
 	t.Run("routes a deleted-project session to Untagged", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "deleted-project", Dir: t.TempDir()}}
+		sessions := []Session{{Name: "deleted-project", Answered: true, Dir: t.TempDir()}}
 
 		items := buildByTag(sessions, project.NewIndex(nil), nil)
 
@@ -860,10 +859,10 @@ func TestBuildByTag(t *testing.T) {
 	t.Run("never drops a session: every input session appears at least once", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
-		sessions := []tmux.Session{
-			{Name: "tagged", Dir: dir},
-			{Name: "untagged-dir"},
-			{Name: "deleted-project", Dir: t.TempDir()},
+		sessions := []Session{
+			{Name: "tagged", Answered: true, Dir: dir},
+			{Name: "untagged-dir", Answered: true},
+			{Name: "deleted-project", Answered: true, Dir: t.TempDir()},
 		}
 
 		items := buildByTag(sessions, project.NewIndex(projects), nil)

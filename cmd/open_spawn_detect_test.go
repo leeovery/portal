@@ -5,7 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -18,7 +17,7 @@ func TestBuildTUIModel_ThreadsDetectionSeams(t *testing.T) {
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "alpha", Windows: 1}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "alpha", Answered: true}}})
 
 	if !model.(tui.Model).DetectDispatched() {
 		t.Error("buildTUIModel must thread cfg.detector/cfg.resolve so reaching PageSessions dispatches detection")

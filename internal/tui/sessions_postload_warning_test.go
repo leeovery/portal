@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-type postloadStubLister struct{ sessions []tmux.Session }
+type postloadStubLister struct{ sessions []Session }
 
-func (l postloadStubLister) ListSessions() ([]tmux.Session, error) { return l.sessions, nil }
+func (l postloadStubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
-func coldTUIModel(t *testing.T, sessions []tmux.Session) tea.Model {
+func coldTUIModel(t *testing.T, sessions []Session) tea.Model {
 	t.Helper()
 	lister := postloadStubLister{sessions: sessions}
 	receiver := func() tea.Msg { return nil }
@@ -24,7 +23,7 @@ func coldTUIModel(t *testing.T, sessions []tmux.Session) tea.Model {
 
 func warmStagingModel(t *testing.T) tea.Model {
 	t.Helper()
-	lister := postloadStubLister{sessions: []tmux.Session{}}
+	lister := postloadStubLister{sessions: []Session{}}
 	m := New(lister, WithServerStarted(true))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -84,7 +83,7 @@ func TestColdTUIWarnings_SurfaceWhenMinElapsedArmTransitions(t *testing.T) {
 func TestColdTUIWarnings_RendersInSessionsViewChrome(t *testing.T) {
 	const line = "the session saver is not running"
 	warnings := []BootstrapWarning{{Lines: []string{line}}}
-	model, _ := transitionWithWarnings(coldTUIModel(t, []tmux.Session{{Name: "dev", Windows: 1}}), warnings)
+	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "dev", Answered: true}}), warnings)
 
 	content := model.(Model).View().Content
 	if !strings.Contains(content, line) {

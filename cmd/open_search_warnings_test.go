@@ -57,7 +57,7 @@ func searchTeardownModel(t *testing.T, decide func() (string, error), warnings [
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           &mockSessionLister{},
+		Lister:           asPickerLister(&mockSessionLister{}),
 		ServerStarted:    true,
 		ProgressReceiver: receiver,
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
@@ -216,7 +216,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		m := tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
+			Lister:           asPickerLister(&mockSessionLister{}),
 			ServerStarted:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
@@ -270,7 +270,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 	t.Run("it owes the buffered set when the loading page was cancelled", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
+			Lister:           asPickerLister(&mockSessionLister{}),
 			ServerStarted:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
@@ -293,7 +293,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 	t.Run("it owes the buffered set when the loading page was cancelled with the decision still in flight", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
+			Lister:           asPickerLister(&mockSessionLister{}),
 			ServerStarted:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
@@ -399,13 +399,13 @@ func (c *observingConnector) Connect(string) error {
 func warmPickerModel(t *testing.T, deps tui.Deps, warnings []warning.Warning) tui.Model {
 	t.Helper()
 
-	deps.Lister = &mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}}
+	deps.Lister = asPickerLister(&mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}})
 	m := tui.Build(deps)
 	m.SetPendingBootstrapWarnings(warnings)
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "portal-a1b2"}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "portal-a1b2", Answered: true}}})
 
 	updated, ok := model.(tui.Model)
 	if !ok {
@@ -452,7 +452,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes nothing at teardown when the loading gate already surfaced them", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: asPickerLister(&mockSessionLister{}), ServerStarted: true})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m
@@ -478,7 +478,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes the warnings the gate took when the loading page was cancelled", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: asPickerLister(&mockSessionLister{}), ServerStarted: true})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m

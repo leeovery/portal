@@ -3,11 +3,9 @@ package tui
 import (
 	"slices"
 	"testing"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func pickerSessionNames(sessions []tmux.Session) []string {
+func pickerSessionNames(sessions []Session) []string {
 	names := make([]string, 0, len(sessions))
 	for _, s := range sessions {
 		names = append(names, s.Name)
@@ -17,7 +15,7 @@ func pickerSessionNames(sessions []tmux.Session) []string {
 
 func TestPickerSessions(t *testing.T) {
 	t.Run("it drops the named session and keeps the rest in enumeration order", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "alpha"}, {Name: "current"}, {Name: "beta"}}
+		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "current", Answered: true}, {Name: "beta", Answered: true}}
 
 		got := pickerSessionNames(PickerSessions(sessions, "current"))
 
@@ -27,7 +25,7 @@ func TestPickerSessions(t *testing.T) {
 	})
 
 	t.Run("it drops nothing when the current session name is empty", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "alpha"}, {Name: "beta"}}
+		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "beta", Answered: true}}
 
 		got := pickerSessionNames(PickerSessions(sessions, ""))
 
@@ -37,7 +35,7 @@ func TestPickerSessions(t *testing.T) {
 	})
 
 	t.Run("it drops nothing when no session carries the name", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "alpha"}, {Name: "beta"}}
+		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "beta", Answered: true}}
 
 		got := pickerSessionNames(PickerSessions(sessions, "gamma"))
 
@@ -47,7 +45,7 @@ func TestPickerSessions(t *testing.T) {
 	})
 
 	t.Run("it leaves the caller's slice unmodified", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "alpha"}, {Name: "current"}, {Name: "beta"}}
+		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "current", Answered: true}, {Name: "beta", Answered: true}}
 
 		PickerSessions(sessions, "current")
 

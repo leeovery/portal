@@ -5,7 +5,6 @@ import (
 
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func assertUnsupportedPreflightAbort(t *testing.T, m Model, adapter *spawntest.FakeAdapter) {
@@ -40,9 +39,9 @@ func assertUnsupportedPreflightAbort(t *testing.T, m Model, adapter *spawntest.F
 }
 
 func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -64,9 +63,9 @@ func TestBurstUnsupported_PreflightAbortBeforeNoop(t *testing.T) {
 }
 
 func TestBurstUnsupported_DeferredPreflightAbortBeforeNoop(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha", Answered: true},
+		{Name: "bravo", Answered: true},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}

@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func preCanvasBg(th theme.Theme, colourless bool) lipgloss.Style {
@@ -34,7 +33,7 @@ func TestSessionCanvasBg_DelegatesToHeaderCanvasBg(t *testing.T) {
 			want := headerCanvasBg(th, colourless).Render("  ")
 			if got := d.canvasBg().Render("  "); got != want {
 				t.Errorf("canvasBg(th=%v col=%v) = %q, want headerCanvasBg %q",
-					themeLabel(th), colourless, got, want)
+					themeLabel(th), colourless, ansi.Strip(got), ansi.Strip(want))
 			}
 			pre := preCanvasBg(th, colourless).Render("  ")
 			if want != pre {
@@ -60,7 +59,7 @@ func TestSessionTokenStyle_DelegatesToHeaderStyle(t *testing.T) {
 					want := headerStyle(tok, th, colourless).Inherit(base).Render("probe")
 					if got := d.tokenStyle(base, tok).Render("probe"); got != want {
 						t.Errorf("tokenStyle(base=%s tok=%s th=%v col=%v) = %q, want headerStyle.Inherit %q",
-							baseName, tok.Name, themeLabel(th), colourless, got, want)
+							baseName, tok.Name, themeLabel(th), colourless, ansi.Strip(got), ansi.Strip(want))
 					}
 					pre := preTokenStyle(base, tok, th, colourless).Render("probe")
 					if want != pre {
@@ -79,8 +78,8 @@ func TestSessionDelegateRender_ByteIdenticalAcrossConsolidation(t *testing.T) {
 
 	header := HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"}
 	sessions := []list.Item{
-		SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-		SessionItem{Session: tmux.Session{Name: "work", Windows: 1, Attached: false}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "dev", Answered: true, Attached: true}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		SessionItem{Session: Session{Name: "work", Answered: true, Attached: false}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 	}
 
 	for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
@@ -123,15 +122,15 @@ type sessionStyleGoldenKey struct {
 
 var sessionStyleGoldens = map[sessionStyleGoldenKey]string{
 	{"header", "dark", false}:              "\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mPortal \x1b[m\x1b[38;2;83;92;134;48;2;11;12;20m··· 2\x1b[m",
-	{"session-selected", "dark", false}:    "\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;187;154;247;48;2;40;36;58m▌\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58mdev\x1b[m\x1b[48;2;40;36;58m                                                        \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;169;177;214;48;2;40;36;58m3 windows\x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[38;2;158;206;106;48;2;40;36;58m●\x1b[m\x1b[48;2;40;36;58m  \x1b[m",
-	{"session-unselected", "dark", false}:  "\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mwork\x1b[m\x1b[48;2;11;12;20m                                                       \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m1 window\x1b[m\x1b[48;2;11;12;20m   \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m",
+	{"session-selected", "dark", false}:    "\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;187;154;247;48;2;40;36;58m▌\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58mdev\x1b[m\x1b[48;2;40;36;58m                                                                   \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[38;2;158;206;106;48;2;40;36;58m●\x1b[m\x1b[48;2;40;36;58m  \x1b[m",
+	{"session-unselected", "dark", false}:  "\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mwork\x1b[m\x1b[48;2;11;12;20m                                                                  \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m",
 	{"header", "dark", true}:               "  Portal ··· 2",
-	{"session-selected", "dark", true}:     "  ▌ \x1b[1mdev\x1b[m                                                          3 windows   A  ",
-	{"session-unselected", "dark", true}:   "    \x1b[1mwork\x1b[m                                                         1 window       ",
+	{"session-selected", "dark", true}:     "  ▌ \x1b[1mdev\x1b[m                                                                      A  ",
+	{"session-unselected", "dark", true}:   "    \x1b[1mwork\x1b[m                                                                        ",
 	{"header", "light", false}:             "\x1b[48;2;225;226;231m  \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mPortal \x1b[m\x1b[38;2;118;125;162;48;2;225;226;231m··· 2\x1b[m",
-	{"session-selected", "light", false}:   "\x1b[48;2;208;198;240m  \x1b[m\x1b[38;2;138;63;209;48;2;208;198;240m▌\x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[1;38;2;26;27;46;48;2;208;198;240mdev\x1b[m\x1b[48;2;208;198;240m                                                        \x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[38;2;63;71;96;48;2;208;198;240m3 windows\x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[38;2;59;94;24;48;2;208;198;240m●\x1b[m\x1b[48;2;208;198;240m  \x1b[m",
-	{"session-unselected", "light", false}: "\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[1;38;2;46;60;100;48;2;225;226;231mwork\x1b[m\x1b[48;2;225;226;231m                                                       \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231m1 window\x1b[m\x1b[48;2;225;226;231m   \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m",
+	{"session-selected", "light", false}:   "\x1b[48;2;208;198;240m  \x1b[m\x1b[38;2;138;63;209;48;2;208;198;240m▌\x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[1;38;2;26;27;46;48;2;208;198;240mdev\x1b[m\x1b[48;2;208;198;240m                                                                   \x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[38;2;59;94;24;48;2;208;198;240m●\x1b[m\x1b[48;2;208;198;240m  \x1b[m",
+	{"session-unselected", "light", false}: "\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[1;38;2;46;60;100;48;2;225;226;231mwork\x1b[m\x1b[48;2;225;226;231m                                                                  \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m",
 	{"header", "light", true}:              "  Portal ··· 2",
-	{"session-selected", "light", true}:    "  ▌ \x1b[1mdev\x1b[m                                                          3 windows   A  ",
-	{"session-unselected", "light", true}:  "    \x1b[1mwork\x1b[m                                                         1 window       ",
+	{"session-selected", "light", true}:    "  ▌ \x1b[1mdev\x1b[m                                                                      A  ",
+	{"session-unselected", "light", true}:  "    \x1b[1mwork\x1b[m                                                                        ",
 }

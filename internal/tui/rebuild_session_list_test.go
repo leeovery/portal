@@ -6,10 +6,9 @@ import (
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-func newRebuildTestModel(t *testing.T, mode prefs.SessionListMode, sessions []tmux.Session, projects []project.Project) Model {
+func newRebuildTestModel(t *testing.T, mode prefs.SessionListMode, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	m := Model{
 		themeState:      themeState{active: testDarkTheme(t)},
@@ -27,9 +26,9 @@ func newRebuildTestModel(t *testing.T, mode prefs.SessionListMode, sessions []tm
 
 func TestRebuildSessionList(t *testing.T) {
 	t.Run("builds flat items when the mode is Flat", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha"},
-			{Name: "bravo"},
+		sessions := []Session{
+			{Name: "alpha", Answered: true},
+			{Name: "bravo", Answered: true},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 
@@ -49,9 +48,9 @@ func TestRebuildSessionList(t *testing.T) {
 	})
 
 	t.Run("flat-mode output is byte-for-byte today's flat items", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 2, Attached: true},
-			{Name: "bravo", Windows: 1},
+		sessions := []Session{
+			{Name: "alpha", Answered: true, Attached: true},
+			{Name: "bravo", Answered: true},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
 
@@ -73,7 +72,7 @@ func TestRebuildSessionList(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.rebuildSessionList()
@@ -99,7 +98,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("builds By Tag items when the mode is By Tag", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -123,7 +122,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("feeds cached project records to the grouping builders", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		without := newRebuildTestModel(t, prefs.ModeByProject, sessions, nil)
 		without.rebuildSessionList()
@@ -156,7 +155,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("is idempotent when re-rendering the same mode with the same inputs", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 		m.rebuildSessionList()
@@ -178,7 +177,7 @@ func TestRebuildSessionList(t *testing.T) {
 	t.Run("preserves the active mode across a SessionsMsg refresh", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		sessions := []Session{{Name: "portal-abc", Answered: true, Dir: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 		m.activePage = PageSessions
@@ -199,10 +198,9 @@ func TestRebuildSessionList(t *testing.T) {
 		}
 	})
 
-	t.Run("excludes the current session when inside tmux", func(t *testing.T) {
-		sessions := []tmux.Session{{Name: "alpha"}, {Name: "current"}}
+	t.Run("excludes the current session when inside a session", func(t *testing.T) {
+		sessions := []Session{{Name: "alpha", Answered: true}, {Name: "current", Answered: true}}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
-		m.insideTmux = true
 		m.currentSession = "current"
 
 		m.rebuildSessionList()
@@ -217,18 +215,18 @@ func TestRebuildSessionList(t *testing.T) {
 	})
 }
 
-func TestWithInsideTmuxRoutesThroughRebuild(t *testing.T) {
+func TestWithCurrentSessionRoutesThroughRebuild(t *testing.T) {
 	t.Run("routes through rebuildSessionList so an already-populated grouped list is grouped", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{
-			{Name: "portal-abc", Dir: dir},
-			{Name: "current", Dir: dir},
+		sessions := []Session{
+			{Name: "portal-abc", Answered: true, Dir: dir},
+			{Name: "current", Answered: true, Dir: dir},
 		}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m = m.WithInsideTmux("current")
+		m = m.WithCurrentSession("current")
 
 		rows := sessionRows(m.sessionList.Items())
 		if len(rows) != 1 {
@@ -248,7 +246,7 @@ func TestWithInsideTmuxRoutesThroughRebuild(t *testing.T) {
 
 	t.Run("preserves construction behaviour: empty sessions yields empty list and mode-aware inside-tmux title", func(t *testing.T) {
 		m := newRebuildTestModel(t, prefs.ModeByTag, nil, nil)
-		m = m.WithInsideTmux("current")
+		m = m.WithCurrentSession("current")
 
 		if got := len(m.sessionList.Items()); got != 0 {
 			t.Fatalf("len(items) = %d, want 0 for empty sessions at construction", got)
@@ -259,14 +257,14 @@ func TestWithInsideTmuxRoutesThroughRebuild(t *testing.T) {
 		}
 	})
 
-	t.Run("still excludes the current session under WithInsideTmux in flat mode", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha"},
-			{Name: "current"},
-			{Name: "bravo"},
+	t.Run("still excludes the current session under WithCurrentSession in flat mode", func(t *testing.T) {
+		sessions := []Session{
+			{Name: "alpha", Answered: true},
+			{Name: "current", Answered: true},
+			{Name: "bravo", Answered: true},
 		}
 		m := newRebuildTestModel(t, prefs.ModeFlat, sessions, nil)
-		m = m.WithInsideTmux("current")
+		m = m.WithCurrentSession("current")
 
 		items := m.sessionList.Items()
 		if len(items) != 2 {

@@ -41,12 +41,12 @@ func loadingFatalReceiver(events []tui.BootstrapProgressMsg, fatal tui.Bootstrap
 }
 
 type fakeLister struct {
-	sessions []tmux.Session
+	sessions []tui.Session
 }
 
-func (f *fakeLister) ListSessions() ([]tmux.Session, error) {
+func (f *fakeLister) ListSessions() ([]tui.Session, error) {
 	// Copy: a caller mutating the slice must not perturb the fixture across rebuilds.
-	out := make([]tmux.Session, len(f.sessions))
+	out := make([]tui.Session, len(f.sessions))
 	copy(out, f.sessions)
 	return out, nil
 }
@@ -55,14 +55,12 @@ type fakePendingReader struct {
 	sessions []string
 }
 
-func (f fakePendingReader) ListPendingResumePanes() (tmux.PendingResumeView, error) {
-	view := tmux.PendingResumeView{Rows: []tmux.PendingResumeRow{}, Sessions: map[string]struct{}{}}
+func (f fakePendingReader) ListPendingResumeSessions() (map[string]struct{}, error) {
+	pending := make(map[string]struct{}, len(f.sessions))
 	for _, name := range f.sessions {
-		view.Rows = append(view.Rows, tmux.PendingResumeRow{Pending: true, Session: name})
-		view.Sessions[name] = struct{}{}
+		pending[name] = struct{}{}
 	}
-	view.Panes = len(view.Rows)
-	return view, nil
+	return pending, nil
 }
 
 type fakeKiller struct{}
