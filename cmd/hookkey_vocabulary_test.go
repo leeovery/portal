@@ -8,7 +8,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -81,7 +80,7 @@ func (r *recordingPaneHookLister) ListAllPaneHookKeys() ([]tmux.PaneHookRow, err
 	return r.rows, r.err
 }
 
-var _ PaneHookLister = (*recordingPaneHookLister)(nil)
+var _ hooksweep.PaneHookLister = (*recordingPaneHookLister)(nil)
 
 // stubStaleSweepReader answers the sweep's two seams with fixed values: a fixed
 // row set (or failure) for the pane-token enumeration, and a fixed
@@ -105,90 +104,6 @@ func (s *stubStaleSweepReader) TryGetServerOption(string) (string, bool, error) 
 }
 
 var _ hooksweep.Reader = (*stubStaleSweepReader)(nil)
-
-// mockKeyResolver answers the registration read with one fixed key (or one
-// fixed failure) however many times it is asked, and counts the asks. The fixed
-// answer is the point: a case that stamps still reads back the same key, so a
-// test can tell a re-read apart from a mint.
-type mockKeyResolver struct {
-	key   string
-	err   error
-	calls int
-}
-
-func (m *mockKeyResolver) ResolveHookKey(_ tmux.Target) (string, error) {
-	m.calls++
-	return m.key, m.err
-}
-
-// paneStampCall is one recorded set-option -p, kept whole so a test can assert
-// the option name and value as well as the target.
-type paneStampCall struct {
-	target tmux.Target
-	name   string
-	value  string
-}
-
-// recordingPaneStamper records every stamp it is asked for without applying
-// any, and can be armed with an err a case expects the command to surface — or,
-// on a path where no stamp is legal at all, with an err whose text names the
-// violation, so a call that should never happen fails loudly.
-type recordingPaneStamper struct {
-	calls  []paneStampCall
-	err    error
-	onCall func()
-}
-
-func (r *recordingPaneStamper) SetPaneOption(target tmux.Target, name, value string) error {
-	if r.onCall != nil {
-		r.onCall()
-	}
-	r.calls = append(r.calls, paneStampCall{target: target, name: name, value: value})
-	return r.err
-}
-
-// stampedPane models the pane itself: it answers with whatever token has been
-// stamped onto it, so a retry reads back the token the failed attempt left.
-type stampedPane struct {
-	token  string
-	stamps []paneStampCall
-}
-
-func (p *stampedPane) ResolveHookKey(_ tmux.Target) (string, error) { return p.token, nil }
-
-func (p *stampedPane) SetPaneOption(target tmux.Target, name, value string) error {
-	p.stamps = append(p.stamps, paneStampCall{target: target, name: name, value: value})
-	p.token = value
-	return nil
-}
-
-// The --pane-key path removes a verbatim key and reaches tmux for nothing, so
-// both pane seams are armed with an error naming the violation: a call that
-// should never happen fails loudly rather than passing silently.
-var (
-	errPaneKeyResolverCalled = errors.New("the resolver must not be called on the --pane-key path")
-	errPaneKeyStamperCalled  = errors.New("the stamper must not be called on the --pane-key path")
-)
-
-// paneKeyPathSeams returns the poisoned pair to inject on a --pane-key case,
-// and assertNoPaneTmuxCalls is its other half: poisoning one seam proves
-// nothing about the other, so every such case guards both.
-func paneKeyPathSeams() (*mockKeyResolver, *recordingPaneStamper) {
-	return &mockKeyResolver{err: errPaneKeyResolverCalled}, &recordingPaneStamper{err: errPaneKeyStamperCalled}
-}
-
-// assertNoPaneTmuxCalls reports the seams that were reached on a path that must
-// reach tmux for nothing, whichever path that is: the call counts are the proof,
-// and an armed seam only turns a reached one into a louder failure.
-func assertNoPaneTmuxCalls(t *testing.T, resolver *mockKeyResolver, stamper *recordingPaneStamper) {
-	t.Helper()
-	if resolver.calls != 0 {
-		t.Errorf("hook-key read count = %d, want 0 — this path must reach tmux for nothing", resolver.calls)
-	}
-	if len(stamper.calls) != 0 {
-		t.Errorf("set-option call count = %d, want 0 — this path must reach tmux for nothing: %+v", len(stamper.calls), stamper.calls)
-	}
-}
 
 // assertHookKeysStaged proves the seed keys a sweep fixture is about to measure
 // were staged before it ran. Without it an "absent afterwards" assertion passes

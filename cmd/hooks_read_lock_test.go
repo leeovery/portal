@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestDoctorStaleHooksDegradedRead(t *testing.T) {
@@ -70,11 +70,9 @@ func TestHookListDegradedRead(t *testing.T) {
 	t.Run("it lists hooks under a degraded read", func(t *testing.T) {
 		hooks.SetLockTimeoutForTest(t, 40*time.Millisecond)
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "npm start"},
+			hookSessionA: {"on-resume": "npm start"},
 		})
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "proj:0.0"},
-		}}})
+		inSession(t, "", backend.Session{Name: hookSessionA})
 
 		sink := logtest.Install(t)
 		want := runHookList(t)
@@ -91,14 +89,14 @@ func TestHookListDegradedRead(t *testing.T) {
 		hookstest.AssertDegradedRead(t, sink, "cli")
 	})
 
-	t.Run("it takes no tmux read and creates nothing on a fresh install", func(t *testing.T) {
+	t.Run("it reads no sessions and creates nothing on a fresh install", func(t *testing.T) {
 		// A fresh install: the directory holds neither hooks.json nor the
 		// sidecar, so a read that created either would show up as a new entry.
 		hooks.SetLockTimeoutForTest(t, 20*time.Millisecond)
 		_, hooksFile := hookstest.StageStore(t, hookstest.Staging{SidecarAbsent: true})
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		configDir := filepath.Dir(hooksFile)
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
+		fake := inSession(t, "", backend.Session{Name: hookSessionA})
 
 		before := dirListing(t, configDir)
 		if got := runHookList(t); got != "" {
@@ -107,6 +105,7 @@ func TestHookListDegradedRead(t *testing.T) {
 		if after := dirListing(t, configDir); !reflect.DeepEqual(before, after) {
 			t.Errorf("config directory changed across hook list: before=%v after=%v", before, after)
 		}
+		assertNoBackendList(t, fake)
 	})
 }
 

@@ -3,285 +3,240 @@ package cmd
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
+// The sessions the hook suites key their registrations by.
+const (
+	hookSessionA = "api-x7Kd9a"
+	hookSessionB = "web-Qm3pLz"
+)
+
+// inSession stages a backend holding a session named name and running this
+// process inside it, in a state directory of the test's own; an empty name
+// stages one running outside any session.
+func inSession(t *testing.T, name string, others ...backend.Session) *backendtest.Fake {
+	t.Helper()
+	fake := backendtest.New(others...)
+	if name != "" {
+		fake.Add(backend.Session{Name: name})
+	}
+	fake.SetCurrent(name)
+	withBackendDeps(t, BackendDeps{Backend: fake})
+	isolateStateDir(t)
+	return fake
+}
+
+// runHookSetForKey drives `hook set` from inside the session named key, so the
+// command writes under it.
+func runHookSetForKey(t *testing.T, key, command string) error {
+	t.Helper()
+	inSession(t, key)
+	_, err := runHookSet(t, command)
+	return err
+}
+
+// seedHooksFile stages a hooks.json holding body verbatim and points the
+// commands at it, for a fixture whose subject is a stored shape the store's own
+// layout helpers do not express.
+func seedHooksFile(t *testing.T, body string) string {
+	t.Helper()
+	_, hooksFile := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), Seed: body})
+	t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+	return hooksFile
+}
+
+// assertNoBackendList fails when the hook list read the backend at all.
+func assertNoBackendList(t *testing.T, fake *backendtest.Fake) {
+	t.Helper()
+	if calls := fake.CallsTo(backendtest.OpList); len(calls) != 0 {
+		t.Errorf("backend List calls = %d, want none with no entries to locate", len(calls))
+	}
+}
+
 func TestHooksListCommand(t *testing.T) {
-	t.Run("outputs hooks in tab-separated format", func(t *testing.T) {
+	t.Run("it prints key, event, command, location and mode, tab-separated", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc123"},
+			hookSessionA: {"on-resume": "claude --resume abc123"},
 		})
-
-		// Stub bootstrap so the real orchestrator never runs against the test's
-		// tmux server.
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project-abc123:0.0"},
-		}}})
+		inSession(t, "", backend.Session{Name: hookSessionA})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\t\n"
+		want := hookSessionA + "\ton-resume\tclaude --resume abc123\t" + hookSessionA + "\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("produces empty output when no hooks registered", func(t *testing.T) {
+	t.Run("it prints nothing and reads no sessions with no hooks registered", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{})
+		fake := inSession(t, "", backend.Session{Name: hookSessionA})
 
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-
-		buf := new(bytes.Buffer)
-		resetRootCmd()
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"hooks", "list"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if got := runHookList(t); got != "" {
+			t.Errorf("output = %q, want empty", got)
 		}
-
-		got := buf.String()
-		if got != "" {
-			t.Errorf("output = %q, want empty string", got)
-		}
+		assertNoBackendList(t, fake)
 	})
 
-	t.Run("produces empty output when hooks file does not exist", func(t *testing.T) {
+	t.Run("it prints nothing and reads no sessions when hooks.json does not exist", func(t *testing.T) {
 		hooksFileInTempDir(t, nil)
+		fake := inSession(t, "", backend.Session{Name: hookSessionA})
 
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-
-		buf := new(bytes.Buffer)
-		resetRootCmd()
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"hooks", "list"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if got := runHookList(t); got != "" {
+			t.Errorf("output = %q, want empty", got)
 		}
-
-		got := buf.String()
-		if got != "" {
-			t.Errorf("output = %q, want empty string", got)
-		}
+		assertNoBackendList(t, fake)
 	})
 
-	t.Run("it keeps the sort by key then event", func(t *testing.T) {
+	t.Run("it sorts by key then event", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedC: {"on-resume": "claude --resume def456"},
-			hookstest.SubjectSeedB: {"on-resume": "claude --resume abc123"},
-			hookstest.SubjectSeedA: {"on-resume": "npm start"},
+			hookSessionB: {"on-resume": "claude --resume def456"},
+			hookSessionA: {"on-resume": "npm start"},
 		})
-
-		// Stub bootstrap so the real orchestrator never runs against the test's
-		// tmux server.
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedC, Location: "proj-abc:1.0"},
-			{Token: hookstest.SubjectSeedB, Location: "proj-abc:0.0"},
-			{Token: hookstest.SubjectSeedA, Location: "other-proj:0.0"},
-		}}})
+		inSession(t, "", backend.Session{Name: hookSessionA}, backend.Session{Name: hookSessionB})
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tother-proj:0.0\t\n" +
-			hookstest.SubjectSeedB + "\ton-resume\tclaude --resume abc123\tproj-abc:0.0\t\n" +
-			hookstest.SubjectSeedC + "\ton-resume\tclaude --resume def456\tproj-abc:1.0\t\n"
+		want := hookSessionA + "\ton-resume\tnpm start\t" + hookSessionA + "\t\n" +
+			hookSessionB + "\ton-resume\tclaude --resume def456\t" + hookSessionB + "\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("accepts no arguments", func(t *testing.T) {
+	t.Run("it accepts no arguments", func(t *testing.T) {
 		hooksFileInTempDir(t, nil)
+		inSession(t, "")
 
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "list", "extraarg"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error for extra argument, got nil")
+		if _, _, err := runRootCmd(t, "hook", "list", "extraarg"); err == nil {
+			t.Fatal("expected an error for an extra argument, got nil")
 		}
 	})
 }
 
 func TestHooksListLocationColumn(t *testing.T) {
-	t.Run("it appends the resolved location as a fourth column", func(t *testing.T) {
+	t.Run("it locates a key by its live session's label", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc123"},
+			hookSessionA: {"on-resume": "npm start"},
+			hookSessionB: {"on-resume": "make dev"},
 		})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project-abc123:0.0"},
-		}}})
+		inSession(t, "", backend.Session{Name: hookSessionA}, backend.Session{Name: hookSessionB})
+		setLabel(t, os.Getenv("PORTAL_STATE_DIR"), hookSessionB, "web · checkout")
 
 		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tmy-project-abc123:0.0\t\n"
+		want := hookSessionA + "\ton-resume\tnpm start\t" + hookSessionA + "\t\n" +
+			hookSessionB + "\ton-resume\tmake dev\tweb · checkout\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it does not let an unstamped pane's row lend its location", func(t *testing.T) {
+	t.Run("it leaves the location empty for a key that names no session", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			"": {"on-resume": "npm start"},
+			hookSessionA:               {"on-resume": "npm start"},
+			hookstest.SubjectSeedA:     {"on-resume": "claude --resume abc"},
+			hookstest.UnjudgeableSeedA: {"on-resume": "make dev"},
+			"gone-Zx81Qa":              {"on-resume": "true"},
 		})
+		inSession(t, "", backend.Session{Name: hookSessionA})
 
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: "", Location: "unstamped-sess:0.0"},
-		}}})
+		for line := range strings.SplitSeq(strings.TrimSuffix(runHookList(t), "\n"), "\n") {
+			fields := strings.Split(line, "\t")
+			if len(fields) != 5 {
+				t.Fatalf("line %q, want five tab-separated fields", line)
+			}
+			want := ""
+			if fields[0] == hookSessionA {
+				want = hookSessionA
+			}
+			if fields[3] != want {
+				t.Errorf("location for %s = %q, want %q", fields[0], fields[3], want)
+			}
+		}
+	})
+
+	t.Run("it does not locate a key by one of Portal's own sessions", func(t *testing.T) {
+		hooksFileInTempDir(t, map[string]map[string]string{
+			"_portal-saver": {"on-resume": "true"},
+		})
+		inSession(t, "", backend.Session{Name: "_portal-saver"})
+
+		if got, want := runHookList(t), "_portal-saver\ton-resume\ttrue\t\t\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it locates a session that is not answering", func(t *testing.T) {
+		hooksFileInTempDir(t, map[string]map[string]string{
+			hookSessionA: {"on-resume": "npm start"},
+		})
+		fake := inSession(t, "", backend.Session{Name: hookSessionA})
+		fake.StopAnswering(hookSessionA)
+
+		if got, want := runHookList(t), hookSessionA+"\ton-resume\tnpm start\t"+hookSessionA+"\t\n"; got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it leaves every location empty when the listing fails, and still lists", func(t *testing.T) {
+		hooksFileInTempDir(t, map[string]map[string]string{
+			hookSessionA: {"on-resume": "npm start"},
+			hookSessionB: {"on-resume": "make dev"},
+		})
+		fake := inSession(t, "", backend.Session{Name: hookSessionA}, backend.Session{Name: hookSessionB})
+		fake.Fail(backendtest.OpList, errors.New("read zmx dir: permission denied"))
 
 		got := runHookList(t)
-		want := "\ton-resume\tnpm start\t\t\n"
+		want := hookSessionA + "\ton-resume\tnpm start\t\t\n" + hookSessionB + "\ton-resume\tmake dev\t\t\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it renders one line for a token carried by two rows", func(t *testing.T) {
+	t.Run("it locates by name when the index cannot be read", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "npm start"},
+			hookSessionA: {"on-resume": "npm start"},
 		})
+		inSession(t, "", backend.Session{Name: hookSessionA})
+		blockStateDir(t)
 
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "first-sess:0.0"},
-			{Token: hookstest.SubjectSeedA, Location: "second-sess:1.2"},
-		}}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tfirst-sess:0.0\t\n"
-		if got != want {
+		if got, want := runHookList(t), hookSessionA+"\ton-resume\tnpm start\t"+hookSessionA+"\t\n"; got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it renders every fourth field empty when the enumeration fails", func(t *testing.T) {
+	t.Run("it lists the sessions once for many entries", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc123"},
-			hookstest.SubjectSeedB: {"on-resume": "npm start"},
+			hookSessionA:           {"on-resume": "one"},
+			hookSessionB:           {"on-resume": "two"},
+			hookstest.SubjectSeedA: {"on-resume": "three"},
 		})
-
-		// Rows alongside the error: a failed read must be judged by the error, not
-		// by whether the lister also handed back rows.
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{
-			rows: []tmux.PaneHookRow{{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"}},
-			err:  errors.New("no server running"),
-		}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\t\t\n" + hookstest.SubjectSeedB + "\ton-resume\tnpm start\t\t\n"
-		if got != want {
-			t.Errorf("output = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it takes no enumeration read when there are no entries", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-
-		got := runHookList(t)
-		if got != "" {
-			t.Errorf("output = %q, want empty string", got)
-		}
-	})
-
-	t.Run("it renders an empty fourth field for a token no row carries", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedC: {"on-resume": "npm start"},
-		})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-			{Token: hookstest.SubjectSeedB, Location: "my-project:0.1"},
-		}}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedC + "\ton-resume\tnpm start\t\t\n"
-		if got != want {
-			t.Errorf("output = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it renders an empty fourth field for an old-format key", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA:     {"on-resume": "claude --resume abc123"},
-			hookstest.UnjudgeableSeedA: {"on-resume": "npm start"},
-		})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "sess:0.0"},
-		}}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tclaude --resume abc123\tsess:0.0\t\n" +
-			hookstest.UnjudgeableSeedA + "\ton-resume\tnpm start\t\t\n"
-		if got != want {
-			t.Errorf("output = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it renders a location whose session name carries a pipe verbatim", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "npm start"},
-		})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "a|b:0.0"},
-		}}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\ta|b:0.0\t\n"
-		if got != want {
-			t.Errorf("output = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it takes exactly one enumeration read for many entries", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "one"},
-			hookstest.SubjectSeedB: {"on-resume": "two"},
-			hookstest.SubjectSeedC: {"on-resume": "three"},
-			hookstest.SubjectSeedD: {"on-resume": "four"},
-		})
-
-		lister := &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-		}}
-		withHooksDeps(t, HooksDeps{PaneLister: lister})
+		fake := inSession(t, "", backend.Session{Name: hookSessionA}, backend.Session{Name: hookSessionB})
 
 		runHookList(t)
 
-		if lister.calls != 1 {
-			t.Errorf("enumeration reads = %d, want 1", lister.calls)
+		if calls := fake.CallsTo(backendtest.OpList); len(calls) != 1 {
+			t.Errorf("backend List calls = %d, want 1", len(calls))
 		}
 	})
 }
 
 func TestHooksListModeColumn(t *testing.T) {
-	t.Run("it appends the registration's mode as a fifth column", func(t *testing.T) {
+	t.Run("it prints the registration's mode as the fifth column", func(t *testing.T) {
 		for _, mode := range []string{"eager", "lazy"} {
 			t.Run(mode, func(t *testing.T) {
-				seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"`+mode+`"}}}`)
-
-				withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-					{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-				}}})
+				seedHooksFile(t, `{"`+hookSessionA+`":{"on-resume":{"command":"npm start","resume":"`+mode+`"}}}`)
+				inSession(t, "", backend.Session{Name: hookSessionA})
 
 				got := runHookList(t)
-				want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t" + mode + "\n"
+				want := hookSessionA + "\ton-resume\tnpm start\t" + hookSessionA + "\t" + mode + "\n"
 				if got != want {
 					t.Errorf("output = %q, want %q", got, want)
 				}
@@ -289,23 +244,7 @@ func TestHooksListModeColumn(t *testing.T) {
 		}
 	})
 
-	t.Run("it renders an empty fifth column for a registration carrying no mode", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "npm start"},
-		})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-		}}})
-
-		got := runHookList(t)
-		want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t\n"
-		if got != want {
-			t.Errorf("output = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it renders an empty fifth column for an unrecognised stored resume value", func(t *testing.T) {
+	t.Run("it leaves the fifth column empty for a registration carrying no recognised mode", func(t *testing.T) {
 		for _, tt := range []struct {
 			name   string
 			stored string
@@ -321,14 +260,11 @@ func TestHooksListModeColumn(t *testing.T) {
 				if tt.stored != "" {
 					registration = `{"command":"npm start","resume":` + tt.stored + `}`
 				}
-				seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":`+registration+`}}`)
-
-				withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-					{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-				}}})
+				seedHooksFile(t, `{"`+hookSessionA+`":{"on-resume":`+registration+`}}`)
+				inSession(t, "", backend.Session{Name: hookSessionA})
 
 				got := runHookList(t)
-				want := hookstest.SubjectSeedA + "\ton-resume\tnpm start\tmy-project:0.0\t\n"
+				want := hookSessionA + "\ton-resume\tnpm start\t" + hookSessionA + "\t\n"
 				if got != want {
 					t.Errorf("output = %q, want %q", got, want)
 				}
@@ -336,486 +272,232 @@ func TestHooksListModeColumn(t *testing.T) {
 		}
 	})
 
-	t.Run("it leaves the first four columns unchanged for a positional parser", func(t *testing.T) {
-		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}},`+
+	t.Run("it keeps the first four columns where a positional parser reads them", func(t *testing.T) {
+		seedHooksFile(t, `{"`+hookSessionA+`":{"on-resume":{"command":"npm start","resume":"lazy"}},`+
 			`"`+hookstest.SubjectSeedB+`":{"on-resume":"claude --resume abc123"}}`)
+		inSession(t, "", backend.Session{Name: hookSessionA})
 
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-		}}})
-
-		wantFirstFour := [][]string{
-			{hookstest.SubjectSeedA, "on-resume", "npm start", "my-project:0.0"},
-			{hookstest.SubjectSeedB, "on-resume", "claude --resume abc123", ""},
+		wantFirstFour := map[string][]string{
+			hookSessionA:           {hookSessionA, "on-resume", "npm start", hookSessionA},
+			hookstest.SubjectSeedB: {hookstest.SubjectSeedB, "on-resume", "claude --resume abc123", ""},
 		}
 		lines := strings.Split(strings.TrimSuffix(runHookList(t), "\n"), "\n")
 		if len(lines) != len(wantFirstFour) {
-			t.Fatalf("lines = %d, want %d", len(lines), len(wantFirstFour))
+			t.Fatalf("lines = %q, want %d", lines, len(wantFirstFour))
 		}
-		for i, line := range lines {
+		for _, line := range lines {
 			fields := strings.Split(line, "\t")
 			if len(fields) != 5 {
-				t.Fatalf("line %d = %q, want five tab-separated fields", i, line)
+				t.Fatalf("line %q, want five tab-separated fields", line)
 			}
-			if got := fields[:4]; !slices.Equal(got, wantFirstFour[i]) {
-				t.Errorf("line %d first four fields = %q, want %q", i, got, wantFirstFour[i])
+			if want := wantFirstFour[fields[0]]; !slices.Equal(fields[:4], want) {
+				t.Errorf("first four fields = %q, want %q", fields[:4], want)
 			}
 		}
 	})
-
-	t.Run("it adds no second tmux read", func(t *testing.T) {
-		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}},`+
-			`"`+hookstest.SubjectSeedB+`":{"on-resume":{"command":"two","resume":"eager"}},`+
-			`"`+hookstest.SubjectSeedC+`":{"on-resume":"three"}}`)
-
-		lister := &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-		}}
-		withHooksDeps(t, HooksDeps{PaneLister: lister})
-
-		runHookList(t)
-
-		if lister.calls != 1 {
-			t.Errorf("enumeration reads = %d, want 1", lister.calls)
-		}
-	})
-
-	t.Run("it takes no tmux read at all with no entries", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-
-		if got := runHookList(t); got != "" {
-			t.Errorf("output = %q, want empty string", got)
-		}
-	})
-
-	t.Run("it prints no line for the install-wide default", func(t *testing.T) {
-		seedHooksFile(t, `{"`+hookstest.SubjectSeedA+`":{"on-resume":{"command":"npm start","resume":"lazy"}}}`)
-
-		withHooksDeps(t, HooksDeps{PaneLister: &recordingPaneHookLister{rows: []tmux.PaneHookRow{
-			{Token: hookstest.SubjectSeedA, Location: "my-project:0.0"},
-		}}})
-
-		got := runHookList(t)
-		if lines := strings.Count(got, "\n"); lines != 1 {
-			t.Errorf("lines = %d, want one line per registration and nothing else (output %q)", lines, got)
-		}
-	})
-}
-
-// seedHooksFile stages a hooks.json holding body verbatim and points the
-// commands at it, for a fixture whose subject is a stored shape the store's own
-// layout helpers do not express.
-func seedHooksFile(t *testing.T, body string) string {
-	t.Helper()
-	_, hooksFile := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), Seed: body})
-	t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
-	return hooksFile
-}
-
-// loudPaneHookLister fails the test the moment it is read from: nothing to
-// resolve must mean no tmux read at all.
-type loudPaneHookLister struct{ t *testing.T }
-
-func (l *loudPaneHookLister) ListAllPaneHookKeys() ([]tmux.PaneHookRow, error) {
-	l.t.Helper()
-	l.t.Error("enumeration read taken with no entries to resolve")
-	return nil, nil
 }
 
 func TestHooksSetCommand(t *testing.T) {
-	t.Run("sets hook for current pane", func(t *testing.T) {
+	t.Run("it registers the hook under the current session's name", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
+		fake := inSession(t, hookSessionA)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := runHookSet(t, "claude --resume abc123"); err != nil {
+			t.Fatalf("hook set: %v", err)
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
+		if len(data) != 1 || len(data[hookSessionA]) != 1 || data[hookSessionA]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("hooks.json = %v, want one on-resume entry under %s", data, hookSessionA)
+		}
+		if calls := fake.Calls(); len(calls) != 0 {
+			t.Errorf("backend calls = %+v, want none: the key is the current session's name", calls)
 		}
 	})
 
-	t.Run("reads pane ID from TMUX_PANE environment variable", func(t *testing.T) {
+	t.Run("it keys by ZMX_SESSION under the production backend", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%99")
+		isolateStateDir(t)
+		t.Setenv("ZMX_SESSION", hookSessionB)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedB}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "some-cmd"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := runHookSet(t, "make dev"); err != nil {
+			t.Fatalf("hook set: %v", err)
 		}
 
-		data := readHooksJSON(t, hooksFile)
-		if _, ok := data[hookstest.SubjectSeedB]; !ok {
-			t.Error("expected a hook entry for the resolved hook key, not found")
-		}
-		if _, ok := data["%99"]; ok {
-			t.Error("raw pane ID %99 should not be used as key")
+		if got := readHooksJSON(t, hooksFile)[hookSessionB]["on-resume"].Command; got != "make dev" {
+			t.Errorf("entry under %s = %q, want %q", hookSessionB, got, "make dev")
 		}
 	})
 
-	t.Run("returns error when TMUX_PANE is not set", func(t *testing.T) {
+	t.Run("it refuses outside a session in one line and writes nothing", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "some-cmd"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "must be run from inside a tmux pane") {
-			t.Errorf("error = %q, want it to contain %q", err.Error(), "must be run from inside a tmux pane")
-		}
-
-		if _, statErr := os.Stat(hooksFile); statErr == nil {
-			t.Error("hooks file should not have been created")
-		}
-	})
-
-	t.Run("returns error when on-resume flag is not provided", func(t *testing.T) {
-		hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error for missing --on-resume flag, got nil")
-		}
-		if !strings.Contains(err.Error(), "on-resume") {
-			t.Errorf("error = %q, want it to mention %q", err.Error(), "on-resume")
-		}
-	})
-
-	t.Run("overwrites existing hook for same pane idempotently", func(t *testing.T) {
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "old-cmd"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("first set: unexpected error: %v", err)
-		}
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "new-cmd"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("second set: unexpected error: %v", err)
-		}
-
-		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "new-cmd" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "new-cmd")
-		}
-	})
-
-	t.Run("writes correct JSON structure to hooks file", func(t *testing.T) {
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		data := readHooksJSON(t, hooksFile)
-
-		if len(data) != 1 {
-			t.Fatalf("expected 1 entry, got %d", len(data))
-		}
-
-		events, ok := data[hookstest.SubjectSeedA]
-		if !ok {
-			t.Fatalf("expected an entry for hook key %s", hookstest.SubjectSeedA)
-		}
-		if len(events) != 1 {
-			t.Fatalf("expected 1 event for %s, got %d", hookstest.SubjectSeedA, len(events))
-		}
-		if events["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("on-resume = %q, want %q", events["on-resume"].Command, "claude --resume abc123")
-		}
-	})
-
-	t.Run("it aborts hook set when the hook-key read fails", func(t *testing.T) {
-		const stderr = "no such pane: %999"
-
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%999")
-
-		resolver := &mockKeyResolver{err: &tmux.CommandError{Stderr: stderr}}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver, PaneStamper: &recordingPaneStamper{}})
+		inSession(t, "")
 
 		_, err := runHookSet(t, "some-cmd")
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if err.Error() != stderr {
-			t.Errorf("error = %q, want tmux's own words %q unaltered", err.Error(), stderr)
-		}
-		if _, ok := errors.AsType[*tmux.CommandError](err); !ok {
-			t.Errorf("errors.AsType[*tmux.CommandError](err) = false; want a recoverable *tmux.CommandError; err = %v", err)
-		}
 
+		if !errors.Is(err, errNotInSession) || err.Error() != "not inside a Portal session" {
+			t.Errorf("error = %v, want %q", err, "not inside a Portal session")
+		}
 		if _, statErr := os.Stat(hooksFile); statErr == nil {
-			t.Error("hooks file should not have been created")
+			t.Error("hooks.json was created outside a session")
 		}
 	})
 
-	t.Run("it stores the hook under the resolved hook key", func(t *testing.T) {
+	t.Run("it requires --on-resume", func(t *testing.T) {
+		hooksFileInTempDir(t, nil)
+		inSession(t, hookSessionA)
+
+		_, _, err := runRootCmd(t, "hook", "set")
+		if err == nil || !strings.Contains(err.Error(), "on-resume") {
+			t.Errorf("error = %v, want it to name --on-resume", err)
+		}
+	})
+
+	t.Run("it overwrites the session's earlier hook", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
+		inSession(t, hookSessionA)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		for _, command := range []string{"old-cmd", "new-cmd"} {
+			if _, err := runHookSet(t, command); err != nil {
+				t.Fatalf("hook set %s: %v", command, err)
+			}
 		}
 
-		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
+		if got := readHooksJSON(t, hooksFile)[hookSessionA]["on-resume"].Command; got != "new-cmd" {
+			t.Errorf("hook command = %q, want %q", got, "new-cmd")
+		}
+	})
+
+	t.Run("it creates no state directory", func(t *testing.T) {
+		hooksFileInTempDir(t, nil)
+		inSession(t, hookSessionA)
+		stateDir := filepath.Join(t.TempDir(), "state")
+		t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+		if _, err := runHookSet(t, "npm start"); err != nil {
+			t.Fatalf("hook set: %v", err)
+		}
+
+		if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat %s = %v, want it never created", stateDir, err)
 		}
 	})
 }
 
 func TestHooksRmCommand(t *testing.T) {
-	t.Run("returns error when TMUX_PANE is not set", func(t *testing.T) {
-		hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "must be run from inside a tmux pane") {
-			t.Errorf("error = %q, want it to contain %q", err.Error(), "must be run from inside a tmux pane")
-		}
-	})
-
-	t.Run("returns error when on-resume flag is not provided", func(t *testing.T) {
-		hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
-
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error for missing --on-resume flag, got nil")
-		}
-		if !strings.Contains(err.Error(), "on-resume") {
-			t.Errorf("error = %q, want it to mention %q", err.Error(), "on-resume")
-		}
-	})
-
-	t.Run("cleans up pane key when last event removed", func(t *testing.T) {
+	t.Run("it removes the current session's hook, leaving the others", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "some-cmd"},
+			hookSessionA: {"on-resume": "npm start"},
+			hookSessionB: {"on-resume": "make dev"},
 		})
-		t.Setenv("TMUX_PANE", "%5")
+		inSession(t, hookSessionA)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := runHookRm(t); err != nil {
+			t.Fatalf("hook rm: %v", err)
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if _, ok := data[hookstest.SubjectSeedA]; ok {
-			t.Error("expected the hook key to be removed when the last event was deleted")
+		if _, ok := data[hookSessionA]; ok {
+			t.Errorf("hooks.json = %v, want %s's entry removed", data, hookSessionA)
 		}
-		if len(data) != 0 {
-			t.Errorf("expected empty hooks file, got %d entries", len(data))
+		if data[hookSessionB]["on-resume"].Command != "make dev" {
+			t.Errorf("hooks.json = %v, want %s's entry left in place", data, hookSessionB)
 		}
 	})
 
-	t.Run("it aborts hooks rm when the hook-key read fails and leaves the entry intact", func(t *testing.T) {
+	t.Run("it refuses outside a session in one line", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "some-cmd"},
+			hookSessionA: {"on-resume": "npm start"},
 		})
-		t.Setenv("TMUX_PANE", "%3")
+		before := readFileBytes(t, hooksFile)
+		inSession(t, "")
 
-		resolver := &mockKeyResolver{err: fmt.Errorf("tmux not responding")}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
-		err := rootCmd.Execute()
-		if err == nil {
-			t.Fatal("expected error, got nil")
+		if _, err := runHookRm(t); !errors.Is(err, errNotInSession) {
+			t.Errorf("error = %v, want %v", err, errNotInSession)
 		}
-		if err.Error() != "tmux not responding" {
-			t.Errorf("error = %q, want the read's own words %q unaltered", err.Error(), "tmux not responding")
-		}
+		assertHooksFileUnchanged(t, hooksFile, before)
+	})
 
-		data := readHooksJSON(t, hooksFile)
-		if _, ok := data[hookstest.SubjectSeedA]; !ok {
-			t.Error("hook should not have been removed on resolver failure")
+	t.Run("it requires --on-resume", func(t *testing.T) {
+		hooksFileInTempDir(t, nil)
+		inSession(t, hookSessionA)
+
+		_, _, err := runRootCmd(t, "hook", "rm")
+		if err == nil || !strings.Contains(err.Error(), "on-resume") {
+			t.Errorf("error = %v, want it to name --on-resume", err)
 		}
 	})
 
-	t.Run("--pane-key flag removes specified key without requiring TMUX_PANE", func(t *testing.T) {
+	t.Run("it removes the --pane-key entry verbatim, outside any session", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
 			hookstest.SubjectSeedA:     {"on-resume": "claude --resume xyz"},
 			hookstest.UnjudgeableSeedA: {"on-resume": "npm start"},
 		})
-		t.Setenv("TMUX_PANE", "")
+		inSession(t, "")
 
-		resolver, stamper := paneKeyPathSeams()
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver, PaneStamper: stamper})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm", "--pane-key", hookstest.SubjectSeedA, "--on-resume"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		for _, key := range []string{hookstest.SubjectSeedA, hookstest.UnjudgeableSeedA} {
+			if _, err := runHookRm(t, "--pane-key", key); err != nil {
+				t.Fatalf("hook rm --pane-key %s: %v", key, err)
+			}
 		}
 
-		data := readHooksJSON(t, hooksFile)
-		if _, ok := data[hookstest.SubjectSeedA]; ok {
-			t.Error("expected the named entry to be removed via --pane-key")
+		if data := readHooksJSON(t, hooksFile); len(data) != 0 {
+			t.Errorf("hooks.json = %v, want both keys removed", data)
 		}
-		if data[hookstest.UnjudgeableSeedA]["on-resume"].Command != "npm start" {
-			t.Errorf("the untouched entry's on-resume = %q, want %q", data[hookstest.UnjudgeableSeedA]["on-resume"].Command, "npm start")
-		}
-		assertNoPaneTmuxCalls(t, resolver, stamper)
 	})
 
-	t.Run("--pane-key unset falls back to resolveCurrentPaneKey", func(t *testing.T) {
+	t.Run("it takes --pane-key over the current session", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedD: {"on-resume": "some-cmd"},
+			hookSessionA: {"on-resume": "npm start"},
+			hookSessionB: {"on-resume": "make dev"},
 		})
-		t.Setenv("TMUX_PANE", "%7")
+		inSession(t, hookSessionA)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedD}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := runHookRm(t, "--pane-key", hookSessionB); err != nil {
+			t.Fatalf("hook rm --pane-key: %v", err)
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if _, ok := data[hookstest.SubjectSeedD]; ok {
-			t.Error("expected the resolved entry to be removed via fallback")
+		if _, ok := data[hookSessionB]; ok || data[hookSessionA]["on-resume"].Command != "npm start" {
+			t.Errorf("hooks.json = %v, want only %s's entry removed", data, hookSessionB)
 		}
 	})
 
-	t.Run("--pane-key help describes a verbatim hook key", func(t *testing.T) {
+	t.Run("it describes --pane-key as a verbatim hook key", func(t *testing.T) {
 		flag := hooksRmCmd.Flags().Lookup("pane-key")
 		if flag == nil {
 			t.Fatal("hook rm has no --pane-key flag")
 		}
 
-		want := "Hook key of the entry to remove, taken verbatim — any key, including an old-format one (defaults to the current pane's token)"
+		want := "Hook key of the entry to remove, taken verbatim — any key, including an old-format one (defaults to the current session's name)"
 		if flag.Usage != want {
 			t.Errorf("--pane-key usage = %q, want %q", flag.Usage, want)
 		}
 	})
 }
 
-func TestHookCommandRename(t *testing.T) {
-	t.Run("exposes hook as the canonical command name", func(t *testing.T) {
-		if hookCmd.Name() != "hook" {
-			t.Errorf("hookCmd.Name() = %q, want %q", hookCmd.Name(), "hook")
+func TestHookCommandAlias(t *testing.T) {
+	t.Run("it names the command hook, with hooks as an alias", func(t *testing.T) {
+		if hookCmd.Name() != "hook" || !slices.Contains(hookCmd.Aliases, "hooks") {
+			t.Errorf("hookCmd = %q aliases %v, want hook aliased by hooks", hookCmd.Name(), hookCmd.Aliases)
 		}
 	})
 
-	t.Run("declares hooks as an alias of hook", func(t *testing.T) {
-		found := false
-		for _, a := range hookCmd.Aliases {
-			if a == "hooks" {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("hookCmd.Aliases = %v, want to contain %q", hookCmd.Aliases, "hooks")
-		}
-	})
-
-	t.Run("resolves the hooks alias to the hook subcommands", func(t *testing.T) {
+	t.Run("it resolves the hooks alias to the hook subcommands", func(t *testing.T) {
 		for _, sub := range []string{"list", "set", "rm"} {
 			c, _, err := rootCmd.Find([]string{"hooks", sub})
 			if err != nil {
 				t.Fatalf("Find([hooks %s]) error: %v", sub, err)
 			}
-			if c.Name() != sub {
-				t.Errorf("Find([hooks %s]) resolved to %q, want %q", sub, c.Name(), sub)
-			}
-			if c.Parent() == nil || c.Parent().Name() != "hook" {
-				t.Errorf("Find([hooks %s]) parent = %v, want parent named hook", sub, c.Parent())
+			if c.Name() != sub || c.Parent() == nil || c.Parent().Name() != "hook" {
+				t.Errorf("Find([hooks %s]) = %q under %v, want %s under hook", sub, c.Name(), c.Parent(), sub)
 			}
 		}
 	})
 
-	t.Run("keeps hooks working as a silent cobra alias", func(t *testing.T) {
+	t.Run("it keeps hooks a silent alias", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{})
-
-		withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
+		inSession(t, "")
 
 		outBuf := new(bytes.Buffer)
 		errBuf := new(bytes.Buffer)
@@ -824,242 +506,25 @@ func TestHookCommandRename(t *testing.T) {
 		rootCmd.SetErr(errBuf)
 		rootCmd.SetArgs([]string{"hooks", "list"})
 		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("hooks list: %v", err)
 		}
 
 		combined := strings.ToLower(outBuf.String() + errBuf.String())
-		if strings.Contains(combined, "deprecat") {
-			t.Errorf("hooks alias produced deprecation text: out=%q err=%q", outBuf.String(), errBuf.String())
-		}
-		if strings.Contains(combined, "warning") {
-			t.Errorf("hooks alias produced warning text: out=%q err=%q", outBuf.String(), errBuf.String())
+		if strings.Contains(combined, "deprecat") || strings.Contains(combined, "warning") {
+			t.Errorf("hooks alias printed a notice: out=%q err=%q", outBuf.String(), errBuf.String())
 		}
 	})
 
-	t.Run("machine-generated hooks set still persists via the alias", func(t *testing.T) {
+	t.Run("it persists a machine-written hooks set through the alias", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("TMUX_PANE", "%3")
+		inSession(t, hookSessionA)
 
-		resolver := &mockKeyResolver{key: hookstest.SubjectSeedA}
-		withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if _, _, err := runRootCmd(t, "hooks", "set", "--on-resume", "claude --resume abc123"); err != nil {
+			t.Fatalf("hooks set: %v", err)
 		}
 
-		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc123")
-		}
-	})
-}
-
-// runHookSetForKey drives `hook set` with the pane resolver stubbed to answer key,
-// so the command writes under it without a stamp.
-func runHookSetForKey(t *testing.T, key, command string) error {
-	t.Helper()
-
-	t.Setenv("TMUX_PANE", "%3")
-	withHooksDeps(t, HooksDeps{KeyResolver: &mockKeyResolver{key: key}})
-
-	_, err := runHookSet(t, command)
-	return err
-}
-
-func saveRequestedExists(t *testing.T, stateDir string) bool {
-	t.Helper()
-	_, err := os.Stat(state.SaveRequested(stateDir))
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("stat save.requested: %v", err)
-	}
-	return err == nil
-}
-
-// assertTouchWarn asserts the sink holds exactly one record at WARN or above and
-// that it is the dirty-flag touch failure for wantKey.
-func assertTouchWarn(t *testing.T, sink *logtest.Sink, wantKey string) {
-	t.Helper()
-
-	rec := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "record at or above WARN")
-	assertHooksRecord(t, rec, hooksRecordWant{
-		level: slog.LevelWarn,
-		msg:   "touch-save-requested",
-		op:    "touch-save-requested",
-		via:   "cli",
-	})
-	if got := rec.AttrString(t, "hook_key"); got != wantKey {
-		t.Errorf("hook_key = %q, want %q", got, wantKey)
-	}
-	if got := rec.AttrString(t, "error"); got == "" {
-		t.Error("error attr is empty, want the failure it carries")
-	}
-}
-
-func TestHooksSetTouchesSaveRequested(t *testing.T) {
-	t.Run("it touches save.requested after a successful registration", func(t *testing.T) {
-		hooksFileInTempDir(t, nil)
-		stateDir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !saveRequestedExists(t, stateDir) {
-			t.Error("save.requested was not created in the state directory")
-		}
-	})
-
-	t.Run("it exits 0 when the state directory cannot be resolved", func(t *testing.T) {
-		dir, hooksFile := hooksFileInTempDir(t, nil)
-
-		blocker := filepath.Join(dir, "not-a-dir")
-		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-			t.Fatalf("write blocker file: %v", err)
-		}
-		t.Setenv("PORTAL_STATE_DIR", filepath.Join(blocker, "state"))
-
-		sink := logtest.Install(t)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err != nil {
-			t.Fatalf("hook set failed on an unresolvable state directory: %v", err)
-		}
-
-		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc")
-		}
-		assertTouchWarn(t, sink, hookstest.SubjectSeedA)
-	})
-
-	t.Run("it exits 0 when the touch itself fails", func(t *testing.T) {
-		dir, hooksFile := hooksFileInTempDir(t, nil)
-
-		stateDir := filepath.Join(dir, "state")
-		if err := os.MkdirAll(filepath.Join(stateDir, "scrollback"), 0o700); err != nil {
-			t.Fatalf("mkdir state dir: %v", err)
-		}
-		if err := os.Chmod(stateDir, 0o500); err != nil {
-			t.Fatalf("chmod state dir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(stateDir, 0o700) })
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-		sink := logtest.Install(t)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err != nil {
-			t.Fatalf("hook set failed on a failing touch: %v", err)
-		}
-
-		data := readHooksJSON(t, hooksFile)
-		if data[hookstest.SubjectSeedA]["on-resume"].Command != "claude --resume abc" {
-			t.Errorf("hook command = %q, want %q", data[hookstest.SubjectSeedA]["on-resume"].Command, "claude --resume abc")
-		}
-		assertTouchWarn(t, sink, hookstest.SubjectSeedA)
-	})
-
-	t.Run("it emits no set WARN when only the dirty-flag touch fails", func(t *testing.T) {
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("PORTAL_STATE_DIR", filepath.Join(hooksFile, "state"))
-
-		sink := logtest.Install(t)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		for _, r := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
-			if r.HasAttr("op") && r.AttrString(t, "op") == "set" {
-				t.Errorf("a set WARN was emitted for a registration that succeeded: %+v", r)
-			}
-		}
-	})
-
-	t.Run("it emits exactly one warn per failing hook set", func(t *testing.T) {
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		t.Setenv("PORTAL_STATE_DIR", filepath.Join(hooksFile, "state"))
-
-		sink := logtest.Install(t)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if warns := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warns) != 1 {
-			t.Errorf("WARN record count = %d, want 1: %+v", len(warns), warns)
-		}
-	})
-
-	t.Run("it does not touch when the write fails", func(t *testing.T) {
-		_, hooksFile := hooksFileInTempDir(t, nil)
-		// A directory at the hooks.json path makes the store's own read fail, so
-		// the command aborts before it could touch anything.
-		if err := os.MkdirAll(hooksFile, 0o700); err != nil {
-			t.Fatalf("mkdir bogus hooks path: %v", err)
-		}
-		stateDir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-		sink := logtest.Install(t)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "claude --resume abc"); err == nil {
-			t.Fatal("expected an error from a failed write, got nil")
-		}
-
-		if saveRequestedExists(t, stateDir) {
-			t.Error("save.requested was touched despite the write failing")
-		}
-		for _, r := range sink.Records() {
-			if r.Msg == "touch-save-requested" {
-				t.Errorf("touch emission on a failed write: %+v", r)
-			}
-		}
-	})
-
-	t.Run("it touches on a no-op re-registration", func(t *testing.T) {
-		hooksFileInTempDir(t, nil)
-		stateDir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "same-cmd"); err != nil {
-			t.Fatalf("first set: unexpected error: %v", err)
-		}
-		if err := os.Remove(state.SaveRequested(stateDir)); err != nil {
-			t.Fatalf("remove save.requested: %v", err)
-		}
-
-		if err := runHookSetForKey(t, hookstest.SubjectSeedA, "same-cmd"); err != nil {
-			t.Fatalf("second set: unexpected error: %v", err)
-		}
-
-		if !saveRequestedExists(t, stateDir) {
-			t.Error("a no-op re-registration did not touch save.requested")
-		}
-	})
-
-	t.Run("it does not touch from hook rm", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc"},
-		})
-		stateDir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
-		t.Setenv("TMUX_PANE", "%3")
-
-		withHooksDeps(t, HooksDeps{KeyResolver: &mockKeyResolver{key: hookstest.SubjectSeedA}})
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hook", "rm", "--on-resume"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if saveRequestedExists(t, stateDir) {
-			t.Error("hook rm touched save.requested")
+		if got := readHooksJSON(t, hooksFile)[hookSessionA]["on-resume"].Command; got != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", got, "claude --resume abc123")
 		}
 	})
 }

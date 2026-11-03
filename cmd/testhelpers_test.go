@@ -24,30 +24,11 @@ import (
 // timeout through, so no case waits out the production figure.
 const lockBound = 60 * time.Millisecond
 
-// withHooksDeps installs deps as the package-level hooks seam for the rest of
-// the test and registers the restore in the same breath. The seam outlives the
-// test that sets it, so the install and its restore are written together here
-// rather than left to each call site to pair.
-func withHooksDeps(t *testing.T, deps HooksDeps) {
-	t.Helper()
-	hooksDeps = &deps
-	t.Cleanup(func() { hooksDeps = nil })
-}
-
-// withoutHooksDeps leaves the hooks seam unset for the rest of the test, so a
-// case whose subject is the production default states that precondition instead
-// of inheriting it.
-func withoutHooksDeps(t *testing.T) {
-	t.Helper()
-	hooksDeps = nil
-	t.Cleanup(func() { hooksDeps = nil })
-}
-
-// The seams below are staged the same way, for the same reason. Each is a
-// package-level pointer the production command body reads, so an install
-// without its paired restore outlives the test that made it and answers for
-// every later test in the package. Writing the install and the restore in one
-// place is what makes the pair impossible to separate at a call site.
+// Each seam below is a package-level pointer the production command body
+// reads, so an install without its paired restore outlives the test that made
+// it and answers for every later test in the package. Writing the install and
+// the restore in one place is what makes the pair impossible to separate at a
+// call site.
 
 // withBootstrapDeps installs deps as the package-level bootstrap seam for the
 // rest of the test and registers the restore in the same breath.
@@ -79,14 +60,6 @@ func withDoctorDeps(t *testing.T, deps DoctorDeps) {
 	t.Helper()
 	doctorDeps = &deps
 	t.Cleanup(func() { doctorDeps = nil })
-}
-
-// withKillDeps installs deps as the package-level kill seam for the rest of the
-// test and registers the restore in the same breath.
-func withKillDeps(t *testing.T, deps KillDeps) {
-	t.Helper()
-	killDeps = &deps
-	t.Cleanup(func() { killDeps = nil })
 }
 
 // withListDeps installs deps as the package-level list seam for the rest of the
