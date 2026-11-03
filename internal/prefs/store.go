@@ -94,10 +94,15 @@ type prefsFile struct {
 	ThemeMigrated migrationMarker `json:"theme_migrated,omitempty"`
 	// Must stay declared for the same re-encode reason as Appearance.
 	ResumeMode resumeModeValue `json:"resume_mode,omitempty"`
-	// Kept raw, never decoded here: a value the attach runner can't parse
-	// survives every other write as it was.
+	// Kept raw, never decoded here, so a value the attach runner can't parse
+	// survives every other write: its entries, their order and every value as
+	// written. Only its whitespace is re-indented.
 	Keys json.RawMessage `json:"keys,omitempty"`
 }
+
+// ErrInvalidJSON is wrapped by a strict read of a prefs.json that does not
+// decode.
+var ErrInvalidJSON = errors.New("not valid JSON")
 
 // ThemeKeys carries the raw theme slugs from prefs.json verbatim — validation,
 // defaulting and the theme-wins tiebreak belong to the resolver.
@@ -180,7 +185,7 @@ func (s *Store) readFileStrict() (prefsFile, bool, error) {
 		}
 		// Named, not bare: this aborts a commit, and the raw decode error tells
 		// the user nothing about which file to open.
-		return prefsFile{}, false, fmt.Errorf("prefs: %s is not valid JSON: %w", s.path, err)
+		return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrInvalidJSON, err)
 	}
 
 	return f, true, nil
@@ -224,10 +229,13 @@ func (s *Store) LoadResumeMode() (resumemode.Mode, error) {
 	return resumemode.Default, nil
 }
 
-// LoadKeys reads the attach runner's keys object verbatim, under the same
-// tolerant policy as Load; nil when prefs.json sets none.
+// LoadKeys reads the attach runner's keys object verbatim; nil when prefs.json
+// sets none. Unlike the other loads it reads strictly, so its caller can say
+// why the keys keep their defaults: a prefs.json that does not decode is an
+// error wrapping ErrInvalidJSON. It writes nothing, so it is safe on doctor's
+// read-only path.
 func (s *Store) LoadKeys() (json.RawMessage, error) {
-	f, _, err := s.readFile()
+	f, _, err := s.readFileStrict()
 	if err != nil {
 		return nil, err
 	}

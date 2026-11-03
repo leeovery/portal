@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 )
 
-// actionNames gives each action its name in prefs.json's keys object, in the
-// order warnings and summaries name them.
-var actionNames = []struct {
+// actionName is an action's name in prefs.json's keys object.
+type actionName struct {
 	action Action
 	name   string
-}{
+}
+
+// actionNames is in the order warnings and summaries name the actions.
+var actionNames = []actionName{
 	{Detach, "detach"},
 	{DetachToShell, "detach_to_shell"},
 	{Kill, "kill"},
@@ -65,22 +68,23 @@ func (b Bindings) String() string {
 	return strings.Join(parts, "; ")
 }
 
-// Warning names a binding that fell back to its action's default, and why.
+// Warning names something in the keys config the runner can't use, and why.
 type Warning struct {
-	// Action fell back to its default. It is zero when the keys value as a
-	// whole is unusable, and every action keeps its default.
+	// Action fell back to its default; zero for a warning about no one
+	// action.
 	Action Action
-	// Value is the binding as configured: a key quoted, any other value as
-	// JSON.
+	// Value is what the warning is about: a key or an entry's name quoted,
+	// any other value as JSON.
 	Value string
-	// Reason completes a sentence whose subject is Value.
+	// Reason completes a sentence whose subject is Value. For a warning about
+	// no one action, it also says what the runner does instead.
 	Reason string
 }
 
 // String says what fell back to what, and why.
 func (w Warning) String() string {
 	if w.Action == 0 {
-		return fmt.Sprintf("keys keep their defaults: %s %s", w.Value, w.Reason)
+		return fmt.Sprintf("keys: %s %s", w.Value, w.Reason)
 	}
 	return fmt.Sprintf("%s falls back to %s: %s %s", nameOf(w.Action), defaultKeys[w.Action], w.Value, w.Reason)
 }
@@ -89,7 +93,7 @@ func (w Warning) String() string {
 // default, and an unknown one is ignored. An entry that doesn't parse, or
 // binds a key the runner refuses, falls back to its action's default; so does
 // each configured action with a key that sends another action's bytes. Every
-// fallback returns a warning.
+// fallback and every unknown entry returns a warning.
 func Parse(raw json.RawMessage) (Bindings, []Warning) {
 	b := Defaults()
 	if len(raw) == 0 {
@@ -97,7 +101,7 @@ func Parse(raw json.RawMessage) (Bindings, []Warning) {
 	}
 	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return b, []Warning{{Value: compactJSON(raw), Reason: "is not an object"}}
+		return b, []Warning{{Value: compactJSON(raw), Reason: "is not an object, so every action keeps its default"}}
 	}
 
 	var warnings []Warning
@@ -118,7 +122,19 @@ func Parse(raw json.RawMessage) (Bindings, []Warning) {
 		// missing entry does.
 		configured[n.action] = !slices.Equal(keys, []Key{defaultKeys[n.action]})
 	}
-	return b, append(warnings, settleClashes(b, configured)...)
+	warnings = append(warnings, settleClashes(b, configured)...)
+	return b, append(warnings, unknownEntries(entries)...)
+}
+
+// unknownEntries names each entry that is no action's, in sorted order.
+func unknownEntries(entries map[string]json.RawMessage) []Warning {
+	var warnings []Warning
+	for _, name := range slices.Sorted(maps.Keys(entries)) {
+		if !slices.ContainsFunc(actionNames, func(n actionName) bool { return n.name == name }) {
+			warnings = append(warnings, Warning{Value: strconv.Quote(name), Reason: "is not an action, so it is ignored"})
+		}
+	}
+	return warnings
 }
 
 // parseEntry reads one action's value: a key, or a list of keys. The warning

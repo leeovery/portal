@@ -60,10 +60,10 @@ func (k Key) without(m mods) Key {
 	return k
 }
 
-// parseKey reads a key as written, case-insensitively. Its errors complete a
-// sentence whose subject is the key.
+// parseKey reads a key as written, case-insensitively and with surrounding
+// whitespace ignored. Its errors complete a sentence whose subject is the key.
 func parseKey(text string) (Key, error) {
-	parts := strings.Split(strings.ToLower(text), "+")
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(text)), "+")
 	// "+" is a key as well as the separator, so a trailing "++" names it.
 	if n := len(parts); n >= 2 && parts[n-1] == "" && parts[n-2] == "" {
 		parts = append(parts[:n-2], "+")
@@ -120,14 +120,15 @@ func isLetter(c byte) bool {
 }
 
 // ctrlByte is the C0 byte a terminal sends for ctrl and c without the newer
-// encoding: kitty's table, which Ghostty follows. A key it has no byte for
-// loses its ctrl.
+// encoding: kitty's table, which Ghostty follows, less the marks a US layout
+// types with shift, which no binding names. A key it has no byte for loses
+// its ctrl.
 func ctrlByte(c byte) (byte, bool) {
 	if isLetter(c) {
 		return c - 'a' + 1, true
 	}
 	switch c {
-	case '2', '@':
+	case '2':
 		return 0x00, true
 	case '3', '[':
 		return esc, true
@@ -135,11 +136,11 @@ func ctrlByte(c byte) (byte, bool) {
 		return 0x1c, true
 	case '5', ']':
 		return 0x1d, true
-	case '6', '^', '~':
+	case '6':
 		return 0x1e, true
-	case '7', '/', '_':
+	case '7', '/':
 		return 0x1f, true
-	case '8', '?':
+	case '8':
 		return 0x7f, true
 	}
 	return 0, false

@@ -34,15 +34,36 @@ func doctorKeyConfigReport(t *testing.T, content string) (line, summary string) 
 
 func TestDoctorKeyConfig(t *testing.T) {
 	t.Run("it passes with the defaults when prefs.json sets no keys", func(t *testing.T) {
-		for _, content := range []string{"", `{"theme":"nord"}`, `{"keys":null}`, `{"keys":{"detach":"alt+d"`} {
+		for _, content := range []string{"", `{"theme":"nord"}`, `{"keys":null}`} {
 			if line, _ := doctorKeyConfigReport(t, content); line != defaultKeyConfigLine {
 				t.Errorf("prefs.json %q: key-config line = %q; want %q", content, line, defaultKeyConfigLine)
 			}
 		}
 	})
 
+	t.Run("it says so when prefs.json is not valid JSON", func(t *testing.T) {
+		for _, content := range []string{`{"keys":{"detach":"alt+d"`, `[]`} {
+			line, summary := doctorKeyConfigReport(t, content)
+			want := "  " + checkMarker(checkInfo) + " key config: prefs.json is not valid JSON; keys keep their defaults"
+			if line != want {
+				t.Errorf("prefs.json %q: key-config line = %q; want %q", content, line, want)
+			}
+			if want := "  6 checks passed"; summary != want {
+				t.Errorf("prefs.json %q: summary = %q; want %q", content, summary, want)
+			}
+		}
+	})
+
+	t.Run("it names an entry that is no action's", func(t *testing.T) {
+		line, _ := doctorKeyConfigReport(t, `{"keys":{"detatch":"alt+x"}}`)
+		want := "  " + checkMarker(checkInfo) + ` key config: keys: "detatch" is not an action, so it is ignored`
+		if line != want {
+			t.Errorf("key-config line = %q; want %q", line, want)
+		}
+	})
+
 	t.Run("it passes a config whose every binding parses, naming the keys in effect", func(t *testing.T) {
-		line, summary := doctorKeyConfigReport(t, `{"keys":{"detach":["ALT+x","ctrl+o"],"kill":[],"unknown":1}}`)
+		line, summary := doctorKeyConfigReport(t, `{"keys":{"detach":["ALT+x","ctrl+o"],"kill":[]}}`)
 		if want := "  ✓ key config: detach alt+x, ctrl+o; detach_to_shell alt+shift+d; kill off"; line != want {
 			t.Errorf("key-config line = %q; want %q", line, want)
 		}
@@ -66,7 +87,7 @@ func TestDoctorKeyConfig(t *testing.T) {
 
 	t.Run("it warns once when the keys value is not an object", func(t *testing.T) {
 		line, _ := doctorKeyConfigReport(t, `{"keys":["alt+d"]}`)
-		want := "  " + checkMarker(checkInfo) + ` key config: keys keep their defaults: ["alt+d"] is not an object`
+		want := "  " + checkMarker(checkInfo) + ` key config: keys: ["alt+d"] is not an object, so every action keeps its default`
 		if line != want {
 			t.Errorf("key-config line = %q; want %q", line, want)
 		}

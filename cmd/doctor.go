@@ -366,7 +366,10 @@ func checkKeyConfig(store *prefs.Store) checkResult {
 		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
 	}
 	raw, err := store.LoadKeys()
-	if err != nil {
+	switch {
+	case errors.Is(err, prefs.ErrInvalidJSON):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not valid JSON; keys keep their defaults"}
+	case err != nil:
 		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
 	}
 	bindings, warnings := attachkeys.Parse(raw)

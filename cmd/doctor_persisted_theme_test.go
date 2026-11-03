@@ -484,8 +484,9 @@ func TestPersistedThemeAdvisory_TolerantOnDegeneratePrefs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute err = %v; a corrupt prefs.json must never abort the diagnosis", err)
 		}
-		if out := outBuf.String(); !strings.HasSuffix(out, "\n  7 checks passed\n") {
-			t.Errorf("report does not close with the full all-passed summary:\n%s", out)
+		// Six, not seven: the key-config line reports the corrupt file as info.
+		if out := outBuf.String(); !strings.HasSuffix(out, "\n  6 checks passed\n") {
+			t.Errorf("report does not close with the all-passed summary:\n%s", out)
 		}
 	})
 }

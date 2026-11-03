@@ -3,6 +3,7 @@ package attachkeys_test
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/leeovery/portal/internal/attachkeys"
@@ -58,7 +59,6 @@ func TestParse_Shape(t *testing.T) {
 		{"a value may be one key", `{"detach":"ctrl+o"}`, "detach ctrl+o; detach_to_shell alt+shift+d; kill alt+q"},
 		{"a value may be a list of keys", `{"detach":["alt+x","ctrl+o","alt+f5"]}`, "detach alt+x, ctrl+o, alt+f5; detach_to_shell alt+shift+d; kill alt+q"},
 		{"an empty list turns the action off", `{"kill":[]}`, "detach alt+d; detach_to_shell alt+shift+d; kill off"},
-		{"unknown entries are ignored", `{"detatch":"nonsense","detach":"alt+x","extra":{"a":[1]}}`, "detach alt+x; detach_to_shell alt+shift+d; kill alt+q"},
 		{"a key repeated in one list counts once", `{"detach":["alt+x","ALT+X"]}`, "detach alt+x; detach_to_shell alt+shift+d; kill alt+q"},
 		{"rebinding a default to its own action is no clash", `{"detach":"alt+d","kill":"alt+x"}`, "detach alt+d; detach_to_shell alt+shift+d; kill alt+x"},
 		{"two actions may swap their defaults", `{"detach":"alt+q","kill":"alt+d"}`, "detach alt+q; detach_to_shell alt+shift+d; kill alt+d"},
@@ -67,6 +67,13 @@ func TestParse_Shape(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { assertClean(t, tc.raw, tc.want) })
 	}
+
+	t.Run("unknown entries are ignored, each named in sorted order", func(t *testing.T) {
+		assertWarnings(t, `{"extra":{"a":[1]},"detatch":"nonsense","detach":"alt+x"}`,
+			"detach alt+x; detach_to_shell alt+shift+d; kill alt+q",
+			`keys: "detatch" is not an action, so it is ignored`,
+			`keys: "extra" is not an action, so it is ignored`)
+	})
 }
 
 func TestParse_KeyGrammar(t *testing.T) {
@@ -82,18 +89,24 @@ func TestParse_KeyGrammar(t *testing.T) {
 		{"an uppercase letter is the letter, not shift", "alt+K", "alt+k"},
 		{"a digit", "alt+1", "alt+1"},
 		{"a punctuation mark", "alt+,", "alt+,"},
-		{"a punctuation mark shift types on some layouts", "alt+!", "alt+!"},
-		{"plus as the key", "alt++", "alt++"},
+		{"a backtick", "alt+`", "alt+`"},
+		{"a minus", "alt+-", "alt+-"},
+		{"an equals sign", "alt+=", "alt+="},
+		{"a semicolon", "alt+;", "alt+;"},
+		{"an apostrophe", "alt+'", "alt+'"},
+		{"a full stop", "alt+.", "alt+."},
+		{"a slash", "alt+/", "alt+/"},
 		{"ctrl and a punctuation mark with a C0 byte", "ctrl+]", "ctrl+]"},
+		{"ctrl and a slash, a C0 byte", "ctrl+/", "ctrl+/"},
 		{"ctrl and a digit with a C0 byte", "ctrl+5", "ctrl+5"},
 		{"a function key", "ctrl+f1", "ctrl+f1"},
 		{"the last function key", "alt+F12", "alt+f12"},
 		{"shift on a function key", "ctrl+shift+f5", "ctrl+shift+f5"},
-		{"alt and backslash, which ends a string only inside one", "alt+\\", "alt+\\"},
 		{"alt, shift and N, which no terminal sends as SS2", "alt+shift+n", "alt+shift+n"},
 		{"lowercase o, p and x, which begin nothing", "alt+o", "alt+o"},
 		{"ctrl, alt and backslash, which is not zmx's", "ctrl+alt+\\", "ctrl+alt+\\"},
-		{"ctrl and 2, a NUL byte", "ctrl+2", "ctrl+2"},
+		{"ctrl, alt and g, which ends no reply", "ctrl+alt+g", "ctrl+alt+g"},
+		{"surrounding whitespace is trimmed", " alt+x\t", "alt+x"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,7 +130,7 @@ func mustJSON(t *testing.T, v any) string {
 func assertKillFallsBack(t *testing.T, key, reason string) {
 	t.Helper()
 	assertWarnings(t, `{"kill":`+mustJSON(t, key)+`}`, defaultsSummary,
-		"kill falls back to alt+q: "+mustJSON(t, key)+" "+reason)
+		"kill falls back to alt+q: "+strconv.Quote(key)+" "+reason)
 }
 
 func TestParse_UnparsableKeysFallBack(t *testing.T) {
@@ -147,9 +160,17 @@ func TestParse_UnparsableKeysFallBack(t *testing.T) {
 }
 
 // Every refusal follows from what the key sends without the newer encoding,
-// but the layout one.
+// but the layout ones.
 func TestParse_RefusedKeysFallBack(t *testing.T) {
-	const layout = "puts shift on a digit or punctuation mark, whose bytes depend on the keyboard layout"
+	const (
+		layout    = "puts shift on a digit or punctuation mark, whose bytes depend on the keyboard layout"
+		usShifted = "is typed with shift on a US layout, so its bytes depend on the keyboard layout"
+	)
+	for _, mark := range `!@#$%^&*()_+{}|:"<>?~` {
+		t.Run("alt+"+string(mark)+" needs shift on a US layout", func(t *testing.T) {
+			assertKillFallsBack(t, "alt+"+string(mark), usShifted)
+		})
+	}
 	cases := []struct {
 		name, key, reason string
 	}{
@@ -165,13 +186,19 @@ func TestParse_RefusedKeysFallBack(t *testing.T) {
 		{"ctrl+j is a linefeed", "ctrl+j", "sends the same bytes as linefeed"},
 		{"ctrl+h is backspace", "ctrl+h", "sends the same bytes as backspace"},
 		{"ctrl+8 is DEL, backspace", "ctrl+8", "sends the same bytes as backspace"},
-		{"ctrl+? is DEL, backspace", "ctrl+?", "sends the same bytes as backspace"},
+		{"ctrl+? needs shift on a US layout", "ctrl+?", usShifted},
+		{"ctrl+@ needs shift on a US layout", "ctrl+@", usShifted},
 		{"ctrl+[ is ESC", "ctrl+[", "sends the same bytes as escape"},
 		{"ctrl+3 is ESC", "ctrl+3", "sends the same bytes as escape"},
 		{"alt+ctrl+i is alt+tab", "ctrl+alt+i", "sends the same bytes as alt+tab"},
 		{"alt+ctrl+m is alt+enter", "ctrl+alt+m", "sends the same bytes as alt+enter"},
 		{"alt+ctrl+h is alt+backspace", "ctrl+alt+h", "sends the same bytes as alt+backspace"},
 		{"alt+ctrl+[ is alt+escape", "ctrl+alt+[", "sends the same bytes as alt+escape"},
+		{"ctrl+2 is NUL, ctrl+space", "ctrl+2", "sends the same bytes as ctrl+space"},
+		{"alt+ctrl+2 is alt+ctrl+space", "ctrl+alt+2", "sends the same bytes as alt+ctrl+space"},
+		{"ctrl+g is BEL, which ends a reply", "ctrl+g", "sends BEL, which ends a terminal's reply"},
+		{"alt+\\ is ST, which ends a reply", "alt+\\", "sends ST, which ends a terminal's reply"},
+		{"a refused key's whitespace is trimmed", " ctrl+i ", "sends the same bytes as tab"},
 		{"ctrl on a digit with no C0 byte is lost", "ctrl+1", `sends the same bytes as "1"`},
 		{"ctrl on a punctuation mark with no C0 byte is lost", "ctrl+,", `sends the same bytes as ","`},
 		{"ctrl lost beside alt", "ctrl+alt+,", `sends the same bytes as "alt+,"`},
@@ -180,8 +207,6 @@ func TestParse_RefusedKeysFallBack(t *testing.T) {
 		{"alt+shift+o begins SS3", "alt+shift+o", "is the start of an SS3 sequence"},
 		{"alt+shift+p begins DCS", "alt+shift+p", "is the start of a DCS string"},
 		{"alt+shift+x begins SOS", "alt+shift+x", "is the start of an SOS string"},
-		{"alt+^ begins PM", "alt+^", "is the start of a PM string"},
-		{"alt+_ begins APC", "alt+_", "is the start of an APC string"},
 		{"f3 with a modifier is a cursor position report", "ctrl+f3", "sends the same bytes as a cursor position report"},
 		{"f3 with alt as well", "alt+f3", "sends the same bytes as a cursor position report"},
 	}
@@ -200,7 +225,7 @@ func TestParse_MalformedValuesFallBack(t *testing.T) {
 
 	t.Run("a keys value that is not an object keeps every default with one warning", func(t *testing.T) {
 		for _, raw := range []string{`42`, `"alt+d"`, `["alt+d"]`} {
-			assertWarnings(t, raw, defaultsSummary, "keys keep their defaults: "+raw+" is not an object")
+			assertWarnings(t, raw, defaultsSummary, "keys: "+raw+" is not an object, so every action keeps its default")
 		}
 	})
 
