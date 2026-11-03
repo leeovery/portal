@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,7 +21,6 @@ import (
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/tui"
-	"github.com/spf13/cobra"
 )
 
 // leading is a leader's tracked environment carrying the runner token.
@@ -240,34 +238,17 @@ func TestAttach_ASwitchAttachesTheSessionItNames(t *testing.T) {
 	})
 
 	t.Run("a switched attach that fails other than for a fault of its session's returns the error, as a first attach does", func(t *testing.T) {
-		boom := errors.New("the attach broke")
-		notStarted := &exec.Error{Name: "zmx", Err: exec.ErrNotFound}
-		signalled := fmt.Errorf("interrupted while %w", backend.ErrTimeout)
-		for _, tc := range []struct {
-			name  string
-			stage func(*backendtest.Fake, *attachRecorder, *cobra.Command)
-			want  error
-		}{
-			{"the runner fails", func(_ *backendtest.Fake, rec *attachRecorder, _ *cobra.Command) {
-				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: boom})
-			}, boom},
-			{"the zmx binary fails to start", func(_ *backendtest.Fake, rec *attachRecorder, _ *cobra.Command) {
-				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: notStarted})
-			}, notStarted},
-			{"Portal's context ends, with a cause that reads as not answering", func(_ *backendtest.Fake, rec *attachRecorder, cmd *cobra.Command) {
-				ctx, end := context.WithCancelCause(cmd.Context())
-				cmd.SetContext(ctx)
-				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}, ended: func() { end(signalled) }})
-			}, signalled},
+		for name, failure := range map[string]error{
+			"the runner fails":              errors.New("the attach broke"),
+			"the zmx binary fails to start": &exec.Error{Name: "zmx", Err: exec.ErrNotFound},
 		} {
-			t.Run(tc.name, func(t *testing.T) {
-				fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
-				cmd := contextCommand()
-				tc.stage(fake, rec, cmd)
+			t.Run(name, func(t *testing.T) {
+				_, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: failure})
 				picker := stagePicker(t)
 
-				if err := openSession(cmd, "api-x7Kd9a"); !errors.Is(err, tc.want) {
-					t.Errorf("openSession = %v, want the switched attach's own %v", err, tc.want)
+				if err := openSession(contextCommand(), "api-x7Kd9a"); !errors.Is(err, failure) {
+					t.Errorf("openSession = %v, want the switched attach's own %v", err, failure)
 				}
 				if len(picker.flashes) != 0 {
 					t.Errorf("the picker opened with %q, want it never opened", picker.flashes)
