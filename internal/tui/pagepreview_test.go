@@ -23,14 +23,17 @@ func historyFake(t *testing.T, vt string, names ...string) *backendtest.Fake {
 	return f
 }
 
-// newTestPreview opens a preview of session "work" whose history is vt.
+// openedPreview is the preview of session once its read from history has
+// landed, as the picker shows it a moment after Space.
+func openedPreview(t *testing.T, session string, history HistoryReader, width, height int) previewModel {
+	t.Helper()
+	return NewPreviewModel(session, newPreviewHistory(history).body(session), width, height)
+}
+
+// newTestPreview is the opened preview of session "work" whose history is vt.
 func newTestPreview(t *testing.T, vt string, width, height int) previewModel {
 	t.Helper()
-	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, vt, "work")), width, height)
-	if !ok {
-		t.Fatalf("setup: NewPreviewModel returned ok=false")
-	}
-	return m
+	return openedPreview(t, "work", historyFake(t, vt, "work"), width, height)
 }
 
 // previewBody is the viewport's rows as text, right-trimmed, without the blank
@@ -46,6 +49,11 @@ func previewBody(m previewModel) []string {
 	return rows
 }
 
+func lastBodyRow(m previewModel) string {
+	body := previewBody(m)
+	return body[len(body)-1]
+}
+
 // stallingHistory answers nothing until its context ends, then fails with the
 // context's cause, as a wedged session does under the Backend contract.
 type stallingHistory struct {
@@ -59,24 +67,21 @@ func (s *stallingHistory) History(ctx context.Context, _ string, _ int) ([]byte,
 	return nil, context.Cause(ctx)
 }
 
-func TestNewPreviewModel_BodyIsTheSessionsWholeHistory(t *testing.T) {
+func TestPreviewHistoryBody_IsTheSessionsWholeHistory(t *testing.T) {
 	fake := historyFake(t, "first\r\nsecond", "work")
 
-	m, ok := NewPreviewModel("work", newPreviewHistory(fake), 80, 24)
+	body := newPreviewHistory(fake).body("work")
 
-	if !ok {
-		t.Fatalf("NewPreviewModel ok=false, want true")
-	}
 	calls := fake.CallsTo(backendtest.OpHistory)
 	if len(calls) != 1 || calls[0].Name != "work" || calls[0].Rows != 0 {
 		t.Errorf("History calls = %+v, want one for work with rows 0 (the whole history)", calls)
 	}
-	if got := previewBody(m); !slices.Equal(got[len(got)-2:], []string{"first", "second"}) {
-		t.Errorf("body = %q, want it to end with the history's two rows", got)
+	if got := stripANSI(body); got != "first\nsecond" {
+		t.Errorf("body = %q, want the history's two rows", got)
 	}
 }
 
-func TestNewPreviewModel_DrawsTheHistoryAsTheTerminalWould(t *testing.T) {
+func TestPreviewHistoryBody_DrawsTheHistoryAsTheTerminalWould(t *testing.T) {
 	// zmx's own serialisation: a CUF step, a background erase, then the
 	// cursor's CUP and the state after it.
 	m := newTestPreview(t, "a\x1b[3Cb\r\n\x1b[44mx\x1b[2X\x1b[2C\x1b[0m\x1b[2;4H\x1b[0m", 80, 24)
@@ -90,81 +95,51 @@ func TestNewPreviewModel_DrawsTheHistoryAsTheTerminalWould(t *testing.T) {
 	}
 }
 
-func TestNewPreviewModel_OpensAtTheBottomOfTheHistory(t *testing.T) {
-	m := newTestPreview(t, strings.Repeat("line\r\n", 50)+"last", 80, 24)
-
-	if !m.viewport.AtBottom() {
-		t.Errorf("viewport.AtBottom() = false right after construction, want true")
-	}
-}
-
-func TestNewPreviewModel_SaysWhenTheSessionIsNotAnswering(t *testing.T) {
-	fake := historyFake(t, "unread", "work")
-	fake.StopAnswering("work")
-
-	m, ok := NewPreviewModel("work", newPreviewHistory(fake), 80, 24)
-
-	if !ok {
-		t.Fatalf("NewPreviewModel ok=false, want the preview to open and say why it is empty")
-	}
-	if got := previewBody(m); got[len(got)-1] != previewNotAnswering {
-		t.Errorf("body = %q, want %q", got, previewNotAnswering)
-	}
-}
-
-func TestNewPreviewModel_SaysWhenTheHistoryIsUnavailable(t *testing.T) {
-	for name, fail := range map[string]error{
-		"unavailable":     backend.ErrHistoryUnavailable,
-		"any other error": errors.New("connection reset"),
+func TestPreviewHistoryBody_SaysWhyThereIsNone(t *testing.T) {
+	for name, tc := range map[string]struct {
+		stage func(*backendtest.Fake)
+		want  string
+	}{
+		"not answering":   {func(f *backendtest.Fake) { f.StopAnswering("work") }, previewNotAnswering},
+		"unavailable":     {func(f *backendtest.Fake) { f.Fail(backendtest.OpHistory, backend.ErrHistoryUnavailable) }, previewHistoryUnavailable},
+		"any other error": {func(f *backendtest.Fake) { f.Fail(backendtest.OpHistory, errors.New("connection reset")) }, previewHistoryUnavailable},
+		"gone":            {func(f *backendtest.Fake) { f.Remove("work") }, previewSessionGone},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fake := historyFake(t, "unread", "work")
-			fake.Fail(backendtest.OpHistory, fail)
+			tc.stage(fake)
 
-			m, ok := NewPreviewModel("work", newPreviewHistory(fake), 80, 24)
-
-			if !ok {
-				t.Fatalf("NewPreviewModel ok=false, want the preview to open and say why it is empty")
-			}
-			if got := previewBody(m); got[len(got)-1] != previewHistoryUnavailable {
-				t.Errorf("body = %q, want %q", got, previewHistoryUnavailable)
+			if got := newPreviewHistory(fake).body("work"); got != tc.want {
+				t.Errorf("body = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestNewPreviewModel_OpensNothingForAGoneSession(t *testing.T) {
-	fake := historyFake(t, "x", "other")
-
-	if _, ok := NewPreviewModel("work", newPreviewHistory(fake), 80, 24); ok {
-		t.Errorf("NewPreviewModel ok=true for a session the backend no longer holds, want false")
-	}
-}
-
-func TestNewPreviewModel_OpensNothingWithoutAHistoryReader(t *testing.T) {
-	if _, ok := NewPreviewModel("work", previewHistory{}, 80, 24); ok {
-		t.Errorf("NewPreviewModel ok=true with no history reader, want false")
-	}
-}
-
-func TestNewPreviewModel_AWedgedSessionHoldsThePreviewOnlyToTheCeiling(t *testing.T) {
+func TestPreviewHistoryBody_AWedgedSessionHoldsTheReadOnlyToTheCeiling(t *testing.T) {
 	const ceiling = 20 * time.Millisecond
 	stall := &stallingHistory{}
 	start := time.Now()
 
-	m, ok := NewPreviewModel("work", previewHistory{reader: stall, ceiling: ceiling}, 80, 24)
+	body := previewHistory{reader: stall, ceiling: ceiling}.body("work")
 
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("NewPreviewModel took %s against a %s ceiling", elapsed, ceiling)
-	}
-	if !ok {
-		t.Fatalf("NewPreviewModel ok=false, want the preview to open")
+		t.Fatalf("the read took %s against a %s ceiling", elapsed, ceiling)
 	}
 	if stall.deadline.IsZero() || stall.deadline.Sub(stall.entered) > ceiling {
 		t.Errorf("History's context deadline = %v, want one within %s of the call", stall.deadline, ceiling)
 	}
-	if got := previewBody(m); got[len(got)-1] != previewNotAnswering {
-		t.Errorf("body = %q, want %q once the ceiling passes", got, previewNotAnswering)
+	if body != previewNotAnswering {
+		t.Errorf("body = %q, want %q once the ceiling passes", body, previewNotAnswering)
+	}
+}
+
+func TestPreviewHistoryRead_CarriesItsGeneration(t *testing.T) {
+	msg := newPreviewHistory(historyFake(t, "x", "work")).read("work", 7)()
+
+	got, ok := msg.(previewBodyMsg)
+	if !ok || got.gen != 7 || got.body != "x" {
+		t.Errorf("read's message = %#v, want the body for generation 7", msg)
 	}
 }
 
@@ -176,23 +151,23 @@ func TestWithHistory_BoundsEveryReadByTheCeiling(t *testing.T) {
 	}
 }
 
-func TestNewPreviewModel_ReadsAfreshEachTimeItOpens(t *testing.T) {
-	fake := historyFake(t, "first", "work")
-	history := newPreviewHistory(fake)
+func TestNewPreviewModel_OpensAtTheBottomOfItsBody(t *testing.T) {
+	m := newTestPreview(t, strings.Repeat("line\r\n", 50)+"last", 80, 24)
 
-	if _, ok := NewPreviewModel("work", history, 80, 24); !ok {
-		t.Fatalf("first open: ok=false")
+	if !m.viewport.AtBottom() {
+		t.Errorf("viewport.AtBottom() = false right after construction, want true")
 	}
-	fake.SetHistory("work", []byte("second"))
-	m, ok := NewPreviewModel("work", history, 80, 24)
-	if !ok {
-		t.Fatalf("second open: ok=false")
-	}
+}
 
-	if n := len(fake.CallsTo(backendtest.OpHistory)); n != 2 {
-		t.Errorf("History calls = %d, want one per open", n)
+func TestPreviewSetBody_ReplacesTheBodyAnchoredAtTheBottom(t *testing.T) {
+	m := NewPreviewModel("work", previewLoading, 80, 24)
+
+	m.setBody(renderHistory([]byte(strings.Repeat("line\r\n", 50) + "last")))
+
+	if got := lastBodyRow(m); got != "last" {
+		t.Errorf("last row = %q, want the new body's", got)
 	}
-	if got := previewBody(m); got[len(got)-1] != "second" {
-		t.Errorf("second open's body = %q, want the history as it is now", got)
+	if !m.viewport.AtBottom() {
+		t.Errorf("viewport.AtBottom() = false after the body landed, want true")
 	}
 }

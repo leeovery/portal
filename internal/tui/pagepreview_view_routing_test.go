@@ -13,11 +13,7 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	m := modelWithSeams(t, sessions, historyFor(t, "hello-from-preview", sessions))
 	m.termWidth = 120
 
-	updated, _ := m.Update(keySpaceMsg())
-	got, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("expected Model, got %T", updated)
-	}
+	got := openPreviewOn(t, m)
 	if got.activePage != pagePreview {
 		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
 	}

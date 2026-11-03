@@ -12,10 +12,7 @@ import (
 func TestPreviewHermetic_FullLifecycleReadsTheHistoryOnceAtOpen(t *testing.T) {
 	history := historyFake(t, strings.Repeat("content\r\n", 40), "work")
 
-	m, ok := NewPreviewModel("work", newPreviewHistory(history), 80, 24)
-	if !ok {
-		t.Fatalf("expected ok=true on construction, got false")
-	}
+	m := openedPreview(t, "work", history, 80, 24)
 
 	keys := []tea.KeyPressMsg{
 		{Code: 'k', Text: "k"},

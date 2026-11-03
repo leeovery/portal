@@ -58,10 +58,7 @@ func TestPreviewFooter_HintsNoWindowOrPaneCycling(t *testing.T) {
 
 func TestPreviewChromeLine_ProducesNoIOWhenInvoked(t *testing.T) {
 	history := historyFake(t, "content", "work")
-	m, ok := NewPreviewModel("work", newPreviewHistory(history), 80, 24)
-	if !ok {
-		t.Fatalf("setup: NewPreviewModel ok=false")
-	}
+	m := openedPreview(t, "work", history, 80, 24)
 	before := len(history.CallsTo(backendtest.OpHistory))
 
 	_ = chromeLineForTest(m)

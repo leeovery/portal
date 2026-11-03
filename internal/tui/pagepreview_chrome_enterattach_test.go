@@ -24,10 +24,7 @@ func TestPreviewFooter_ByteIdenticalAcrossBodies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			history := historyFake(t, "hello world", "work")
 			tc.stage(history)
-			m, ok := NewPreviewModel("work", newPreviewHistory(history), 80, 24)
-			if !ok {
-				t.Fatalf("expected ok=true on construction, got false")
-			}
+			m := openedPreview(t, "work", history, 80, 24)
 			got := stripANSI(footerLineForTest(m))
 
 			if !strings.Contains(got, "⏎ attach  ␣ back") {

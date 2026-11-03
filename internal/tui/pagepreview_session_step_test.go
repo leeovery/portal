@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,19 +20,8 @@ func stepSessions(names ...string) []Session {
 
 func stepModel(t *testing.T, names ...string) Model {
 	t.Helper()
-	return stepModelWithGone(t, nil, names...)
-}
-
-// stepModelWithGone lists every name but holds no session for those in gone,
-// as with sessions killed outside the picker.
-func stepModelWithGone(t *testing.T, gone []string, names ...string) Model {
-	t.Helper()
 	sessions := stepSessions(names...)
-	history := historyFor(t, strings.Repeat("hi\r\n", 60), sessions)
-	for _, name := range gone {
-		history.Remove(name)
-	}
-	return modelWithSeams(t, sessions, history)
+	return modelWithSeams(t, sessions, historyFor(t, strings.Repeat("hi\r\n", 60), sessions))
 }
 
 func asModel(t *testing.T, tm tea.Model) Model {
@@ -46,7 +36,7 @@ func asModel(t *testing.T, tm tea.Model) Model {
 func openPreviewAt(t *testing.T, m Model, index int) Model {
 	t.Helper()
 	m.sessionList.Select(index)
-	m = asModel(t, dropCmd(m.Update(keySpaceMsg())))
+	m = openPreviewOn(t, m)
 	if m.activePage != pagePreview {
 		t.Fatalf("setup: expected pagePreview after Space, got %v", m.activePage)
 	}
@@ -55,8 +45,8 @@ func openPreviewAt(t *testing.T, m Model, index int) Model {
 
 func dropCmd(tm tea.Model, _ tea.Cmd) tea.Model { return tm }
 
-// Presses the key on the preview page and feeds the step message it emits back
-// through the parent, as the runtime does.
+// Presses the key on the preview page and feeds the step message it emits, and
+// then the read the step starts, back through the parent, as the runtime does.
 func pressPreviewStep(t *testing.T, m Model, code rune) Model {
 	t.Helper()
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: code})
@@ -68,7 +58,12 @@ func pressPreviewStep(t *testing.T, m Model, code rune) Model {
 	if _, ok := msg.(previewStepSessionMsg); !ok {
 		t.Fatalf("expected previewStepSessionMsg, got %T", msg)
 	}
-	return asModel(t, dropCmd(m.Update(msg)))
+	updated, read := m.Update(msg)
+	m = asModel(t, updated)
+	if read == nil {
+		return m
+	}
+	return landRead(t, m, read)
 }
 
 func assertPreviewing(t *testing.T, m Model, wantSession string, wantIndex int) {
@@ -164,12 +159,34 @@ func TestPreviewStep_SkipsGroupHeadings(t *testing.T) {
 	assertPreviewing(t, m, "charlie", 4)
 }
 
-func TestPreviewStep_PassesOverASessionThatIsGone(t *testing.T) {
-	m := openPreviewAt(t, stepModelWithGone(t, []string{"bravo"}, "alpha", "bravo", "charlie"), 0)
+// The step opens the next session at once, before its read can say whether
+// the backend still holds it, so a gone one is opened and says so.
+func TestPreviewStep_OpensASessionThatIsGoneAndSaysSo(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha", "bravo", "charlie"), 0)
+	m.history.reader.(*backendtest.Fake).Remove("bravo")
 
 	m = pressPreviewStep(t, m, tea.KeyDown)
 
-	assertPreviewing(t, m, "charlie", 2)
+	assertPreviewing(t, m, "bravo", 1)
+	if body := lastBodyRow(m.preview); body != previewSessionGone {
+		t.Errorf("stepped preview body = %q, want %q", body, previewSessionGone)
+	}
+}
+
+func TestPreviewStep_OpensASessionListedNotAnsweringWithoutDialling(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo", NotAnswering: true}}
+	history := historyFor(t, "hi", sessions)
+	m := openPreviewAt(t, modelWithSeams(t, sessions, history), 0)
+
+	m = pressPreviewStep(t, m, tea.KeyDown)
+
+	assertPreviewing(t, m, "bravo", 1)
+	if body := lastBodyRow(m.preview); body != previewNotAnswering {
+		t.Errorf("stepped preview body = %q, want %q", body, previewNotAnswering)
+	}
+	if calls := historyCalls(history); slices.Contains(calls, "bravo") {
+		t.Errorf("History read %v, want none for bravo", calls)
+	}
 }
 
 func TestPreviewStep_OpensASessionNotAnsweringAndSaysSo(t *testing.T) {
@@ -184,21 +201,16 @@ func TestPreviewStep_OpensASessionNotAnsweringAndSaysSo(t *testing.T) {
 	}
 }
 
-func TestPreviewStep_StaysPutWhenNoOtherSessionOpens(t *testing.T) {
-	t.Run("single session", func(t *testing.T) {
-		m := openPreviewAt(t, stepModel(t, "alpha"), 0)
+func TestPreviewStep_StaysPutWithNoOtherSession(t *testing.T) {
+	m := openPreviewAt(t, stepModel(t, "alpha"), 0)
+	reads := len(historyCalls(m.history.reader.(*backendtest.Fake)))
 
-		m = pressPreviewStep(t, m, tea.KeyDown)
+	m = pressPreviewStep(t, m, tea.KeyDown)
 
-		assertPreviewing(t, m, "alpha", 0)
-	})
-	t.Run("every other session gone", func(t *testing.T) {
-		m := openPreviewAt(t, stepModelWithGone(t, []string{"bravo", "charlie"}, "alpha", "bravo", "charlie"), 0)
-
-		m = pressPreviewStep(t, m, tea.KeyUp)
-
-		assertPreviewing(t, m, "alpha", 0)
-	})
+	assertPreviewing(t, m, "alpha", 0)
+	if n := len(historyCalls(m.history.reader.(*backendtest.Fake))); n != reads {
+		t.Errorf("History reads %d → %d; staying put re-read the session", reads, n)
+	}
 }
 
 func TestPreviewStep_WalksOnlyTheFilteredSessions(t *testing.T) {

@@ -397,7 +397,7 @@ func TestSwipeScrollsThePreviewWithTheFinger(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line %d", i))
 	}
 	m := modelWithSeams(t, sessions, historyFor(t, strings.Join(lines, "\n"), sessions))
-	m, _ = pointerUpdate(t, m, keySpaceMsg())
+	m = openPreviewOn(t, m)
 	if m.activePage != pagePreview {
 		t.Fatal("fixture: Space did not open the preview")
 	}

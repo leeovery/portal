@@ -8,10 +8,7 @@ import (
 )
 
 func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
-	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, "alpha\nbeta\ngamma\n", "work")), 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "alpha\nbeta\ngamma\n", "work"), 80, 24)
 
 	out := m.View()
 	lines := strings.Split(out, "\n")
@@ -48,10 +45,7 @@ func TestPreviewView_JoinedPanelLayoutHeaderBodyFooter(t *testing.T) {
 
 func TestPreviewView_FillsFullTerminalHeight(t *testing.T) {
 	const termH = 24
-	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, "only-one-line\n", "work")), 80, termH)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "only-one-line\n", "work"), 80, termH)
 
 	out := m.View()
 	if got := strings.Count(out, "\n") + 1; got != termH {
@@ -91,10 +85,7 @@ func TestPreviewWindowSizeMsg_SmallHeightDoesNotProduceNegativeViewportHeight(t 
 
 func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 	const initialHeight = 24
-	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, "x", "work")), 80, initialHeight)
-	if !ok {
-		t.Fatalf("setup: expected ok=true, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "x", "work"), 80, initialHeight)
 
 	wantHeight := initialHeight - previewFrameOverhead
 	if m.viewport.Height() != wantHeight {

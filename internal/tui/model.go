@@ -255,6 +255,9 @@ type Model struct {
 
 	history previewHistory
 	preview previewModel
+	// previewGen counts preview opens, so a read that lands after its preview
+	// has stepped on or closed is told apart from the one now showing.
+	previewGen uint64
 
 	// The derived directory is never stamped back to tmux — a pane's cwd can drift
 	// from the origin dir, and freezing that drift would permanently mis-group the
@@ -1389,22 +1392,32 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	}
 }
 
-func (m Model) newSessionPreview(session string) (previewModel, bool) {
-	pmodel, ok := NewPreviewModel(session, m.history, m.contentWidth(), m.contentHeight())
-	if !ok {
-		return previewModel{}, false
+// openSessionPreview opens the preview on s with its body still to come, and
+// returns the read that brings it. A session the listing already found not
+// answering says so at once, with nothing dialled. ok is false, and nothing
+// opens, when no history is wired.
+func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
+	if m.history.reader == nil {
+		return nil, false
 	}
-	pmodel.th = m.themeState.active
-	pmodel.colourless = m.colourless
-	return pmodel, true
+	m.previewGen++
+	body := previewLoading
+	if s.NotAnswering {
+		body = previewNotAnswering
+	} else {
+		cmd = m.history.read(s.Name, m.previewGen)
+	}
+	m.preview = NewPreviewModel(s.Name, body, m.contentWidth(), m.contentHeight())
+	m.preview.th = m.themeState.active
+	m.preview.colourless = m.colourless
+	return cmd, true
 }
 
 // Steps the preview to the next session in the list's visible order, wrapping as
 // the list's arrows do and skipping group headings. The list cursor moves with
 // it, so a dismiss lands on the session last previewed and the filter is never
-// touched. A session the backend no longer holds is passed over, as Space passes
-// over it; with no other session to open, the preview stays where it is.
-func (m *Model) stepPreviewSession(delta int) {
+// touched. With no other session to open, the preview stays where it is.
+func (m *Model) stepPreviewSession(delta int) tea.Cmd {
 	visible := m.sessionList.VisibleItems()
 	n := len(visible)
 	start := m.sessionList.Index()
@@ -1423,14 +1436,11 @@ func (m *Model) stepPreviewSession(delta int) {
 		if !ok {
 			continue
 		}
-		pmodel, ok := m.newSessionPreview(si.Session.Name)
-		if !ok {
-			continue
-		}
 		m.sessionList.Select(i)
-		m.preview = pmodel
-		return
+		cmd, _ := m.openSessionPreview(si.Session)
+		return cmd
 	}
+	return nil
 }
 
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
@@ -1812,7 +1822,12 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.activePage != pagePreview {
 			return m, nil
 		}
-		m.stepPreviewSession(msg.delta)
+		return m, m.stepPreviewSession(msg.delta)
+	case previewBodyMsg:
+		if m.activePage != pagePreview || msg.gen != m.previewGen {
+			return m, nil
+		}
+		m.preview.setBody(msg.body)
 		return m, nil
 	case previewOpenMsg:
 		m.selected = msg.Session
@@ -2636,13 +2651,12 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := m.newSessionPreview(si.Session.Name)
+			cmd, ok := m.openSessionPreview(si.Session)
 			if !ok {
 				return m, nil
 			}
-			m.preview = pmodel
 			m.activePage = pagePreview
-			return m, nil
+			return m, cmd
 		}
 		switch {
 		case keyIsCode(msg, tea.KeyEscape):

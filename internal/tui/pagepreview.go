@@ -141,41 +141,44 @@ type previewModel struct {
 	helpOpen   bool
 }
 
-// NewPreviewModel returns ok=false when there is no session to preview, so the
-// caller falls through to the silent no-open path.
-func NewPreviewModel(session string, history previewHistory, width, height int) (previewModel, bool) {
-	body, ok := history.body(session)
-	if !ok {
-		return previewModel{}, false
-	}
-
+// NewPreviewModel opens a preview of session showing body, which the
+// session's read replaces once it lands.
+func NewPreviewModel(session, body string, width, height int) previewModel {
 	// Mirrors innerWidth/innerHeight, which aren't usable yet — m.width and
 	// m.height are unassigned.
-	vp := newPreviewViewport(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead))
-	vp.SetContent(body)
-	// viewport.SetContent auto-jumps to the bottom only when the previous YOffset
-	// overshoots, so on a fresh viewport the explicit jump is what anchors.
-	vp.GotoBottom()
-
-	return previewModel{
+	m := previewModel{
 		session:  session,
-		viewport: vp,
+		viewport: newPreviewViewport(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
 		width:    width,
 		height:   height,
 		// A zero Theme is silently colourless with no compile error.
 		th: defaultDarkTheme(),
-	}, true
+	}
+	m.setBody(body)
+	return m
+}
+
+// setBody shows body anchored at its bottom, where the session's cursor is.
+func (m *previewModel) setBody(body string) {
+	m.viewport.SetContent(body)
+	// viewport.SetContent auto-jumps to the bottom only when the previous YOffset
+	// overshoots, so the explicit jump is what anchors.
+	m.viewport.GotoBottom()
 }
 
 // Plain ↑/↓ belong to the preview's session step, so the viewport's line scroll
 // is j/k alone (the wheel scrolls through its own path, not the keymap), and
-// ^↑/↓ page as they do in the lists.
+// ^↑/↓ page as they do in the lists. Nothing pans sideways: the body is the
+// session's own screen, clipped as a terminal of this width would clip it.
 func newPreviewViewport(width, height int) viewport.Model {
 	vp := viewport.New(viewport.WithWidth(width), viewport.WithHeight(height))
 	vp.KeyMap.Up.SetKeys("k")
 	vp.KeyMap.Down.SetKeys("j")
 	vp.KeyMap.PageUp.SetKeys("pgup", "ctrl+up", "b")
 	vp.KeyMap.PageDown.SetKeys("pgdown", "ctrl+down", "f")
+	// A zero step stills the sideways keys and the horizontal and shifted wheel
+	// alike, where clearing the keymap would leave the wheel panning.
+	vp.SetHorizontalStep(0)
 	return vp
 }
 

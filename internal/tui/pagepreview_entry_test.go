@@ -41,6 +41,23 @@ func historyFor(t *testing.T, vt string, sessions []Session) *backendtest.Fake {
 	return historyFake(t, vt, names...)
 }
 
+// landRead delivers what cmd returns, as the runtime does once a preview's
+// read comes back.
+func landRead(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	if cmd == nil {
+		t.Fatalf("expected the preview's read, got no cmd")
+	}
+	return asModel(t, dropCmd(m.Update(cmd())))
+}
+
+// openPreviewOn presses Space on the highlighted session and lands its read.
+func openPreviewOn(t *testing.T, m Model) Model {
+	t.Helper()
+	updated, cmd := m.Update(keySpaceMsg())
+	return landRead(t, asModel(t, updated), cmd)
+}
+
 func historyCalls(f *backendtest.Fake) []string {
 	var names []string
 	for _, c := range f.CallsTo(backendtest.OpHistory) {
@@ -49,21 +66,44 @@ func historyCalls(f *backendtest.Fake) []string {
 	return names
 }
 
-func TestSpaceOnSessionsPageTransitionsToPagePreviewWhenHighlighted(t *testing.T) {
+func TestSpaceOnSessionsPageOpensThePreviewBeforeTheReadLands(t *testing.T) {
 	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
 	history := historyFor(t, "hi", sessions)
 	m := modelWithSeams(t, sessions, history)
 
 	updated, cmd := m.Update(keySpaceMsg())
 
+	got := asModel(t, updated)
+	if got.activePage != pagePreview {
+		t.Fatalf("expected activePage=pagePreview at once, got %v", got.activePage)
+	}
+	if body := lastBodyRow(got.preview); body != previewLoading {
+		t.Errorf("body before the read lands = %q, want %q", body, previewLoading)
+	}
+	if calls := historyCalls(history); len(calls) != 0 {
+		t.Errorf("History read %v inside Update, want the read left to the cmd", calls)
+	}
+
+	got = landRead(t, got, cmd)
+
+	if calls := historyCalls(history); len(calls) != 1 || calls[0] != "alpha" {
+		t.Errorf("History read %v, want once for the highlighted alpha", calls)
+	}
+	if body := lastBodyRow(got.preview); body != "hi" {
+		t.Errorf("body once the read lands = %q, want the history", body)
+	}
+}
+
+func TestSpaceOnSessionsPageOpensNothingWithoutAHistoryReader(t *testing.T) {
+	m := modelWithSeams(t, []Session{{Name: "alpha"}}, nil)
+
+	updated, cmd := m.Update(keySpaceMsg())
+
 	if cmd != nil {
-		t.Errorf("expected nil cmd on successful preview transition, got %T", cmd)
+		t.Errorf("expected nil cmd, got %T", cmd)
 	}
-	if got := asModel(t, updated); got.activePage != pagePreview {
-		t.Errorf("expected activePage=pagePreview, got %v", got.activePage)
-	}
-	if got := historyCalls(history); len(got) != 1 || got[0] != "alpha" {
-		t.Errorf("History read %v, want once for the highlighted alpha", got)
+	if got := asModel(t, updated); got.activePage != PageSessions {
+		t.Errorf("expected activePage=PageSessions with no history reader, got %v", got.activePage)
 	}
 }
 
@@ -108,17 +148,17 @@ func TestSpaceOnSessionsPageNoOpWhenSelectedItemNil(t *testing.T) {
 	}
 }
 
-func TestSpaceOnSessionsPageRemainsOnSessionsWhenTheSessionIsGone(t *testing.T) {
+func TestSpaceOnSessionsPageSaysWhenTheSessionIsGone(t *testing.T) {
 	sessions := []Session{{Name: "alpha"}}
 	m := modelWithSeams(t, sessions, historyFake(t, "hi"))
 
-	updated, cmd := m.Update(keySpaceMsg())
+	got := openPreviewOn(t, m)
 
-	if cmd != nil {
-		t.Errorf("expected nil cmd, got %T", cmd)
+	if got.activePage != pagePreview {
+		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
 	}
-	if got := asModel(t, updated); got.activePage != PageSessions {
-		t.Errorf("expected activePage=PageSessions for a session the backend no longer holds, got %v", got.activePage)
+	if body := lastBodyRow(got.preview); body != previewSessionGone {
+		t.Errorf("body = %q, want %q", body, previewSessionGone)
 	}
 }
 
@@ -128,13 +168,81 @@ func TestSpaceOnSessionsPageOpensAPreviewOfASessionNotAnswering(t *testing.T) {
 	history.StopAnswering("alpha")
 	m := modelWithSeams(t, sessions, history)
 
-	got := asModel(t, dropCmd(m.Update(keySpaceMsg())))
+	got := openPreviewOn(t, m)
 
 	if got.activePage != pagePreview {
 		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
 	}
-	if body := previewBody(got.preview); body[len(body)-1] != previewNotAnswering {
+	if body := lastBodyRow(got.preview); body != previewNotAnswering {
 		t.Errorf("body = %q, want %q", body, previewNotAnswering)
+	}
+}
+
+func TestSpaceOnASessionListedNotAnsweringSaysSoWithoutDialling(t *testing.T) {
+	sessions := []Session{{Name: "alpha", NotAnswering: true}}
+	history := historyFor(t, "hi", sessions)
+	m := modelWithSeams(t, sessions, history)
+
+	updated, cmd := m.Update(keySpaceMsg())
+
+	got := asModel(t, updated)
+	if got.activePage != pagePreview {
+		t.Fatalf("expected activePage=pagePreview, got %v", got.activePage)
+	}
+	if body := lastBodyRow(got.preview); body != previewNotAnswering {
+		t.Errorf("body = %q, want %q at once", body, previewNotAnswering)
+	}
+	if cmd != nil {
+		t.Errorf("expected no read for a session the listing found not answering, got %T", cmd)
+	}
+	if calls := historyCalls(history); len(calls) != 0 {
+		t.Errorf("History read %v, want none", calls)
+	}
+}
+
+func TestPreviewRead_DroppedOnceTheUserHasSteppedOn(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}, {Name: "bravo"}}
+	history := historyFor(t, "hi", sessions)
+	history.SetHistory("alpha", []byte("alpha's history"))
+	m := modelWithSeams(t, sessions, history)
+	updated, alphaRead := m.Update(keySpaceMsg())
+	m = asModel(t, updated)
+	updated, stepCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = asModel(t, updated)
+	updated, bravoRead := m.Update(drainCmd(t, stepCmd))
+	m = asModel(t, updated)
+
+	m = landRead(t, m, alphaRead)
+
+	if m.preview.session != "bravo" {
+		t.Fatalf("setup: preview on %q, want bravo", m.preview.session)
+	}
+	if body := lastBodyRow(m.preview); body != previewLoading {
+		t.Errorf("bravo's body = %q after alpha's late read, want it still %q", body, previewLoading)
+	}
+
+	m = landRead(t, m, bravoRead)
+
+	if body := lastBodyRow(m.preview); body != "hi" {
+		t.Errorf("bravo's body = %q once its own read lands, want its history", body)
+	}
+}
+
+func TestPreviewRead_DroppedOnceThePreviewHasClosed(t *testing.T) {
+	sessions := []Session{{Name: "alpha"}}
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
+	updated, read := m.Update(keySpaceMsg())
+	m = asModel(t, updated)
+	updated, dismiss := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = asModel(t, dropCmd(asModel(t, updated).Update(drainCmd(t, dismiss))))
+
+	m = landRead(t, m, read)
+
+	if m.activePage != PageSessions {
+		t.Errorf("a late read reopened the preview: page %v", m.activePage)
+	}
+	if m.preview.session != "" {
+		t.Errorf("a late read drew into the closed preview: session %q", m.preview.session)
 	}
 }
 

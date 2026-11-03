@@ -141,16 +141,13 @@ func TestSpaceAfterEnterCommitOpensPreviewOnHighlightedMatch(t *testing.T) {
 		t.Fatalf("expected highlighted match to be %q, got %q", "pigeon-fly", si.Session.Name)
 	}
 
-	updated, _ = got.Update(keySpaceRune())
-	got2, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("expected Model, got %T", updated)
-	}
+	updated, read := got.Update(keySpaceRune())
+	got2 := landRead(t, asModel(t, updated), read)
 	if got2.activePage != pagePreview {
 		t.Errorf("expected activePage=pagePreview after Enter-commit + Space, got %v", got2.activePage)
 	}
 	if len(historyCalls(history)) != 1 {
-		t.Errorf("expected NewPreviewModel called once after Enter-commit + Space, got History reads=%d", len(historyCalls(history)))
+		t.Errorf("expected one History read after Enter-commit + Space, got %d", len(historyCalls(history)))
 	}
 	if historyCalls(history)[0] != "pigeon-fly" {
 		t.Errorf("expected History read for highlighted match %q, got %q", "pigeon-fly", historyCalls(history)[0])

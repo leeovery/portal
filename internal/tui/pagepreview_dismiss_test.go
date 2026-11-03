@@ -150,27 +150,30 @@ func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
 	}
 }
 
-func TestPreviewReopenAfterDismissConstructsFreshPreviewModel(t *testing.T) {
+func TestPreviewReopenAfterDismissReadsTheHistoryAfresh(t *testing.T) {
 	sessions := []Session{
 		{Name: "alpha", Attached: false},
 	}
-	history := historyFor(t, "hi", sessions)
+	history := historyFor(t, "first", sessions)
 	m := modelWithSeams(t, sessions, history)
 
-	afterFirst := pressSpaceThenEsc(t, m)
+	first := openPreviewOn(t, m)
+	updated, dismiss := first.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	afterFirst := asModel(t, dropCmd(asModel(t, updated).Update(drainCmd(t, dismiss))))
 	if n := len(historyCalls(history)); n != 1 {
 		t.Fatalf("expected 1 History read after first open, got %d", n)
 	}
+	history.SetHistory("alpha", []byte("second"))
 
-	updated, _ := afterFirst.Update(keySpaceMsg())
-	got, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("expected Model after second Space, got %T", updated)
-	}
+	got := openPreviewOn(t, afterFirst)
+
 	if got.activePage != pagePreview {
 		t.Errorf("expected pagePreview after second Space, got %v", got.activePage)
 	}
 	if n := len(historyCalls(history)); n != 2 {
 		t.Errorf("expected History reads to bump to 2 after re-open, got %d", n)
+	}
+	if body := lastBodyRow(got.preview); body != "second" {
+		t.Errorf("re-opened body = %q, want the history as it is now", body)
 	}
 }

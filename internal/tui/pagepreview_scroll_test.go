@@ -15,10 +15,7 @@ func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *backe
 		b.WriteString("line\r\n")
 	}
 	reader := historyFake(t, b.String(), "work")
-	m, ok := NewPreviewModel("work", newPreviewHistory(reader), 80, 10)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, "work", reader, 80, 10)
 	return m, reader
 }
 

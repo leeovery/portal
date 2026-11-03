@@ -189,3 +189,100 @@ func TestRenderHistory_ClosesEveryStyledRow(t *testing.T) {
 		}
 	}
 }
+
+// The screens below are written as ghostty's VT formatter writes them, which
+// is how zmx serialises History: rows joined by CR LF, then terminal state.
+
+func TestRenderHistory_DrawsTheAlternateScreensRows(t *testing.T) {
+	// A session in a full-screen program: the mode leads, then that screen's
+	// rows, then the cursor.
+	got := plainRows("\x1b[?1049h\x1b[?25ltop bar\r\n\r\nstatus\x1b[3;7H\x1b[0m")
+
+	if !slices.Equal(got, []string{"top bar", "", "status"}) {
+		t.Errorf("rows = %q, want the alternate screen's rows as drawn", got)
+	}
+}
+
+func TestRenderHistory_DrawsASoftWrappedRowAsTheScreenShowedIt(t *testing.T) {
+	// A line longer than a 10-column screen wraps; the formatter, not
+	// unwrapping, ends the screen row with CR LF like any other.
+	got := plainRows("0123456789\r\nabc\x1b[2;4H")
+
+	if !slices.Equal(got, []string{"0123456789", "abc"}) {
+		t.Errorf("rows = %q, want the wrapped line on the two rows it took", got)
+	}
+}
+
+func TestRenderHistory_DrawsAWideCharacterWrappedAtTheEdge(t *testing.T) {
+	// "1A⚡" on a 3-column screen: ⚡ cannot start in the last column, which is
+	// left a spacer head the formatter skips, and lands on the next row.
+	rows := historyRows("1A\r\n⚡\x1b[2;3H")
+
+	if !slices.Equal(rows, []string{"1A", "⚡"}) {
+		t.Errorf("rows = %q, want 1A then ⚡ alone", rows)
+	}
+	if w := ansi.StringWidth(rows[1]); w != 2 {
+		t.Errorf("⚡ row is %d cells, want 2", w)
+	}
+}
+
+func TestRenderHistory_DrawsNothingOfABlankCellsPendingWrap(t *testing.T) {
+	// A cursor left pending-wrap over a blank last cell is restored by
+	// printing a space, then erasing it under a saved cursor.
+	got := historyRows("full row\r\nnext\x1b[2;10H \x1b7\x1b[X\x1b8\x1b[0m")
+
+	if !slices.Equal(got, []string{"full row", "next"}) {
+		t.Errorf("rows = %q, want the rows alone, with no space drawn past them", got)
+	}
+}
+
+func TestRenderHistory_DrawsNothingOfAScrollRegion(t *testing.T) {
+	// Margins come after the rows, ahead of the cursor's CUP.
+	got := plainRows("one\r\ntwo\r\nthree\x1b[2;3r\x1b[3;6H")
+
+	if !slices.Equal(got, []string{"one", "two", "three"}) {
+		t.Errorf("rows = %q, want the rows unmoved by the margins", got)
+	}
+}
+
+func TestRenderHistory_JoinsACombiningMarkToItsBase(t *testing.T) {
+	// The decoder hands a mark after an ASCII base over on its own, with no
+	// width; it belongs to the cell before it.
+	rows := historyRows("café ok")
+
+	if rows[0] != "café ok" {
+		t.Errorf("row = %q, want café ok with its accent", rows[0])
+	}
+	if w := ansi.StringWidth(rows[0]); w != 7 {
+		t.Errorf("row is %d cells, want 7", w)
+	}
+}
+
+func TestRenderHistory_DrawsAKeycapAtTheWidthItIsMeasuredAt(t *testing.T) {
+	// The variation selector makes 1️⃣ an emoji, two cells wide as the viewport
+	// measures it, so the text after it lands past both.
+	rows := historyRows("1️⃣ x")
+
+	if rows[0] != "1️⃣ x" {
+		t.Errorf("row = %q, want the whole keycap then x", rows[0])
+	}
+	if w := ansi.StringWidth(rows[0]); w != 4 {
+		t.Errorf("keycap row is %d cells, want 4: keycap 2, space, x", w)
+	}
+}
+
+func TestRenderHistory_DropsAMarkWithNothingToJoin(t *testing.T) {
+	if got := plainRows("a\r\ńb"); !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("rows = %q, want a mark that follows no cell on its row dropped", got)
+	}
+}
+
+func TestRenderHistory_BoundsAStepOrEraseCount(t *testing.T) {
+	for _, vt := range []string{"a\x1b[100000Cb", "a\x1b[100000Xb"} {
+		rows := historyRows(vt)
+
+		if w := ansi.StringWidth(rows[0]); w > historyMaxColumns+1 {
+			t.Errorf("renderHistory(%q) drew a row %d cells wide, want at most %d", vt, w, historyMaxColumns+1)
+		}
+	}
+}

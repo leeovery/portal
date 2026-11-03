@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -39,21 +40,36 @@ func renderHistory(vt []byte) string {
 	return s.String()
 }
 
-// historyScreen is the grid renderHistory draws into. It is unbounded both
-// ways: a row is as wide as what was drawn on it, and rows are added as the
-// cursor moves down to draw on them.
+// historyMaxColumns bounds how far a CUF or ECH count can reach: wider than any
+// terminal a session runs in, so a corrupt count costs a row no wider than it.
+const historyMaxColumns = 1024
+
+// historyScreen is the grid renderHistory draws into. A row is as wide as what
+// was drawn on it, and rows are added as the cursor moves down to draw on them.
 type historyScreen struct {
 	rows []uv.Line
 	x, y int
 	pen  uv.Style
+	// glyph is the cell the sequence just applied drew, which a mark with no
+	// width of its own, decoded apart from an ASCII base, joins.
+	glyph struct {
+		x  int
+		ok bool
+	}
 }
 
 // apply draws one decoded sequence, reporting false once the rows are over.
 func (s *historyScreen) apply(seq []byte, width int, p *ansi.Parser) bool {
+	glyph := s.glyph
+	s.glyph.ok = false
 	switch {
 	case width > 0:
 		s.set(s.x, uv.Cell{Content: string(seq), Width: width, Style: s.pen})
+		s.glyph.x, s.glyph.ok = s.x, true
 		s.x += width
+	case glyph.ok && isMark(seq):
+		s.join(glyph.x, string(seq))
+		s.glyph = glyph
 	case string(seq) == "\r":
 		s.x = 0
 	// A bare LF also returns the carriage, as a tty's ONLCR does, so text
@@ -73,10 +89,10 @@ func (s *historyScreen) csi(p *ansi.Parser) bool {
 	case 'm':
 		uv.ReadStyle(p.Params(), &s.pen)
 	case 'C':
-		s.x += csiCount(p)
+		s.x += s.csiCount(p)
 	case 'X':
 		erased := uv.Cell{Content: " ", Width: 1, Style: uv.Style{Bg: s.pen.Bg}}
-		for i := range csiCount(p) {
+		for i := range s.csiCount(p) {
 			s.set(s.x+i, erased)
 		}
 	case 'H', 'f':
@@ -85,10 +101,29 @@ func (s *historyScreen) csi(p *ansi.Parser) bool {
 	return true
 }
 
-// csiCount is a CUF or ECH count, where 0 and absent both mean 1.
-func csiCount(p *ansi.Parser) int {
+// csiCount is a CUF or ECH count, where 0 and absent both mean 1, clamped so
+// it reaches no further right than historyMaxColumns.
+func (s *historyScreen) csiCount(p *ansi.Parser) int {
 	n, _ := p.Param(0, 1)
-	return max(1, n)
+	return max(0, min(max(1, n), historyMaxColumns-s.x))
+}
+
+// isMark reports whether seq is text that draws no cell of its own, such as a
+// combining accent or the variation selector and keycap of 1️⃣. C1 controls
+// sit below U+00A0, and a stray byte decodes as utf8.RuneError.
+func isMark(seq []byte) bool {
+	r, _ := utf8.DecodeRune(seq)
+	return r >= 0xa0 && r != utf8.RuneError
+}
+
+// join adds mark to the cell at x, measuring the cluster afresh as the
+// viewport will measure the row: a variation selector can widen it.
+func (s *historyScreen) join(x int, mark string) {
+	c := *s.rows[s.y].At(x)
+	c.Content += mark
+	c.Width = ansi.StringWidth(c.Content)
+	s.set(x, c)
+	s.x = x + c.Width
 }
 
 func (s *historyScreen) set(x int, c uv.Cell) {

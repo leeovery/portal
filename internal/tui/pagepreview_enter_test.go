@@ -41,10 +41,7 @@ func TestPreviewEnter_OpensWhateverTheBodyShows(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fake := historyFake(t, "x", "work")
 			stage(fake)
-			m, ok := NewPreviewModel("work", newPreviewHistory(fake), 80, 24)
-			if !ok {
-				t.Fatalf("setup: NewPreviewModel ok=false")
-			}
+			m := openedPreview(t, "work", fake, 80, 24)
 
 			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 

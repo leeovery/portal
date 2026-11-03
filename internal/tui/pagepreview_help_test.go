@@ -10,10 +10,7 @@ import (
 
 func newPreviewHelpModel(t *testing.T, th theme.Theme, colourless bool) previewModel {
 	t.Helper()
-	m, ok := NewPreviewModel("work", newPreviewHistory(historyFake(t, "hello scrollback line", "work")), 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, "work", historyFake(t, "hello scrollback line", "work"), 80, 24)
 	m.th = th
 	m.colourless = colourless
 	return m

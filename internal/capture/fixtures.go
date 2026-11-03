@@ -68,7 +68,10 @@ type Fixture struct {
 	// Tapes are scaffolding and do not live in the repository, so the post-load
 	// key script is declared here.
 	captureKeys []tea.KeyPressMsg
-	noColor     bool
+	// landsLastKeyRead runs the last capture key's command and delivers what it
+	// returns, as a running program would: the preview's body arrives that way.
+	landsLastKeyRead bool
+	noColor          bool
 }
 
 // Deps hands the palette to two seams that must agree — the constant nomination
@@ -882,6 +885,8 @@ func previewScreenFixture() *Fixture {
 		initialMode:  prefs.ModeFlat,
 		history:      history,
 		captureKeys:  []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		// Without the read landing, the frame is the preview's loading line.
+		landsLastKeyRead: true,
 	}
 }
 

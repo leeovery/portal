@@ -70,8 +70,12 @@ func (f *Fixture) modelAt(deps tui.Deps, w, h int) tui.Model {
 	if f.fatalEvent.FailedStep > 0 {
 		model, _ = model.Update(f.fatalEvent)
 	}
+	var cmd tea.Cmd
 	for _, key := range f.captureKeys {
-		model, _ = model.Update(key)
+		model, cmd = model.Update(key)
+	}
+	if f.landsLastKeyRead && cmd != nil {
+		model, _ = model.Update(cmd())
 	}
 	return model.(tui.Model)
 }

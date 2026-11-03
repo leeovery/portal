@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/backend"
 )
 
@@ -21,8 +22,10 @@ type HistoryReader interface {
 const previewHistoryCeiling = time.Second
 
 const (
+	previewLoading            = "(reading history…)"
 	previewNotAnswering       = "(session not answering)"
 	previewHistoryUnavailable = "(history unavailable)"
+	previewSessionGone        = "(session gone)"
 )
 
 // previewHistory is where the preview reads its body from.
@@ -35,13 +38,25 @@ func newPreviewHistory(reader HistoryReader) previewHistory {
 	return previewHistory{reader: reader, ceiling: previewHistoryCeiling}
 }
 
-// body is the preview body for session: its whole history, drawn, or a line
-// saying why there is none. ok is false when there is no session to preview,
-// so the caller opens nothing, as it does with no reader at all.
-func (h previewHistory) body(session string) (body string, ok bool) {
-	if h.reader == nil {
-		return "", false
+// previewBodyMsg carries a preview's body back from its read. Gen is the
+// open it was read for, so a body that lands after the user has stepped on
+// or left is dropped rather than drawn over the session now showing.
+type previewBodyMsg struct {
+	gen  uint64
+	body string
+}
+
+// read is the command that reads and draws session's body off the update
+// loop, where a 10,000-line history or a wedged session would hold every key.
+func (h previewHistory) read(session string, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return previewBodyMsg{gen: gen, body: h.body(session)}
 	}
+}
+
+// body is the preview body for session: its whole history, drawn, or a line
+// saying why there is none.
+func (h previewHistory) body(session string) string {
 	ctx, cancel := context.WithTimeoutCause(context.Background(), h.ceiling,
 		fmt.Errorf("preview read got no answer in %s: %w", h.ceiling, backend.ErrTimeout))
 	defer cancel()
@@ -49,12 +64,12 @@ func (h previewHistory) body(session string) (body string, ok bool) {
 	vt, err := h.reader.History(ctx, session, 0)
 	switch {
 	case err == nil:
-		return renderHistory(vt), true
+		return renderHistory(vt)
 	case errors.Is(err, backend.ErrNoSuchSession):
-		return "", false
+		return previewSessionGone
 	case errors.Is(err, backend.ErrTimeout):
-		return previewNotAnswering, true
+		return previewNotAnswering
 	default:
-		return previewHistoryUnavailable, true
+		return previewHistoryUnavailable
 	}
 }

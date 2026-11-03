@@ -11,10 +11,7 @@ import (
 
 func newPeekPreviewModel(t *testing.T, session, vt string, width, height int) previewModel {
 	t.Helper()
-	m, ok := NewPreviewModel(session, newPreviewHistory(historyFake(t, vt, session)), width, height)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, session, historyFake(t, vt, session), width, height)
 	return m
 }
 
@@ -143,10 +140,7 @@ func TestPreviewPeekChrome_NarrowWidthDegradesGracefully(t *testing.T) {
 }
 
 func TestPreviewPeekChrome_ColourlessKeepsStructureDropsHue(t *testing.T) {
-	m, ok := NewPreviewModel("aviva-proxy", newPreviewHistory(historyFake(t, "hello", "aviva-proxy")), 120, 24)
-	if !ok {
-		t.Fatalf("expected ok=true from NewPreviewModel")
-	}
+	m := openedPreview(t, "aviva-proxy", historyFake(t, "hello", "aviva-proxy"), 120, 24)
 	m.colourless = true
 
 	out := m.View()

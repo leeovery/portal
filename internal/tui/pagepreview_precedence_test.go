@@ -15,10 +15,7 @@ func newPreviewModelForPrecedence(t *testing.T) (previewModel, *backendtest.Fake
 		b.WriteString("line\r\n")
 	}
 	reader := historyFake(t, b.String(), "work")
-	m, ok := NewPreviewModel("work", newPreviewHistory(reader), 80, 10)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := openedPreview(t, "work", reader, 80, 10)
 	return m, reader
 }
 
@@ -111,13 +108,42 @@ func TestPreviewPrecedence_NonKeyMsgFallsThroughToViewport(t *testing.T) {
 	}
 }
 
-// Window and pane cycling are gone: ←/→ and Tab are not the preview's own, so
-// they fall through to the viewport, which takes ←/→ as its horizontal scroll.
+// Window and pane cycling are gone: ←/→ and Tab are not the preview's own.
 func TestPreviewPrecedence_ArrowsAndTabAreNotPreviewKeys(t *testing.T) {
 	m, _ := newPreviewModelForPrecedence(t)
 	for _, code := range []rune{tea.KeyLeft, tea.KeyRight, tea.KeyTab} {
 		if handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: code}); handled {
 			t.Errorf("key %d is still preview-owned; window and pane cycling are gone", code)
 		}
+	}
+}
+
+// The body is the session's screen clipped at the panel's width, as a terminal
+// that size would clip it, so nothing pans it sideways: not the viewport's own
+// ←/→/h/l, and not the wheel, sideways or shifted.
+func TestPreviewPrecedence_NothingPansTheBodySideways(t *testing.T) {
+	wide := strings.Repeat("0123456789", 30)
+	inputs := map[string]tea.Msg{
+		"←":                  tea.KeyPressMsg{Code: tea.KeyLeft},
+		"→":                  tea.KeyPressMsg{Code: tea.KeyRight},
+		"h":                  tea.KeyPressMsg{Code: 'h', Text: "h"},
+		"l":                  tea.KeyPressMsg{Code: 'l', Text: "l"},
+		"wheel left":         tea.MouseWheelMsg{Button: tea.MouseWheelLeft},
+		"wheel right":        tea.MouseWheelMsg{Button: tea.MouseWheelRight},
+		"shifted wheel down": tea.MouseWheelMsg{Button: tea.MouseWheelDown, Mod: tea.ModShift},
+		"shifted wheel up":   tea.MouseWheelMsg{Button: tea.MouseWheelUp, Mod: tea.ModShift},
+	}
+	for name, msg := range inputs {
+		t.Run(name, func(t *testing.T) {
+			m := newTestPreview(t, wide, 80, 10)
+			// Off the left edge, so a pan either way would show.
+			m.viewport.SetXOffset(5)
+
+			updated, _ := m.Update(msg)
+
+			if got := updated.viewport.XOffset(); got != 5 {
+				t.Errorf("XOffset = %d after %s, want 5: the body panned sideways", got, name)
+			}
+		})
 	}
 }
