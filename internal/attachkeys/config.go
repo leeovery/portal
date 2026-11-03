@@ -187,59 +187,46 @@ func bindable(text string) (Key, error) {
 	return k, refusal(k)
 }
 
-// claim is one action's hold on a key.
-type claim struct {
-	action Action
-	key    Key
-}
-
-// settleClashes falls back each configured action whose key sends the same
-// bytes as another action's, until no two actions share any. The defaults
+// settleClashes falls back each configured action bound to a key another
+// action is bound to as well, until no two actions share one. The defaults
 // share none, so each round settles at least one action for good.
 func settleClashes(b Bindings, configured map[Action]bool) []Warning {
 	var warnings []Warning
 	for {
-		first, second, ok := findClash(b)
+		k, first, second, ok := findClash(b)
 		if !ok {
 			return warnings
 		}
-		for _, c := range [][2]claim{{first, second}, {second, first}} {
-			mine, theirs := c[0], c[1]
-			if !configured[mine.action] {
+		for _, pair := range [][2]Action{{first, second}, {second, first}} {
+			mine, theirs := pair[0], pair[1]
+			if !configured[mine] {
 				continue
 			}
 			warnings = append(warnings, Warning{
-				Action: mine.action,
-				Value:  strconv.Quote(mine.key.String()),
-				Reason: clashReason(mine.key, theirs),
+				Action: mine,
+				Value:  strconv.Quote(k.String()),
+				Reason: "is also bound to " + nameOf(theirs),
 			})
-			b[mine.action] = []Key{defaultKeys[mine.action]}
-			configured[mine.action] = false
+			b[mine] = []Key{defaultKeys[mine]}
+			configured[mine] = false
 		}
 	}
 }
 
-// findClash finds two actions with keys that send the same bytes without the
-// newer encoding, which can't tell them apart.
-func findClash(b Bindings) (claim, claim, bool) {
-	owners := map[string]claim{}
+// findClash finds a key two actions are bound to. Two bindable keys never
+// send the same bytes, as refusal sees to and a test pins, so a key is the
+// whole of what the matcher tells apart.
+func findClash(b Bindings) (Key, Action, Action, bool) {
+	owners := map[Key]Action{}
 	for _, n := range actionNames {
 		for _, k := range b[n.action] {
-			seq := k.legacy()
-			if owner, ok := owners[seq]; ok && owner.action != n.action {
-				return owner, claim{action: n.action, key: k}, true
+			if owner, ok := owners[k]; ok && owner != n.action {
+				return k, owner, n.action, true
 			}
-			owners[seq] = claim{action: n.action, key: k}
+			owners[k] = n.action
 		}
 	}
-	return claim{}, claim{}, false
-}
-
-func clashReason(mine Key, theirs claim) string {
-	if mine == theirs.key {
-		return "is also bound to " + nameOf(theirs.action)
-	}
-	return fmt.Sprintf("sends the same bytes as %q, bound to %s", theirs.key.String(), nameOf(theirs.action))
+	return Key{}, 0, 0, false
 }
 
 func compactJSON(raw json.RawMessage) string {

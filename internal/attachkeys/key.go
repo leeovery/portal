@@ -47,9 +47,12 @@ func (k Key) String() string {
 			b.WriteString(m.name + "+")
 		}
 	}
-	if k.fn != 0 {
+	switch {
+	case k.fn != 0:
 		b.WriteString("f" + strconv.Itoa(k.fn))
-	} else {
+	case k.char == ' ':
+		b.WriteString("space")
+	default:
 		b.WriteByte(k.char)
 	}
 	return b.String()
@@ -60,10 +63,12 @@ func (k Key) without(m mods) Key {
 	return k
 }
 
-// parseKey reads a key as written, case-insensitively and with surrounding
-// whitespace ignored. Its errors complete a sentence whose subject is the key.
+// parseKey reads a key as written, with surrounding whitespace ignored.
+// Modifiers and function keys are case-insensitive; a letter must be written
+// lowercase, since an uppercase one reads as shift. Its errors complete a
+// sentence whose subject is the key.
 func parseKey(text string) (Key, error) {
-	parts := strings.Split(strings.ToLower(strings.TrimSpace(text)), "+")
+	parts := strings.Split(strings.TrimSpace(text), "+")
 	// "+" is a key as well as the separator, so a trailing "++" names it.
 	if n := len(parts); n >= 2 && parts[n-1] == "" && parts[n-2] == "" {
 		parts = append(parts[:n-2], "+")
@@ -76,7 +81,7 @@ func parseKey(text string) (Key, error) {
 			return Key{}, err
 		}
 		if k.mods&m != 0 {
-			return Key{}, fmt.Errorf("names %s twice", part)
+			return Key{}, fmt.Errorf("names %s twice", strings.ToLower(part))
 		}
 		k.mods |= m
 	}
@@ -91,59 +96,85 @@ func parseKey(text string) (Key, error) {
 
 func modifierOf(part string) (mods, error) {
 	for _, m := range modifierNames {
-		if m.name == part {
+		if m.name == strings.ToLower(part) {
 			return m.mod, nil
 		}
 	}
 	return 0, fmt.Errorf("has an unknown modifier %q", part)
 }
 
-func (k *Key) setKey(text string) error {
-	if text == "" {
+func (k *Key) setKey(name string) error {
+	switch {
+	case name == "":
 		return errors.New("has no key")
-	}
-	if len(text) == 1 && text[0] > ' ' && text[0] < 0x7f {
-		k.char = text[0]
+	case len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z':
+		shifted := Key{mods: k.mods | modShift, char: name[0] - 'A' + 'a'}
+		return fmt.Errorf("writes its letter uppercase; write %q for the shifted key", shifted.String())
+	case len(name) == 1 && name[0] > ' ' && name[0] < 0x7f:
+		k.char = name[0]
 		return nil
 	}
 	for n := 1; n < len(fnCodes); n++ {
-		if text == "f"+strconv.Itoa(n) {
+		if strings.EqualFold(name, "f"+strconv.Itoa(n)) {
 			k.fn = n
 			return nil
 		}
 	}
-	return fmt.Errorf("has an unknown key %q", text)
+	return fmt.Errorf("has an unknown key %q", name)
 }
 
 func isLetter(c byte) bool {
 	return c >= 'a' && c <= 'z'
 }
 
+// ctrlGroups are kitty's table of the C0 byte a terminal sends for ctrl and a
+// key other than a letter, without the newer encoding; Ghostty follows it.
+// The keys in a group send the same byte, so each is the others' alias.
+var ctrlGroups = []struct {
+	c0   byte
+	keys string
+}{
+	{0x00, " 2@"},
+	{esc, "3["},
+	{0x1c, "4\\"},
+	{0x1d, "5]"},
+	{0x1e, "6^~"},
+	{0x1f, "7/_"},
+	{0x7f, "8?"},
+}
+
 // ctrlByte is the C0 byte a terminal sends for ctrl and c without the newer
-// encoding: kitty's table, which Ghostty follows, less the marks a US layout
-// types with shift, which no binding names. A key it has no byte for loses
-// its ctrl.
+// encoding. A key it has no byte for loses its ctrl.
 func ctrlByte(c byte) (byte, bool) {
 	if isLetter(c) {
 		return c - 'a' + 1, true
 	}
-	switch c {
-	case '2':
-		return 0x00, true
-	case '3', '[':
-		return esc, true
-	case '4', '\\':
-		return 0x1c, true
-	case '5', ']':
-		return 0x1d, true
-	case '6':
-		return 0x1e, true
-	case '7', '/':
-		return 0x1f, true
-	case '8':
-		return 0x7f, true
+	for _, g := range ctrlGroups {
+		if strings.IndexByte(g.keys, c) >= 0 {
+			return g.c0, true
+		}
 	}
 	return 0, false
+}
+
+// ctrlAliases are the other keys whose ctrl sends k's byte, with k's
+// modifiers; none unless k holds ctrl on a key other than a letter.
+func ctrlAliases(k Key) []Key {
+	if k.mods&modCtrl == 0 {
+		return nil
+	}
+	var aliases []Key
+	for _, g := range ctrlGroups {
+		if strings.IndexByte(g.keys, k.char) < 0 {
+			continue
+		}
+		for i := range len(g.keys) {
+			if g.keys[i] != k.char {
+				aliases = append(aliases, Key{mods: k.mods, char: g.keys[i]})
+			}
+		}
+	}
+	return aliases
 }
 
 // fnCodes is each function key's number and final byte in its CSI form, which

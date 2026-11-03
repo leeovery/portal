@@ -41,15 +41,22 @@ func TestDoctorKeyConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("it says so when prefs.json is not valid JSON", func(t *testing.T) {
-		for _, content := range []string{`{"keys":{"detach":"alt+d"`, `[]`} {
-			line, summary := doctorKeyConfigReport(t, content)
-			want := "  " + checkMarker(checkInfo) + " key config: prefs.json is not valid JSON; keys keep their defaults"
+	t.Run("it says so when prefs.json does not decode, and how", func(t *testing.T) {
+		const notJSON, notObject = "not valid JSON", "not a JSON object"
+		for _, tc := range []struct{ content, problem string }{
+			{`{"keys":{"detach":"alt+d"`, notJSON},
+			{`not json`, notJSON},
+			{`[]`, notObject},
+			{`5`, notObject},
+			{`"x"`, notObject},
+		} {
+			line, summary := doctorKeyConfigReport(t, tc.content)
+			want := "  " + checkMarker(checkInfo) + " key config: prefs.json is " + tc.problem + "; keys keep their defaults"
 			if line != want {
-				t.Errorf("prefs.json %q: key-config line = %q; want %q", content, line, want)
+				t.Errorf("prefs.json %q: key-config line = %q; want %q", tc.content, line, want)
 			}
 			if want := "  6 checks passed"; summary != want {
-				t.Errorf("prefs.json %q: summary = %q; want %q", content, summary, want)
+				t.Errorf("prefs.json %q: summary = %q; want %q", tc.content, summary, want)
 			}
 		}
 	})

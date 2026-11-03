@@ -2,7 +2,9 @@ package attachkeys_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/leeovery/portal/internal/attachkeys"
 )
@@ -72,7 +74,7 @@ var richKeyForms = []struct {
 	action attachkeys.Action
 }{
 	{"\x0f", attachkeys.Detach},
-	{"\x1d", attachkeys.Kill},
+	{"\x0b", attachkeys.Kill},
 	{"\x1b[100;3u", attachkeys.Detach},
 	{"\x1b[100;67:1u", attachkeys.Detach},
 	{"\x1b[100;4u", attachkeys.DetachToShell},
@@ -104,6 +106,117 @@ func FuzzScan_FindsAKeyAfterText(f *testing.F) {
 		forward, action, found := attachkeys.NewMatcher(bindings).Scan(read)
 		if !found || action != key.action || !bytes.Equal(forward, text) {
 			t.Fatalf("Scan(%q) = (%q, %d, %v); want (%q, %d, true)", read, forward, action, found, text, key.action)
+		}
+	})
+}
+
+// terminalReplies are what a terminal writes to its input other than keys:
+// replies to queries, and the reports it sends unasked.
+var terminalReplies = []string{
+	"\x1b[12;40R", "\x1b[1;3R", "\x1b[1;5R", // cursor position, f3's bytes with modifiers
+	"\x1b[?12;40;1R",                      // DECXCPR
+	"\x1b[0n",                             // device status
+	"\x1b[?62;22;52c", "\x1b[>1;4000;15c", // DA1, DA2
+	"\x1b[?2004;1$y", "\x1b[2026;2$y", // DECRPM, private and ANSI
+	"\x1b[?31u",                    // kitty keyboard flags
+	"\x1b[?997;1n", "\x1b[?997;2n", // colour scheme
+	"\x1b[I", "\x1b[O", // focus in and out
+	"\x1b[<0;10;20M", "\x1b[<0;10;20m", "\x1b[<64;1;1M", // SGR mouse
+	"\x1b[32;10;20M",                                     // urxvt mouse
+	"\x1b[M !!", "\x1b[M\x7f\x7f\x7f", "\x1b[M#\xff\xa0", // X10 mouse
+	"\x1b[8;24;80t", "\x1b[4;600;800t", // window size
+	"\x1b]11;rgb:1a1a/1b1b/2626\x07", "\x1b]11;rgb:1a1a/1b1b/2626\x1b\\", // OSC 11
+	"\x1b]10;rgb:ffff/ffff/ffff\x1b\\", "\x1b]4;1;rgb:cdcd/0000/0000\x07", // OSC 10, OSC 4
+	"\x1b]52;c;aGVsbG8gd29ybGQ=\x07",                    // OSC 52
+	"\x1bP>|kitty(0.40.1)\x1b\\", "\x1bP>|tmux 3.5\x07", // XTVERSION
+	"\x1bP1$r0;1m\x1b\\", "\x1bP0$r\x1b\\", // DECRQSS
+	"\x1bP1+r544e=787465726d2d6b69747479\x1b\\",                  // XTGETTCAP
+	"\x1b_Gi=31;OK\x1b\\", "\x1b_Gi=31;ENOENT:no such image\x07", // kitty graphics
+}
+
+// withText, set in a pick, puts the text after the reply it picks.
+const withText = 0x80
+
+// splice joins the picked replies, each pick naming one and whether the text
+// follows it.
+func splice(picks, text []byte) []byte {
+	var stream []byte
+	for _, p := range picks {
+		stream = append(stream, terminalReplies[int(p&^withText)%len(terminalReplies)]...)
+		if p&withText != 0 {
+			stream = append(stream, text...)
+		}
+	}
+	return stream
+}
+
+// cutInto cuts stream into reads, each one byte longer than its cut, and the
+// rest into one last read.
+func cutInto(stream, cuts []byte) [][]byte {
+	var reads [][]byte
+	for _, c := range cuts {
+		if len(stream) == 0 {
+			break
+		}
+		n := min(int(c)+1, len(stream))
+		reads, stream = append(reads, stream[:n]), stream[n:]
+	}
+	if len(stream) > 0 {
+		reads = append(reads, stream)
+	}
+	return reads
+}
+
+func printable(s string) []byte {
+	return []byte(strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return -1
+		}
+		return r
+	}, s))
+}
+
+// FuzzScan_RepliesFindNothing splices terminal replies with typed text and
+// cuts the stream into reads where the fuzzer chooses. No reply is a key,
+// whole or in pieces, so under every binding at once each read is forwarded
+// whole and nothing is found.
+func FuzzScan_RepliesFindNothing(f *testing.F) {
+	// The seeds pick every reply, with and without text after it, and read
+	// them all at once, a reply to a read, and in reads of one to four bytes
+	// at every offset.
+	const seedText = "hé ✓ d"
+	typed := printable(seedText)
+	picks := make([]byte, len(terminalReplies))
+	var byReply []byte
+	for i, reply := range terminalReplies {
+		picks[i] = byte(i)
+		byReply = append(byReply, byte(len(reply)-1))
+		if i%2 == 1 {
+			picks[i] |= withText
+			byReply = append(byReply, byte(len(typed)-1))
+		}
+	}
+	f.Add(seedText, picks, []byte{})
+	f.Add(seedText, picks, byReply)
+	stream := splice(picks, typed)
+	for width := 1; width <= 4; width++ {
+		for offset := range width {
+			var cuts []byte
+			if offset > 0 {
+				cuts = append(cuts, byte(offset-1))
+			}
+			f.Add(seedText, picks, append(cuts, bytes.Repeat([]byte{byte(width - 1)}, len(stream)/width+1)...))
+		}
+	}
+	bindings := everyKey(f)
+
+	f.Fuzz(func(t *testing.T, text string, picks, cuts []byte) {
+		m := attachkeys.NewMatcher(bindings)
+		for _, read := range cutInto(splice(picks, printable(text)), cuts) {
+			forward, action, found := m.Scan(read)
+			if found || action != 0 || !bytes.Equal(forward, read) {
+				t.Fatalf("Scan(%q) = (%q, %d, %v); want the whole read forwarded, nothing found", read, forward, action, found)
+			}
 		}
 	})
 }

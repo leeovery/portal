@@ -369,6 +369,8 @@ func checkKeyConfig(store *prefs.Store) checkResult {
 	switch {
 	case errors.Is(err, prefs.ErrInvalidJSON):
 		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not valid JSON; keys keep their defaults"}
+	case errors.Is(err, prefs.ErrNotObject):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not a JSON object; keys keep their defaults"}
 	case err != nil:
 		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
 	}

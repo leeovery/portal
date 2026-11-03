@@ -26,7 +26,6 @@ var introducers = map[byte]struct {
 // otherKeyBytes are the control bytes keys no binding names send. A binding
 // sending one would fire on that key.
 var otherKeyBytes = map[byte]string{
-	0x00: "ctrl+space",
 	'\t': "tab",
 	'\n': "linefeed",
 	'\r': "enter",
@@ -114,6 +113,13 @@ func legacyRefusal(k Key) error {
 			name = "alt+" + name
 		}
 		return sameBytesAs(name)
+	}
+	if aliases := ctrlAliases(k); len(aliases) > 0 {
+		names := make([]string, 0, len(aliases))
+		for _, a := range aliases {
+			names = append(names, strconv.Quote(a.String()))
+		}
+		return sameBytesAs(strings.Join(names, " and "))
 	}
 	if intro, ok := introducers[last]; ok {
 		return fmt.Errorf("is the start of %s", intro.name)

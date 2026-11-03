@@ -100,9 +100,14 @@ type prefsFile struct {
 	Keys json.RawMessage `json:"keys,omitempty"`
 }
 
-// ErrInvalidJSON is wrapped by a strict read of a prefs.json that does not
-// decode.
-var ErrInvalidJSON = errors.New("not valid JSON")
+// A strict read of a prefs.json that does not decode wraps one of these
+// beside the decoder's own error.
+var (
+	// ErrInvalidJSON is a prefs.json that is not JSON at all.
+	ErrInvalidJSON = errors.New("not valid JSON")
+	// ErrNotObject is a prefs.json that is JSON, but not an object.
+	ErrNotObject = errors.New("not a JSON object")
+)
 
 // ThemeKeys carries the raw theme slugs from prefs.json verbatim — validation,
 // defaulting and the theme-wins tiebreak belong to the resolver.
@@ -180,12 +185,15 @@ func (s *Store) readFileStrict() (prefsFile, bool, error) {
 	var f prefsFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && typeErr.Field != "" {
+		if !errors.As(err, &typeErr) {
+			// Named, not bare: this aborts a commit, and the raw decode error
+			// tells the user nothing about which file to open.
+			return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrInvalidJSON, err)
+		}
+		if typeErr.Field != "" {
 			return f, true, nil
 		}
-		// Named, not bare: this aborts a commit, and the raw decode error tells
-		// the user nothing about which file to open.
-		return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrInvalidJSON, err)
+		return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrNotObject, err)
 	}
 
 	return f, true, nil
@@ -232,8 +240,8 @@ func (s *Store) LoadResumeMode() (resumemode.Mode, error) {
 // LoadKeys reads the attach runner's keys object verbatim; nil when prefs.json
 // sets none. Unlike the other loads it reads strictly, so its caller can say
 // why the keys keep their defaults: a prefs.json that does not decode is an
-// error wrapping ErrInvalidJSON. It writes nothing, so it is safe on doctor's
-// read-only path.
+// error wrapping ErrInvalidJSON or ErrNotObject. It writes nothing, so it is
+// safe on doctor's read-only path.
 func (s *Store) LoadKeys() (json.RawMessage, error) {
 	f, _, err := s.readFileStrict()
 	if err != nil {

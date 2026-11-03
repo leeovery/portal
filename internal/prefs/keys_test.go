@@ -44,25 +44,31 @@ func TestLoadKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports a prefs.json that does not decode", func(t *testing.T) {
-		for name, content := range map[string]string{
-			"corrupt file":    `{"keys":{"detach":"alt+x"}`,
-			"top-level array": `[]`,
+	t.Run("it reports a prefs.json that does not decode, saying how", func(t *testing.T) {
+		for _, tc := range []struct {
+			content string
+			want    error
+		}{
+			{`{"keys":{"detach":"alt+x"}`, prefs.ErrInvalidJSON},
+			{`not json`, prefs.ErrInvalidJSON},
+			{`[]`, prefs.ErrNotObject},
+			{`5`, prefs.ErrNotObject},
+			{`"x"`, prefs.ErrNotObject},
 		} {
-			got, err := prefs.NewStore(writePrefsFile(t, content)).LoadKeys()
-			if !errors.Is(err, prefs.ErrInvalidJSON) || got != nil {
-				t.Errorf("%s: LoadKeys = (%s, %v); want (nil, an error wrapping ErrInvalidJSON)", name, got, err)
+			got, err := prefs.NewStore(writePrefsFile(t, tc.content)).LoadKeys()
+			if !errors.Is(err, tc.want) || got != nil {
+				t.Errorf("%s: LoadKeys = (%s, %v); want (nil, an error wrapping %q)", tc.content, got, err, tc.want)
 			}
 		}
 	})
 
-	t.Run("it returns a read error, which is not ErrInvalidJSON", func(t *testing.T) {
+	t.Run("it returns a read error, which is neither", func(t *testing.T) {
 		path := writePrefsFile(t, `{"keys":{}}`)
 		if err := themetest.DenyRead(t, path); err == nil {
 			t.Skip("prefs.json stayed readable at mode 0000 (running as root?)")
 		}
 		_, err := prefs.NewStore(path).LoadKeys()
-		if err == nil || errors.Is(err, prefs.ErrInvalidJSON) {
+		if err == nil || errors.Is(err, prefs.ErrInvalidJSON) || errors.Is(err, prefs.ErrNotObject) {
 			t.Errorf("LoadKeys error = %v; want the read error", err)
 		}
 	})

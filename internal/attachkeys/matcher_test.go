@@ -11,7 +11,7 @@ import (
 const richKeys = `{
 	"detach": ["alt+d", "ctrl+o", "ctrl+alt+x", "alt+f1", "ctrl+f5", "ctrl+shift+f12", "alt+/"],
 	"detach_to_shell": "alt+shift+d",
-	"kill": ["alt+q", "ctrl+]"]
+	"kill": ["alt+q", "ctrl+k"]
 }`
 
 func bindingsFor(t testing.TB, raw string) attachkeys.Bindings {
@@ -77,13 +77,49 @@ type readsCase struct {
 	want  []scanned
 }
 
-func runReadsCases(t *testing.T, cases []readsCase) {
+func runReadsCases(t *testing.T, b attachkeys.Bindings, cases []readsCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assertScans(t, attachkeys.NewMatcher(bindingsFor(t, richKeys)), tc.reads, tc.want)
+			assertScans(t, attachkeys.NewMatcher(b), tc.reads, tc.want)
 		})
 	}
+}
+
+func keysJSON(t testing.TB, entries map[string]any) string {
+	t.Helper()
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatalf("json.Marshal(%v): %v", entries, err)
+	}
+	return string(raw)
+}
+
+// everyKey binds every key Parse accepts, all to detach. Binding more keys
+// never finds less, so a read that finds nothing here finds nothing under any
+// bindings.
+func everyKey(t testing.TB) attachkeys.Bindings {
+	t.Helper()
+	off := []string{}
+	var keys []string
+	for _, text := range attachkeys.WrittenKeys() {
+		raw := keysJSON(t, map[string]any{"detach": off, "detach_to_shell": off, "kill": text})
+		if _, warnings := attachkeys.Parse(json.RawMessage(raw)); len(warnings) == 0 {
+			keys = append(keys, text)
+		}
+	}
+	b := bindingsFor(t, keysJSON(t, map[string]any{"detach": keys, "detach_to_shell": off, "kill": off}))
+
+	bound := map[string]bool{}
+	for _, k := range b[detach] {
+		bound[k.String()] = true
+	}
+	for _, k := range []string{"alt+d", "alt+shift+d", "alt+q", "ctrl+o", "ctrl+alt+x", "alt+f1", "ctrl+shift+f12"} {
+		if !bound[k] {
+			t.Fatalf("everyKey binds %d keys, but not %s", len(bound), k)
+		}
+	}
+	return b
 }
 
 const (
@@ -103,8 +139,14 @@ func TestScan_EachBindingInEachEncoding(t *testing.T) {
 		{"alt+d CSI-u caps lock", "\x1b[100;67u", found(detach)},
 		{"alt+d CSI-u num lock", "\x1b[100;131u", found(detach)},
 		{"alt+d CSI-u both locks and event", "\x1b[100;195:1u", found(detach)},
+		{"alt+d on a Cyrillic layout, by its base-layout key", "\x1b[1074::100;3u", found(detach)},
+		{"alt+d on a Cyrillic layout, with an event", "\x1b[1074::100;3:1u", found(detach)},
+		{"a Cyrillic key without its base-layout key", "\x1b[1074;3u", passes("\x1b[1074;3u")},
+		{"an AZERTY a, in a US q's place, is not alt+q", "\x1b[97::113;3u", passes("\x1b[97::113;3u")},
 		{"alt+d modifyOtherKeys", "\x1b[27;3;100~", found(detach)},
-		{"alt+d modifyOtherKeys caps lock", "\x1b[27;67;100~", found(detach)},
+		// xterm's modifier field carries no lock bits: caps lock shows as the
+		// uppercase code, beside no shift bit.
+		{"alt+d modifyOtherKeys caps lock", "\x1b[27;3;68~", found(detach)},
 
 		{"ctrl+o legacy", "\x0f", found(detach)},
 		{"ctrl+o CSI-u", "\x1b[111;5u", found(detach)},
@@ -125,8 +167,8 @@ func TestScan_EachBindingInEachEncoding(t *testing.T) {
 
 		{"alt+q legacy, a read of its own", "\x1bq", found(kill)},
 		{"alt+q CSI-u", "\x1b[113;3u", found(kill)},
-		{"ctrl+] legacy", "\x1d", found(kill)},
-		{"ctrl+] CSI-u", "\x1b[93;5u", found(kill)},
+		{"ctrl+k legacy", "\x0b", found(kill)},
+		{"ctrl+k CSI-u", "\x1b[107;5u", found(kill)},
 
 		{"alt+/ legacy, a read of its own", "\x1b/", found(detach)},
 		{"alt+/ CSI-u", "\x1b[47;3u", found(detach)},
@@ -156,7 +198,7 @@ func TestScan_ModifiersMatchExactly(t *testing.T) {
 	runScanCases(t, richKeys, []scanCase{
 		{"ctrl+alt+d is not alt+d", "\x1b[100;7u", passes("\x1b[100;7u")},
 		{"super+alt+d is not alt+d", "\x1b[100;11u", passes("\x1b[100;11u")},
-		{"an uppercase code without shift is not the letter", "\x1b[68;3u", passes("\x1b[68;3u")},
+		{"an uppercase code without shift is the letter under caps lock", "\x1b[68;3u", found(detach)},
 		{"an unbound alt key", "\x1b[97;3u", passes("\x1b[97;3u")},
 		{"an unbound alt key, legacy", "\x1ba", passes("\x1ba")},
 		{"an unknown event type", "\x1b[100;3:4u", passes("\x1b[100;3:4u")},
@@ -254,26 +296,26 @@ func TestScan_NothingInsideABracketedPaste(t *testing.T) {
 }
 
 func TestScan_APasteSpansReads(t *testing.T) {
-	runReadsCases(t, []readsCase{
+	runReadsCases(t, bindingsFor(t, richKeys), []readsCase{
 		{
 			"a paste over several reads",
 			[]string{"\x1b[200~abc", "\x1bd", "def\x1b[201~", "\x1bd"},
 			[]scanned{passes("\x1b[200~abc"), passes("\x1bd"), passes("def\x1b[201~"), found(detach)},
 		},
 		{
-			"both markers split across reads",
-			[]string{"\x1b[20", "0~\x0f", "x\x1b[2", "01~\x0f"},
-			[]scanned{passes("\x1b[20"), passes("0~\x0f"), passes("x\x1b[2"), {forward: "01~", action: detach}},
+			"an end marker split across reads",
+			[]string{"\x1b[200~x\x1b[2", "01~\x0f"},
+			[]scanned{passes("\x1b[200~x\x1b[2"), {forward: "01~", action: detach}},
 		},
 		{
-			"a start marker over three reads",
-			[]string{"\x1b", "[2", "00~\x0f", "\x1b[201~", "\x0f"},
-			[]scanned{passes("\x1b"), passes("[2"), passes("00~\x0f"), passes("\x1b[201~"), found(detach)},
+			"a start marker split across reads opens no paste",
+			[]string{"\x1b[20", "0~\x0f"},
+			[]scanned{passes("\x1b[20"), {forward: "0~", action: detach}},
 		},
 		{
-			"a start marker begun and not finished",
-			[]string{"\x1b[20", "x\x0f"},
-			[]scanned{passes("\x1b[20"), {forward: "x", action: detach}},
+			"a start marker typed a key at a time opens no paste",
+			[]string{"\x1b", "[", "2", "0", "0", "~", "\x0f"},
+			[]scanned{passes("\x1b"), passes("["), passes("2"), passes("0"), passes("0"), passes("~"), found(detach)},
 		},
 		{
 			"the input a match drops is never read, so opens no paste",
@@ -285,7 +327,7 @@ func TestScan_APasteSpansReads(t *testing.T) {
 
 // Each read is parsed afresh: whatever one leaves open never reaches the next.
 func TestScan_NoStateCrossesReads(t *testing.T) {
-	runReadsCases(t, []readsCase{
+	runReadsCases(t, bindingsFor(t, richKeys), []readsCase{
 		{"an ESC ending a read, then a ctrl key", []string{"abc\x1b", "\x0f"}, []scanned{passes("abc\x1b"), found(detach)}},
 		{"an ESC ending a read, then a lone alt key", []string{"\x1b", "\x1bd"}, []scanned{passes("\x1b"), found(detach)}},
 		{"a stray APC opener", []string{"\x1b_", "\x0f"}, []scanned{passes("\x1b_"), found(detach)}},
@@ -298,7 +340,7 @@ func TestScan_NoStateCrossesReads(t *testing.T) {
 }
 
 func TestScan_SplitKeysAreMissed(t *testing.T) {
-	runReadsCases(t, []readsCase{
+	runReadsCases(t, bindingsFor(t, richKeys), []readsCase{
 		{"a legacy key", []string{"\x1b", "d"}, []scanned{passes("\x1b"), passes("d")}},
 		{"a CSI-u key", []string{"\x1b[100;", "3u"}, []scanned{passes("\x1b[100;"), passes("3u")}},
 		{"a release is not swallowed", []string{"\x1b[100;3:", "3u"}, []scanned{passes("\x1b[100;3:"), passes("3u")}},
@@ -308,7 +350,7 @@ func TestScan_SplitKeysAreMissed(t *testing.T) {
 // A read can begin with the tail of a terminal's reply to a query. It is read
 // as typing, so nothing it could hold is bindable.
 func TestScan_SplitReplyTailsFindNothing(t *testing.T) {
-	runReadsCases(t, []readsCase{
+	runReadsCases(t, everyKey(t), []readsCase{
 		{"an OSC reply ended by BEL", []string{"\x1b]11;rgb:00", "00/0000/0000\x07"}, []scanned{passes("\x1b]11;rgb:00"), passes("00/0000/0000\x07")}},
 		{"an OSC reply ended by ST", []string{"\x1b]11;rgb:00", "00/0000/0000\x1b\\"}, []scanned{passes("\x1b]11;rgb:00"), passes("00/0000/0000\x1b\\")}},
 		{"an ST read on its own", []string{"\x1b]11;rgb:0/0/0", "\x1b\\"}, []scanned{passes("\x1b]11;rgb:0/0/0"), passes("\x1b\\")}},
@@ -317,6 +359,8 @@ func TestScan_SplitReplyTailsFindNothing(t *testing.T) {
 		{"an APC reply", []string{"\x1b_Gi=1", ";OK\x1b\\"}, []scanned{passes("\x1b_Gi=1"), passes(";OK\x1b\\")}},
 		{"a cursor position report", []string{"\x1b[1;", "3R"}, []scanned{passes("\x1b[1;"), passes("3R")}},
 		{"a reply's head read on its own", []string{"\x1b]", "11;rgb:0/0/0\x07"}, []scanned{passes("\x1b]"), passes("11;rgb:0/0/0\x07")}},
+		{"an X10 mouse report's coordinates", []string{"\x1b[M", "\x7f\x7f\x7f"}, []scanned{passes("\x1b[M"), passes("\x7f\x7f\x7f")}},
+		{"a DCS reply's ST", []string{"\x1bP1$r0;1m", "\x1b\\"}, []scanned{passes("\x1bP1$r0;1m"), passes("\x1b\\")}},
 	})
 }
 

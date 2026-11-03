@@ -68,11 +68,12 @@ func modifyOtherKey(modsText, codeText string) (csiEvent, bool) {
 	return csiEvent{key: canonical(csiKey{number: code, final: 'u', mods: m}), event: event}, true
 }
 
-// canonical names a shifted letter by the letter. Kitty sends its lowercase
-// code; modifyOtherKeys, fixterms and iTerm2's CSI u mode send the uppercase
-// one beside the shift bit.
+// canonical names a letter by its lowercase code, as kitty sends it.
+// modifyOtherKeys, fixterms and iTerm2's CSI u mode send the character typed:
+// uppercase beside the shift bit, or with caps lock on, which they carry no
+// bit for.
 func canonical(k csiKey) csiKey {
-	if k.final == 'u' && k.mods&modShift != 0 && k.number >= 'A' && k.number <= 'Z' {
+	if k.final == 'u' && k.number >= 'A' && k.number <= 'Z' {
 		k.number += 'a' - 'A'
 	}
 	return k
@@ -90,10 +91,13 @@ func maxFields(final byte) int {
 	return 0
 }
 
-// keyField reads the key code. Only the CSI-u form carries alternates beside
-// it, which are checked and set aside: the code alone names the key.
-func keyField(text string, final byte) (int, bool) {
-	codes := strings.Split(text, ":")
+// keyField reads the number that names the key. Only the CSI-u form carries
+// alternates beside its code: the shifted key, set aside, and the key's place
+// on a US layout. That names the key when the code is not ASCII, as on a
+// Cyrillic layout, which kitty sends it for. On a Latin layout the code
+// stays: an AZERTY a, in a US q's place, is not alt+q.
+func keyField(field string, final byte) (int, bool) {
+	codes := strings.Split(field, ":")
 	if len(codes) > 3 || len(codes) > 1 && final != 'u' {
 		return 0, false
 	}
@@ -101,14 +105,20 @@ func keyField(text string, final byte) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	for i, alternate := range codes[1:] {
-		// The shifted key may be empty when only the base-layout key follows.
-		if alternate == "" && i == 0 && len(codes) == 3 {
-			continue
-		}
-		if _, ok := decimal(alternate); !ok {
+	if len(codes) > 1 && codes[1] != "" {
+		if _, ok := decimal(codes[1]); !ok {
 			return 0, false
 		}
+	}
+	if len(codes) < 3 {
+		return number, true
+	}
+	base, ok := decimal(codes[2])
+	if !ok {
+		return 0, false
+	}
+	if number > 0x7f {
+		number = base
 	}
 	return number, true
 }

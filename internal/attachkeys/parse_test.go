@@ -59,7 +59,7 @@ func TestParse_Shape(t *testing.T) {
 		{"a value may be one key", `{"detach":"ctrl+o"}`, "detach ctrl+o; detach_to_shell alt+shift+d; kill alt+q"},
 		{"a value may be a list of keys", `{"detach":["alt+x","ctrl+o","alt+f5"]}`, "detach alt+x, ctrl+o, alt+f5; detach_to_shell alt+shift+d; kill alt+q"},
 		{"an empty list turns the action off", `{"kill":[]}`, "detach alt+d; detach_to_shell alt+shift+d; kill off"},
-		{"a key repeated in one list counts once", `{"detach":["alt+x","ALT+X"]}`, "detach alt+x; detach_to_shell alt+shift+d; kill alt+q"},
+		{"a key repeated in one list counts once", `{"detach":["alt+x","ALT+x"]}`, "detach alt+x; detach_to_shell alt+shift+d; kill alt+q"},
 		{"rebinding a default to its own action is no clash", `{"detach":"alt+d","kill":"alt+x"}`, "detach alt+d; detach_to_shell alt+shift+d; kill alt+x"},
 		{"two actions may swap their defaults", `{"detach":"alt+q","kill":"alt+d"}`, "detach alt+q; detach_to_shell alt+shift+d; kill alt+d"},
 		{"an off action leaves its default free", `{"kill":[],"detach":"alt+q"}`, "detach alt+q; detach_to_shell alt+shift+d; kill off"},
@@ -85,8 +85,7 @@ func TestParse_KeyGrammar(t *testing.T) {
 		{"ctrl, alt and a letter", "ctrl+alt+o", "ctrl+alt+o"},
 		{"alt, shift and a letter", "alt+shift+k", "alt+shift+k"},
 		{"modifiers in any order", "shift+alt+k", "alt+shift+k"},
-		{"case-insensitive modifiers and key", "CTRL+Alt+O", "ctrl+alt+o"},
-		{"an uppercase letter is the letter, not shift", "alt+K", "alt+k"},
+		{"case-insensitive modifiers", "CTRL+Alt+o", "ctrl+alt+o"},
 		{"a digit", "alt+1", "alt+1"},
 		{"a punctuation mark", "alt+,", "alt+,"},
 		{"a backtick", "alt+`", "alt+`"},
@@ -96,15 +95,11 @@ func TestParse_KeyGrammar(t *testing.T) {
 		{"an apostrophe", "alt+'", "alt+'"},
 		{"a full stop", "alt+.", "alt+."},
 		{"a slash", "alt+/", "alt+/"},
-		{"ctrl and a punctuation mark with a C0 byte", "ctrl+]", "ctrl+]"},
-		{"ctrl and a slash, a C0 byte", "ctrl+/", "ctrl+/"},
-		{"ctrl and a digit with a C0 byte", "ctrl+5", "ctrl+5"},
 		{"a function key", "ctrl+f1", "ctrl+f1"},
-		{"the last function key", "alt+F12", "alt+f12"},
+		{"the last function key, case-insensitive", "alt+F12", "alt+f12"},
 		{"shift on a function key", "ctrl+shift+f5", "ctrl+shift+f5"},
 		{"alt, shift and N, which no terminal sends as SS2", "alt+shift+n", "alt+shift+n"},
 		{"lowercase o, p and x, which begin nothing", "alt+o", "alt+o"},
-		{"ctrl, alt and backslash, which is not zmx's", "ctrl+alt+\\", "ctrl+alt+\\"},
 		{"ctrl, alt and g, which ends no reply", "ctrl+alt+g", "ctrl+alt+g"},
 		{"surrounding whitespace is trimmed", " alt+x\t", "alt+x"},
 	}
@@ -194,8 +189,19 @@ func TestParse_RefusedKeysFallBack(t *testing.T) {
 		{"alt+ctrl+m is alt+enter", "ctrl+alt+m", "sends the same bytes as alt+enter"},
 		{"alt+ctrl+h is alt+backspace", "ctrl+alt+h", "sends the same bytes as alt+backspace"},
 		{"alt+ctrl+[ is alt+escape", "ctrl+alt+[", "sends the same bytes as alt+escape"},
-		{"ctrl+2 is NUL, ctrl+space", "ctrl+2", "sends the same bytes as ctrl+space"},
-		{"alt+ctrl+2 is alt+ctrl+space", "ctrl+alt+2", "sends the same bytes as alt+ctrl+space"},
+		{"ctrl+2 is NUL, as ctrl+space and ctrl+@ are", "ctrl+2", `sends the same bytes as "ctrl+space" and "ctrl+@"`},
+		{"alt beside a ctrl alias keeps the alias", "ctrl+alt+2", `sends the same bytes as "ctrl+alt+space" and "ctrl+alt+@"`},
+		{"ctrl+5 is ctrl+]", "ctrl+5", `sends the same bytes as "ctrl+]"`},
+		{"ctrl+] is ctrl+5", "ctrl+]", `sends the same bytes as "ctrl+5"`},
+		{"ctrl+6 is ctrl+^ and ctrl+~", "ctrl+6", `sends the same bytes as "ctrl+^" and "ctrl+~"`},
+		{"ctrl+7 is ctrl+/ and ctrl+_", "ctrl+7", `sends the same bytes as "ctrl+/" and "ctrl+_"`},
+		{"ctrl+/ is ctrl+7 and ctrl+_", "ctrl+/", `sends the same bytes as "ctrl+7" and "ctrl+_"`},
+		{"ctrl+alt+5 is ctrl+alt+]", "ctrl+alt+5", `sends the same bytes as "ctrl+alt+]"`},
+		{"ctrl+alt+\\ is ctrl+alt+4", "ctrl+alt+\\", `sends the same bytes as "ctrl+alt+4"`},
+		{"ctrl+alt+4 is ctrl+alt+\\", "ctrl+alt+4", `sends the same bytes as "ctrl+alt+\\"`},
+		{"an uppercase letter", "alt+D", `writes its letter uppercase; write "alt+shift+d" for the shifted key`},
+		{"an uppercase letter beside ctrl", "ctrl+alt+K", `writes its letter uppercase; write "ctrl+alt+shift+k" for the shifted key`},
+		{"an uppercase letter beside shift", "alt+shift+D", `writes its letter uppercase; write "alt+shift+d" for the shifted key`},
 		{"ctrl+g is BEL, which ends a reply", "ctrl+g", "sends BEL, which ends a terminal's reply"},
 		{"alt+\\ is ST, which ends a reply", "alt+\\", "sends ST, which ends a terminal's reply"},
 		{"a refused key's whitespace is trimmed", " ctrl+i ", "sends the same bytes as tab"},
@@ -250,15 +256,9 @@ func TestParse_KeysBoundToTwoActionsFallBack(t *testing.T) {
 	})
 
 	t.Run("a key two actions configure falls back in both", func(t *testing.T) {
-		assertWarnings(t, `{"detach":"alt+x","kill":["ctrl+o","ALT+X"]}`, defaultsSummary,
+		assertWarnings(t, `{"detach":"alt+x","kill":["ctrl+o","ALT+x"]}`, defaultsSummary,
 			`detach falls back to alt+d: "alt+x" is also bound to kill`,
 			`kill falls back to alt+q: "alt+x" is also bound to detach`)
-	})
-
-	t.Run("two keys sending the same bytes clash", func(t *testing.T) {
-		assertWarnings(t, `{"detach":"ctrl+5","kill":"ctrl+]"}`, defaultsSummary,
-			`detach falls back to alt+d: "ctrl+5" sends the same bytes as "ctrl+]", bound to kill`,
-			`kill falls back to alt+q: "ctrl+]" sends the same bytes as "ctrl+5", bound to detach`)
 	})
 
 	t.Run("an explicit default keeps its key against a configured clash", func(t *testing.T) {
