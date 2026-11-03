@@ -57,7 +57,7 @@ func (c attachConnector) Connect(name string) error {
 	out, err := c.attach(name, listing)
 	for err == nil {
 		if out.Switch != "" {
-			out = c.attachSwitched(out.Switch, listing)
+			out, err = c.attachSwitched(out.Switch, listing)
 			continue
 		}
 		if name, err = c.next(out, listing); err != nil || name == "" {
@@ -68,15 +68,15 @@ func (c attachConnector) Connect(name string) error {
 	return err
 }
 
-// attachSwitched attaches the session a switch named. One it can't attach,
-// gone by now say, ends as a failed kill does: the picker follows, showing
-// why.
-func (c attachConnector) attachSwitched(name string, listing runnerListing) runner.Outcome {
+// attachSwitched attaches the session a switch named. One gone by then ends
+// as a failed kill does: the picker follows, showing why. Any other failure
+// is returned, as a first attach's is.
+func (c attachConnector) attachSwitched(name string, listing runnerListing) (runner.Outcome, error) {
 	out, err := c.attach(name, listing)
-	if err != nil {
-		return runner.Outcome{Action: attachkeys.Detach, Err: err}
+	if errors.Is(err, backend.ErrNoSuchSession) {
+		return runner.Outcome{Action: attachkeys.Detach, Err: err}, nil
 	}
-	return out
+	return out, err
 }
 
 // next is the session to attach after an attach that ended with out other

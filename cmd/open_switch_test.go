@@ -218,6 +218,39 @@ func TestAttach_ASwitchAttachesTheSessionItNames(t *testing.T) {
 		}
 	})
 
+	t.Run("a switched attach that fails other than by its session being gone returns the error, as a first attach does", func(t *testing.T) {
+		boom := errors.New("the attach broke")
+		for _, tc := range []struct {
+			name  string
+			stage func(*backendtest.Fake, *attachRecorder)
+			want  error
+		}{
+			{"the runner fails", func(_ *backendtest.Fake, rec *attachRecorder) {
+				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}}, runResult{err: boom})
+			}, boom},
+			{"the session doesn't answer", func(fake *backendtest.Fake, rec *attachRecorder) {
+				fake.StopAnswering("blog-c3d4")
+				rec.answer(runResult{out: runner.Outcome{Switch: "blog-c3d4"}})
+			}, backend.ErrTimeout},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
+				tc.stage(fake, rec)
+				picker := stagePicker(t)
+
+				if err := openSession(contextCommand(), "api-x7Kd9a"); !errors.Is(err, tc.want) {
+					t.Errorf("openSession = %v, want the switched attach's own %v", err, tc.want)
+				}
+				if len(picker.flashes) != 0 {
+					t.Errorf("the picker opened with %q, want it never opened", picker.flashes)
+				}
+				if events := rec.runners.events; len(events) == 0 || events[len(events)-1] != "unlisted" {
+					t.Errorf("listing = %q, want the runner unlisted as Portal exits", events)
+				}
+			})
+		}
+	})
+
 	t.Run("the runner is unlisted while the picker is open, and listed again for its pick", func(t *testing.T) {
 		_, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		rec.answer(outcome(attachkeys.Detach))
