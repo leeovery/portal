@@ -112,6 +112,7 @@ Portal starts `zmx attach <name>` as a child in a pseudo-terminal it owns:
   - **detach to shell:** the same, then Portal exits to the shell.
   - **kill:** kills the current session through the backend; the picker follows.
 - The picker follows only when Portal asked for it: one of its keys, or Esc on the resume panel through the registry. Any other end of the child (`ctrl+\`, a `zmx detach` from elsewhere, the session ending) exits to the shell, as plain `zmx attach` does.
+- A switch asked for through the registry ends the attach as detach does, and the session it names attaches next, with no picker between.
 - When the attach ends, Portal resets the terminal unless zmx's own reset is known to have reached it. Restoring the terminal (`TCSAFLUSH`) waits for the terminal to take its output, reset or not, and ends early only if the terminal hangs up.
 - The picker that follows is the plain one: no filter, no search, no pending command, no bootstrap. A kill that fails shows there as its flash. Picking attaches again, and quitting exits 0.
 - Every other end exits with the runner's code, silently: the child's, or 128 plus a signal's. zmx attach exits 0 however the session's program ended, so a session's own end exits 0.
@@ -137,11 +138,17 @@ In `prefs.json`; a missing entry keeps its default:
 
 ### Runner registry
 
-zmx doesn't list its clients, so the runners list themselves, taking the part tmux's client list plays today. Each runner registers in `state/runners/` with its pid, session and control socket, and records when it last forwarded input. Entries whose pid is dead are ignored and removed.
-- **Switching.** `portal open <x>` inside a session asks this session's runner with the most recent input, which is the one whose terminal the command was typed in, to switch. The runner ends its child and attaches `<x>`.
+zmx doesn't list its clients, so the runners list themselves, taking the part tmux's client list plays today (`internal/runnerreg`). While it is attached, each runner has an entry in `state/runners/`: `<token>.json` holding its pid and session, and beside it its control socket, `<token>.sock`. It registers once its attach has begun, moves the entry to the next session when a switch attaches it, and removes it when an attach ends any other way. The directory is 0700 and the socket 0600. A runner keeps when it last forwarded input in memory and answers it over its socket; nothing is written per keystroke.
+- **Liveness.** An entry is live only when its pid is running and its socket answers as that pid: a pid alone proves nothing, since another process may hold it now. Every other entry is removed with its socket when read, except one that can't be read or whose runner refuses, which may be another version's and is left.
+- **Socket paths.** A socket's path must fit a unix socket's address, 103 bytes on macOS. A state dir too deep for that holds no runner: the registration fails with a WARN and the attach runs unlisted. A path is never cut short.
+- **Control protocol.** A connection carries one request, a JSON line such as `{"version":1,"request":"switch","session":"<x>"}`, and one answer, `{"version":1,"ok":true,"pid":…}` or a refusal saying why. A runner refuses another version, an unknown request or field, and a session given to a request that takes none or missing from one that needs it, so a Portal upgraded while attached never acts on a request it doesn't understand; the caller then goes on as if there were no runner. A runner takes a request only while its attach waits to end, and refuses one sent between attaches or once the attach is ending.
+  - `last-input`: when the runner last forwarded input, and its pid.
+  - `switch`: answered once the runner has taken it, not once the new attach is up. The runner ends its attach as the detach key does, by `ctrl+\` to its child, and attaches `<x>`, as the picker's pick is attached.
+  - `detach-to-picker`: ends the attach as the detach key does; the picker follows.
+- **Switching.** `portal open <x>` inside a session, a mint there (created first) and a pick in a picker running there ask this session's runner with the most recent input, which is the one whose terminal the command was typed in, to switch, and Portal exits 0 once it accepts. A runner that has forwarded no input is never the one. A refusal or a failure falls back as no runner does.
 - **New windows (`m`).** Portal walks that same runner's process tree up to the terminal app, as it walks the tmux client's today.
 - **Detach to the picker.** The resume panel's Esc asks every runner on the session.
-- **No runner** (a raw `zmx attach`, or rootshell's own zmx picker). Switching falls back to `zmx attach <x>`, which zmx routes to the client that typed it. `m` looks for the session's `zmx attach` process in the process table, and refuses unless there is exactly one.
+- **No runner** (a raw `zmx attach`, or rootshell's own zmx picker). Switching falls back to exec of `zmx attach <x>`, which zmx routes to the client that typed it. `m` looks for the session's `zmx attach` process in the process table, and refuses unless there is exactly one.
 
 ## Commands
 

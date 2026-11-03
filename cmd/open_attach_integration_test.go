@@ -38,13 +38,53 @@ const (
 	altQ      = "\x1bq"
 )
 
-// portalTerm is a portal binary running on a pseudo-terminal the test holds,
-// against a zmx directory and state directory of the test's own.
-type portalTerm struct {
-	cmd      *exec.Cmd
-	tty      *os.File
+// portalWorld is a zmx directory and a state directory of a test's own, and
+// the environment a portal binary runs in against them.
+type portalWorld struct {
+	binary   string
+	env      []string
 	b        *zmx.Backend
 	stateDir string
+}
+
+func newPortalWorld(t *testing.T, binary string) *portalWorld {
+	t.Helper()
+	env, _ := portaltest.IsolateStateForTest(t)
+	// The runner registry's sockets live in the state directory, and one under
+	// macOS's $TMPDIR is too long for a socket's address. Made before the zmx
+	// directory, so it is removed after the sessions are killed.
+	stateDir := shortTempDir(t)
+	b := zmxtest.New(t)
+	env = append(env,
+		"PORTAL_STATE_DIR="+stateDir,
+		"ZMX_DIR="+b.Dir(),
+		"PATH="+filepath.Dir(zmxtest.Binary(t))+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PORTAL_PROJECTS_FILE="+filepath.Join(t.TempDir(), "projects.json"),
+		"PORTAL_PREFS_FILE="+filepath.Join(t.TempDir(), "prefs.json"),
+		"SHELL=/bin/sh",
+		"TERM=xterm-256color",
+	)
+	return &portalWorld{binary: binary, env: env, b: b, stateDir: stateDir}
+}
+
+// shortTempDir is a directory of the test's own under /tmp, short enough to
+// hold unix sockets.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ps-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// portalTerm is a process running on a pseudo-terminal the test holds, in a
+// world of the test's own.
+type portalTerm struct {
+	*portalWorld
+	cmd *exec.Cmd
+	tty *os.File
 
 	mu  sync.Mutex
 	out bytes.Buffer
@@ -53,31 +93,16 @@ type portalTerm struct {
 	waitErr error
 }
 
-// openOnTerminal mints a session in a project directory with portal open -p,
-// on a terminal, and waits for the attach to connect.
-func openOnTerminal(t *testing.T, binary string) (*portalTerm, string) {
+// start runs argv on a terminal of its own, in the world's environment.
+func (w *portalWorld) start(t *testing.T, argv ...string) *portalTerm {
 	t.Helper()
-	env, stateDir := portaltest.IsolateStateForTest(t)
-	b := zmxtest.New(t)
-	work := filepath.Join(realPath(t, t.TempDir()), "myproj")
-	if err := os.Mkdir(work, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command(binary, "open", "-p", work)
-	cmd.Env = append(env,
-		"ZMX_DIR="+b.Dir(),
-		"PATH="+filepath.Dir(zmxtest.Binary(t))+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"PORTAL_PROJECTS_FILE="+filepath.Join(t.TempDir(), "projects.json"),
-		"PORTAL_PREFS_FILE="+filepath.Join(t.TempDir(), "prefs.json"),
-		"SHELL=/bin/sh",
-		"TERM=xterm-256color",
-	)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = w.env
 	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
-		t.Fatalf("start portal on a terminal: %v", err)
+		t.Fatalf("start %s on a terminal: %v", argv[0], err)
 	}
-	p := &portalTerm{cmd: cmd, tty: tty, b: b, stateDir: stateDir, exited: make(chan struct{})}
+	p := &portalTerm{portalWorld: w, cmd: cmd, tty: tty, exited: make(chan struct{})}
 	go p.record()
 	go func() {
 		p.waitErr = cmd.Wait()
@@ -88,9 +113,33 @@ func openOnTerminal(t *testing.T, binary string) (*portalTerm, string) {
 		<-p.exited
 		_ = tty.Close()
 	})
+	return p
+}
 
-	name := p.awaitOneSession(t)
-	p.awaitClients(t, name, 1)
+// portal runs the portal binary with args on a terminal of its own.
+func (w *portalWorld) portal(t *testing.T, args ...string) *portalTerm {
+	t.Helper()
+	return w.start(t, append([]string{w.binary}, args...)...)
+}
+
+// openOnTerminal mints a session in a project directory with portal open -p,
+// on a terminal, in a world of its own, and waits for the attach to connect.
+func openOnTerminal(t *testing.T, binary string) (*portalTerm, string) {
+	t.Helper()
+	return newPortalWorld(t, binary).openProject(t)
+}
+
+// openProject mints the world's first session, in a project directory, with
+// portal open -p on a terminal, and waits for the attach to connect.
+func (w *portalWorld) openProject(t *testing.T) (*portalTerm, string) {
+	t.Helper()
+	work := filepath.Join(realPath(t, t.TempDir()), "myproj")
+	if err := os.Mkdir(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := w.portal(t, "open", "-p", work)
+	name := w.awaitOneSession(t)
+	w.awaitClients(t, name, 1)
 	return p, name
 }
 
@@ -138,11 +187,11 @@ func (p *portalTerm) typeIn(t *testing.T, input string) {
 	}
 }
 
-func (p *portalTerm) awaitOneSession(t *testing.T) string {
+func (w *portalWorld) awaitOneSession(t *testing.T) string {
 	t.Helper()
 	var names []string
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
-		sessions, err := p.b.List(t.Context())
+		sessions, err := w.b.List(t.Context())
 		names = names[:0]
 		for _, s := range sessions {
 			names = append(names, s.Name)
@@ -154,11 +203,11 @@ func (p *portalTerm) awaitOneSession(t *testing.T) string {
 	return names[0]
 }
 
-func (p *portalTerm) awaitClients(t *testing.T, name string, want int) {
+func (w *portalWorld) awaitClients(t *testing.T, name string, want int) {
 	t.Helper()
 	var got int
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
-		s, err := p.b.Session(t.Context(), name)
+		s, err := w.b.Session(t.Context(), name)
 		got = s.Clients
 		return err == nil && got == want
 	}) {
@@ -166,9 +215,9 @@ func (p *portalTerm) awaitClients(t *testing.T, name string, want int) {
 	}
 }
 
-func (p *portalTerm) alive(t *testing.T, name string) bool {
+func (w *portalWorld) alive(t *testing.T, name string) bool {
 	t.Helper()
-	alive, err := p.b.Exists(t.Context(), name)
+	alive, err := w.b.Exists(t.Context(), name)
 	if err != nil {
 		t.Fatalf("Exists %s: %v", name, err)
 	}

@@ -57,6 +57,8 @@ type OpenDeps struct {
 	Execer execer
 	// Runner replaces runner.Run, which attaches the terminal to a session.
 	Runner func(context.Context, runner.Config) (runner.Outcome, error)
+	// Runners replaces the runner registry under the state directory.
+	Runners runnerRegistry
 }
 
 // SessionConnector connects the caller's terminal to a session.

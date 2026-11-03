@@ -54,13 +54,33 @@ type Config struct {
 	// Kill kills the named session through the backend. Run refuses a config
 	// without one.
 	Kill func(ctx context.Context, name string) error
+	// Requests carries the ends of the attach asked for from outside it. Run
+	// takes a request only while it waits for the attach's end, so one it
+	// takes is one it carries out: taking it is accepting it. Nil asks for
+	// none.
+	Requests <-chan Request
+	// Began, when set, is called once the attach has begun, before Run takes
+	// any request.
+	Began func()
+	// Forwarded, when set, is called each time input reaches the child, on
+	// the loop that forwards it, so it must not block.
+	Forwarded func()
+}
+
+// Request ends the attach from outside it as the detach key does: to the
+// picker, or, when Switch names a session, to that session.
+type Request struct {
+	// Switch is the session to attach next, empty to ask for the picker.
+	Switch string
 }
 
 // Outcome is how an attach ended.
 type Outcome struct {
 	// Action is the action that ended the attach, zero when the child ended
-	// on its own or Portal was signalled.
+	// on its own, Portal was signalled, or a switch ended it.
 	Action attachkeys.Action
+	// Switch is the session a switch request named, to attach next.
+	Switch string
 	// ExitCode is the status to exit to the shell with, as a shell reports
 	// one: the child's own when it ended on its own, 128 plus the signal's
 	// number when a signal ended the child or Portal's attach, and 0
@@ -72,18 +92,18 @@ type Outcome struct {
 }
 
 // Picker reports whether the picker follows, which only Portal's own action
-// asks for; every other end of an attach exits to the shell.
+// or request asks for; every other end of an attach exits to the shell.
 func (o Outcome) Picker() bool {
 	return o.Action == attachkeys.Detach || o.Action == attachkeys.Kill
 }
 
 // Run attaches the terminal to cfg.Session until the child ends or an action
-// ends the attach, with the terminal in raw mode until Run returns. An
-// action, a signal to Portal or the context's end detaches the child by
-// sending it zmx's own ctrl+\, except a kill that succeeds, whose session's
-// end ends the child. A child still running after the grace is sent SIGHUP,
-// then SIGKILL. A signal to Portal, or the terminal hanging up, at any point
-// ends the attach with that signal's outcome.
+// or a request ends the attach, with the terminal in raw mode until Run
+// returns. An action, a request, a signal to Portal or the context's end
+// detaches the child by sending it zmx's own ctrl+\, except a kill that
+// succeeds, whose session's end ends the child. A child still running after
+// the grace is sent SIGHUP, then SIGKILL. A signal to Portal, or the terminal
+// hanging up, at any point ends the attach with that signal's outcome.
 //
 // Run reads and writes the terminal through descriptions of its own, so the
 // flags of the ones the shell shares never change. Unless zmx's own reset is
@@ -91,7 +111,7 @@ func (o Outcome) Picker() bool {
 // to take that last write however long it takes.
 //
 // The attach is torn down however Run's goroutine leaves it, and a panic on
-// that goroutine, in Kill say, is raised again once it is. A command that
+// that goroutine, in Kill or Began say, is raised again once it is. A command that
 // switches sessions rather than attaching, or a config with no Kill, is
 // refused.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
@@ -121,6 +141,7 @@ func (a *attach) run(ctx context.Context) (out Outcome, err error) {
 		}
 		out, err = end.out, end.err
 	}()
+	a.cfg.Began()
 	end := a.await(ctx)
 	awaited = &end
 	return
@@ -185,6 +206,9 @@ func (e ending) report(session string) {
 	if e.detail != "" {
 		attrs = append(attrs, "detail", e.detail)
 	}
+	if e.out.Switch != "" {
+		attrs = append(attrs, "target", e.out.Switch)
+	}
 	if err := cmp.Or(e.err, e.out.Err); err != nil {
 		attrs = append(attrs, "error", err)
 	}
@@ -197,8 +221,10 @@ func (a *attach) await(ctx context.Context) ending {
 		select {
 		case <-a.winch:
 			a.resize()
-		case action := <-a.requests:
+		case action := <-a.keys:
 			return a.act(ctx, action)
+		case req := <-a.cfg.Requests:
+			return a.request(ctx, req)
 		case <-a.exited:
 			return ending{out: Outcome{ExitCode: exitCode(a.child.ProcessState)}, reason: "exit"}
 		case sig := <-a.signals:
@@ -230,6 +256,17 @@ func (a *attach) act(ctx context.Context, action attachkeys.Action) ending {
 	}
 	a.detach()
 	return end
+}
+
+// request carries out a request from outside the attach. A switch detaches
+// the child as the detach key does, naming its session in the outcome; any
+// other request is the detach key's.
+func (a *attach) request(ctx context.Context, req Request) ending {
+	if req.Switch == "" {
+		return a.act(ctx, attachkeys.Detach)
+	}
+	a.detach()
+	return ending{out: Outcome{Switch: req.Switch}, reason: "switch"}
 }
 
 // exitCode is the status a shell would report for the child.

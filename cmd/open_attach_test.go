@@ -194,7 +194,7 @@ func TestAttach_PickerLoop(t *testing.T) {
 		}
 	})
 
-	t.Run("a pick inside a session execs its switch and ends the loop", func(t *testing.T) {
+	t.Run("a pick inside a session with no runner execs its switch and ends the loop", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		rec.answer(outcome(attachkeys.Detach))
 		picker := stagePicker(t, "blog-c3d4")

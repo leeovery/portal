@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
@@ -26,7 +27,8 @@ import (
 
 // attachRecorder makes no attach. It records each run the runner is asked
 // for, answering from results, and each exec instead of replacing the test
-// process, with whether the exec marker was already logged when it ran.
+// process, with whether the exec marker was already logged when it ran. Its
+// runners stand in for the runner registry.
 type attachRecorder struct {
 	sink *logtest.Sink
 	runs []runner.Config
@@ -35,6 +37,7 @@ type attachRecorder struct {
 	results    []runResult
 	execs      []execCall
 	markerSeen bool
+	runners    runnersFake
 }
 
 type runResult struct {
@@ -47,13 +50,17 @@ type execCall struct {
 	argv, env []string
 }
 
+// Run begins the attach, as runner.Run does, unless it answers with an error.
 func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outcome, error) {
 	r.runs = append(r.runs, cfg)
-	if len(r.results) == 0 {
-		return runner.Outcome{}, nil
+	var res runResult
+	if len(r.results) > 0 {
+		res = r.results[0]
+		r.results = r.results[1:]
 	}
-	res := r.results[0]
-	r.results = r.results[1:]
+	if res.err == nil && cfg.Began != nil {
+		cfg.Began()
+	}
 	return res.out, res.err
 }
 
@@ -126,9 +133,50 @@ func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRe
 		fake.Add(backend.Session{Name: name})
 	}
 	withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, env: attachEnv}})
-	rec := &attachRecorder{}
-	withOpenDeps(t, OpenDeps{Execer: rec, Runner: rec.Run})
+	rec := &attachRecorder{runners: runnersFake{switchErr: runnerreg.ErrNoRunner}}
+	withOpenDeps(t, OpenDeps{Execer: rec, Runner: rec.Run, Runners: &rec.runners})
 	return fake, rec
+}
+
+// runnersFake stands in for the runner registry. It answers each switch with
+// switchErr, and records the switches asked for and, in order, what each
+// attach did to the listing: listed or moved to a session as it began, ended,
+// and unlisted.
+type runnersFake struct {
+	switchErr error
+	switches  []switchCall
+	events    []string
+	listed    bool
+}
+
+type switchCall struct{ current, target string }
+
+func (f *runnersFake) Listing() runnerListing { return f }
+
+func (f *runnersFake) SwitchFrom(_ context.Context, current, target string) error {
+	f.switches = append(f.switches, switchCall{current, target})
+	return f.switchErr
+}
+
+func (f *runnersFake) Attach(cfg *runner.Config) {
+	session := cfg.Session
+	cfg.Began = func() {
+		if f.listed {
+			f.events = append(f.events, "moved "+session)
+		} else {
+			f.events = append(f.events, "listed "+session)
+		}
+		f.listed = true
+	}
+}
+
+func (f *runnersFake) Ended() { f.events = append(f.events, "ended") }
+
+func (f *runnersFake) Close() {
+	if f.listed {
+		f.events = append(f.events, "unlisted")
+	}
+	f.listed = false
 }
 
 func contextCommand() *cobra.Command {
@@ -186,7 +234,7 @@ func TestOpenSession_AttachesThroughTheRunner(t *testing.T) {
 		assertAttached(t, rec, "api-x7Kd9a")
 	})
 
-	t.Run("inside a session it execs the command, which switches and exits, and never runs the runner", func(t *testing.T) {
+	t.Run("inside a session with no runner it execs the command, which switches and exits, and never runs the runner", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a", "blog-c3d4")
 		fake.SetCurrent("blog-c3d4")
 		if command, _ := fake.AttachCommand(context.Background(), "api-x7Kd9a"); !command.Switches {
@@ -458,6 +506,7 @@ func stageResolution(t *testing.T, rec *attachRecorder) {
 		DirValidator: &testDirValidator{existing: map[string]bool{}},
 		Execer:       rec,
 		Runner:       rec.Run,
+		Runners:      &rec.runners,
 	})
 }
 
@@ -514,6 +563,7 @@ func TestOpenCommand_SeveralSessionsAtOnceRefuse(t *testing.T) {
 				DirValidator: &testDirValidator{existing: map[string]bool{"/tmp": true}},
 				Execer:       rec,
 				Runner:       rec.Run,
+				Runners:      &rec.runners,
 			})
 			argv := append([]string{"open"}, args...)
 			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal"}, argv...) })

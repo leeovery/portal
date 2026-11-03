@@ -17,45 +17,64 @@ import (
 var attachLogger = log.For("attach")
 
 // attachConnector attaches the terminal to a session through the attach
-// runner, and each time the attach ends asking for the picker, opens the plain
-// picker and attaches its pick, until the picker is quit or an attach ends any
-// other way.
+// runner, listed in the runner registry while it is attached. Each time the
+// attach ends asking for the picker, it opens the plain picker and attaches
+// its pick; each time a switch ends it, it attaches the session switched to;
+// until the picker is quit or an attach ends any other way. Inside a session
+// it switches instead, through the registry.
 type attachConnector struct {
 	cmd     *cobra.Command
 	backend backend.Backend
 	execer  execer
 	run     func(context.Context, runner.Config) (runner.Outcome, error)
+	runners runnerRegistry
 }
 
 func newSessionConnector(cmd *cobra.Command, b backend.Backend) SessionConnector {
-	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run}
+	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}}
 	if openDeps != nil && openDeps.Execer != nil {
 		c.execer = openDeps.Execer
 	}
 	if openDeps != nil && openDeps.Runner != nil {
 		c.run = openDeps.Runner
 	}
+	if openDeps != nil && openDeps.Runners != nil {
+		c.runners = openDeps.Runners
+	}
 	return c
 }
 
 func (c attachConnector) Connect(name string) error {
+	listing := c.runners.Listing()
+	defer listing.Close()
 	for {
-		out, err := c.attach(name)
+		out, err := c.attach(name, listing)
 		if err != nil {
 			return err
 		}
-		if !out.Picker() {
-			return exitStatus(out.ExitCode)
-		}
-		if name, err = reopenPickerFunc(c.cmd, c.backend, flashOf(out.Err)); err != nil || name == "" {
+		if name, err = c.next(out, listing); err != nil || name == "" {
 			return err
 		}
 	}
 }
 
+// next is the session to attach after an attach ends with out: the session a
+// switch named, or the picker's pick. It is empty when Portal exits instead,
+// with the error to exit with. The runner stays listed only through a switch.
+func (c attachConnector) next(out runner.Outcome, listing runnerListing) (string, error) {
+	if out.Switch != "" {
+		return out.Switch, nil
+	}
+	listing.Close()
+	if !out.Picker() {
+		return "", exitStatus(out.ExitCode)
+	}
+	return reopenPickerFunc(c.cmd, c.backend, flashOf(out.Err))
+}
+
 // attach runs one attach. An exec returns only if it fails, so beside its
 // error the outcome is the zero one.
-func (c attachConnector) attach(name string) (runner.Outcome, error) {
+func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
 	if err != nil {
@@ -65,22 +84,35 @@ func (c attachConnector) attach(name string) (runner.Outcome, error) {
 		return runner.Outcome{}, fmt.Errorf("attach session %q: the backend gave no command to run", name)
 	}
 	// Inside a session the command switches that session's clients and exits
-	// at once, which the runner refuses: Portal has nothing left to do.
+	// at once, which the runner refuses: the terminal moves through switchTo.
 	if command.Switches {
-		return runner.Outcome{}, c.exec(command)
+		return runner.Outcome{}, c.switchTo(name, command)
 	}
-	out, err := c.run(ctx, runner.Config{
+	cfg := runner.Config{
 		Session: name,
 		Command: command,
 		In:      os.Stdin,
 		Out:     os.Stdout,
 		Scanner: attachkeys.NewMatcher(attachBindings(name)),
 		Kill:    c.kill,
-	})
+	}
+	listing.Attach(&cfg)
+	defer listing.Ended()
+	out, err := c.run(ctx, cfg)
 	if errors.Is(err, runner.ErrNoTerminal) {
 		return runner.Outcome{}, c.exec(command)
 	}
 	return out, err
+}
+
+// switchTo moves the terminal this command was typed in to name, from inside
+// a session: through the runner attached there whose terminal last took
+// input, else by the command, which zmx routes to the client that typed it.
+func (c attachConnector) switchTo(name string, command backend.Command) error {
+	if err := c.runners.SwitchFrom(c.cmd.Context(), c.backend.Current(), name); err == nil {
+		return nil
+	}
+	return c.exec(command)
 }
 
 func (c attachConnector) exec(command backend.Command) error {

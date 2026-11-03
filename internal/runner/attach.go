@@ -53,8 +53,8 @@ type attach struct {
 	inDone, outDone chan struct{}
 	// exited closes once the child is reaped.
 	exited chan struct{}
-	// requests carries the actions that end the attach.
-	requests chan attachkeys.Action
+	// keys carries the action of the bound key the input found.
+	keys chan attachkeys.Action
 	// broken carries the end a copy loop's panic makes.
 	broken         chan ending
 	signals, winch chan os.Signal
@@ -62,16 +62,22 @@ type attach struct {
 }
 
 func newAttach(cfg Config) *attach {
+	if cfg.Began == nil {
+		cfg.Began = func() {}
+	}
+	if cfg.Forwarded == nil {
+		cfg.Forwarded = func() {}
+	}
 	return &attach{
-		cfg:      cfg,
-		began:    time.Now(),
-		inDone:   make(chan struct{}),
-		outDone:  make(chan struct{}),
-		exited:   make(chan struct{}),
-		requests: make(chan attachkeys.Action, 1),
-		broken:   make(chan ending, 2),
-		signals:  make(chan os.Signal, 1),
-		winch:    make(chan os.Signal, 1),
+		cfg:     cfg,
+		began:   time.Now(),
+		inDone:  make(chan struct{}),
+		outDone: make(chan struct{}),
+		exited:  make(chan struct{}),
+		keys:    make(chan attachkeys.Action, 1),
+		broken:  make(chan ending, 2),
+		signals: make(chan os.Signal, 1),
+		winch:   make(chan os.Signal, 1),
 	}
 }
 
@@ -423,7 +429,8 @@ func (a *attach) panicked(r any) ending {
 }
 
 // copyInput passes the terminal's input to the child until a bound key, which
-// it hands on as a request. The end of the input is the terminal hanging up.
+// it hands on to end the attach. The end of the input is the terminal hanging
+// up.
 func (a *attach) copyInput() {
 	buf := make([]byte, bufSize)
 	for {
@@ -436,14 +443,25 @@ func (a *attach) copyInput() {
 			return
 		}
 		forward, action, found := a.cfg.Scanner.Scan(buf[:n])
-		if err := writeAll(a.ptmxFd, forward, a.stopIn.wait); err != nil {
+		if err := a.forward(forward); err != nil {
 			return // stopped, or the child's side has closed and its exit ends the attach
 		}
 		if found {
-			a.requests <- action
+			a.keys <- action
 			return
 		}
 	}
+}
+
+// forward passes input to the child, and reports it forwarded.
+func (a *attach) forward(input []byte) error {
+	if err := writeAll(a.ptmxFd, input, a.stopIn.wait); err != nil {
+		return err
+	}
+	if len(input) > 0 {
+		a.cfg.Forwarded()
+	}
+	return nil
 }
 
 // hangUp takes the end of the terminal's input as the hang-up a SIGHUP to
