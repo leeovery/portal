@@ -18,7 +18,7 @@ import (
 // built from the value the code renders asserts nothing about what it holds.
 const (
 	surfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
-	surfaceReport  = "the pane is frozen and will not lift"
+	surfaceReport  = "can't unpause this session: permission denied"
 )
 
 const (

@@ -21,11 +21,11 @@ const (
 // built by the code under test's own wrap asserts nothing about where it broke.
 var (
 	discardConsequenceAtCard = []string{
-		"Removes this pane's resume command permanently. The",
-		"session and its scrollback are untouched.",
+		"Removes this session's resume command permanently.",
+		"The session and its scrollback are untouched.",
 	}
 	discardConsequenceAtStack = []string{
-		"Removes this pane's resume",
+		"Removes this session's resume",
 		"command permanently. The",
 		"session and its scrollback are",
 		"untouched.",
@@ -113,7 +113,7 @@ func TestRenderResumeDiscardConfirm_Card(t *testing.T) {
 					t.Errorf("the card does not read %q:\n%q", want, content)
 				}
 			}
-			const sentence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."
+			const sentence = "Removes this session's resume command permanently. The session and its scrollback are untouched."
 			if discardConfirmConsequence != sentence {
 				t.Errorf("the consequence constant reads\n got: %q\nwant: %q", discardConfirmConsequence, sentence)
 			}

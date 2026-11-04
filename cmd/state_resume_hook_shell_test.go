@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/shellquote"
 )
@@ -67,9 +68,9 @@ func eagerHookArgv(t *testing.T, command string) (string, []string) {
 	cfg := hydrateCfg(t, hydrateCfgOpts{
 		FIFO:      fifo,
 		File:      scrollback,
-		HookKey:   "work:0.0",
+		HookKey:   samplePayload().Session,
 		OpenFIFO:  openFIFOWithTimeout,
-		HookStore: hydrateStoreWithMode(t, "work:0.0", command, resumemode.Eager),
+		HookStore: hydrateStoreWithMode(t, samplePayload().Session, command, resumemode.Eager),
 		ExecShell: execStub.fn(),
 	})
 	if err := runHydrate(cfg); err != nil {
@@ -95,9 +96,9 @@ func answeredHookArgv(t *testing.T, command string) (string, []string) {
 // hookPane runs a route's hook shell as a pane's top process would, with a hook
 // program and a user's shell standing in for the real ones.
 type hookPane struct {
-	dir    string
-	pid    int
-	exited chan *os.ProcessState
+	dir  string
+	pid  int
+	held *proctest.Held
 }
 
 func startHookPane(t *testing.T, route hookShellRoute) hookPane {
@@ -112,18 +113,8 @@ func startHookPane(t *testing.T, route hookShellRoute) hookPane {
 	pane.Args = args
 	pane.Env = append(os.Environ(), "HOOK_DIR="+dir)
 	pane.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := pane.Start(); err != nil {
-		t.Fatalf("start the pane's shell: %v", err)
-	}
-	p := hookPane{dir: dir, pid: pane.Process.Pid, exited: make(chan *os.ProcessState, 1)}
-	go func() {
-		_ = pane.Wait()
-		p.exited <- pane.ProcessState
-	}()
-	t.Cleanup(func() {
-		_ = syscall.Kill(-p.pid, syscall.SIGKILL)
-	})
-	return p
+	held := proctest.Start(t, pane, "HOOK_DIR="+dir)
+	return hookPane{dir: dir, pid: held.PID(), held: held}
 }
 
 func stageStub(t *testing.T, dir, name, body string) string {
@@ -169,54 +160,60 @@ func (p hookPane) exists(name string) bool {
 	return err == nil
 }
 
+// signal sends sig to pid once it is proved a process of the session's.
+func (p hookPane) signal(t *testing.T, pid int, sig syscall.Signal) {
+	t.Helper()
+	if err := p.held.Signal(pid, sig); err != nil {
+		t.Fatalf("send %v to pid %d: %v", sig, pid, err)
+	}
+}
+
 func (p hookPane) assertStillUp(t *testing.T, settle time.Duration) {
 	t.Helper()
 	select {
-	case st := <-p.exited:
-		p.exited <- st
-		t.Fatalf("the pane's shell ended (%v), want it still up", st)
+	case <-p.held.Exited():
+		t.Fatalf("the session's shell ended (%v), want it still up", p.held.Status())
 	case <-time.After(settle):
 	}
 }
 
-// assertUserShellEndsOnSIGTERM checks the pane is now the user's shell, then
-// that SIGTERM ends it, which it does only at the default disposition.
+// endedOn waits for the session's shell to end and checks sig ended it.
+func (p hookPane) endedOn(t *testing.T, sig syscall.Signal, what string) {
+	t.Helper()
+	if !endsWithin(p.held.Exited(), hookShellWait) {
+		t.Fatalf("%s survived %v", what, sig)
+	}
+	if ws := p.held.Status(); !ws.Signaled() || ws.Signal() != sig {
+		t.Errorf("%s ended %v, want killed by %v", what, ws, sig)
+	}
+}
+
+// assertUserShellEndsOnSIGTERM checks the session is now the user's shell,
+// then that SIGTERM ends it, which it does only at the default disposition.
 func (p hookPane) assertUserShellEndsOnSIGTERM(t *testing.T) {
 	t.Helper()
 	shellPID := p.awaitPID(t, "shell.pid", "the user's shell")
 	if shellPID != p.pid {
-		t.Fatalf("the user's shell runs as pid %d, want the pane's own process %d", shellPID, p.pid)
+		t.Fatalf("the user's shell runs as pid %d, want the session's own process %d", shellPID, p.pid)
 	}
-	if err := syscall.Kill(p.pid, syscall.SIGTERM); err != nil {
-		t.Fatalf("signal the user's shell: %v", err)
-	}
-	select {
-	case st := <-p.exited:
-		ws, ok := st.Sys().(syscall.WaitStatus)
-		if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGTERM {
-			t.Errorf("the user's shell ended %v, want killed by SIGTERM at its default disposition", st)
-		}
-	case <-time.After(hookShellWait):
-		t.Fatal("the user's shell survived SIGTERM: it inherited the signal as ignored")
-	}
-}
-
-func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	p.signal(t, p.pid, syscall.SIGTERM)
+	p.endedOn(t, syscall.SIGTERM, "the user's shell, at its default disposition,")
 }
 
 func TestResumeHookShell_SurvivesSIGTERMWhileTheHookRuns(t *testing.T) {
 	for _, route := range hookShellRoutes() {
-		t.Run(route.name+" keeps its pane and hook program through a SIGTERM to its shell", func(t *testing.T) {
+		t.Run(route.name+" keeps its session and hook program through a SIGTERM to its shell", func(t *testing.T) {
 			p := startHookPane(t, route)
 			hookPID := p.awaitPID(t, "hook.pid", "the hook program")
+			hookGone := p.held.Watch(t, hookPID)
 
-			if err := syscall.Kill(p.pid, syscall.SIGTERM); err != nil {
-				t.Fatalf("signal the pane's shell: %v", err)
-			}
+			p.signal(t, p.pid, syscall.SIGTERM)
+
 			p.assertStillUp(t, 300*time.Millisecond)
-			if !processAlive(hookPID) {
+			select {
+			case <-hookGone:
 				t.Fatal("the hook program ended with the SIGTERM to its shell")
+			default:
 			}
 
 			p.release(t)
@@ -234,12 +231,7 @@ func TestResumeHookShell_HookProgramEndsOnSIGTERM(t *testing.T) {
 			p := startHookPane(t, route)
 			hookPID := p.awaitPID(t, "hook.pid", "the hook program")
 
-			if err := syscall.Kill(hookPID, syscall.SIGTERM); err != nil {
-				t.Fatalf("signal the hook program: %v", err)
-			}
-			if !harnesstest.PollUntil(t, hookShellWait, 10*time.Millisecond, func() bool { return !processAlive(hookPID) }) {
-				t.Fatal("the hook program survived SIGTERM: it inherited the signal as ignored")
-			}
+			assertEndsOnSIGTERM(t, p.held, hookPID, "the hook program")
 			if p.exists("hook.done") {
 				t.Error("the hook program ran to its end, want it ended by SIGTERM")
 			}
@@ -267,18 +259,9 @@ func TestResumeHookShell_LeavesSIGHUPUncaught(t *testing.T) {
 			p := startHookPane(t, route)
 			p.awaitPID(t, "hook.pid", "the hook program")
 
-			if err := syscall.Kill(p.pid, syscall.SIGHUP); err != nil {
-				t.Fatalf("signal the pane's shell: %v", err)
-			}
-			select {
-			case st := <-p.exited:
-				ws, ok := st.Sys().(syscall.WaitStatus)
-				if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
-					t.Errorf("the pane's shell ended %v, want killed by SIGHUP", st)
-				}
-			case <-time.After(hookShellWait):
-				t.Fatal("the pane's shell survived SIGHUP")
-			}
+			p.signal(t, p.pid, syscall.SIGHUP)
+
+			p.endedOn(t, syscall.SIGHUP, "the session's shell")
 		})
 	}
 }

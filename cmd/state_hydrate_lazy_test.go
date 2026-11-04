@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	lazyPaneID  = "%7"
-	lazyHookKey = "paneToken"
+	lazySession = "proj-a1b2"
 	lazyExe     = "/opt/portal/bin/portal"
 )
+
+var eagerHookArgs = []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
 
 // lazyTail names one of the three routes runHydrate can end on: the replay it
 // takes when the signal arrives and the scrollback is readable, and the two
@@ -90,15 +91,14 @@ func lazyPrefs(t *testing.T, mode string) func() (*prefs.Store, error) {
 	return func() (*prefs.Store, error) { return prefs.NewStore(path), nil }
 }
 
-// lazyOpts is the config every lazy case starts from: a pane that can be
-// marked, an executable that resolves and a commander that accepts every option
-// write.
+// lazyOpts is the config every lazy case starts from: a state directory of the
+// test's own to raise the session's flag in, and an executable that resolves.
 func lazyOpts(t *testing.T, store *hooks.Store, loadPrefs func() (*prefs.Store, error), exec *stubExecShell) hydrateCfgOpts {
 	t.Helper()
-	t.Setenv("TMUX_PANE", lazyPaneID)
+	resumeStateDir(t)
 	t.Setenv("SHELL", "/bin/zsh")
 	return hydrateCfgOpts{
-		HookKey:        lazyHookKey,
+		HookKey:        lazySession,
 		HookStore:      store,
 		LoadPrefsStore: loadPrefs,
 		ResolveExe:     func() (string, error) { return lazyExe, nil },
@@ -106,16 +106,56 @@ func lazyOpts(t *testing.T, store *hooks.Store, loadPrefs func() (*prefs.Store, 
 	}
 }
 
-// lazyChainArgs is the argv a parked chain execs for one pane.
-func lazyChainArgs(command, paneKey string) []string {
-	payload := resumeChainPayload{
-		Command: command,
-		HookKey: lazyHookKey,
-		Pane:    lazyPaneID,
-		PaneKey: paneKey,
+// lazyFlag is the session's flag in the state directory the test runs in.
+func lazyFlag(t *testing.T) string {
+	t.Helper()
+	dir, err := state.Dir()
+	if err != nil {
+		t.Fatal(err)
 	}
-	recover := shellquote.Join(resumeChainArgv(lazyExe, resumeRecoverSubcommand, payload))
-	return []string{"sh", "-c", parkedChainTrap + parkedChainDraw(lazyExe, payload) + "; " + recover + parkedChainBackstop(lazyExe, payload)}
+	path, err := state.ResumePending.Path(dir, lazySession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// lazyChainArgs is the argv a parked chain execs for the session.
+func lazyChainArgs(t *testing.T, command string) []string {
+	t.Helper()
+	parked := parkedChain{Exe: lazyExe, Flag: lazyFlag(t)}
+	return []string{"sh", "-c", parkedResumeChain(parked, resumeChainPayload{Command: command, Session: lazySession})}
+}
+
+func flagRaisedAt(t *testing.T, path string) bool {
+	t.Helper()
+	_, err := os.Lstat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("look for the flag: %v", err)
+	}
+	return err == nil
+}
+
+// flagAtSkeletonClear scripts the skeleton marker's clear to record whether
+// the session's flag was raised as it ran.
+func flagAtSkeletonClear(t *testing.T, raised *bool) *commandertest.Scripted {
+	t.Helper()
+	flag := lazyFlag(t)
+	return commandertest.Quiet(
+		commandertest.When(commandertest.ArgvPrefix("set-option", "-su"), "", nil).
+			Doing(func([]string) { *raised = flagRaisedAt(t, flag) }),
+	)
+}
+
+// unwritableStateDir points PORTAL_STATE_DIR under a regular file, so nothing
+// can be made in it.
+func unwritableStateDir(t *testing.T) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PORTAL_STATE_DIR", filepath.Join(file, "state"))
 }
 
 func TestHydrateLazy_NoRegistrationRestoresAsToday(t *testing.T) {
@@ -132,9 +172,8 @@ func TestHydrateLazy_NoRegistrationRestoresAsToday(t *testing.T) {
 			if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
 				t.Errorf("exec = %q %v, want a bare /bin/zsh", exec.target, exec.args)
 			}
-			assertNoPendingMarker(t, cmder)
-			assertNoAltScreenPin(t, cmder)
-			assertNoTokenWrite(t, cmder)
+			assertNoFlag(t)
+			assertNoPaneOptionWrite(t, cmder)
 		})
 	}
 }
@@ -153,18 +192,16 @@ func TestHydrateLazy_EagerRegistrationRestoresAsToday(t *testing.T) {
 			t.Run(tc.name+"/"+tail.name, func(t *testing.T) {
 				exec := &stubExecShell{}
 				cmder := commandertest.Quiet()
-				opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", tc.registration), lazyPrefs(t, tc.install), exec)
+				opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", tc.registration), lazyPrefs(t, tc.install), exec)
 				opts.Commander = cmder
 
 				lazyRun(t, tail, opts)
 
-				want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-				if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-					t.Errorf("exec = %q %v, want /bin/sh %v", exec.target, exec.args, want)
+				if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+					t.Errorf("exec = %q %v, want /bin/sh %v", exec.target, exec.args, eagerHookArgs)
 				}
-				assertNoPendingMarker(t, cmder)
-				assertNoAltScreenPin(t, cmder)
-				assertNoTokenWrite(t, cmder)
+				assertNoFlag(t)
+				assertNoPaneOptionWrite(t, cmder)
 			})
 		}
 	}
@@ -172,53 +209,53 @@ func TestHydrateLazy_EagerRegistrationRestoresAsToday(t *testing.T) {
 
 func TestHydrateLazy_PinnedLazyBeatsAnEagerInstall(t *testing.T) {
 	exec := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, "eager"), exec)
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, "eager"), exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
 	if exec.target != "/bin/sh" {
 		t.Fatalf("exec target = %q, want /bin/sh", exec.target)
 	}
-	if want := lazyChainArgs("echo hi", paneKey); !reflect.DeepEqual(exec.args, want) {
+	if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
 	}
 }
 
-func TestHydrateLazy_MarksPendingBeforeClearingMidRestoreMarker(t *testing.T) {
+func TestHydrateLazy_RaisesTheFlagBeforeClearingTheMidRestoreMarker(t *testing.T) {
 	for _, tail := range lazyTails() {
 		t.Run(tail.name, func(t *testing.T) {
 			exec := &stubExecShell{}
-			cmder := commandertest.Quiet()
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			var raisedAtClear bool
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			cmder := flagAtSkeletonClear(t, &raisedAtClear)
 			opts.Commander = cmder
 
 			paneKey := lazyRun(t, tail, opts)
 
-			pending := cmder.CallsMatching("set-option", "-p", state.ResumePendingOption).FirstIndex()
-			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
-			if pending < 0 {
-				t.Fatalf("no pending marker write; calls: %v", cmder.Calls())
-			}
-			if cleared < 0 {
+			if cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex() < 0 {
 				t.Fatalf("no skeleton marker clear; calls: %v", cmder.Calls())
 			}
-			if pending > cleared {
-				t.Errorf("pending marker written at %d, after the skeleton clear at %d; calls: %v", pending, cleared, cmder.Calls())
+			if !raisedAtClear {
+				t.Error("the skeleton marker cleared before the session's flag was raised")
 			}
+			if !flagRaisedAt(t, lazyFlag(t)) {
+				t.Error("the parked session's flag is not raised")
+			}
+			assertNoPaneOptionWrite(t, cmder)
 		})
 	}
 }
 
 func TestHydrateLazy_ParksTheDrawAndTheTailInOneShell(t *testing.T) {
 	exec := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
 	if exec.target != "/bin/sh" {
 		t.Errorf("exec target = %q, want /bin/sh", exec.target)
 	}
-	if want := lazyChainArgs("echo hi", paneKey); !reflect.DeepEqual(exec.args, want) {
+	if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec args = %v, want %v", exec.args, want)
 	}
 }
@@ -234,7 +271,7 @@ func TestHydrateLazy_QuotesTheCommandIntoTheChain(t *testing.T) {
 	for _, command := range commands {
 		t.Run(command, func(t *testing.T) {
 			exec := &stubExecShell{}
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, command, resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, command, resumemode.Lazy), lazyPrefs(t, ""), exec)
 
 			lazyRun(t, lazyTails()[0], opts)
 
@@ -248,72 +285,61 @@ func TestHydrateLazy_QuotesTheCommandIntoTheChain(t *testing.T) {
 
 func TestHydrateLazy_SeparatesTheDrawAndTheTailWithASemicolon(t *testing.T) {
 	exec := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
-	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
-	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(lazyExe, payload))
+	parked := parkedChain{Exe: lazyExe, Flag: lazyFlag(t)}
+	payload := resumeChainPayload{Command: "echo hi", Session: lazySession}
+	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(parked, payload))
 	if !found {
 		t.Fatalf("chain %q does not open on the draw", exec.args[2])
-	}
-	if strings.Contains(tail, "&&") {
-		t.Errorf("tail %q joins the halves with &&; the tail must run whatever the draw did", tail)
 	}
 	if !strings.HasPrefix(tail, "; "+shellquote.Single(lazyExe)) {
 		t.Errorf("tail %q is not separated from the draw by a semicolon", tail)
 	}
 }
 
-func TestHydrateLazy_ComposesTheTailWithThePaneIdentityAlone(t *testing.T) {
+func TestHydrateLazy_ComposesTheTailWithTheSessionAlone(t *testing.T) {
 	exec := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
-	payload := resumeChainPayload{Command: "echo hi", HookKey: lazyHookKey, Pane: lazyPaneID, PaneKey: paneKey}
-	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(lazyExe, payload)+"; ")
+	parked := parkedChain{Exe: lazyExe, Flag: lazyFlag(t)}
+	payload := resumeChainPayload{Command: "echo hi", Session: lazySession}
+	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(parked, payload)+"; ")
 	if !found {
 		t.Fatalf("chain %q has no tail", exec.args[2])
 	}
-	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--hook-key", lazyHookKey, "--pane", lazyPaneID, "--pane-key", paneKey}) + parkedChainBackstop(lazyExe, payload)
+	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--session", lazySession}) + parkedChainBackstop(parked)
 	if tail != want {
 		t.Errorf("tail = %q, want %q", tail, want)
 	}
 }
 
-func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
+func TestHydrateLazy_FiresTheHookWhenTheFlagCannotBeRaised(t *testing.T) {
 	refusals := []struct {
 		name    string
+		session string
 		prepare func(t *testing.T, opts *hydrateCfgOpts)
-		// wantNoPin marks a refusal taken before the pin: a pin written ahead
-		// of resolution would outlive the eager hook. wantNoToken marks one
-		// taken before any write at all.
-		wantNoWrite, wantNoPin, wantNoToken bool
 	}{
-		{name: "the token write fails", wantNoWrite: true, wantNoPin: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "the flag's directory can't be made", session: lazySession, prepare: func(t *testing.T, _ *hydrateCfgOpts) {
 			t.Helper()
-			opts.Commander = commandertest.Quiet(
-				commandertest.Fails(errors.New("tmux refused"), tokenWriteArgv()...),
-			)
+			unwritableStateDir(t)
 		}},
-		{name: "the marker write fails", prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "the session's name can't name a file", session: "..", prepare: func(t *testing.T, opts *hydrateCfgOpts) {
 			t.Helper()
-			opts.Commander = commandertest.Quiet(
-				commandertest.Fails(errors.New("tmux refused"), markerWriteArgv()...),
-			)
+			opts.HookKey = ".."
+			opts.HookStore = hydrateStoreWithMode(t, "..", "echo hi", resumemode.Lazy)
 		}},
-		{name: "the alternate-screen pin fails", wantNoWrite: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "the state directory can't be resolved", session: lazySession, prepare: func(t *testing.T, _ *hydrateCfgOpts) {
 			t.Helper()
-			opts.Commander = commandertest.Quiet(
-				commandertest.Fails(errors.New("tmux refused"), pinArgv()...),
-			)
+			t.Setenv("PORTAL_STATE_DIR", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("HOME", "")
 		}},
-		{name: "TMUX_PANE is absent", wantNoWrite: true, wantNoPin: true, wantNoToken: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
-			t.Helper()
-			t.Setenv("TMUX_PANE", "")
-		}},
-		{name: "the executable cannot be resolved", wantNoWrite: true, wantNoPin: true, wantNoToken: true, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
+		{name: "the executable can't be resolved", session: lazySession, prepare: func(t *testing.T, opts *hydrateCfgOpts) {
 			t.Helper()
 			opts.ResolveExe = func() (string, error) { return "", errors.New("no executable") }
 		}},
@@ -321,128 +347,48 @@ func TestHydrateLazy_FiresTheHookWhenThePaneCannotBeMarked(t *testing.T) {
 	for _, refusal := range refusals {
 		t.Run(refusal.name, func(t *testing.T) {
 			exec := &stubExecShell{}
+			cmder := commandertest.Quiet()
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Logger = logger
-			opts.Commander = commandertest.Quiet()
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander, opts.Logger = cmder, logger
+			assertNoFlagLater := noFlagIn(t)
 			refusal.prepare(t, &opts)
-			cmder := opts.Commander.(*commandertest.Scripted)
 
 			paneKey := lazyRun(t, lazyTails()[0], opts)
 
-			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
+			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, eagerHookArgs)
 			}
-			assertOneMarkerRefusalWarn(t, sink, paneKey)
-			if refusal.wantNoWrite {
-				assertNoPendingMarker(t, cmder)
+			assertOneFlagRefusalWarn(t, sink, refusal.session)
+			if n := strings.Count(sink.Body(), "WARN"); n != 1 {
+				t.Errorf("got %d WARNs, want the refusal alone: %q", n, sink.Body())
 			}
-			if refusal.wantNoPin {
-				assertNoAltScreenPin(t, cmder)
-			}
-			if refusal.wantNoToken {
-				assertNoTokenWrite(t, cmder)
+			assertNoFlagLater()
+			if cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex() < 0 {
+				t.Errorf("a refused flag must still clear the skeleton marker; calls: %v", cmder.Calls())
 			}
 		})
 	}
 }
 
-func TestHydrateLazy_NamesThePinsErrorWhenTheAlternateScreenCannotBePinned(t *testing.T) {
-	pinErr := errors.New("invalid option: alternate-screen")
-	exec := &stubExecShell{}
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-	opts.Logger = logger
-	opts.Commander = commandertest.Quiet(commandertest.Fails(pinErr, pinArgv()...))
-
-	lazyRun(t, lazyTails()[0], opts)
-
-	warn := execLogLine(t, sink.Body(), "WARN", "set resume pending marker failed")
-	if !strings.Contains(warn, pinErr.Error()) || !strings.Contains(warn, altScreenOption) {
-		t.Errorf("refusal WARN = %q, want it to name the pin's error %q", warn, pinErr)
-	}
-}
-
-func TestHydrateLazy_LiftsThePinWhenTheMarkerWriteIsRefused(t *testing.T) {
-	markerErr := errors.New("marker refused")
-
-	t.Run("it lifts the pin before the eager hook runs and names the marker's error", func(t *testing.T) {
-		exec := &stubExecShell{}
-		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-		opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-		cmder := commandertest.Quiet(commandertest.Fails(markerErr, markerWriteArgv()...))
-		opts.Logger, opts.Commander = logger, cmder
-
-		paneKey := lazyRun(t, lazyTails()[0], opts)
-
-		pin, marker, lift := callIndex(cmder, pinArgv()), callIndex(cmder, markerWriteArgv()), callIndex(cmder, liftArgv())
-		if pin < 0 || marker < 0 || lift < 0 || pin > marker || marker > lift {
-			t.Errorf("pin at %d, marker at %d, lift at %d; want pin, then the refused marker, then the lift; calls: %v",
-				pin, marker, lift, cmder.Calls())
-		}
-		want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
-		}
-		assertOneMarkerRefusalWarn(t, sink, paneKey)
-		if warn := execLogLine(t, sink.Body(), "WARN", "set resume pending marker failed"); !strings.Contains(warn, markerErr.Error()) {
-			t.Errorf("refusal WARN = %q, want it to name the marker's error", warn)
-		}
-		if n := strings.Count(sink.Body(), "WARN"); n != 1 {
-			t.Errorf("got %d WARNs, want the refusal alone after a lift that landed: %q", n, sink.Body())
-		}
-	})
-
-	t.Run("it records a refused lift apart from the refusal and still runs the hook", func(t *testing.T) {
-		liftErr := errors.New("lift refused")
-		exec := &stubExecShell{}
-		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-		opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-		opts.Logger = logger
-		opts.Commander = commandertest.Quiet(
-			commandertest.Fails(markerErr, markerWriteArgv()...),
-			commandertest.Fails(liftErr, liftArgv()...),
-		)
-
-		paneKey := lazyRun(t, lazyTails()[0], opts)
-
-		want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
-		}
-		assertOneMarkerRefusalWarn(t, sink, paneKey)
-		lift := execLogLine(t, sink.Body(), "WARN", "lift alternate-screen pin failed")
-		if !strings.Contains(lift, "pane_key="+paneKey) || !strings.Contains(lift, liftErr.Error()) {
-			t.Errorf("lift WARN = %q, want it to name the pane and the lift's error", lift)
-		}
-	})
-}
-
-func TestHydrateLazy_PinsTheAlternateScreenBeforeMarkingThePane(t *testing.T) {
+func TestHydrateLazy_FiresTheHookOnEveryTailWhenTheFlagCannotBeRaised(t *testing.T) {
 	for _, tail := range lazyTails() {
 		t.Run(tail.name, func(t *testing.T) {
 			exec := &stubExecShell{}
 			cmder := commandertest.Quiet()
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Commander = cmder
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			unwritableStateDir(t)
+			opts.Commander, opts.Logger = cmder, logger
 
 			paneKey := lazyRun(t, tail, opts)
 
-			pin := callIndex(cmder, pinArgv())
-			marker := callIndex(cmder, markerWriteArgv())
-			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
-			if pin < 0 || marker < 0 || cleared < 0 || pin > marker || marker > cleared {
-				t.Errorf("pin at %d, marker at %d, skeleton clear at %d; want them in that order; calls: %v",
-					pin, marker, cleared, cmder.Calls())
+			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, eagerHookArgs)
 			}
-			for i, call := range cmder.Calls()[:max(pin, 0)] {
-				if call[0] != "set-option" && strings.Contains(strings.Join(call, " "), "alternate") {
-					t.Errorf("call %d %v reads the alternate screen ahead of the pin", i, call)
-				}
-			}
-			if want := lazyChainArgs("echo hi", paneKey); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec = %q %v, want the parked chain %v", exec.target, exec.args, want)
+			assertOneFlagRefusalWarn(t, sink, lazySession)
+			if cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex() < 0 {
+				t.Errorf("a refused flag must still clear the skeleton marker; calls: %v", cmder.Calls())
 			}
 		})
 	}
@@ -451,43 +397,42 @@ func TestHydrateLazy_PinsTheAlternateScreenBeforeMarkingThePane(t *testing.T) {
 func TestHydrateLazy_ResolvesTheShippedDefaultWhenThePrefsReadFails(t *testing.T) {
 	exec := &stubExecShell{}
 	unreadable := t.TempDir()
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Unset), func() (*prefs.Store, error) {
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Unset), func() (*prefs.Store, error) {
 		return prefs.NewStore(unreadable), nil
 	}, exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
-	if want := lazyChainArgs("echo hi", paneKey); !reflect.DeepEqual(exec.args, want) {
+	if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
 	}
 }
 
 func TestHydrateLazy_ResolvesTheShippedDefaultWhenThePrefsStoreCannotBeBuilt(t *testing.T) {
 	exec := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Unset), func() (*prefs.Store, error) {
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Unset), func() (*prefs.Store, error) {
 		return nil, errors.New("no config base")
 	}, exec)
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
-	if want := lazyChainArgs("echo hi", paneKey); !reflect.DeepEqual(exec.args, want) {
+	if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
 	}
 }
 
 func TestHydrateLazy_AbsentHookStoreIsNoRegistration(t *testing.T) {
 	exec := &stubExecShell{}
-	cmder := commandertest.Quiet()
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 	opts := lazyOpts(t, nil, lazyPrefs(t, ""), exec)
-	opts.Commander, opts.Logger = cmder, logger
+	opts.Logger = logger
 
 	lazyRun(t, lazyTails()[0], opts)
 
 	if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
 		t.Errorf("exec = %q %v, want a bare /bin/zsh", exec.target, exec.args)
 	}
-	assertNoPendingMarker(t, cmder)
+	assertNoFlag(t)
 	if dbg := execLogLine(t, sink.Body(), "DEBUG", "hook lookup"); !strings.Contains(dbg, "result=miss") {
 		t.Errorf("absent store must record a miss: %q", dbg)
 	}
@@ -495,18 +440,17 @@ func TestHydrateLazy_AbsentHookStoreIsNoRegistration(t *testing.T) {
 
 func TestHydrateLazy_UnreadableStoreGivesABareShellAndNeverAWait(t *testing.T) {
 	exec := &stubExecShell{}
-	cmder := commandertest.Quiet()
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Unreadable: true})
 	opts := lazyOpts(t, store, lazyPrefs(t, ""), exec)
-	opts.Commander, opts.Logger = cmder, logger
+	opts.Logger = logger
 
 	lazyRun(t, lazyTails()[0], opts)
 
 	if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
 		t.Errorf("exec = %q %v, want a bare /bin/zsh", exec.target, exec.args)
 	}
-	assertNoPendingMarker(t, cmder)
+	assertNoFlag(t)
 	body := sink.Body()
 	if dbg := execLogLine(t, body, "DEBUG", "hook lookup"); !strings.Contains(dbg, "result=error") {
 		t.Errorf("an unreadable store must record result=error: %q", dbg)
@@ -516,14 +460,14 @@ func TestHydrateLazy_UnreadableStoreGivesABareShellAndNeverAWait(t *testing.T) {
 	}
 }
 
-func TestHydrateLazy_ReadsTheStoreOnceAndThePrefsOncePerPane(t *testing.T) {
+func TestHydrateLazy_ReadsTheStoreOnceAndThePrefsOncePerSession(t *testing.T) {
 	for _, tail := range lazyTails() {
 		t.Run(tail.name, func(t *testing.T) {
 			exec := &stubExecShell{}
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 			loads := 0
 			seam := lazyPrefs(t, "")
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Eager), func() (*prefs.Store, error) {
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Eager), func() (*prefs.Store, error) {
 				loads++
 				return seam()
 			}, exec)
@@ -532,10 +476,10 @@ func TestHydrateLazy_ReadsTheStoreOnceAndThePrefsOncePerPane(t *testing.T) {
 			lazyRun(t, tail, opts)
 
 			if n := strings.Count(sink.Body(), "DEBUG hook lookup"); n != 1 {
-				t.Errorf("hook lookup recorded %d times, want exactly one per pane: %q", n, sink.Body())
+				t.Errorf("hook lookup recorded %d times, want exactly one per session: %q", n, sink.Body())
 			}
 			if loads != 1 {
-				t.Errorf("prefs loaded %d times, want exactly one per pane", loads)
+				t.Errorf("prefs loaded %d times, want exactly one per session", loads)
 			}
 		})
 	}
@@ -544,48 +488,40 @@ func TestHydrateLazy_ReadsTheStoreOnceAndThePrefsOncePerPane(t *testing.T) {
 func TestHydrateLazy_ComposesTheChainFromTheValuesTheMarkStepResolved(t *testing.T) {
 	exec := &stubExecShell{}
 	exes := 0
-	t.Setenv("TMUX_PANE", lazyPaneID)
-	t.Setenv("SHELL", "/bin/zsh")
-	// The pane id moves the moment the marker lands, so a chain composed from a
-	// second read would carry the new one.
-	cmder := commandertest.Quiet(
-		commandertest.When(commandertest.ArgvPrefix("set-option", "-p"), "", nil).
-			Doing(func([]string) { t.Setenv("TMUX_PANE", "%99") }),
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+	want := lazyChainArgs(t, "echo hi")
+	// The state directory moves the moment the flag is raised, so a chain
+	// composed from a second resolution would carry another flag.
+	moved := t.TempDir()
+	opts.Commander = commandertest.Quiet(
+		commandertest.When(commandertest.ArgvPrefix("set-option", "-su"), "", nil).
+			Doing(func([]string) { t.Setenv("PORTAL_STATE_DIR", moved) }),
 	)
-	opts := hydrateCfgOpts{
-		HookKey:        lazyHookKey,
-		HookStore:      hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy),
-		LoadPrefsStore: lazyPrefs(t, ""),
-		ResolveExe:     func() (string, error) { exes++; return lazyExe, nil },
-		ExecShell:      exec.fn(),
-		Commander:      cmder,
-	}
+	opts.ResolveExe = func() (string, error) { exes++; return lazyExe, nil }
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, lazyTails()[0], opts)
 
 	if exes != 1 {
-		t.Errorf("executable resolved %d times, want exactly one per pane", exes)
+		t.Errorf("executable resolved %d times, want exactly one per session", exes)
 	}
-	if want := lazyChainArgs("echo hi", paneKey); !reflect.DeepEqual(exec.args, want) {
-		t.Errorf("exec args = %v, want the chain composed from the marked pane %v", exec.args, want)
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Errorf("exec args = %v, want the chain composed from the raised flag %v", exec.args, want)
 	}
 }
 
 func TestHydrateLazy_EmptyStoredCommandIsNoRegistration(t *testing.T) {
 	exec := &stubExecShell{}
-	cmder := commandertest.Quiet()
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "", resumemode.Lazy), lazyPrefs(t, ""), exec)
-	opts.Commander = cmder
+	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "", resumemode.Lazy), lazyPrefs(t, ""), exec)
 
 	lazyRun(t, lazyTails()[0], opts)
 
 	if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
 		t.Errorf("exec = %q %v, want a bare /bin/zsh", exec.target, exec.args)
 	}
-	assertNoPendingMarker(t, cmder)
+	assertNoFlag(t)
 }
 
-func TestHydrateLazy_MarksAndParksWhateverTheHandlerSeamDoes(t *testing.T) {
+func TestHydrateLazy_RaisesAndParksWhateverTheHandlerSeamDoes(t *testing.T) {
 	inert := map[string]func(opts *hydrateCfgOpts){
 		"signal timeout": func(opts *hydrateCfgOpts) {
 			opts.HandleTimeout = func(hydrateConfig) error { return nil }
@@ -601,9 +537,9 @@ func TestHydrateLazy_MarksAndParksWhateverTheHandlerSeamDoes(t *testing.T) {
 		}
 		t.Run(tail.name, func(t *testing.T) {
 			exec := &stubExecShell{}
-			cmder := commandertest.Quiet()
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Commander = cmder
+			var raisedAtClear bool
+			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+			opts.Commander = flagAtSkeletonClear(t, &raisedAtClear)
 			stage := tail.stage
 			tail.stage = func(t *testing.T, dir string, opts *hydrateCfgOpts) string {
 				t.Helper()
@@ -612,52 +548,25 @@ func TestHydrateLazy_MarksAndParksWhateverTheHandlerSeamDoes(t *testing.T) {
 				return paneKey
 			}
 
-			paneKey := lazyRun(t, tail, opts)
+			lazyRun(t, tail, opts)
 
-			pending := cmder.CallsMatching("set-option", "-p", state.ResumePendingOption).FirstIndex()
-			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
-			if pending < 0 || cleared < 0 || pending > cleared {
-				t.Errorf("pending marker at %d, skeleton clear at %d, want the mark first and both present; calls: %v", pending, cleared, cmder.Calls())
+			if !raisedAtClear {
+				t.Error("the skeleton marker cleared before the session's flag was raised")
 			}
-			if want := lazyChainArgs("echo hi", paneKey); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
+			if want := lazyChainArgs(t, "echo hi"); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
 				t.Errorf("exec = %q %v, want the parked chain %v", exec.target, exec.args, want)
 			}
 		})
 	}
 }
 
-func TestHydrateLazy_FiresTheHookOnEveryTailWhenThePaneCannotBeMarked(t *testing.T) {
-	for _, tail := range lazyTails() {
-		t.Run(tail.name, func(t *testing.T) {
-			exec := &stubExecShell{}
-			cmder := commandertest.Quiet(
-				commandertest.Fails(errors.New("tmux refused"), "set-option", "-p"),
-			)
-			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Commander, opts.Logger = cmder, logger
-
-			paneKey := lazyRun(t, tail, opts)
-
-			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
-			}
-			assertOneMarkerRefusalWarn(t, sink, paneKey)
-			if cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex() < 0 {
-				t.Errorf("a refused mark must still clear the skeleton marker; calls: %v", cmder.Calls())
-			}
-		})
-	}
-}
-
-func TestHydrateLazy_ExecWithNoParkedPaneRunsTheHookAndLooksNothingUp(t *testing.T) {
+func TestHydrateLazy_ExecWithNoParkedSessionRunsTheHookAndLooksNothingUp(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	exec := &stubExecShell{}
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   lazyHookKey,
-		HookStore: hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy),
+		HookKey:   lazySession,
+		HookStore: hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy),
 		OpenFIFO:  unexpectedOpenFIFO(t),
 		Logger:    logger,
 		ExecShell: exec.fn(),
@@ -666,9 +575,8 @@ func TestHydrateLazy_ExecWithNoParkedPaneRunsTheHookAndLooksNothingUp(t *testing
 
 	execShellOrHookAndExit(cfg, registration, nil)
 
-	want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-	if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-		t.Errorf("exec = %q %v, want the hook %v", exec.target, exec.args, want)
+	if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+		t.Errorf("exec = %q %v, want the hook %v", exec.target, exec.args, eagerHookArgs)
 	}
 	body := sink.Body()
 	if info := execLogLine(t, body, "INFO", "exec"); !strings.Contains(info, "hook_present=true") {
@@ -676,156 +584,6 @@ func TestHydrateLazy_ExecWithNoParkedPaneRunsTheHookAndLooksNothingUp(t *testing
 	}
 	if n := strings.Count(body, "hook lookup"); n != 0 {
 		t.Errorf("the exec looked the registration up itself %d times: %q", n, body)
-	}
-}
-
-func assertNoPendingMarker(t *testing.T, cmder *commandertest.Scripted) {
-	t.Helper()
-	if calls := cmder.CallsMatching("set-option", "-p", state.ResumePendingOption); len(calls) != 0 {
-		t.Errorf("wrote the pending marker on a pane that must not wait: %v", calls)
-	}
-}
-
-func assertNoTokenWrite(t *testing.T, cmder *commandertest.Scripted) {
-	t.Helper()
-	if calls := cmder.CallsMatching("set-option", "-p", state.PortalPaneIDOption); len(calls) != 0 {
-		t.Errorf("wrote a token on a pane that must not wait: %v", calls)
-	}
-}
-
-// assertNeverReadsTheToken fails on any call naming the token's option other
-// than the one unconditional write: the firing path is a function of saved
-// state and must not depend on what the pane carries live.
-func assertNeverReadsTheToken(t *testing.T, cmder *commandertest.Scripted) {
-	t.Helper()
-	for i, call := range cmder.Calls() {
-		if reflect.DeepEqual(call, tokenWriteArgv()) {
-			continue
-		}
-		if strings.Contains(strings.Join(call, " "), state.PortalPaneIDOption) {
-			t.Errorf("call %d %v touches the pane's token other than by the one write", i, call)
-		}
-	}
-}
-
-func assertNoAltScreenPin(t *testing.T, cmder *commandertest.Scripted) {
-	t.Helper()
-	if calls := cmder.CallsMatching("set-option", "-p", altScreenOption); len(calls) != 0 {
-		t.Errorf("pinned the alternate screen on a pane that must not wait: %v", calls)
-	}
-}
-
-// pinArgv is the pane-scoped write that holds a waiting pane's panel on an
-// alternate screen whatever the install sets.
-func pinArgv() []string {
-	return []string{"set-option", "-p", "-t", lazyPaneID, altScreenOption, "on"}
-}
-
-// tokenWriteArgv stamps the baked hook key onto the pane as its durable token,
-// the one a stale-hook sweep reads to keep the registration.
-func tokenWriteArgv() []string {
-	return []string{"set-option", "-p", "-t", lazyPaneID, state.PortalPaneIDOption, lazyHookKey}
-}
-
-func liftArgv() []string {
-	return []string{"set-option", "-pu", "-t", lazyPaneID, altScreenOption}
-}
-
-func markerWriteArgv() []string {
-	return []string{"set-option", "-p", "-t", lazyPaneID, state.ResumePendingOption, "1"}
-}
-
-func callIndex(cmder *commandertest.Scripted, argv []string) int {
-	for i, call := range cmder.Calls() {
-		if reflect.DeepEqual(call, argv) {
-			return i
-		}
-	}
-	return -1
-}
-
-func assertOneMarkerRefusalWarn(t *testing.T, sink *logtest.Sink, paneKey string) {
-	t.Helper()
-	warn := execLogLine(t, sink.Body(), "WARN", "set resume pending marker failed")
-	if !strings.Contains(warn, "pane_key="+paneKey) {
-		t.Errorf("refusal WARN does not name the pane: %q", warn)
-	}
-	if !strings.Contains(warn, "error=") {
-		t.Errorf("refusal WARN carries no error: %q", warn)
-	}
-}
-
-func TestHydrateLazy_StampsTheTokenBeforeThePinAndTheMarker(t *testing.T) {
-	for _, tail := range lazyTails() {
-		t.Run(tail.name, func(t *testing.T) {
-			exec := &stubExecShell{}
-			cmder := commandertest.Quiet()
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Commander = cmder
-
-			paneKey := lazyRun(t, tail, opts)
-
-			token := callIndex(cmder, tokenWriteArgv())
-			pin := callIndex(cmder, pinArgv())
-			marker := callIndex(cmder, markerWriteArgv())
-			cleared := cmder.CallsMatching("set-option", "-su", state.SkeletonMarkerPrefix+paneKey).FirstIndex()
-			if token < 0 || pin < 0 || marker < 0 || cleared < 0 || token > pin || pin > marker || marker > cleared {
-				t.Errorf("token at %d, pin at %d, marker at %d, skeleton clear at %d; want them in that order; calls: %v",
-					token, pin, marker, cleared, cmder.Calls())
-			}
-			if n := len(cmder.CallsMatching("set-option", "-p", state.PortalPaneIDOption)); n != 1 {
-				t.Errorf("wrote the token %d times, want exactly one; calls: %v", n, cmder.Calls())
-			}
-			assertNeverReadsTheToken(t, cmder)
-			if want := lazyChainArgs("echo hi", paneKey); exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec = %q %v, want the parked chain %v", exec.target, exec.args, want)
-			}
-		})
-	}
-}
-
-func TestHydrateLazy_NamesTheTokenWritesErrorWhenItIsRefused(t *testing.T) {
-	tokenErr := errors.New("token refused")
-	exec := &stubExecShell{}
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-	opts.Logger = logger
-	opts.Commander = commandertest.Quiet(commandertest.Fails(tokenErr, tokenWriteArgv()...))
-
-	lazyRun(t, lazyTails()[0], opts)
-
-	warn := execLogLine(t, sink.Body(), "WARN", "set resume pending marker failed")
-	if !strings.Contains(warn, tokenErr.Error()) {
-		t.Errorf("refusal WARN = %q, want it to name the token write's error %q", warn, tokenErr)
-	}
-	if n := strings.Count(sink.Body(), "WARN"); n != 1 {
-		t.Errorf("got %d WARNs, want the refusal alone: %q", n, sink.Body())
-	}
-}
-
-func TestHydrateLazy_LeavesTheTokenWhenALaterWriteIsRefused(t *testing.T) {
-	refusals := map[string][]string{
-		"the alternate-screen pin": pinArgv(),
-		"the pending marker":       markerWriteArgv(),
-	}
-	for name, refused := range refusals {
-		t.Run(name, func(t *testing.T) {
-			exec := &stubExecShell{}
-			cmder := commandertest.Quiet(commandertest.Fails(errors.New("tmux refused"), refused...))
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
-			opts.Commander = cmder
-
-			lazyRun(t, lazyTails()[0], opts)
-
-			if callIndex(cmder, tokenWriteArgv()) < 0 {
-				t.Fatalf("no token write ahead of the refusal; calls: %v", cmder.Calls())
-			}
-			assertNeverReadsTheToken(t, cmder)
-			want := []string{"sh", "-c", "trap : TERM; echo hi; exec /bin/zsh"}
-			if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, want)
-			}
-		})
 	}
 }
 
@@ -842,15 +600,15 @@ func TestHydrateHandlers_ReportWithoutTouchingEitherMarker(t *testing.T) {
 	}
 	for name, run := range runs {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("TMUX_PANE", lazyPaneID)
+			resumeStateDir(t)
 			cmder := commandertest.Quiet()
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 			dir := t.TempDir()
 			cfg := hydrateCfg(t, hydrateCfgOpts{
 				FIFO:      filepath.Join(dir, "hydrate-alone__0.0.fifo"),
 				File:      filepath.Join(dir, "sb"),
-				HookKey:   lazyHookKey,
-				HookStore: hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy),
+				HookKey:   lazySession,
+				HookStore: hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy),
 				OpenFIFO:  unexpectedOpenFIFO(t),
 				Commander: cmder,
 				Logger:    logger,
@@ -863,6 +621,7 @@ func TestHydrateHandlers_ReportWithoutTouchingEitherMarker(t *testing.T) {
 			if calls := cmder.Calls(); len(calls) != 0 {
 				t.Errorf("handler issued tmux commands %v, want none", calls)
 			}
+			assertNoFlag(t)
 			body := sink.Body()
 			for _, line := range wantLines[name] {
 				if n := strings.Count(body, line); n != 1 {
@@ -870,5 +629,53 @@ func TestHydrateHandlers_ReportWithoutTouchingEitherMarker(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// assertNoFlag fails on any resume-pending flag in the state directory: the
+// session must not wait.
+func assertNoFlag(t *testing.T) {
+	t.Helper()
+	noFlagIn(t)()
+}
+
+// noFlagIn fixes the state directory the test runs in now and returns a check
+// that no flag was raised in it, for a case that moves PORTAL_STATE_DIR on.
+func noFlagIn(t *testing.T) func() {
+	t.Helper()
+	dir, err := state.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if raised, err := state.ResumePending.List(dir); err != nil || len(raised) != 0 {
+			t.Errorf("resume-pending flags = %v, %v; want none on a session that must not wait", raised, err)
+		}
+	}
+}
+
+// assertNoPaneOptionWrite fails on any pane option written: the token and the
+// alternate-screen pin a tmux pane once carried are gone.
+func assertNoPaneOptionWrite(t *testing.T, cmder *commandertest.Scripted) {
+	t.Helper()
+	for _, call := range cmder.Calls() {
+		if len(call) > 1 && call[0] == "set-option" && strings.HasPrefix(call[1], "-p") {
+			t.Errorf("wrote a pane option %v, want none", call)
+		}
+	}
+}
+
+func assertOneFlagRefusalWarn(t *testing.T, sink *logtest.Sink, session string) {
+	t.Helper()
+	if n := strings.Count(sink.Body(), "WARN set resume pending flag failed"); n != 1 {
+		t.Errorf("got %d refusal WARNs, want one: %q", n, sink.Body())
+	}
+	warn := execLogLine(t, sink.Body(), "WARN", "set resume pending flag failed")
+	if !strings.Contains(warn, "session="+session) {
+		t.Errorf("refusal WARN does not name the session: %q", warn)
+	}
+	if !strings.Contains(warn, "error=") {
+		t.Errorf("refusal WARN carries no error: %q", warn)
 	}
 }

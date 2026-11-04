@@ -14,9 +14,6 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/resumekeys"
-	"github.com/leeovery/portal/internal/shellquote"
-	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -52,48 +49,45 @@ type resumeWaitConfig struct {
 
 	// Winch and Settle are the redraw pair: a SIGWINCH arms the settle window
 	// and each further one restarts it, so a drag of any length costs at most
-	// one redraw. A SIGWINCH is the pane's tty announcing a new size or Portal
-	// asking for a repaint — signal-hydrate sends one to the waiting panes of
-	// every session a client attaches to, so a panel painted at restore is
-	// repainted in the theme as it is now — and nothing tells the two apart, so
-	// the window a SIGWINCH opens redraws at whatever size it settles. Size
-	// reads the pane at start-up, and again when the window that start-up
-	// opened elapses.
+	// one redraw. A SIGWINCH is the session's tty announcing a new size or
+	// Portal asking for a repaint, so a panel painted at restore is repainted in
+	// the theme as it is now, and nothing tells the two apart, so the window a
+	// SIGWINCH opens redraws at whatever size it settles. Size reads the session
+	// at start-up, and again when the window that start-up opened elapses.
 	Winch  <-chan os.Signal
 	Settle func(d time.Duration) <-chan time.Time
 	Size   func() (int, int, error)
 
-	// AwaitInput reports whether a byte arrived on the pane within window,
+	// AwaitInput reports whether a byte arrived on the session within window,
 	// reading nothing.
 	AwaitInput func(window time.Duration) (bool, error)
 
-	// ClearMarker lifts the pane's freeze; LookupResume reads the registration
-	// at the moment the key is pressed rather than carrying what the panel was
-	// drawn from, since the store can have changed over an indefinite wait.
-	ClearMarker  func() error
+	// ClearPending lowers the session's resume-pending flag; LookupResume
+	// reads the registration at the moment the key is pressed rather than
+	// carrying what the panel was drawn from, since the store can have changed
+	// over an indefinite wait.
+	ClearPending func() error
 	LookupResume func(hookKey string) (hooks.OnResume, error)
 
-	// DiscardRegistration removes the pane's registration if it still holds
-	// the command shown, reporting whether it removed one.
+	// DiscardRegistration removes the session's registration if it still
+	// holds the command shown, reporting whether it removed one.
 	DiscardRegistration func(hookKey, shown string) (bool, error)
 
-	// EnableTTYSignals gives the kill keys back to a pane being handed to a
+	// EnableTTYSignals gives the kill keys back to a session being handed to a
 	// hook or a shell. The raw restore cannot: it puts back the tty the waiter
 	// found, which the chain keeps with signal generation off.
 	EnableTTYSignals func() error
 
-	// EnableEcho gives echo back to a pane being handed on, which the draw
+	// EnableEcho gives echo back to a session being handed on, which the draw
 	// turned off and the raw restore therefore leaves off.
 	EnableEcho func() error
 
-	// BackToPicker replaces the tmux client showing the pane with the session
-	// picker, reporting whether a client was showing it at all.
-	BackToPicker func() (sent bool, err error)
+	// BackToPicker sends the terminals showing the session to the session
+	// picker, as Escape on the panel asks.
+	BackToPicker func() error
 
-	AltScreen altScreenPin
-
-	// Set by runResumeWait from MakeRaw, so an answer hands the pane on in a
-	// cooked tty. An answer reached without a wait restores nothing.
+	// Set by runResumeWait from MakeRaw, so an answer hands the session on in
+	// a cooked tty. An answer reached without a wait restores nothing.
 	restoreTerminal func()
 }
 
@@ -108,7 +102,7 @@ func (cfg resumeWaitConfig) restore() {
 // paste or a burst answers nothing whatever it carries, and every other byte is
 // swallowed — the three keys that would signal a foreground process among them,
 // since raw mode delivers them as bytes. A SIGTERM is caught and changes
-// nothing; a hangup is not, so tmux tearing the pane down ends the waiter.
+// nothing; a hangup is not, so the session's end ends the waiter.
 func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.CatchSIGTERM()
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
@@ -326,17 +320,17 @@ func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error
 	return reader
 }
 
-// resumeAnswerEnter hands the pane back to its own transcript and starts what
-// the store holds now over it, once the freeze has lifted.
+// resumeAnswerEnter hands the session back to its own transcript and starts
+// what the store holds now over it, once its flag is lowered.
 func resumeAnswerEnter(cfg resumeWaitConfig) error {
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
 
-	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.HookKey).Command
+	command := resumeRegistrationOrLog(cfg.Logger, cfg.LookupResume, cfg.Session).Command
 	cfg.restore()
-	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
-	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.paneRef())
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.Session)
+	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.Session)
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, command)
 	return nil
@@ -353,45 +347,19 @@ func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 	return resumeShowScreen(cfg, resumeScreenPanel)
 }
 
-// resumeBackToPicker is Escape on the panel. It backs out of the pane rather
-// than answering it: the terminal showing the pane goes back to the session
-// picker, and the pane keeps waiting with its registration and its freeze
-// untouched, so the panel is there again the next time the session is opened.
-// A key no client typed — send-keys, or a synchronized sibling — has no
-// terminal to send back and does nothing. One tmux refused redraws the panel
-// with the reason.
+// resumeBackToPicker is Escape on the panel. It backs out of the session
+// rather than answering it: the terminals showing the session go back to the
+// session picker, or to their shells with no runner to show one, and the
+// session keeps waiting with its registration and its flag untouched, so the
+// panel is there again the next time the session is opened. One the runners
+// or the backend refused redraws the panel with the reason.
 func resumeBackToPicker(cfg resumeWaitConfig) (ended bool, err error) {
-	sent, backErr := cfg.BackToPicker()
-	if backErr != nil {
-		cfg.Logger.Warn("back to picker failed", cfg.paneRef().logAttrs("error", backErr)...)
+	if backErr := cfg.BackToPicker(); backErr != nil {
+		cfg.Logger.Warn("back to picker failed", cfg.logAttrs("error", backErr)...)
 		return true, resumeReport(cfg, resumeScreenPanel, resumeBackRefusal(backErr))
 	}
-	if !sent {
-		cfg.Logger.Info("back to picker skipped: no client is showing the pane", cfg.paneRef().logAttrs()...)
-		return false, nil
-	}
-	cfg.Logger.Info("back to picker", cfg.paneRef().logAttrs()...)
+	cfg.Logger.Info("back to picker", cfg.logAttrs()...)
 	return false, nil
-}
-
-// sendClientToPicker replaces the client showing paneID with this binary's
-// session picker, through detach-client -E. The client runs it in the
-// environment it was started in, outside tmux for a client attached from a
-// terminal, so the picker comes up in that terminal and attaches it to
-// whichever session is picked next.
-func sendClientToPicker(client *tmux.Client, paneID string) (bool, error) {
-	name, ok, err := client.ClientShowingPane(paneID)
-	if err != nil || !ok {
-		return false, err
-	}
-	exe, err := resumeChainExe()
-	if err != nil {
-		return false, err
-	}
-	if err := client.DetachClientTo(tmux.ClientNameTarget(name), shellquote.Join([]string{exe, "open"})); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // resumeAnswerDiscard is the confirmation's y. The removal runs while the
@@ -399,7 +367,7 @@ func sendClientToPicker(client *tmux.Client, paneID string) (bool, error) {
 // than closing the confirmation as a cancel would. A discard that found nothing
 // to remove still proceeds: the store is already as the user asked for it.
 func resumeAnswerDiscard(cfg resumeWaitConfig) error {
-	if _, err := cfg.DiscardRegistration(cfg.HookKey, cfg.Command); err != nil {
+	if _, err := cfg.DiscardRegistration(cfg.Session, cfg.Command); err != nil {
 		return resumeReport(cfg, resumeScreenDiscard, resumeDiscardRefusal(err))
 	}
 
@@ -407,33 +375,31 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 		return err
 	}
 	cfg.restore()
-	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.paneRef())
-	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.paneRef())
+	enableTTYSignalsOrLog(cfg.Logger, cfg.EnableTTYSignals, cfg.Session)
+	enableTTYEchoOrLog(cfg.Logger, cfg.EnableEcho, cfg.Session)
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, "")
 	return nil
 }
 
-// resumeUnfreeze hands the pane back to its own transcript and then lifts the
-// freeze, in that order, so a saver tick landing between the two captures what
-// is really in the pane. A clear that is refused brings the waiting panel back
-// with the reason, since a pane handed on frozen stays frozen for the rest of
-// its life; cleared is false then, err is the redraw's, and the alternate-screen
-// pin stays for that redraw to paint onto.
+// resumeUnfreeze hands the session back to its own transcript and then lowers
+// its flag, in that order, so a saver tick landing between the two captures
+// what is really in the session. A clear that is refused brings the waiting
+// panel back with the reason, since a session handed on flagged is never
+// captured again; cleared is false then, and err is the redraw's.
 func resumeUnfreeze(cfg resumeWaitConfig) (cleared bool, err error) {
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
 
-	if err := cfg.ClearMarker(); err != nil {
-		warnResumePendingClearFailed(cfg.Logger, cfg.paneRef(), err)
+	if err := cfg.ClearPending(); err != nil {
+		warnResumePendingClearFailed(cfg.Logger, cfg.Session, err)
 		return false, resumeReport(cfg, resumeScreenPanel, resumeClearRefusal(err))
 	}
-	releaseAltScreenPin(cfg.Logger, cfg.paneRef(), cfg.AltScreen)
 	return true, nil
 }
 
-// resumeReport hands the pane to a fresh draw of screen carrying row as the
+// resumeReport hands the session to a fresh draw of screen carrying row as the
 // report. The draw paints what the payload names without consulting the store,
-// so a registration already gone is still shown rather than a blank pane.
+// so a registration already gone is still shown rather than a blank screen.
 func resumeReport(cfg resumeWaitConfig, screen, row string) error {
 	next := cfg
 	next.Screen = screen
@@ -442,8 +408,8 @@ func resumeReport(cfg resumeWaitConfig, screen, row string) error {
 	return resumeRedraw(next)
 }
 
-// resumeShowScreen hands the pane to a fresh draw of screen. The key press that
-// moved it there ends any report the waiter was holding.
+// resumeShowScreen hands the session to a fresh draw of screen. The key press
+// that moved it there ends any report the waiter was holding.
 func resumeShowScreen(cfg resumeWaitConfig, screen string) error {
 	next := cfg
 	next.Screen = screen
@@ -451,10 +417,10 @@ func resumeShowScreen(cfg resumeWaitConfig, screen string) error {
 	return resumeRedraw(next)
 }
 
-// resumeRedraw hands the pane to a fresh draw of the screen its payload names,
-// carrying that payload whole. A binary that cannot be resolved ends the wait as
-// a read error does: the pending marker is still set, so the chain's tail
-// recovers the pane to a usable shell rather than leaving one whose keys
+// resumeRedraw hands the session to a fresh draw of the screen its payload
+// names, carrying that payload whole. A binary that cannot be resolved ends the
+// wait as a read error does: the flag is still raised, so the chain's tail
+// recovers the session to a usable shell rather than leaving one whose keys
 // silently do nothing.
 func resumeRedraw(cfg resumeWaitConfig) error {
 	cfg.restore()
@@ -462,7 +428,7 @@ func resumeRedraw(cfg resumeWaitConfig) error {
 }
 
 // A store that cannot even be resolved reads as no registration, which drops
-// the pane to a plain shell exactly as an unreadable one does.
+// the session to a plain shell exactly as an unreadable one does.
 func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 	store, _ := loadHookStore()
 	if store == nil {
@@ -471,22 +437,22 @@ func lookupResumeRegistration(hookKey string) (hooks.OnResume, error) {
 	return store.LookupOnResume(hookKey, hooks.ViaHydrate)
 }
 
-// discardResumeRegistration removes the pane's registration when it still
+// discardResumeRegistration removes the session's registration when it still
 // holds the command shown. Unlike the lookup, a store that cannot be resolved
 // is an error: reading it as a miss would drop the panel while the registration
 // it named survives. The store records its own refusals; one it was never
 // reached for is recorded here.
-func discardResumeRegistration(pane resumePaneRef, shown string) (bool, error) {
+func discardResumeRegistration(session, shown string) (bool, error) {
 	store, err := loadHookStore()
 	if err != nil {
-		hydrateLogger.Warn("resolve hook store failed", pane.logAttrs("error", err)...)
+		hydrateLogger.Warn("resolve hook store failed", resumeLogAttrs(session, "error", err)...)
 		return false, hookStoreUnlocatedError{err: err}
 	}
-	return store.Discard(pane.HookKey, hooks.EventOnResume, shown, hooks.ViaPanel)
+	return store.Discard(session, hooks.EventOnResume, shown, hooks.ViaPanel)
 }
 
-// A hangup keeps its default disposition, so tmux tearing the pane down ends
-// the waiter with it.
+// A hangup keeps its default disposition, so the session's end ends the
+// waiter with it.
 func winchSignals() <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGWINCH)
@@ -512,18 +478,16 @@ func makeStdinRaw() (func(), error) {
 
 var resumeWaitRunFunc = runResumeWait
 
-// stateResumeWaitCmd holds a pane between the screens of its resume panel.
+// stateResumeWaitCmd holds a session between the screens of its resume panel.
 var stateResumeWaitCmd = &cobra.Command{
 	Use:    resumeWaitSubcommand,
-	Short:  "Hold a pane showing the resume panel until it is answered (internal)",
+	Short:  "Hold a session showing the resume panel until it is answered (internal)",
 	Args:   cobra.NoArgs,
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, _ := cmd.Flags().GetString(resumeFlagCommand)
 		report, _ := cmd.Flags().GetString(resumeFlagReport)
-		hookKey, _ := cmd.Flags().GetString(resumeFlagHookKey)
-		pane, _ := cmd.Flags().GetString(resumeFlagPane)
-		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
+		session, _ := cmd.Flags().GetString(resumeFlagSession)
 		width, _ := cmd.Flags().GetInt(resumeFlagWidth)
 		height, _ := cmd.Flags().GetInt(resumeFlagHeight)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
@@ -533,39 +497,30 @@ var stateResumeWaitCmd = &cobra.Command{
 			resumeChainPayload: resumeChainPayload{
 				Command: command,
 				Report:  report,
-				HookKey: hookKey,
-				Pane:    pane,
-				PaneKey: paneKey,
+				Session: session,
 				Width:   width,
 				Height:  height,
 				Screen:  screen,
 
 				InputArriving: inputArriving,
 			},
-			Stdout:     os.Stdout,
-			In:         os.Stdin,
-			Logger:     hydrateLogger,
-			IsTerminal: stdinIsTerminal,
-			MakeRaw:    makeStdinRaw,
-			ExecSelf:   defaultExecShell,
-			Winch:      winchSignals(),
-			Settle:     time.After,
-			Size:       paneSizeFromStdin,
-			AwaitInput: awaitStdinInput,
-			ClearMarker: func() error {
-				return state.UnsetResumePendingMarker(tmux.DefaultClient(), tmux.PaneIDTarget(pane))
-			},
-			LookupResume: lookupResumeRegistration,
-			DiscardRegistration: func(hookKey, shown string) (bool, error) {
-				return discardResumeRegistration(resumePaneRef{HookKey: hookKey, PaneKey: paneKey}, shown)
-			},
-			EnableTTYSignals: setStdinSignals,
-			EnableEcho:       setStdinEcho,
-			BackToPicker: func() (bool, error) {
-				return sendClientToPicker(tmux.DefaultClient(), pane)
-			},
-			AltScreen:    paneAltScreenPin(tmux.DefaultClient(), tmux.PaneIDTarget(pane)),
-			CatchSIGTERM: catchSIGTERM,
+			Stdout:              os.Stdout,
+			In:                  os.Stdin,
+			Logger:              hydrateLogger,
+			IsTerminal:          stdinIsTerminal,
+			MakeRaw:             makeStdinRaw,
+			ExecSelf:            defaultExecShell,
+			Winch:               winchSignals(),
+			Settle:              time.After,
+			Size:                paneSizeFromStdin,
+			AwaitInput:          awaitStdinInput,
+			ClearPending:        func() error { return clearResumePending(session) },
+			LookupResume:        lookupResumeRegistration,
+			DiscardRegistration: discardResumeRegistration,
+			EnableTTYSignals:    setStdinSignals,
+			EnableEcho:          setStdinEcho,
+			BackToPicker:        func() error { return backToPicker(session) },
+			CatchSIGTERM:        catchSIGTERM,
 		})
 	},
 }
@@ -573,13 +528,11 @@ var stateResumeWaitCmd = &cobra.Command{
 func init() {
 	stateResumeWaitCmd.Flags().String(resumeFlagCommand, "", "The registered on-resume command the panel states")
 	stateResumeWaitCmd.Flags().String(resumeFlagReport, "", "What an answer that could not be carried out reported")
-	stateResumeWaitCmd.Flags().String(resumeFlagHookKey, "", "Saved pane token identifying the pane's resume hook")
-	stateResumeWaitCmd.Flags().String(resumeFlagPane, "", "The pane id the marker writes address")
-	stateResumeWaitCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
-	stateResumeWaitCmd.Flags().Int(resumeFlagWidth, 0, "Width the screen the pane is showing was drawn at")
-	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the pane is showing was drawn at")
-	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the pane is showing: discard for the confirmation, else the panel")
-	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the pane when it was handed over")
+	stateResumeWaitCmd.Flags().String(resumeFlagSession, "", "The waiting session: its resume hook's key and its resume-pending flag")
+	stateResumeWaitCmd.Flags().Int(resumeFlagWidth, 0, "Width the screen the session is showing was drawn at")
+	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the session is showing was drawn at")
+	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the session is showing: discard for the confirmation, else the panel")
+	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeWaitCmd)

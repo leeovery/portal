@@ -65,13 +65,10 @@ type resumeWaitProbe struct {
 	restoresAtEchoOn int
 	execsAtEchoOn    int
 
-	// Escape on the panel sends the client showing the pane back to the
-	// picker unless the probe is told no client is showing it.
-	backCalls  int
-	backErr    error
-	backUnseen bool
-
-	pin pinProbe
+	// Escape on the panel sends the terminals showing the session back to the
+	// picker unless the probe is told to refuse.
+	backCalls int
+	backErr   error
 }
 
 // orderedWriter records that the pane was written to before it passes the bytes
@@ -104,7 +101,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.rawCalls++
 			return func() { p.restores++ }, nil
 		},
-		ClearMarker: func() error {
+		ClearPending: func() error {
 			p.order = append(p.order, "clear")
 			p.clearCalls++
 			return p.clearErr
@@ -138,15 +135,11 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.execsAtEchoOn = p.execCalls
 			return p.echoOnErr
 		},
-		BackToPicker: func() (bool, error) {
+		BackToPicker: func() error {
 			p.order = append(p.order, "back")
 			p.backCalls++
-			if p.backErr != nil {
-				return false, p.backErr
-			}
-			return !p.backUnseen, nil
+			return p.backErr
 		},
-		AltScreen: p.pin.seams(&p.order),
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")
 			p.execProg = prog
@@ -562,9 +555,7 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		payload := resumeChainPayload{
 			Command: "make deploy",
 			Report:  "could not clear the pending marker",
-			HookKey: "tok123",
-			Pane:    "%7",
-			PaneKey: "proj-a1b2:0.1",
+			Session: "proj-a1b2",
 			Width:   120,
 			Height:  40,
 		}
@@ -595,7 +586,7 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})
+		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--session", "proj-a1b2"})
 		if err := rootCmd.Execute(); err == nil {
 			t.Error("executing resume-wait with no --command succeeded; the flag is required")
 		}

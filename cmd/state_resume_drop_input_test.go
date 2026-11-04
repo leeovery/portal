@@ -326,11 +326,8 @@ func TestResumeDropInput_Draw(t *testing.T) {
 		if rec.Msg != "clear pending input failed" {
 			t.Errorf("WARN = %q, want the refused drop's record", rec.Msg)
 		}
-		if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().HookKey)
-		}
-		if got := rec.AttrOrEmpty("pane_key"); got != samplePayload().PaneKey {
-			t.Errorf("WARN pane_key = %q, want %q", got, samplePayload().PaneKey)
+		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
+			t.Errorf("WARN session = %q, want %q", got, samplePayload().Session)
 		}
 		if got := rec.ErrorAttr(t, "error"); got.Error() != dropErr.Error() {
 			t.Errorf("WARN error = %v, want %v", got, dropErr)

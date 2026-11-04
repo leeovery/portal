@@ -6,10 +6,9 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // onScreen is the payload a hand-off to screen carries: the key press that
@@ -50,18 +49,18 @@ func swallowed(t *testing.T, payload resumeChainPayload, input string) {
 
 func assertNoStateTouched(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
-	assertPaneStateUntouched(t, p)
+	assertSessionStateUntouched(t, p)
 	if p.backCalls != 0 {
 		t.Errorf("a client was sent back to the picker %d times, want 0", p.backCalls)
 	}
 }
 
-// assertPaneStateUntouched asserts nothing the pane's resume rests on moved:
+// assertSessionStateUntouched asserts nothing the pane's resume rests on moved:
 // its marker, and its registration read or written.
-func assertPaneStateUntouched(t *testing.T, p *resumeWaitProbe) {
+func assertSessionStateUntouched(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
 	if p.clearCalls != 0 {
-		t.Errorf("ClearMarker called %d times, want 0", p.clearCalls)
+		t.Errorf("ClearPending called %d times, want 0", p.clearCalls)
 	}
 	if len(p.lookupKeys) != 0 {
 		t.Errorf("the store was read for %q, want it never opened", p.lookupKeys)
@@ -75,8 +74,8 @@ func assertPaneStateUntouched(t *testing.T, p *resumeWaitProbe) {
 // removal of the pane's registration and the pane handed to a plain shell.
 func assertDiscardAnswered(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload) {
 	t.Helper()
-	if !slices.Equal(p.discardKeys, []string{payload.HookKey}) {
-		t.Errorf("discard written for %q, want one write for %q", p.discardKeys, payload.HookKey)
+	if !slices.Equal(p.discardKeys, []string{payload.Session}) {
+		t.Errorf("discard written for %q, want one write for %q", p.discardKeys, payload.Session)
 	}
 	assertShellHandOff(t, p)
 }
@@ -120,16 +119,13 @@ func backOut(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
 	return h.probe
 }
 
-// backToPicker runs a bare Escape on the waiting panel, then ends the input
-// and asserts it sent the client back to the picker once while the pane went on
-// waiting: no hand-off, its marker and registration untouched, and the loop
-// still reading when the input ended.
-func backToPicker(t *testing.T, payload resumeChainPayload, configure func(*resumeWaitProbe)) *resumeWaitProbe {
+// escapeToPicker runs a bare Escape on the waiting panel, then ends the input
+// and asserts it sent the session's terminals back to the picker once while
+// the session went on waiting: no hand-off, its flag and registration
+// untouched, and the loop still reading when the input ended.
+func escapeToPicker(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
 	t.Helper()
 	h := startArrivals(t, payload)
-	if configure != nil {
-		configure(h.probe)
-	}
 	h.typed("\x1b")
 	_ = h.writer.Close()
 	if err := h.wait(); !errors.Is(err, io.EOF) {
@@ -139,7 +135,7 @@ func backToPicker(t *testing.T, payload resumeChainPayload, configure func(*resu
 		t.Errorf("BackToPicker called %d times, want 1", h.probe.backCalls)
 	}
 	assertNoHandOff(t, h.probe)
-	assertPaneStateUntouched(t, h.probe)
+	assertSessionStateUntouched(t, h.probe)
 	if got := h.reader.reads.Load(); got < 2 {
 		t.Errorf("the wait read %d times, want it to read on past the escape", got)
 	}
@@ -184,34 +180,30 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		swallowed(t, reportedPayload(resumeScreenDiscard), "Y")
 	})
 
-	t.Run("it sends the client back to the picker on Escape and keeps the panel waiting", func(t *testing.T) {
-		probe := backToPicker(t, reportedPayload(resumeScreenPanel), nil)
+	t.Run("it sends the session's terminals back to the picker on Escape and keeps the panel waiting", func(t *testing.T) {
+		probe := escapeToPicker(t, reportedPayload(resumeScreenPanel))
 
-		if got := probe.sink.Records().WithMessage("back to picker").AtExactLevel(slog.LevelInfo); len(got) != 1 {
-			t.Errorf("back to picker INFO records = %d, want 1", len(got))
+		rec := probe.sink.Records().WithMessage("back to picker").AtExactLevel(slog.LevelInfo).Only(t, "the Escape's record")
+		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
+			t.Errorf("back to picker session = %q, want %q", got, samplePayload().Session)
 		}
-	})
-
-	t.Run("it keeps waiting on Escape when no client is showing the pane", func(t *testing.T) {
-		probe := backToPicker(t, reportedPayload(resumeScreenPanel), func(p *resumeWaitProbe) { p.backUnseen = true })
-
 		if got := probe.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(got) != 0 {
-			t.Errorf("WARN records = %v, want none: a key no client typed is not a failure", got)
+			t.Errorf("WARN records = %v, want none", got)
 		}
 	})
 
-	t.Run("it reports on the panel an Escape that could not go back to the picker", func(t *testing.T) {
+	t.Run("it reports on the panel an Escape that sent no terminal anywhere", func(t *testing.T) {
 		payload := reportedPayload(resumeScreenPanel)
 		h := startArrivals(t, payload)
-		h.probe.backErr = &tmux.CommandError{Args: []string{"detach-client"}, Stderr: "can't find client: /dev/ttys002", Err: errors.New("exit status 1")}
+		h.probe.backErr = detachError{err: syscall.ECONNREFUSED}
 
 		h.typed("\x1b")
 		h.answered()
 
 		want := payload
-		want.Report = "can't open the picker: can't find client: /dev/ttys002"
+		want.Report = "can't detach: connection refused"
 		assertHandOff(t, h.probe, want)
-		assertPaneStateUntouched(t, h.probe)
+		assertSessionStateUntouched(t, h.probe)
 		h.probe.sink.Records().WithMessage("back to picker failed").AtExactLevel(slog.LevelWarn).Only(t, "the refused back-out")
 	})
 
@@ -322,7 +314,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		probe := backOut(t, payload)
 		assertHandOff(t, probe, onScreen(payload, resumeScreenPanel))
 
-		backToPicker(t, reportedPayload(resumeScreenPanel), nil)
+		escapeToPicker(t, reportedPayload(resumeScreenPanel))
 	})
 
 	t.Run("it resumes on the Enter typed after a chord on the waiting panel", func(t *testing.T) {
@@ -333,10 +325,10 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				probe := answeredAfter(t, payload, chord.keys, "\r")
 
 				if probe.clearCalls != 1 {
-					t.Errorf("ClearMarker called %d times, want 1", probe.clearCalls)
+					t.Errorf("ClearPending called %d times, want 1", probe.clearCalls)
 				}
-				if !slices.Equal(probe.lookupKeys, []string{payload.HookKey}) {
-					t.Errorf("the store was read for %q, want one read for %q", probe.lookupKeys, payload.HookKey)
+				if !slices.Equal(probe.lookupKeys, []string{payload.Session}) {
+					t.Errorf("the store was read for %q, want one read for %q", probe.lookupKeys, payload.Session)
 				}
 				assertHookHandOff(t, probe, payload.Command)
 			})

@@ -7,26 +7,11 @@ import (
 	"syscall"
 
 	"github.com/leeovery/portal/internal/proctable"
+	"github.com/leeovery/portal/internal/proctest"
 )
 
-// procReader reads this user's processes as each read is made: List, and a
-// process's args and parent. A proof of ownership reads a process's parent
-// only after its args, from the kernel as it then stands, so a pid reused
-// between the two reads never borrows the parent its last holder had.
-type procReader interface {
-	List() ([]proctable.Process, error)
-	Args(pid int) (proctable.Args, error)
-	Parent(pid int) (int, error)
-}
-
-type kernelProcs struct{}
-
-func (kernelProcs) List() ([]proctable.Process, error)   { return proctable.List() }
-func (kernelProcs) Args(pid int) (proctable.Args, error) { return proctable.ReadArgs(pid) }
-func (kernelProcs) Parent(pid int) (int, error)          { return proctable.Parent(pid) }
-
 // processes is the reader every proof reads through; tests replace it.
-var processes procReader = kernelProcs{}
+var processes proctest.Reader = proctest.Kernel{}
 
 // ownedBy reports whether pid is a process started for dir: its environment
 // sets ZMX_DIR to exactly dir, or its parent chain reaches one whose does. The
@@ -38,41 +23,9 @@ func ownedBy(pid int, dir string) bool {
 	return ownedThrough(pid, dir, processes)
 }
 
-// ownedThrough walks from pid up its parents to one whose environment proves
-// dir, reading each process's args, then its parent, and then checks the
-// chain it walked still stands. A walk that reaches pid 1, fails a read or
-// repeats a pid proves nothing, so an orphan reparented to launchd is never
-// owned: it leaks rather than risk a wrong kill.
-func ownedThrough(pid int, dir string, r procReader) bool {
-	var chain []int
-	for pid > 1 && !slices.Contains(chain, pid) {
-		chain = append(chain, pid)
-		a, err := r.Args(pid)
-		if err != nil {
-			return false
-		}
-		if slices.Contains(a.Env, "ZMX_DIR="+dir) {
-			return standing(chain, r)
-		}
-		if pid, err = r.Parent(pid); err != nil {
-			return false
-		}
-	}
-	return false
-}
-
-// standing reports whether each process of chain still has the next as its
-// parent, read after every args read the walk made. A process whose parent
-// exits is reparented and never gets that parent back, so a match proves the
-// parent outlived the read of its args: its pid was not taken by another
-// process, a test's own zmx among them, that the read then proved.
-func standing(chain []int, r procReader) bool {
-	for i := 0; i+1 < len(chain); i++ {
-		if parent, err := r.Parent(chain[i]); err != nil || parent != chain[i+1] {
-			return false
-		}
-	}
-	return true
+// ownedThrough is ownedBy read through r.
+func ownedThrough(pid int, dir string, r proctest.Reader) bool {
+	return proctest.Proved(pid, proctest.EnvProof("ZMX_DIR="+dir), r)
 }
 
 // signalOwned sends sig to pid if it is a process started for dir, proved as

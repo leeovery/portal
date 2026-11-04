@@ -93,7 +93,7 @@ func TestLegacyIndexStop(t *testing.T) {
 			return nil
 		})
 
-		if _, _, err := runRootCmd(t, "state", resumeWaitSubcommand, "--pane", "%7", "--command", "make deploy"); err != nil {
+		if _, _, err := runRootCmd(t, "state", resumeWaitSubcommand, "--session", "proj-a1b2", "--command", "make deploy"); err != nil {
 			t.Fatalf("state %s on a version 1 sessions.json: %v", resumeWaitSubcommand, err)
 		}
 		if !ran {

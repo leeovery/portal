@@ -24,8 +24,8 @@ const (
 // what makes the card's wrap visible rather than theoretical.
 const resumeSurfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
 
-// The report a freeze that will not lift leaves on the card.
-const resumeSurfaceReport = "the pane is frozen and will not lift"
+// The report a resume-pending flag that will not lower leaves on the card.
+const resumeSurfaceReport = "can't unpause this session: permission denied"
 
 // The size a pane holds the card at, and one below it: the degraded form is
 // reachable by name rather than by dragging a window to find the fallback

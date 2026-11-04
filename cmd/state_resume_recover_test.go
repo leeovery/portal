@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,11 +14,13 @@ import (
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
+	"github.com/leeovery/portal/internal/state"
 )
 
+const recoverSession = "proj-a1b2"
+
 // resumeRecoverProbe records what the tail hands to its seams, so a test asserts
-// on the recovery without a marker being read from tmux or a process image being
-// replaced.
+// on the recovery without a flag being read or a process image being replaced.
 type resumeRecoverProbe struct {
 	stdout bytes.Buffer
 
@@ -25,9 +28,9 @@ type resumeRecoverProbe struct {
 	// steps ran out of order fails on the sequence rather than on call counts.
 	order []string
 
-	markerValue string
-	markerErr   error
-	readCalls   int
+	raised    bool
+	readErr   error
+	readCalls int
 
 	clearErr   error
 	clearCalls int
@@ -39,12 +42,11 @@ type resumeRecoverProbe struct {
 	signalsOnCalls   int
 	signalsOnErr     error
 	execsAtSignalsOn int
-
-	pin pinProbe
 }
 
-// recoverWriter records that the pane was written to before it passes the bytes
-// on, so the leave sequence takes its place in the same sequence as the seams.
+// recoverWriter records that the session was written to before it passes the
+// bytes on, so the leave sequence takes its place in the same sequence as the
+// seams.
 type recoverWriter struct {
 	probe *resumeRecoverProbe
 }
@@ -56,39 +58,43 @@ func (w recoverWriter) Write(p []byte) (int, error) {
 
 func newResumeRecoverConfig(t *testing.T, p *resumeRecoverProbe) resumeRecoverConfig {
 	t.Helper()
-	return resumeRecoverConfig{
-		HookKey: "tok123",
-		Pane:    "%7",
-		PaneKey: "proj-a1b2:0.1",
-		Stdout:  recoverWriter{probe: p},
-		Logger:  hydrateLogger,
-		ReadMarker: func() (string, error) {
+	cfg := resumeRecoverConfig{
+		Session: recoverSession,
+		Pending: func() (bool, error) {
 			p.order = append(p.order, "read")
 			p.readCalls++
-			return p.markerValue, p.markerErr
+			return p.raised, p.readErr
 		},
-		ClearMarker: func() error {
+		ClearPending: func() error {
 			p.order = append(p.order, "clear")
 			p.clearCalls++
 			return p.clearErr
 		},
-		EnableTTYSignals: func() error {
-			p.signalsOnCalls++
-			p.execsAtSignalsOn = p.execCalls
-			return p.signalsOnErr
-		},
-		AltScreen: p.pin.seams(&p.order),
-		ExecShell: func(prog string, args []string) {
-			p.order = append(p.order, "exec")
-			p.execProg = prog
-			p.execArgs = args
-			p.execCalls++
-		},
 	}
+	return withRecoverProbe(cfg, p)
+}
+
+// withRecoverProbe hands cfg's writes, its exec and its terminal to probe,
+// leaving its flag as cfg reads and lowers it.
+func withRecoverProbe(cfg resumeRecoverConfig, p *resumeRecoverProbe) resumeRecoverConfig {
+	cfg.Stdout = recoverWriter{probe: p}
+	cfg.Logger = hydrateLogger
+	cfg.EnableTTYSignals = func() error {
+		p.signalsOnCalls++
+		p.execsAtSignalsOn = p.execCalls
+		return p.signalsOnErr
+	}
+	cfg.ExecShell = func(prog string, args []string) {
+		p.order = append(p.order, "exec")
+		p.execProg = prog
+		p.execArgs = args
+		p.execCalls++
+	}
+	return cfg
 }
 
 func TestRunResumeRecover(t *testing.T) {
-	t.Run("it does nothing for a pane that was already answered", func(t *testing.T) {
+	t.Run("it does nothing for a session that was already answered", func(t *testing.T) {
 		var probe resumeRecoverProbe
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -96,25 +102,13 @@ func TestRunResumeRecover(t *testing.T) {
 		}
 
 		if probe.readCalls != 1 {
-			t.Errorf("ReadMarker called %d times, want exactly 1", probe.readCalls)
+			t.Errorf("Pending called %d times, want exactly 1", probe.readCalls)
 		}
-		if probe.stdout.Len() != 0 {
-			t.Errorf("the tail wrote %q to stdout, want nothing", probe.stdout.String())
-		}
-		if probe.clearCalls != 0 {
-			t.Errorf("ClearMarker called %d times, want 0", probe.clearCalls)
-		}
-		if probe.execCalls != 0 {
-			t.Errorf("ExecShell called %d times, want 0: an answered pane already ran its own shell", probe.execCalls)
-		}
-		if probe.pin.readCalls != 0 || probe.pin.unpinCalls != 0 {
-			t.Errorf("alternate_on reads = %d, unpins = %d; want none on an answered pane", probe.pin.readCalls, probe.pin.unpinCalls)
-		}
+		assertNotRecovered(t, &probe)
 	})
 
-	t.Run("it recovers a pane whose marker is still set", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+	t.Run("it recovers a session whose flag is still raised", func(t *testing.T) {
+		probe := resumeRecoverProbe{raised: true}
 		sink := logtest.Install(t)
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -124,9 +118,8 @@ func TestRunResumeRecover(t *testing.T) {
 		assertRecovered(t, &probe, sink)
 	})
 
-	t.Run("it treats a failed marker read as still pending", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerErr = errors.New("no pane answers to \"%7\"")
+	t.Run("it treats a flag it can't look for as still raised", func(t *testing.T) {
+		probe := resumeRecoverProbe{readErr: errors.New("permission denied")}
 		sink := logtest.Install(t)
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -137,9 +130,7 @@ func TestRunResumeRecover(t *testing.T) {
 	})
 
 	t.Run("it execs the shell even when the clear failed", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
-		probe.clearErr = errors.New("no such pane")
+		probe := resumeRecoverProbe{raised: true, clearErr: errors.New("read-only file system")}
 		sink := logtest.Install(t)
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -150,14 +141,13 @@ func TestRunResumeRecover(t *testing.T) {
 	})
 
 	t.Run("it leaves the panel's screen before it drops the protection", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+		probe := resumeRecoverProbe{raised: true}
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
 			t.Fatalf("runResumeRecover() error = %v", err)
 		}
 
-		want := []string{"read", "stdout", "clear", "confirm", "unpin", "exec"}
+		want := []string{"read", "stdout", "clear", "exec"}
 		if !slices.Equal(probe.order, want) {
 			t.Errorf("recovery order = %v, want %v", probe.order, want)
 		}
@@ -167,8 +157,7 @@ func TestRunResumeRecover(t *testing.T) {
 	})
 
 	t.Run("it reads no store and draws nothing", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+		probe := resumeRecoverProbe{raised: true}
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
 			t.Fatalf("runResumeRecover() error = %v", err)
@@ -187,7 +176,7 @@ func TestRunResumeRecover(t *testing.T) {
 		for _, imp := range source.File.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
 			if slices.Contains(forbidden, path) {
-				t.Errorf("%s imports %s; the tail makes a pane usable and consults no registration", source.Path, path)
+				t.Errorf("%s imports %s; the tail makes a session usable and consults no registration", source.Path, path)
 			}
 		}
 		for _, callee := range []string{"loadHookStore", "loadPrefsStore", "loadPrefsStoreNoMigrate", "newThemeLoader"} {
@@ -206,19 +195,28 @@ func assertCalleeAbsent(t *testing.T, source sourceguardtest.ParsedSource, calle
 	})
 }
 
-// assertRecovered pins the whole recovery: the pane leaves the panel's screen,
-// its protection is dropped, and it is handed the user's shell whether or not
-// the drop landed.
+// assertNotRecovered pins a tail that left an answered session alone: nothing
+// written, nothing cleared, no second shell.
+func assertNotRecovered(t *testing.T, p *resumeRecoverProbe) {
+	t.Helper()
+	if p.stdout.Len() != 0 {
+		t.Errorf("the tail wrote %q to stdout, want nothing", p.stdout.String())
+	}
+	if p.clearCalls != 0 {
+		t.Errorf("ClearPending called %d times, want 0", p.clearCalls)
+	}
+	if p.execCalls != 0 {
+		t.Errorf("ExecShell called %d times, want 0: an answered session already ran its own shell", p.execCalls)
+	}
+}
+
+// assertRecovered pins the whole recovery: the session leaves the panel's
+// screen, its flag is lowered, and it is handed the user's shell whether or not
+// the lowering landed.
 func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	t.Helper()
-	if p.readCalls != 1 {
-		t.Errorf("ReadMarker called %d times, want exactly 1", p.readCalls)
-	}
 	if got := p.stdout.String(); got != hydrateResetPreamble {
 		t.Errorf("stdout = %q, want the leave sequence %q", got, hydrateResetPreamble)
-	}
-	if p.clearCalls != 1 {
-		t.Errorf("ClearMarker called %d times, want exactly 1", p.clearCalls)
 	}
 	if p.execCalls != 1 {
 		t.Fatalf("ExecShell called %d times, want exactly 1", p.execCalls)
@@ -247,12 +245,10 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 }
 
 func TestRunResumeRecover_FailedClearRecord(t *testing.T) {
-	const message = "unset resume pending marker failed"
+	const message = "clear resume pending flag failed"
 
-	t.Run("it records a failed clear as a WARN naming the pane and the error", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
-		probe.clearErr = errors.New("no such pane")
+	t.Run("it records a failed clear as a WARN naming the session and the error", func(t *testing.T) {
+		probe := resumeRecoverProbe{raised: true, clearErr: errors.New("read-only file system")}
 		sink := logtest.Install(t)
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -264,26 +260,27 @@ func TestRunResumeRecover_FailedClearRecord(t *testing.T) {
 		if !rec.Matches("hydrate", message) {
 			t.Fatalf("WARN = (%q, %q), want (%q, %q)", rec.AttrOrEmpty("component"), rec.Msg, "hydrate", message)
 		}
-		if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
-			t.Errorf("WARN pane_key = %q, want %q", got, "proj-a1b2:0.1")
+		if got := rec.AttrOrEmpty("session"); got != recoverSession {
+			t.Errorf("WARN session = %q, want %q", got, recoverSession)
 		}
-		if got := rec.AttrOrEmpty("hook_key"); got != "tok123" {
-			t.Errorf("WARN hook_key = %q, want %q", got, "tok123")
+		for _, gone := range []string{"pane_key", "hook_key"} {
+			if rec.HasAttr(gone) {
+				t.Errorf("WARN carries %s, a key the chain no longer has", gone)
+			}
 		}
 		if err := rec.ErrorAttr(t, "error"); !errors.Is(err, probe.clearErr) {
 			t.Errorf("WARN error = %v, want %v", err, probe.clearErr)
 		}
 	})
 
-	t.Run("it words the record apart from every other WARN a pane emits", func(t *testing.T) {
+	t.Run("it words the record apart from every other WARN a session emits", func(t *testing.T) {
 		if occurrences := warnMessages(t)[message]; occurrences != 1 {
-			t.Errorf("%q is emitted by %d WARN sites, want 1: a shared wording stops a grep separating a pane that came back eager from one wrongly frozen", message, occurrences)
+			t.Errorf("%q is emitted by %d WARN sites, want 1: a shared wording stops a grep separating a session that came back eager from one left flagged", message, occurrences)
 		}
 	})
 
 	t.Run("it records nothing when the clear succeeded", func(t *testing.T) {
-		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+		probe := resumeRecoverProbe{raised: true}
 		sink := logtest.Install(t)
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
@@ -301,12 +298,7 @@ func TestRunResumeRecover_FailedClearRecord(t *testing.T) {
 
 func TestStateResumeRecoverCommand(t *testing.T) {
 	t.Run("it parses the chain argv the waiter parks it with", func(t *testing.T) {
-		payload := resumeChainPayload{
-			Command: "make deploy",
-			HookKey: "tok123",
-			Pane:    "%7",
-			PaneKey: "proj-a1b2:0.1",
-		}
+		payload := resumeChainPayload{Command: "make deploy", Session: recoverSession}
 
 		var got resumeRecoverConfig
 		withFuncSeam(t, &resumeRecoverRunFunc, func(cfg resumeRecoverConfig) error {
@@ -323,44 +315,79 @@ func TestStateResumeRecoverCommand(t *testing.T) {
 			t.Fatalf("executing the composed argv: %v\nstderr: %s", err, errBuf)
 		}
 
-		if got.Pane != payload.Pane {
-			t.Errorf("pane = %q, want %q", got.Pane, payload.Pane)
-		}
-		if got.PaneKey != payload.PaneKey {
-			t.Errorf("pane key = %q, want %q", got.PaneKey, payload.PaneKey)
-		}
-		if got.HookKey != payload.HookKey {
-			t.Errorf("hook key = %q, want %q", got.HookKey, payload.HookKey)
+		if got.Session != payload.Session {
+			t.Errorf("session = %q, want %q", got.Session, payload.Session)
 		}
 	})
 
-	t.Run("it recovers a pane parked by a build whose tail carried no hook key", func(t *testing.T) {
+	t.Run("it recovers a session parked by a build whose tail named no session", func(t *testing.T) {
+		resumeStateDir(t)
 		var probe resumeRecoverProbe
-		probe.markerValue = "1"
-		probe.clearErr = errors.New("no such pane")
 		sink := logtest.Install(t)
 
 		parsed, err := executeResumeRecover(t, []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1"}, &probe)
 		if err != nil {
-			t.Fatalf("the tail refused an argv with no hook key: %v", err)
+			t.Fatalf("the tail refused an argv naming no session: %v", err)
 		}
 
-		if parsed.HookKey != "" {
-			t.Errorf("hook key = %q, want empty", parsed.HookKey)
+		if parsed.Session != "" {
+			t.Errorf("session = %q, want empty", parsed.Session)
 		}
 		if probe.execCalls != 1 {
-			t.Errorf("ExecShell called %d times, want the pane recovered", probe.execCalls)
+			t.Errorf("ExecShell called %d times, want the session recovered", probe.execCalls)
 		}
-		rec := sink.Records().WithMessage("unset resume pending marker failed").Only(t, "the failed clear's record")
-		if !rec.HasAttr("hook_key") {
-			t.Error("WARN carries no hook_key attr, want it present and empty")
+		rec := sink.Records().WithMessage("clear resume pending flag failed").Only(t, "the failed clear's record")
+		if !errors.Is(rec.ErrorAttr(t, "error"), state.ErrUnsafeName) {
+			t.Errorf("WARN error = %v, want the unnamed session's refusal", rec.ErrorAttr(t, "error"))
 		}
-		if got := rec.AttrOrEmpty("hook_key"); got != "" {
-			t.Errorf("WARN hook_key = %q, want empty", got)
+	})
+}
+
+// The production flag seams run here against a state directory of the test's
+// own: only the session's writes, its exec and its terminal are probed.
+func TestStateResumeRecoverCommand_Flag(t *testing.T) {
+	args := []string{"--session", recoverSession}
+
+	t.Run("it lowers a raised flag and hands the session its shell", func(t *testing.T) {
+		dir := resumeStateDir(t)
+		raiseFlag(t, dir, recoverSession)
+		var probe resumeRecoverProbe
+		sink := logtest.Install(t)
+
+		if _, err := executeResumeRecover(t, args, &probe); err != nil {
+			t.Fatal(err)
 		}
-		if got := rec.AttrOrEmpty("pane_key"); got != "proj-a1b2:0.1" {
-			t.Errorf("WARN pane_key = %q, want %q", got, "proj-a1b2:0.1")
+
+		if flagRaised(t, dir, recoverSession) {
+			t.Error("the flag is still raised after the tail recovered the session")
 		}
+		assertRecovered(t, &probe, sink)
+	})
+
+	t.Run("it leaves a session whose flag is lowered alone", func(t *testing.T) {
+		resumeStateDir(t)
+		var probe resumeRecoverProbe
+
+		if _, err := executeResumeRecover(t, args, &probe); err != nil {
+			t.Fatal(err)
+		}
+
+		assertNotRecovered(t, &probe)
+	})
+
+	t.Run("it recovers a session whose flag it can't look for", func(t *testing.T) {
+		dir := resumeStateDir(t)
+		raiseFlag(t, dir, recoverSession)
+		unsearchable(t, filepath.Join(dir, string(state.ResumePending)))
+		var probe resumeRecoverProbe
+		sink := logtest.Install(t)
+
+		if _, err := executeResumeRecover(t, args, &probe); err != nil {
+			t.Fatal(err)
+		}
+
+		assertRecovered(t, &probe, sink)
+		sink.Records().WithMessage("clear resume pending flag failed").Only(t, "the refused clear's record")
 	})
 }
 
@@ -389,19 +416,16 @@ func warnMessages(t *testing.T) map[string]int {
 	return counts
 }
 
-// executeResumeRecover runs the tail's command line through the real parse and
-// hands back the config the parse produced, with the recovery driven through
-// probe seams so no marker is read from tmux and no process image is replaced.
+// executeResumeRecover runs the tail's command line through the real parse,
+// its flag read and lowered by the production seams, and hands back the config
+// the parse produced. Its writes, its exec and its terminal go to probe, so no
+// process image is replaced.
 func executeResumeRecover(t *testing.T, args []string, probe *resumeRecoverProbe) (resumeRecoverConfig, error) {
 	t.Helper()
 	var parsed resumeRecoverConfig
 	withFuncSeam(t, &resumeRecoverRunFunc, func(cfg resumeRecoverConfig) error {
 		parsed = cfg
-		driven := newResumeRecoverConfig(t, probe)
-		driven.HookKey = cfg.HookKey
-		driven.Pane = cfg.Pane
-		driven.PaneKey = cfg.PaneKey
-		return runResumeRecover(driven)
+		return runResumeRecover(withRecoverProbe(cfg, probe))
 	})
 
 	resetRootCmd()
@@ -419,10 +443,8 @@ func executeResumeRecover(t *testing.T, args []string, probe *resumeRecoverProbe
 func TestStateResumeRecoverCommand_ForeignArgv(t *testing.T) {
 	full := resumeChainPayload{
 		Command:   "claude --resume abc",
-		Report:    "could not clear the pending marker",
-		HookKey:   "tok123",
-		Pane:      "%7",
-		PaneKey:   "proj-a1b2:0.1",
+		Report:    "could not clear the resume-pending flag",
+		Session:   recoverSession,
 		Width:     120,
 		Height:    40,
 		Screen:    resumeScreenDiscard,
@@ -438,29 +460,34 @@ func TestStateResumeRecoverCommand_ForeignArgv(t *testing.T) {
 		},
 		{
 			name: "a flag a later build added, with its value attached",
-			args: []string{"--pane", "%7", "--resume-attempt=3", "--pane-key", "proj-a1b2:0.1"},
+			args: []string{"--session", recoverSession, "--resume-attempt=3"},
 		},
 		{
 			name: "a flag a later build added, with its value separate",
-			args: []string{"--resume-attempt", "3", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+			args: []string{"--resume-attempt", "3", "--session", recoverSession},
 		},
 		{
 			name: "a switch a later build added, last on the line",
-			args: []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1", "--quiet"},
+			args: []string{"--session", recoverSession, "--quiet"},
 		},
 		{
 			name: "a positional word this build takes none of",
-			args: []string{"attempt-3", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+			args: []string{"attempt-3", "--session", recoverSession},
 		},
 		{
 			name: "a shorthand this build does not register",
-			args: []string{"-q", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"},
+			args: []string{"-q", "--session", recoverSession},
+		},
+		{
+			name: "the pane flags a tmux-era build parked it with",
+			args: []string{"--hook-key", "tok123", "--pane", "%7", "--pane-key", "proj-a1b2:0.1", "--session", recoverSession},
 		},
 	}
 	for _, tc := range cases {
-		t.Run("it recovers the pane when handed "+tc.name, func(t *testing.T) {
+		t.Run("it recovers the session when handed "+tc.name, func(t *testing.T) {
+			dir := resumeStateDir(t)
+			raiseFlag(t, dir, recoverSession)
 			var probe resumeRecoverProbe
-			probe.markerValue = "1"
 			sink := logtest.Install(t)
 
 			parsed, err := executeResumeRecover(t, tc.args, &probe)
@@ -468,45 +495,13 @@ func TestStateResumeRecoverCommand_ForeignArgv(t *testing.T) {
 				t.Fatalf("the tail refused its argv %q: %v", tc.args, err)
 			}
 
-			if parsed.Pane != "%7" {
-				t.Errorf("pane = %q, want %q", parsed.Pane, "%7")
-			}
-			if parsed.PaneKey != "proj-a1b2:0.1" {
-				t.Errorf("pane key = %q, want %q", parsed.PaneKey, "proj-a1b2:0.1")
+			if parsed.Session != recoverSession {
+				t.Errorf("session = %q, want %q", parsed.Session, recoverSession)
 			}
 			assertRecovered(t, &probe, sink)
-		})
-	}
-}
-
-func TestStateResumeRecoverCommand_PaneFromEnvironment(t *testing.T) {
-	cases := []struct {
-		name string
-		env  string
-		args []string
-		want string
-	}{
-		{name: "it recovers the pane $TMUX_PANE names when handed no --pane", env: "%12", args: []string{"--pane-key", "proj-a1b2:0.1"}, want: "%12"},
-		{name: "it recovers the pane $TMUX_PANE names when handed an empty --pane", env: "%12", args: []string{"--pane", "", "--pane-key", "proj-a1b2:0.1"}, want: "%12"},
-		{name: "it addresses the pane a non-empty --pane names", env: "%12", args: []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1"}, want: "%7"},
-		{name: "it recovers the pane $TMUX_PANE names when handed no flags at all", env: "%12", args: nil, want: "%12"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("TMUX_PANE", tc.env)
-			var probe resumeRecoverProbe
-			probe.markerValue = "1"
-			sink := logtest.Install(t)
-
-			parsed, err := executeResumeRecover(t, tc.args, &probe)
-			if err != nil {
-				t.Fatalf("the tail refused its argv %q: %v", tc.args, err)
+			if flagRaised(t, dir, recoverSession) {
+				t.Error("the flag is still raised")
 			}
-
-			if parsed.Pane != tc.want {
-				t.Errorf("pane = %q, want %q", parsed.Pane, tc.want)
-			}
-			assertRecovered(t, &probe, sink)
 		})
 	}
 }

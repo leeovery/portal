@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/proctable"
+	"github.com/leeovery/portal/internal/proctest"
 )
 
 // procTree fakes the process reader: each pid's ZMX_DIR, or "" for an
@@ -111,7 +112,7 @@ func TestOwnership_ReadsEachParentAfterItsArgs(t *testing.T) {
 		}
 		return tree
 	}
-	use := func(t *testing.T, r procReader) {
+	use := func(t *testing.T, r proctest.Reader) {
 		old := processes
 		processes = r
 		t.Cleanup(func() { processes = old })

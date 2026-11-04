@@ -4,18 +4,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/leeovery/portal/internal/harnesstest"
 )
-
-// signalPane sends sig to every process in the pane: the parked chain leads the
-// pane's process group.
-func (p termPane) signalPane(t *testing.T, sig syscall.Signal) {
-	t.Helper()
-	if err := syscall.Kill(-p.parked, sig); err != nil {
-		t.Fatalf("send %v to the pane's process group %d: %v", sig, p.parked, err)
-	}
-}
 
 func (p termPane) assertParkedShellUp(t *testing.T) {
 	t.Helper()
@@ -27,53 +16,52 @@ func (p termPane) assertParkedShellUp(t *testing.T) {
 }
 
 func TestParkedResumeChain_SIGTERM(t *testing.T) {
-	t.Run("a waiting pane stays waiting through a SIGTERM to its parked shell", func(t *testing.T) {
+	t.Run("a waiting session stays waiting through a SIGTERM to its parked shell", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		waiter := p.awaitEvent(t, termEventWait, 1)
 
 		p.signal(t, p.parked, syscall.SIGTERM)
 
 		p.assertStillWaiting(t, waiter)
-		if !processAlive(p.parked) {
-			t.Errorf("the parked shell (pid %d) ended; %s", p.parked, p.diagnostics())
-		}
+		p.assertParkedShellUp(t)
 	})
 
-	t.Run("a waiting pane stays waiting through a SIGTERM to every process in it", func(t *testing.T) {
+	t.Run("a waiting session stays waiting through a SIGTERM to every process in it", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		waiter := p.awaitEvent(t, termEventWait, 1)
 
-		p.signalPane(t, syscall.SIGTERM)
+		p.signalSession(t, syscall.SIGTERM)
 
 		p.assertStillWaiting(t, waiter)
-		if !processAlive(p.parked) {
-			t.Errorf("the parked shell (pid %d) ended; %s", p.parked, p.diagnostics())
-		}
+		p.assertParkedShellUp(t)
 	})
 
-	t.Run("an answered pane keeps its session through a SIGTERM to every process while its hook runs", func(t *testing.T) {
+	t.Run("an answered session keeps its shell through a SIGTERM to every process while its hook runs", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		waiter := p.awaitEvent(t, termEventWait, 1)
 		p.press(t, "\r")
 		p.readPID(t, "hook.pid", "the hook program")
 
-		p.signalPane(t, syscall.SIGTERM)
+		p.signalSession(t, syscall.SIGTERM)
 
 		shell := p.readPID(t, "shell.pid", "the user's shell")
 		if shell != waiter {
-			t.Fatalf("the user's shell runs as pid %d, want the pane's own process %d", shell, waiter)
+			t.Fatalf("the user's shell runs as pid %d, want the session's own process %d", shell, waiter)
 		}
+		gone := p.held.Watch(t, shell)
 		time.Sleep(termPaneSettle)
 		p.assertParkedShellUp(t)
-		if !processAlive(shell) {
+		select {
+		case <-gone:
 			t.Errorf("the user's shell (pid %d) ended; %s", shell, p.diagnostics())
+		default:
 		}
 		if p.recorded(termEventRecovered) {
-			t.Errorf("the recovery tail ran while the user's shell holds the pane; %s", p.diagnostics())
+			t.Errorf("the recovery tail ran while the user's shell holds the session; %s", p.diagnostics())
 		}
 	})
 
-	t.Run("an answered pane whose parked shell caught a SIGTERM hands its hook and shell a default SIGTERM", func(t *testing.T) {
+	t.Run("an answered session whose parked shell caught a SIGTERM hands its hook and shell a default SIGTERM", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		waiter := p.awaitEvent(t, termEventWait, 1)
 		p.signal(t, p.parked, syscall.SIGTERM)
@@ -82,29 +70,25 @@ func TestParkedResumeChain_SIGTERM(t *testing.T) {
 		p.press(t, "\r")
 
 		hook := p.readPID(t, "hook.pid", "the hook program")
-		assertEndsOnSIGTERM(t, hook, "the hook program")
+		assertEndsOnSIGTERM(t, p.held, hook, "the hook program")
 		shell := p.readPID(t, "shell.pid", "the user's shell")
 		if shell != waiter {
-			t.Fatalf("the user's shell runs as pid %d, want the pane's own process %d", shell, waiter)
+			t.Fatalf("the user's shell runs as pid %d, want the session's own process %d", shell, waiter)
 		}
-		assertEndsOnSIGTERM(t, shell, "the user's shell")
+		assertEndsOnSIGTERM(t, p.held, shell, "the user's shell")
 	})
 
-	t.Run("a waiting pane's parked shell still ends on SIGHUP", func(t *testing.T) {
+	t.Run("a waiting session's parked shell still ends on SIGHUP", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		p.awaitEvent(t, termEventWait, 1)
 
 		p.signal(t, p.parked, syscall.SIGHUP)
 
-		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool {
-			select {
-			case <-p.exited:
-				return true
-			default:
-				return false
-			}
-		}) {
+		if !endsWithin(p.exited, termPaneWait) {
 			t.Fatalf("the parked shell survived SIGHUP; %s", p.diagnostics())
+		}
+		if status := p.held.Status(); !status.Signaled() || status.Signal() != syscall.SIGHUP {
+			t.Errorf("the parked shell ended %v, want killed by SIGHUP", status)
 		}
 	})
 }

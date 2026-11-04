@@ -46,7 +46,7 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 
 	// A refusal still paints: a panel over an echoing tty is better than none.
 	if err := cfg.DisableEcho(); err != nil {
-		cfg.Logger.Warn("disable terminal echo failed", cfg.paneRef().logAttrs("error", err)...)
+		cfg.Logger.Warn("disable terminal echo failed", cfg.logAttrs("error", err)...)
 	}
 
 	// The read's error is not consulted: a failed or non-positive size reaches
@@ -66,7 +66,7 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	// is never put up over that input, and the waiter is told the input is its
 	// own to swallow.
 	if dropErr != nil {
-		cfg.Logger.Warn("clear pending input failed", shown.paneRef().logAttrs("error", dropErr)...)
+		cfg.Logger.Warn("clear pending input failed", shown.logAttrs("error", dropErr)...)
 		shown.Screen = resumeScreenPanel
 		shown.Report = resumeDropRefusal(dropErr)
 		shown.InputArriving = true
@@ -138,27 +138,25 @@ func dropStdinInputQueue() error {
 	return nil
 }
 
-// The pane's own tty rather than a tmux read, so a boot's worth of panes costs
-// no tmux calls at all.
+// The session's own tty, so a boot's worth of waiting sessions asks the
+// backend nothing.
 func paneSizeFromStdin() (int, int, error) {
 	return term.GetSize(os.Stdin.Fd())
 }
 
 var resumeDrawRunFunc = runResumeDraw
 
-// stateResumeDrawCmd paints one screen of a waiting pane and hands the pane to
-// the waiter.
+// stateResumeDrawCmd paints one screen of a waiting session and hands the
+// session to the waiter.
 var stateResumeDrawCmd = &cobra.Command{
 	Use:    resumeDrawSubcommand,
-	Short:  "Draw the resume panel into a waiting pane (internal)",
+	Short:  "Draw the resume panel into a waiting session (internal)",
 	Args:   cobra.NoArgs,
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, _ := cmd.Flags().GetString(resumeFlagCommand)
 		report, _ := cmd.Flags().GetString(resumeFlagReport)
-		hookKey, _ := cmd.Flags().GetString(resumeFlagHookKey)
-		pane, _ := cmd.Flags().GetString(resumeFlagPane)
-		paneKey, _ := cmd.Flags().GetString(resumeFlagPaneKey)
+		session, _ := cmd.Flags().GetString(resumeFlagSession)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
@@ -167,9 +165,7 @@ var stateResumeDrawCmd = &cobra.Command{
 			resumeChainPayload: resumeChainPayload{
 				Command:       command,
 				Report:        report,
-				HookKey:       hookKey,
-				Pane:          pane,
-				PaneKey:       paneKey,
+				Session:       session,
 				Screen:        screen,
 				DropInput:     dropInput,
 				InputArriving: inputArriving,
@@ -190,17 +186,15 @@ var stateResumeDrawCmd = &cobra.Command{
 func init() {
 	stateResumeDrawCmd.Flags().String(resumeFlagCommand, "", "The registered on-resume command the panel states")
 	stateResumeDrawCmd.Flags().String(resumeFlagReport, "", "What an answer that could not be carried out reported")
-	stateResumeDrawCmd.Flags().String(resumeFlagHookKey, "", "Saved pane token identifying the pane's resume hook")
-	stateResumeDrawCmd.Flags().String(resumeFlagPane, "", "The pane id the marker writes address")
-	stateResumeDrawCmd.Flags().String(resumeFlagPaneKey, "", "The pane key the chain's records name the pane by")
+	stateResumeDrawCmd.Flags().String(resumeFlagSession, "", "The waiting session: its resume hook's key and its resume-pending flag")
 	// Width and height are registered but not read: a draw measures the pane
 	// itself, and a flag the waiter hands back that this command did not
 	// register would fail its parse.
 	stateResumeDrawCmd.Flags().Int(resumeFlagWidth, 0, "Width the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().Int(resumeFlagHeight, 0, "Height the previous screen was drawn at")
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
-	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the pane before drawing")
-	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the pane when it was handed over")
+	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the session before drawing")
+	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 
 	stateCmd.AddCommand(stateResumeDrawCmd)

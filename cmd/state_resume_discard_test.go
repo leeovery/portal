@@ -49,8 +49,8 @@ func TestResumeAnswerDiscard_Removal(t *testing.T) {
 		payload := confirmationPayload()
 		answerDiscard(t, &probe, payload)
 
-		if !slices.Equal(probe.discardKeys, []string{payload.HookKey}) {
-			t.Fatalf("discard written for %q, want one write for %q", probe.discardKeys, payload.HookKey)
+		if !slices.Equal(probe.discardKeys, []string{payload.Session}) {
+			t.Fatalf("discard written for %q, want one write for %q", probe.discardKeys, payload.Session)
 		}
 		if len(probe.order) == 0 || probe.order[0] != "discard" {
 			t.Errorf("answer sequence = %q, want the removal before anything reaches the pane", probe.order)
@@ -72,7 +72,7 @@ func TestResumeAnswerDiscard_Removal(t *testing.T) {
 		probe.discardMiss = true
 		answerDiscard(t, &probe, confirmationPayload())
 
-		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
 		if got := probe.stdout.String(); got != hydrateResetPreamble {
 			t.Errorf("what the answer wrote to the pane = %q, want the leave sequence %q", got, hydrateResetPreamble)
 		}
@@ -101,7 +101,7 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 
 		assertOrder(t, &probe, "discard", "exec")
 		if probe.clearCalls != 0 {
-			t.Errorf("ClearMarker called %d times, want 0", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want 0", probe.clearCalls)
 		}
 		if probe.stdout.Len() != 0 {
 			t.Errorf("the answer wrote %q to the pane, want nothing: the confirmation stays up", probe.stdout.String())
@@ -116,10 +116,10 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 		payload := reportedOn(confirmationPayload(), resumeScreenDiscard, writeRow)
 		answerDiscard(t, &probe, payload)
 
-		if !slices.Equal(probe.discardKeys, []string{payload.HookKey}) {
-			t.Fatalf("discard written for %q, want one write for %q", probe.discardKeys, payload.HookKey)
+		if !slices.Equal(probe.discardKeys, []string{payload.Session}) {
+			t.Fatalf("discard written for %q, want one write for %q", probe.discardKeys, payload.Session)
 		}
-		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
 		assertShellHandOff(t, &probe)
 	})
 }
@@ -139,17 +139,17 @@ func TestResumeAnswerDiscard_Order(t *testing.T) {
 		}
 	})
 
-	t.Run("it clears the marker and lifts the pin before it runs the shell", func(t *testing.T) {
+	t.Run("it lowers the flag before it runs the shell", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerDiscard(t, &probe, confirmationPayload())
 
-		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
 	})
 }
 
 func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
-	clearErr := tmuxRefusal(t)
-	const clearRow = "can't unpause this pane: can't find pane: %7"
+	clearErr := flagRefusal(t)
+	const clearRow = "can't unpause this session: permission denied"
 
 	t.Run("it redraws the waiting panel with the reason when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
@@ -187,7 +187,7 @@ func TestResumeAnswerDiscard_FailedClear(t *testing.T) {
 		}
 	})
 
-	t.Run("it runs neither the shell nor anything else, and leaves the pin, when the clear fails", func(t *testing.T) {
+	t.Run("it runs neither the shell nor anything else when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
 		probe.clearErr = clearErr
 		answerDiscard(t, &probe, confirmationPayload())
@@ -214,12 +214,12 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 		assertShellHandOff(t, &probe)
 	})
 
-	t.Run("it makes no tmux call but the marker unset and the pin's release", func(t *testing.T) {
+	t.Run("it touches nothing but the registration and its flag", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerDiscard(t, &probe, confirmationPayload())
 
 		if probe.clearCalls != 1 {
-			t.Errorf("ClearMarker called %d times, want exactly 1", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want exactly 1", probe.clearCalls)
 		}
 		if len(probe.lookupKeys) != 0 {
 			t.Errorf("the store was read for %q, want only the removal", probe.lookupKeys)
@@ -227,7 +227,7 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 		if len(probe.discardKeys) != 1 {
 			t.Errorf("DiscardRegistration called %d times, want exactly 1", len(probe.discardKeys))
 		}
-		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
 	})
 
 	t.Run("it restores the terminal before every exec", func(t *testing.T) {
@@ -237,7 +237,7 @@ func TestResumeAnswerDiscard_HandOff(t *testing.T) {
 		}{
 			{"a removal", func(*resumeWaitProbe) {}},
 			{"a refused write", func(p *resumeWaitProbe) { p.discardErr = errors.New("is a directory") }},
-			{"a clear that failed", func(p *resumeWaitProbe) { p.clearErr = errors.New("can't find pane: %7") }},
+			{"a clear that failed", func(p *resumeWaitProbe) { p.clearErr = errors.New("read-only file system") }},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -295,7 +295,7 @@ func TestResumeAnswerDiscard_RewrittenEntry(t *testing.T) {
 		sink := logtest.Install(t)
 		payload := confirmationPayload()
 		store, path := hookstest.StageStore(t, hookstest.Staging{
-			Entries: map[string]string{payload.HookKey: payload.Command + " --replaced"},
+			Entries: map[string]string{payload.Session: payload.Command + " --replaced"},
 		})
 		before := readFileBytes(t, path)
 
@@ -313,7 +313,7 @@ func TestResumeAnswerDiscard_RewrittenEntry(t *testing.T) {
 		if got := sink.Records().Matching("hooks", "discard"); len(got) != 0 {
 			t.Errorf("discard records = %+v, want none", got)
 		}
-		assertOrder(t, &probe, "discard", "stdout", "clear", "confirm", "unpin", "exec")
+		assertOrder(t, &probe, "discard", "stdout", "clear", "exec")
 		assertShellHandOff(t, &probe)
 	})
 }
@@ -323,7 +323,7 @@ func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 		sink := logtest.Install(t)
 		payload := confirmationPayload()
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Entries: map[string]string{payload.HookKey: payload.Command},
+			Entries: map[string]string{payload.Session: payload.Command},
 		})
 
 		var probe resumeWaitProbe
@@ -345,7 +345,7 @@ func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 				t.Errorf("the waiter emitted %q, want no line but the exec marker", r.Msg)
 			}
 		}
-		if got, err := store.LookupOnResume(payload.HookKey, hooks.ViaHydrate); err != nil || got.Found {
+		if got, err := store.LookupOnResume(payload.Session, hooks.ViaHydrate); err != nil || got.Found {
 			t.Errorf("LookupOnResume() = %+v, %v; want the registration gone", got, err)
 		}
 	})
@@ -353,10 +353,10 @@ func TestResumeAnswerDiscard_Breadcrumb(t *testing.T) {
 
 func TestDiscardResumeRegistration(t *testing.T) {
 	t.Run("it removes the registration the store holds", func(t *testing.T) {
-		hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make deploy"}})
+		hooksFileInTempDir(t, map[string]map[string]string{"proj-a1b2": {"on-resume": "make deploy"}})
 		sink := logtest.Install(t)
 
-		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
+		removed, err := discardResumeRegistration(sampleDiscardSession, "make deploy")
 		if err != nil || !removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want a removal", removed, err)
 		}
@@ -364,17 +364,17 @@ func TestDiscardResumeRegistration(t *testing.T) {
 		if got := rec.AttrOrEmpty("via"); got != hooks.ViaPanel.String() {
 			t.Errorf("discard breadcrumb via = %q, want %q", got, hooks.ViaPanel.String())
 		}
-		if got := lookupRegistrationOrFail(t, "tok123"); got.Found {
+		if got := lookupRegistrationOrFail(t, sampleDiscardSession); got.Found {
 			t.Errorf("registration after discard = %+v, want it gone", got)
 		}
 	})
 
 	t.Run("it removes nothing from an entry rewritten to another command", func(t *testing.T) {
-		_, path := hooksFileInTempDir(t, map[string]map[string]string{"tok123": {"on-resume": "make test"}})
+		_, path := hooksFileInTempDir(t, map[string]map[string]string{"proj-a1b2": {"on-resume": "make test"}})
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
+		removed, err := discardResumeRegistration(sampleDiscardSession, "make deploy")
 		if err != nil || removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want no removal and no error", removed, err)
 		}
@@ -387,7 +387,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 	t.Run("it reports nothing removed for a key the store does not hold", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{"other": {"on-resume": "make deploy"}})
 
-		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
+		removed, err := discardResumeRegistration(sampleDiscardSession, "make deploy")
 		if err != nil || removed {
 			t.Fatalf("discardResumeRegistration() = %v, %v; want no removal and no error", removed, err)
 		}
@@ -403,7 +403,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 			t.Fatal("loadHookStore() resolved a store; the fixture must leave none")
 		}
 
-		removed, err := discardResumeRegistration(sampleDiscardPane, "make deploy")
+		removed, err := discardResumeRegistration(sampleDiscardSession, "make deploy")
 		if removed {
 			t.Error("discardResumeRegistration() reported a removal from a store it could not resolve")
 		}
@@ -413,7 +413,7 @@ func TestDiscardResumeRegistration(t *testing.T) {
 	})
 }
 
-var sampleDiscardPane = resumePaneRef{HookKey: "tok123", PaneKey: "proj-a1b2:0.1"}
+const sampleDiscardSession = "proj-a1b2"
 
 func lookupRegistrationOrFail(t *testing.T, hookKey string) hooks.OnResume {
 	t.Helper()

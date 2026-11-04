@@ -27,6 +27,9 @@ import (
 // attachSettle bounds each wait on Portal, zmx or the session's shell.
 const attachSettle = 20 * time.Second
 
+// portalTermRows and portalTermCols size the terminal a portalTerm runs on.
+const portalTermRows, portalTermCols = 40, 120
+
 // pickerMark is on every picker page, and nowhere in a session.
 const pickerMark = "session manager"
 
@@ -108,7 +111,7 @@ func (w *portalWorld) startIn(t *testing.T, env []string, argv ...string) *porta
 	t.Helper()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env
-	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
+	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: portalTermRows, Cols: portalTermCols})
 	if err != nil {
 		t.Fatalf("start %s on a terminal: %v", argv[0], err)
 	}

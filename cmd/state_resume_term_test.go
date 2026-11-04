@@ -16,15 +16,17 @@ import (
 
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 )
 
-// The waiting pane's processes are run for real here, as this test binary
-// re-executed into termPaneProcessName: a signal's disposition is a property of
-// a whole process, which an in-process seam cannot observe. Every tmux and tty
-// seam is faked, and each process records what it did to the events file.
+// The waiting session's processes are run for real here, as this test binary
+// re-executed into termPaneProcessName: a signal's disposition is a property
+// of a whole process, which an in-process seam cannot observe. Every tty seam
+// is faked, the flag is a real one in a state directory of the test's own, and
+// each process records what it did to the events file.
 const (
 	termPaneProcessName = "TestResumeTermPaneProcess"
 	termPaneDirEnv      = "PORTAL_TEST_TERM_PANE_DIR"
@@ -40,7 +42,6 @@ const (
 const (
 	termEventDraw      = "draw"
 	termEventWait      = "wait"
-	termEventCleared   = "cleared"
 	termEventRecovered = "recovered"
 	termEventFailed    = "failed"
 
@@ -68,18 +69,10 @@ resume-recover)
 esac
 `
 
-// stubTermPaneTmux answers the parked chain's pending-marker read as the pane
-// stands, set until something has cleared it, and records the chain's own clear.
-const stubTermPaneTmux = `#!/bin/sh
-case "$*" in
-display-message*@portal-resume-pending*)
-	if grep -qx ` + termEventCleared + ` "$` + termPaneDirEnv + `/events" 2>/dev/null; then echo; else echo 1; fi
-	;;
-set-option*@portal-resume-pending*)
-	echo ` + termEventCleared + ` >> "$` + termPaneDirEnv + `/events"
-	;;
-esac
-`
+// termPaneStateDir is the session's state directory, under the harness's own
+// dir: the package's TestMain poisons PORTAL_STATE_DIR in every process the
+// test binary becomes, so each one points it back here.
+func termPaneStateDir(dir string) string { return filepath.Join(dir, "state") }
 
 // TestResumeTermPaneProcess is not a test: it is the body of the draw and the
 // waiter the harness runs, and does nothing unless started as one.
@@ -88,6 +81,7 @@ func TestResumeTermPaneProcess(t *testing.T) {
 	if dir == "" {
 		return
 	}
+	t.Setenv("PORTAL_STATE_DIR", termPaneStateDir(dir))
 	pane := termPaneProcess{t: t, dir: dir}
 
 	withFuncSeam(t, &resumeDrawRunFunc, func(cfg resumeDrawConfig) error {
@@ -220,10 +214,6 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	cfg.MakeRaw = func() (func(), error) { return func() {}, nil }
 	cfg.In = &announcingReader{inner: cfg.In, announce: func() { p.recordSelf(termEventWait) }}
 	cfg.Size = p.size
-	cfg.ClearMarker = func() error {
-		p.record(termEventCleared)
-		return nil
-	}
 	cfg.LookupResume = func(string) (hooks.OnResume, error) {
 		return hooks.OnResume{Command: os.Getenv(termPaneHookEnv), Found: true}, nil
 	}
@@ -232,11 +222,6 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	}
 	cfg.EnableTTYSignals = func() error { return nil }
 	cfg.EnableEcho = func() error { return nil }
-	cfg.AltScreen = altScreenPin{
-		AlternateOn: func() (string, error) { return "0", nil },
-		Unpin:       func() error { return nil },
-		Pause:       func(time.Duration) {},
-	}
 	cfg.ExecSelf = p.execSelf
 	cfg.CatchSIGTERM = p.holdingCatch(termEventWait, cfg.CatchSIGTERM)
 	return cfg
@@ -255,19 +240,17 @@ func (r *announcingReader) Read(b []byte) (int, error) {
 	return r.inner.Read(b)
 }
 
-// termPane is a waiting pane: the parked chain, started as restore leaves it.
+// termPane is a waiting session: the parked chain, started as restore leaves
+// it, its flag raised in a state directory of the test's own.
 type termPane struct {
 	dir    string
 	parked int
 	stdin  io.WriteCloser
-	exited chan struct{}
+	exited <-chan struct{}
 
-	// ended holds how the parked chain ended, once exited is closed.
-	ended *termPaneEnd
-}
-
-type termPaneEnd struct {
-	state *os.ProcessState
+	// held holds the parked chain unreaped, so every process signalled or
+	// watched in the session is proved the test's own first.
+	held *proctest.Held
 }
 
 type termPaneOpts struct {
@@ -276,9 +259,9 @@ type termPaneOpts struct {
 	// holdCatch is the termPaneHoldCatchEnv value, empty to hold none.
 	holdCatch string
 
-	// tty, when set, is the pane's terminal: the parked chain leads a session
-	// with it as its controlling terminal, as a tmux pane's process does, and
-	// the test holds no stdin.
+	// tty, when set, is the session's terminal: the parked chain leads a
+	// session with it as its controlling terminal, as a session's process
+	// does, and the test holds no stdin.
 	tty *os.File
 }
 
@@ -295,23 +278,20 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 	// once its image is replaced, so its temp root is one this test removes.
 	tmp := filepath.Join(dir, "tmp")
 	if err := os.Mkdir(tmp, 0o700); err != nil {
-		t.Fatalf("stage the pane's temp root: %v", err)
+		t.Fatalf("stage the session's temp root: %v", err)
 	}
-	stubBin := filepath.Join(dir, "bin")
-	if err := os.Mkdir(stubBin, 0o700); err != nil {
-		t.Fatalf("stage the pane's stub bin dir: %v", err)
-	}
-	stageStub(t, stubBin, "tmux", stubTermPaneTmux)
+	flag := raiseFlag(t, termPaneStateDir(dir), samplePayload().Session)
 
-	chain := exec.Command("/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
+	chain := exec.Command("/bin/sh", "-c", parkedResumeChain(parkedChain{Exe: exe, Flag: flag}, samplePayload()))
+	marker := termPaneDirEnv + "=" + dir
 	chain.Env = append(os.Environ(),
-		termPaneDirEnv+"="+dir,
+		marker,
 		termPaneBinEnv+"="+bin,
 		termPaneHookEnv+"="+shellquote.Single(hook),
 		"HOOK_DIR="+dir,
 		"SHELL="+stageStub(t, dir, "user-shell", stubUserShell),
 		"TMPDIR="+tmp,
-		"PATH="+stubBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PORTAL_STATE_DIR="+termPaneStateDir(dir),
 	)
 	if opts.holdDraw {
 		chain.Env = append(chain.Env, termPaneHoldDrawEnv+"=1")
@@ -321,7 +301,7 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 	}
 	stderr, err := os.Create(filepath.Join(dir, "stderr"))
 	if err != nil {
-		t.Fatalf("stage the pane's stderr: %v", err)
+		t.Fatalf("stage the session's stderr: %v", err)
 	}
 	chain.Stderr = stderr
 	var stdin io.WriteCloser
@@ -331,25 +311,19 @@ func startTermPane(t *testing.T, opts termPaneOpts) termPane {
 	} else {
 		chain.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if stdin, err = chain.StdinPipe(); err != nil {
-			t.Fatalf("open the pane's stdin: %v", err)
+			t.Fatalf("open the session's stdin: %v", err)
 		}
 	}
-	if err := chain.Start(); err != nil {
-		t.Fatalf("start the parked chain: %v", err)
-	}
+	held := proctest.Start(t, chain, marker)
 	_ = stderr.Close()
 
-	p := termPane{dir: dir, parked: chain.Process.Pid, stdin: stdin, exited: make(chan struct{}), ended: &termPaneEnd{}}
-	go func() {
-		_ = chain.Wait()
-		p.ended.state = chain.ProcessState
-		close(p.exited)
-	}()
-	t.Cleanup(func() {
-		_ = syscall.Kill(-chain.Process.Pid, syscall.SIGKILL)
-		<-p.exited
-	})
-	return p
+	return termPane{dir: dir, parked: held.PID(), stdin: stdin, exited: held.Exited(), held: held}
+}
+
+// flagLowered reports whether the session's flag has been lowered.
+func (p termPane) flagLowered(t *testing.T) bool {
+	t.Helper()
+	return !flagRaised(t, termPaneStateDir(p.dir), samplePayload().Session)
 }
 
 func (p termPane) events() []string {
@@ -399,28 +373,38 @@ func (p termPane) awaitEvent(t *testing.T, kind string, n int) int {
 	return pids[n-1]
 }
 
+// signal sends sig to pid once it is proved a process of the session's.
 func (p termPane) signal(t *testing.T, pid int, sig syscall.Signal) {
 	t.Helper()
-	if err := syscall.Kill(pid, sig); err != nil {
+	if err := p.held.Signal(pid, sig); err != nil {
 		t.Fatalf("send %v to pid %d: %v", sig, pid, err)
 	}
 }
 
-// assertStillWaiting checks the pane is left as a SIGTERM must leave it: the
-// process holding it is still up, its marker was never cleared, and the parked
-// chain never reached its recovery tail.
+// signalSession sends sig to every process in the session: the parked chain
+// leads its process group.
+func (p termPane) signalSession(t *testing.T, sig syscall.Signal) {
+	t.Helper()
+	if err := p.held.SignalGroup(sig); err != nil {
+		t.Fatalf("send %v to the session's process group %d: %v", sig, p.parked, err)
+	}
+}
+
+// assertStillWaiting checks the session is left as a SIGTERM must leave it:
+// the process holding it is still up, its flag was never lowered, and the
+// parked chain never reached its recovery tail.
 func (p termPane) assertStillWaiting(t *testing.T, pid int) {
 	t.Helper()
+	gone := p.held.Watch(t, pid)
 	select {
 	case <-p.exited:
 		t.Fatalf("the parked chain ended; %s", p.diagnostics())
+	case <-gone:
+		t.Fatalf("the process holding the session (pid %d) ended; %s", pid, p.diagnostics())
 	case <-time.After(termPaneSettle):
 	}
-	if !processAlive(pid) {
-		t.Errorf("the process holding the pane (pid %d) ended; %s", pid, p.diagnostics())
-	}
-	if p.recorded(termEventCleared) {
-		t.Errorf("the pending marker was cleared; %s", p.diagnostics())
+	if p.flagLowered(t) {
+		t.Errorf("the session's flag was lowered; %s", p.diagnostics())
 	}
 	if p.recorded(termEventRecovered) {
 		t.Errorf("the recovery tail ran; %s", p.diagnostics())
@@ -449,15 +433,25 @@ func (p termPane) readPID(t *testing.T, name, what string) int {
 	return pane.awaitPID(t, name, what)
 }
 
-// assertEndsOnSIGTERM checks pid ends on a SIGTERM, which a process does only
-// at the default disposition.
-func assertEndsOnSIGTERM(t *testing.T, pid int, what string) {
+// assertEndsOnSIGTERM checks pid, proved held's, ends on a SIGTERM, which a
+// process does only at the default disposition.
+func assertEndsOnSIGTERM(t *testing.T, held *proctest.Held, pid int, what string) {
 	t.Helper()
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	gone := held.Watch(t, pid)
+	if err := held.Signal(pid, syscall.SIGTERM); err != nil {
 		t.Fatalf("signal %s: %v", what, err)
 	}
-	if !harnesstest.PollUntil(t, hookShellWait, 10*time.Millisecond, func() bool { return !processAlive(pid) }) {
+	if !endsWithin(gone, hookShellWait) {
 		t.Fatalf("%s survived SIGTERM: it inherited the signal as ignored", what)
+	}
+}
+
+func endsWithin(gone <-chan struct{}, d time.Duration) bool {
+	select {
+	case <-gone:
+		return true
+	case <-time.After(d):
+		return false
 	}
 }
 
@@ -511,21 +505,19 @@ func TestResumeWaitingPane_SIGTERM(t *testing.T) {
 		p.press(t, "\r")
 
 		hook := p.readPID(t, "hook.pid", "the hook program")
-		assertEndsOnSIGTERM(t, hook, "the hook program")
+		assertEndsOnSIGTERM(t, p.held, hook, "the hook program")
 		shell := p.readPID(t, "shell.pid", "the user's shell")
 		if shell != waiter {
 			t.Fatalf("the user's shell runs as pid %d, want the pane's own process %d", shell, waiter)
 		}
-		assertEndsOnSIGTERM(t, shell, "the user's shell")
+		assertEndsOnSIGTERM(t, p.held, shell, "the user's shell")
 	})
 
 	t.Run("a waiter still ends on SIGHUP", func(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{})
 		waiter := p.awaitEvent(t, termEventWait, 1)
 
-		p.signal(t, waiter, syscall.SIGHUP)
-
-		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(waiter) }) {
+		if !p.endsOn(t, waiter, syscall.SIGHUP) {
 			t.Fatalf("the waiter survived SIGHUP; %s", p.diagnostics())
 		}
 	})
@@ -534,10 +526,17 @@ func TestResumeWaitingPane_SIGTERM(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{holdDraw: true})
 		draw := p.awaitEvent(t, termEventDraw, 1)
 
-		p.signal(t, draw, syscall.SIGHUP)
-
-		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(draw) }) {
+		if !p.endsOn(t, draw, syscall.SIGHUP) {
 			t.Fatalf("the draw survived SIGHUP; %s", p.diagnostics())
 		}
 	})
+}
+
+// endsOn sends sig to pid, proved the session's, and reports whether pid
+// ended on it.
+func (p termPane) endsOn(t *testing.T, pid int, sig syscall.Signal) bool {
+	t.Helper()
+	gone := p.held.Watch(t, pid)
+	p.signal(t, pid, sig)
+	return endsWithin(gone, termPaneWait)
 }

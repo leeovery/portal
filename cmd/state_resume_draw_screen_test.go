@@ -220,9 +220,7 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 		payload := resumeChainPayload{
 			Command: "claude --resume abc",
 			Report:  "could not clear the pending marker",
-			HookKey: "tok123",
-			Pane:    "%7",
-			PaneKey: "proj-a1b2:0.1",
+			Session: "proj-a1b2",
 			Width:   120,
 			Height:  40,
 			Screen:  resumeScreenPanel,
@@ -233,9 +231,7 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 				"/usr/local/bin/portal", "state", sub,
 				"--command", "claude --resume abc",
 				"--report", "could not clear the pending marker",
-				"--hook-key", "tok123",
-				"--pane", "%7",
-				"--pane-key", "proj-a1b2:0.1",
+				"--session", "proj-a1b2",
 				"--width", "120",
 				"--height", "40",
 			}
@@ -246,7 +242,7 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 	})
 
 	t.Run("it adds only the screen flag to the confirmation's argv", func(t *testing.T) {
-		panel := resumeChainPayload{Command: "c", HookKey: "k", Pane: "%1", PaneKey: "s:0.0", Width: 80, Height: 24}
+		panel := resumeChainPayload{Command: "c", Session: "s", Width: 80, Height: 24}
 		discard := panel
 		discard.Screen = resumeScreenDiscard
 
@@ -261,8 +257,8 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 	})
 
 	t.Run("it carries no screen to the chain's tail", func(t *testing.T) {
-		got := resumeChainArgv("/p", resumeRecoverSubcommand, resumeChainPayload{HookKey: "k", Pane: "%7", PaneKey: "s:0.0", Screen: resumeScreenDiscard})
-		want := []string{"/p", "state", "resume-recover", "--hook-key", "k", "--pane", "%7", "--pane-key", "s:0.0"}
+		got := resumeChainArgv("/p", resumeRecoverSubcommand, resumeChainPayload{Session: "s", Screen: resumeScreenDiscard})
+		want := []string{"/p", "state", "resume-recover", "--session", "s"}
 		if !slices.Equal(got, want) {
 			t.Errorf("argv = %q, want %q", got, want)
 		}
@@ -275,9 +271,7 @@ func TestResumeChainArgv_Screen(t *testing.T) {
 func TestStateResumeCommands_Screen(t *testing.T) {
 	payload := resumeChainPayload{
 		Command: "make deploy",
-		HookKey: "tok123",
-		Pane:    "%7",
-		PaneKey: "proj-a1b2:0.1",
+		Session: "proj-a1b2",
 		Screen:  resumeScreenDiscard,
 	}
 

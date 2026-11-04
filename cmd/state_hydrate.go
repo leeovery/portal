@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -67,11 +68,12 @@ type resumeDecision struct {
 	Lookup hooks.OnResume
 }
 
-// parkedPane is a pane the mark step wrote the pending marker on, with the
-// executable its chain is composed from.
-type parkedPane struct {
-	Pane string
+// parkedChain is what the mark step resolved for a session it raised the
+// resume-pending flag of: the executable its chain is composed from, and the
+// flag's path, which the chain's shell tests and removes.
+type parkedChain struct {
 	Exe  string
+	Flag string
 }
 
 func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
@@ -240,9 +242,9 @@ func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
 	}, cfg.HookKey)
 }
 
-// Only a pane the mark step returned parks; any other runs the registration's
-// command, whatever mode it resolved to.
-func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, parked *parkedPane) {
+// Only a session the mark step returned parks; any other runs the
+// registration's command, whatever mode it resolved to.
+func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, parked *parkedChain) {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	if parked != nil {
 		execResumeChainAndExit(cfg, registration.Command, *parked)
@@ -251,103 +253,90 @@ func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, park
 	handOffToHookOrShell(cfg.Logger, cfg.ExecShell, registration.Command)
 }
 
-// execResumeChainAndExit parks the pane on the draw followed by the chain's
-// tail, so a waiter that ends without answering leaves a pane its user can
-// still type into. Both halves are composed from the marked pane, which
-// resolves nothing further: a resolution failing after the marker is written
-// would leave the pane frozen for life.
+// execResumeChainAndExit parks the session on the draw followed by the
+// chain's tail, so a waiter that ends without answering leaves a session its
+// user can still type into. Both halves are composed from what the mark step
+// resolved, which resolves nothing further: a resolution failing after the
+// flag is raised would leave the session flagged for life.
 //
-// A pane whose signal generation could not be turned off still parks: the
+// A session whose signal generation could not be turned off still parks: the
 // chain's trap turns a kill key that lands into the recovery tail.
-func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedPane) {
-	payload := resumeChainPayload{
-		Command: command,
-		HookKey: cfg.HookKey,
-		Pane:    parked.Pane,
-		PaneKey: state.PaneKeyFromFIFOPath(cfg.FIFO),
-	}
+func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedChain) {
+	payload := resumeChainPayload{Command: command, Session: cfg.HookKey}
 	if err := cfg.DisableTTYSignals(); err != nil {
-		cfg.Logger.Warn("disable terminal signals failed", payload.paneRef().logAttrs("error", err)...)
+		cfg.Logger.Warn("disable terminal signals failed", payload.logAttrs("error", err)...)
 	}
-	args := []string{"sh", "-c", parkedResumeChain(parked.Exe, payload)}
+	args := []string{"sh", "-c", parkedResumeChain(parked, payload)}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
 }
 
 // parkedChainTrap keeps the parked shell alive through a group interrupt or
-// quit so its recovery tail still runs, and through a SIGTERM so the pane keeps
-// its session until tmux itself exits. It must stay a caught trap: an ignored
-// signal stays ignored across exec, and the hook and the user's shell would
-// inherit it. SIGHUP stays uncaught, so a kill still ends the pane.
+// quit so its recovery tail still runs, and through a SIGTERM so the session
+// outlasts a shutdown's SIGTERM until its daemon ends it. It must stay a
+// caught trap: an ignored signal stays ignored across exec, and the hook and
+// the user's shell would inherit it. SIGHUP stays uncaught, so a kill still
+// ends the session.
 const parkedChainTrap = "trap : INT QUIT TERM; "
 
-// parkedChainBackstop leaves the pane at a shell when the tail could not start
-// at all. It keys on the shell's could-not-run statuses, not on any failure: a
-// tail that recovered the pane exec'd the user's shell, whose exit status
-// arrives here, and a second shell after it would make the pane take two exits
-// to close. The executable check tells a tail that never started from a shell
-// that exited 126 or 127 itself. The binary can leave the baked path while an
-// answered pane's shell runs, so the tail's own gate comes first: a marker that
-// reads back clear ends the chain, and a read that fails counts as still
-// pending. Past the gate it takes the tail's own steps in the tail's order,
-// since no Portal binary is left to take them.
-func parkedChainBackstop(exe string, payload resumeChainPayload) string {
-	target := string(tmux.PaneIDTarget(payload.Pane))
-	answeredGate := `if ! ` + paneStillPending(payload.Pane) + `; then exit $s; fi`
+// parkedChainBackstop leaves the session at a shell when the tail could not
+// start at all. It keys on the shell's could-not-run statuses, not on any
+// failure: a tail that recovered the session exec'd the user's shell, whose
+// exit status arrives here, and a second shell after it would make the session
+// take two exits to close. The executable check tells a tail that never started
+// from a shell that exited 126 or 127 itself. The binary can leave the baked
+// path while an answered session's shell runs, so the tail's own gate comes
+// first: a flag proved lowered ends the chain, and one that can't be looked
+// for counts as still raised. Past the gate it takes the tail's own steps in
+// the tail's order, since no Portal binary is left to take them.
+func parkedChainBackstop(parked parkedChain) string {
+	answeredGate := `if ` + flagProvedLowered(parked.Flag) + `; then exit $s; fi`
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
-	clearMarker := shellquote.Join([]string{
-		"tmux", "set-option", "-pu", "-t", target, state.ResumePendingOption,
-	}) + ` 2>/dev/null`
-	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(exe) + ` ]; then ` +
-		answeredGate + `; ` + reset + `; ` + clearMarker + `; ` + backstopReleasePin(payload.Pane) +
+	clearFlag := shellquote.Join([]string{"rm", "-f", "--", parked.Flag}) + ` 2>/dev/null`
+	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(parked.Exe) + ` ]; then ` +
+		answeredGate + `; ` + reset + `; ` + clearFlag +
 		`; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}"; fi;; esac; exit $s`
 }
 
-// backstopReleasePin is releaseAltScreenPin in shell form: the pin is unset only
-// once #{alternate_on} reads 0 within the bound, and nothing reaches stderr.
-func backstopReleasePin(pane string) string {
-	readAlternateOn := shellquote.Join([]string{
-		"tmux", "display-message", "-p", "-t", string(tmux.PaneIDTarget(pane)), "-F", "#{" + alternateOnFormat + "}",
-	}) + ` 2>/dev/null`
-	unpin := shellquote.Join([]string{
-		"tmux", "set-option", "-pu", "-t", string(tmux.PaneIDTarget(pane)), altScreenOption,
-	}) + ` 2>/dev/null`
-	attempts := strconv.Itoa(altScreenLeaveAttempts)
-	pause := strconv.FormatFloat(altScreenLeavePoll.Seconds(), 'f', -1, 64)
-	return `n=1; until [ "$(` + readAlternateOn + `)" = 0 ]; do ` +
-		`if [ $n -ge ` + attempts + ` ]; then n=0; break; fi; n=$((n+1)); sleep ` + pause + ` 2>/dev/null; done; ` +
-		`if [ $n -gt 0 ]; then ` + unpin + `; fi`
+// flagProvedLowered is a shell test that succeeds only when the flag at path
+// is proved lowered, as state.SessionFlag's Exists reads it: nothing stands
+// at path, and its directory could be searched for it, or, that directory
+// gone too, the state directory above it could. Anything the test can't see
+// through, an unsearchable directory among them, leaves the flag raised.
+func flagProvedLowered(path string) string {
+	dir := filepath.Dir(path)
+	return `{ [ ! -e ` + shellquote.Single(path) + ` ] && { ` + searchable(dir) +
+		` || { [ ! -e ` + shellquote.Single(dir) + ` ] && ` + searchable(filepath.Dir(dir)) + `; }; }; }`
 }
 
-// paneStillPending is a shell test that succeeds unless the pane's pending
-// marker reads back clear; a read that fails counts as still pending. A plain
-// format read serves: a pane it misreads as clear is gone or on a server
-// already exiting, and wants nothing more from the chain.
-func paneStillPending(pane string) string {
-	readMarker := shellquote.Join([]string{
-		"tmux", "display-message", "-p", "-t", string(tmux.PaneIDTarget(pane)), "-F", "#{" + state.ResumePendingOption + "}",
-	}) + ` 2>/dev/null`
-	return `{ ! m=$(` + readMarker + `) || [ -n "$m" ]; }`
+// flagStillRaised is flagProvedLowered's negation. The shell has no double
+// negation, so a gate wanting the flag lowered takes flagProvedLowered.
+func flagStillRaised(path string) string { return `! ` + flagProvedLowered(path) }
+
+// searchable is a shell test that succeeds for a directory whose entries can
+// be looked up.
+func searchable(dir string) string {
+	return `{ [ -d ` + shellquote.Single(dir) + ` ] && [ -x ` + shellquote.Single(dir) + ` ]; }`
 }
 
 // sigtermStatus is the status the shell reports for a child a SIGTERM ended.
 const sigtermStatus = 128 + int(syscall.SIGTERM)
 
 // parkedChainDraw starts the draw again when the draw, or the waiter it became,
-// was ended by a SIGTERM while the pane still waits: a catch is not inherited
-// across fork or exec and a Go image cannot install one before its runtime has
-// started, so each hand-off opens a moment only the parked shell can close. The
-// marker gate keeps an answered pane, whose own shell now runs as that process,
-// off the panel.
-func parkedChainDraw(exe string, payload resumeChainPayload) string {
-	return `while ` + shellquote.Join(resumeChainArgv(exe, resumeDrawSubcommand, payload)) +
-		`; [ $? -eq ` + strconv.Itoa(sigtermStatus) + ` ] && ` + paneStillPending(payload.Pane) + `; do :; done`
+// was ended by a SIGTERM while the session still waits: a catch is not
+// inherited across fork or exec and a Go image cannot install one before its
+// runtime has started, so each hand-off opens a moment only the parked shell
+// can close. The flag's gate keeps an answered session, whose own shell now
+// runs as that process, off the panel.
+func parkedChainDraw(parked parkedChain, payload resumeChainPayload) string {
+	return `while ` + shellquote.Join(resumeChainArgv(parked.Exe, resumeDrawSubcommand, payload)) +
+		`; [ $? -eq ` + strconv.Itoa(sigtermStatus) + ` ] && ` + flagStillRaised(parked.Flag) + `; do :; done`
 }
 
-func parkedResumeChain(exe string, payload resumeChainPayload) string {
+func parkedResumeChain(parked parkedChain, payload resumeChainPayload) string {
 	return parkedChainTrap +
-		parkedChainDraw(exe, payload) + "; " +
-		shellquote.Join(resumeChainArgv(exe, resumeRecoverSubcommand, payload)) +
-		parkedChainBackstop(exe, payload)
+		parkedChainDraw(parked, payload) + "; " +
+		shellquote.Join(resumeChainArgv(parked.Exe, resumeRecoverSubcommand, payload)) +
+		parkedChainBackstop(parked)
 }
 
 func handleHydrateTimeout(cfg hydrateConfig) error {
@@ -381,17 +370,17 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	return nil
 }
 
-// markPendingThenUnsetSkeletonMarker holds the ordering the pane's saved
-// transcript depends on: a pane that is going to wait carries its own marker
-// before the mid-restore one is dropped, so no tick lands on an unprotected
-// pane. A pane that cannot be marked does not wait: it returns nil, as does one
-// that was never going to.
-func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecision) *parkedPane {
-	var parked *parkedPane
+// markPendingThenUnsetSkeletonMarker holds the ordering the session's saved
+// transcript depends on: a session that is going to wait raises its own flag
+// before the mid-restore marker is dropped, so no tick lands on an unprotected
+// session. A session whose flag can't be raised does not wait: it returns nil,
+// as does one that was never going to.
+func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecision) *parkedChain {
+	var parked *parkedChain
 	if decision.Wait {
 		p, err := markResumePending(cfg)
 		if err != nil {
-			cfg.Logger.Warn("set resume pending marker failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", err)
+			cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.HookKey, "error", err)...)
 		} else {
 			parked = &p
 		}
@@ -400,45 +389,25 @@ func markPendingThenUnsetSkeletonMarker(cfg hydrateConfig, decision resumeDecisi
 	return parked
 }
 
-// The pane and the executable are resolved before any write, so a refusal is
-// taken while the pane is still an eager one: a marked pane whose chain could
-// not be composed would fire its hook and freeze its saved scrollback for life.
-// The baked hook key is written as the pane's token first, unconditionally and
-// with no read: restore's re-stamp is best-effort, and a waiting pane carrying
-// no token leaves its registration stale to the hook sweep, which can delete it
-// before Enter runs it. The key is the pane's saved token, so the write never
-// changes a durable identity and a later refusal has nothing to lift.
-// The alternate-screen pin goes before the marker because a pin left behind
-// overrides one display setting on one pane, where a marker left behind freezes
-// that pane's scrollback; a refused marker lifts the pin, since the pane never
-// waits.
-func markResumePending(cfg hydrateConfig) (parkedPane, error) {
-	paneID := os.Getenv("TMUX_PANE")
-	if paneID == "" {
-		return parkedPane{}, fmt.Errorf("must be run from inside a tmux pane")
-	}
-	pane := tmux.PaneIDTarget(paneID)
+// The executable is resolved before the flag is raised, so a refusal is taken
+// while the session is still an eager one: a flagged session whose chain could
+// not be composed would fire its hook and never be captured again. The hook
+// key is the session's name, which keys its flag too; a name no file can carry
+// refuses here, before anything is written.
+func markResumePending(cfg hydrateConfig) (parkedChain, error) {
 	resolveExe := cfg.ResolveExe
 	if resolveExe == nil {
 		resolveExe = resumeChainExe
 	}
 	exe, err := resolveExe()
 	if err != nil {
-		return parkedPane{}, err
+		return parkedChain{}, err
 	}
-	if err := cfg.Client.SetPaneOption(pane, state.PortalPaneIDOption, cfg.HookKey); err != nil {
-		return parkedPane{}, err
+	flag, err := raiseResumePending(cfg.HookKey)
+	if err != nil {
+		return parkedChain{}, err
 	}
-	if err := cfg.Client.SetPaneOption(pane, altScreenOption, "on"); err != nil {
-		return parkedPane{}, err
-	}
-	if err := state.SetResumePendingMarker(cfg.Client, pane); err != nil {
-		if liftErr := cfg.Client.UnsetPaneOption(pane, altScreenOption); liftErr != nil {
-			cfg.Logger.Warn("lift alternate-screen pin failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", liftErr)
-		}
-		return parkedPane{}, err
-	}
-	return parkedPane{Pane: string(pane), Exe: exe}, nil
+	return parkedChain{Exe: exe, Flag: flag}, nil
 }
 
 // Failure is non-fatal: the next bootstrap re-skeletons the pane and clears it.

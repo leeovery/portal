@@ -5,52 +5,63 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
-// refusedClear is the error the production client hands back when tmux answers
-// the pending-marker clear with its own stderr, so the chain carries the argv
-// and the option name ahead of tmux's words exactly as a real refusal does.
-func refusedClear(t *testing.T, cause *tmux.CommandError) error {
+// flagRefusal is the error a resume-pending flag that can't be lowered
+// returns, as the production clear meets it: one in a directory that can't
+// be searched.
+func flagRefusal(t *testing.T) error {
 	t.Helper()
-	client := tmux.NewClient(commandertest.Quiet(commandertest.Fails(cause, "set-option")))
-	err := state.UnsetResumePendingMarker(client, tmux.PaneIDTarget("%7"))
+	dir := resumeStateDir(t)
+	raiseFlag(t, dir, samplePayload().Session)
+	unsearchable(t, filepath.Join(dir, string(state.ResumePending)))
+	err := clearResumePending(samplePayload().Session)
 	if err == nil {
-		t.Fatal("the scripted clear succeeded; the fixture must refuse it")
+		t.Fatal("the flag was lowered; the fixture must refuse it")
 	}
 	return err
 }
 
-func tmuxRefusal(t *testing.T) error {
+// unnamedRefusal is the error the clear returns for a session no file can
+// carry.
+func unnamedRefusal(t *testing.T) error {
 	t.Helper()
-	return refusedClear(t, &tmux.CommandError{
-		Stderr: "can't find pane: %7\n",
-		Err:    &exec.ExitError{ProcessState: &os.ProcessState{}},
-		Args:   []string{"set-option", "-pu", "-t", "%7", state.ResumePendingOption},
-	})
+	resumeStateDir(t)
+	err := clearResumePending("")
+	if err == nil {
+		t.Fatal("an unnamed session's flag was lowered; the fixture must refuse it")
+	}
+	return err
 }
 
-func tmuxUnrunnable(t *testing.T) error {
+// unresolvedStateRefusal is the error the clear returns when the state
+// directory can't be resolved.
+func unresolvedStateRefusal(t *testing.T) error {
 	t.Helper()
-	return refusedClear(t, &tmux.CommandError{
-		Err:  &exec.Error{Name: "tmux", Err: exec.ErrNotFound},
-		Args: []string{"set-option", "-pu", "-t", "%7", state.ResumePendingOption},
-	})
+	t.Setenv("PORTAL_STATE_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	err := clearResumePending(samplePayload().Session)
+	if err == nil {
+		t.Fatal("a flag was lowered with no state directory; the fixture must refuse it")
+	}
+	return err
 }
 
 func reportCarried(t *testing.T, argv []string) string {
@@ -71,9 +82,7 @@ func discardAgainstStore(t *testing.T) (*resumeWaitProbe, *logtest.Sink) {
 	payload := confirmationPayload()
 	cfg := newResumeWaitConfig(t, &probe, payload, keystrokes(t, "y"))
 	cfg.Logger = nil
-	cfg.DiscardRegistration = func(hookKey, shown string) (bool, error) {
-		return discardResumeRegistration(resumePaneRef{HookKey: hookKey, PaneKey: payload.PaneKey}, shown)
-	}
+	cfg.DiscardRegistration = discardResumeRegistration
 	if err := runResumeWait(cfg); err != nil {
 		t.Fatalf("runResumeWait() error = %v", err)
 	}
@@ -88,7 +97,7 @@ func stageDiscardStore(t *testing.T, staging hookstest.Staging) string {
 }
 
 func registeredEntries() map[string]string {
-	return map[string]string{samplePayload().HookKey: samplePayload().Command}
+	return map[string]string{samplePayload().Session: samplePayload().Command}
 }
 
 // assertRefusedOnConfirmation pins what every refused removal leaves: the
@@ -103,7 +112,7 @@ func assertRefusedOnConfirmation(t *testing.T, probe *resumeWaitProbe, sink *log
 		t.Errorf("redraw argv = %q, want the confirmation drawn again", probe.execArgs)
 	}
 	if probe.clearCalls != 0 {
-		t.Errorf("ClearMarker called %d times, want 0: the marker stands", probe.clearCalls)
+		t.Errorf("ClearPending called %d times, want 0: the marker stands", probe.clearCalls)
 	}
 	return sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the refusal's one record")
 }
@@ -117,8 +126,8 @@ func assertStoreDiscardWarn(t *testing.T, rec logtest.Record) {
 		Op:        "discard",
 		Via:       "panel",
 	})
-	if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().HookKey {
-		t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().HookKey)
+	if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().Session {
+		t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().Session)
 	}
 }
 
@@ -217,11 +226,8 @@ func TestResumeDiscardReport_StoreRefusals(t *testing.T) {
 		if got := rec.AttrOrEmpty("component"); got != "hydrate" {
 			t.Errorf("WARN component = %q, want hydrate", got)
 		}
-		if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().HookKey)
-		}
-		if got := rec.AttrOrEmpty("pane_key"); got != samplePayload().PaneKey {
-			t.Errorf("WARN pane_key = %q, want %q", got, samplePayload().PaneKey)
+		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
+			t.Errorf("WARN session = %q, want %q", got, samplePayload().Session)
 		}
 		if got := rec.ErrorAttr(t, "error"); got.Error() != wantErr.Error() {
 			t.Errorf("WARN error = %v, want the whole resolution error %v", got, wantErr)
@@ -262,9 +268,9 @@ func TestResumeClearReport(t *testing.T) {
 		err  func(t *testing.T) error
 		want string
 	}{
-		{"tmux refuses the clear", tmuxRefusal, "can't unpause this pane: can't find pane: %7"},
-		{"tmux cannot be run", tmuxUnrunnable, "can't unpause this pane: tmux could not be run"},
-		{"the clear fails outside every class", func(*testing.T) error { return errors.New("marker refused") }, "can't carry out that answer"},
+		{"the flag's directory can't be searched", flagRefusal, "can't unpause this session: permission denied"},
+		{"the session's name can't name a file", unnamedRefusal, "can't unpause this session: " + state.ErrUnsafeName.Error()},
+		{"the state directory can't be resolved", unresolvedStateRefusal, "can't unpause this session: $HOME is not defined"},
 	}
 	for _, a := range answers {
 		for _, r := range refusals {
@@ -279,18 +285,12 @@ func TestResumeClearReport(t *testing.T) {
 					t.Errorf("report row = %q, want %q", got, r.want)
 				}
 				assertArgvLacks(t, probe.execArgs, resumeFlagScreen)
-				if probe.pin.unpinCalls != 0 {
-					t.Errorf("unpins = %d, want the pin left for the redraw", probe.pin.unpinCalls)
-				}
 				rec := probe.sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the refused clear's record")
-				if rec.Msg != "unset resume pending marker failed" {
+				if rec.Msg != "clear resume pending flag failed" {
 					t.Errorf("WARN = %q, want the failed clear's record", rec.Msg)
 				}
-				if got := rec.AttrOrEmpty("hook_key"); got != a.start.HookKey {
-					t.Errorf("WARN hook_key = %q, want %q", got, a.start.HookKey)
-				}
-				if got := rec.AttrOrEmpty("pane_key"); got != a.start.PaneKey {
-					t.Errorf("WARN pane_key = %q, want %q", got, a.start.PaneKey)
+				if got := rec.AttrOrEmpty("session"); got != a.start.Session {
+					t.Errorf("WARN session = %q, want %q", got, a.start.Session)
 				}
 				if got := rec.ErrorAttr(t, "error"); got.Error() != probe.clearErr.Error() {
 					t.Errorf("WARN error = %v, want the whole chain %v", got, probe.clearErr)
@@ -299,9 +299,9 @@ func TestResumeClearReport(t *testing.T) {
 		}
 	}
 
-	t.Run("its row carries no tmux argv and no option name", func(t *testing.T) {
-		row := resumeClearRefusal(tmuxRefusal(t))
-		for _, leaked := range []string{"set-option", state.ResumePendingOption, "exit"} {
+	t.Run("its row carries no path and no flag name", func(t *testing.T) {
+		row := resumeClearRefusal(flagRefusal(t))
+		for _, leaked := range []string{"/", string(state.ResumePending), "remove"} {
 			if strings.Contains(row, leaked) {
 				t.Errorf("row %q carries %q", row, leaked)
 			}
@@ -309,24 +309,58 @@ func TestResumeClearReport(t *testing.T) {
 	})
 }
 
+// The rows are built from what backToPicker really returns: runners on a
+// registry of the test's own, and the fake backend.
 func TestResumeBackReport(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  func(t *testing.T) error
-		want string
-	}{
-		{"tmux refuses the detach", tmuxRefusal, "can't open the picker: can't find pane: %7"},
-		{"tmux cannot be run", tmuxUnrunnable, "can't open the picker: tmux could not be run"},
-		{"the binary cannot be resolved", func(*testing.T) error {
-			return fmt.Errorf("resolve portal executable: %w", errors.New("empty path"))
-		}, "can't open the picker: empty path"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resumeBackRefusal(tc.err(t)); got != tc.want {
-				t.Errorf("resumeBackRefusal() = %q, want %q", got, tc.want)
-			}
-		})
-	}
+	const session = "proj-a1b2"
+	notAttached, ending := "the runner is not attached", "the attach is ending"
+
+	t.Run("runners refusing for one reason name it once", func(t *testing.T) {
+		r, b := pickerDetachWorld(t, session)
+		withBackendDeps(t, BackendDeps{Backend: b})
+		registerDetachHandler(t, r, "first1", session, &detachHandler{refuse: errors.New(notAttached)})
+		registerDetachHandler(t, r, "second", session, &detachHandler{refuse: errors.New(notAttached)})
+
+		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportBack+notAttached; got != want {
+			t.Errorf("row = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("runners refusing for different reasons name each", func(t *testing.T) {
+		r, b := pickerDetachWorld(t, session)
+		withBackendDeps(t, BackendDeps{Backend: b})
+		registerDetachHandler(t, r, "first1", session, &detachHandler{refuse: errors.New(notAttached)})
+		registerDetachHandler(t, r, "second", session, &detachHandler{refuse: errors.New(ending)})
+
+		got := resumeBackRefusal(backToPicker(session))
+		reasons, found := strings.CutPrefix(got, resumeReportBack)
+		if !found {
+			t.Fatalf("row = %q, want it to open %q", got, resumeReportBack)
+		}
+		if parts := strings.Split(reasons, resumeReasonSeparator); !slices.Contains(parts, notAttached) || !slices.Contains(parts, ending) || len(parts) != 2 {
+			t.Errorf("row = %q, want each runner's reason once", got)
+		}
+	})
+
+	t.Run("a backend that fails to detach names the detach", func(t *testing.T) {
+		_, b := pickerDetachWorld(t, session)
+		withBackendDeps(t, BackendDeps{Backend: b})
+		b.Fail(backendtest.OpDetach, backend.ErrTimeout)
+
+		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportDetach+backend.ErrTimeout.Error(); got != want {
+			t.Errorf("row = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a state directory that can't be resolved names the cause", func(t *testing.T) {
+		t.Setenv("PORTAL_STATE_DIR", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", "")
+
+		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportBack+"$HOME is not defined"; got != want {
+			t.Errorf("row = %q, want %q", got, want)
+		}
+	})
 }
 
 func TestResumeReportRows_FitTheCard(t *testing.T) {
@@ -347,9 +381,7 @@ func TestResumeReportRows_FitTheCard(t *testing.T) {
 	whole := []string{
 		resumeReportMalformed,
 		resumeReportLockHeld,
-		resumeReportTmuxAbsent,
 		resumeReportFallback,
-		resumeReportBack + resumeReportTmuxNotRun,
 	}
 	for _, p := range []prefixed{
 		{resumeReportRead, "permission denied"},
@@ -357,7 +389,10 @@ func TestResumeReportRows_FitTheCard(t *testing.T) {
 		{resumeReportWrite, "no space left on device"},
 		{resumeReportWrite, "permission denied"},
 		{resumeReportLocate, "$HOME is not defined"},
-		{resumeReportUnpause, "can't find pane: %7"},
+		{resumeReportUnpause, "permission denied"},
+		{resumeReportUnpause, "$HOME is not defined"},
+		{resumeReportBack, "the runner is not attached"},
+		{resumeReportDetach, backend.ErrTimeout.Error()},
 	} {
 		whole = append(whole, p.act+p.cause)
 	}
