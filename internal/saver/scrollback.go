@@ -72,14 +72,29 @@ type capture struct {
 	sum     [sha256.Size]byte
 }
 
-// capture saves the history of each session the listing shows answering that
-// is due a capture, outside the commit lock, as History can take seconds: at
-// most once every captureEvery per creation, never while Portal is restoring
-// the session, and writing only a history that differs from the one the
-// index last named. A session the poll's captureBudget runs out before is not
-// asked, so stays due. It returns what it wrote, for the index to name.
+// capture saves, for a poll, the history of each session the listing shows
+// answering that is due a capture: at most once every captureEvery per
+// creation. A session the poll's captureBudget runs out before is not asked,
+// so stays due.
 func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 	until := sb.now().Add(captureBudget)
+	return sb.each(ctx, l, func(memo creation) bool {
+		return sb.now().Before(until) && memo.due(l.at)
+	})
+}
+
+// flush saves, for a flush, the history of every session the listing shows
+// answering, however recently it was asked.
+func (sb *scrollback) flush(ctx context.Context, l listing) []capture {
+	return sb.each(ctx, l, func(creation) bool { return true })
+}
+
+// each saves the history of each session the listing shows answering whose
+// creation ask takes, by what the saver last did with it, outside the commit
+// lock, as History can take seconds: never once ctx ends, never while Portal
+// is restoring the session, and writing only a history that differs from the
+// one the index last named. It returns what it wrote, for the index to name.
+func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bool) []capture {
 	listed := map[string]creation{}
 	var written []capture
 	for _, live := range l.answered {
@@ -88,7 +103,7 @@ func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 			continue
 		}
 		memo := sb.creations[file]
-		if ctx.Err() == nil && sb.now().Before(until) && memo.due(l.at) && !state.Flagged(sb.dir, live.Name) {
+		if ctx.Err() == nil && ask(memo) && !state.Flagged(sb.dir, live.Name) {
 			memo.asked = l.at
 			if c, ok := sb.save(ctx, live, file, memo); ok {
 				written = append(written, c)
@@ -177,20 +192,21 @@ func (sb *scrollback) saved(named []capture) {
 // the index as written, names: a capture the index didn't name, or a file an
 // entry left for a later creation's. It removes too each temp file a write
 // left there abandonedAfter ago or more. Anything else there, a legacy
-// <name>.bin among it, is not the saver's to remove.
-func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
+// <name>.bin among it, is not the saver's to remove. It returns how many
+// files it removed.
+func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) int {
 	if !sb.cleaned.IsZero() && at.Sub(sb.cleaned) < cleanEvery {
-		return
+		return 0
 	}
 	sb.cleaned = at
 	dir := state.ScrollbackDir(sb.dir)
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return
+		return 0
 	}
 	if err != nil {
 		captureLogger.Warn("clean failed", "path", dir, "error", err)
-		return
+		return 0
 	}
 	named := namedFiles(idx)
 	reaped := 0
@@ -202,6 +218,7 @@ func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
 	if reaped > 0 {
 		captureLogger.Info("cleaned", "reaped", reaped)
 	}
+	return reaped
 }
 
 func reapable(f fs.DirEntry, named map[string]bool, at time.Time) bool {
