@@ -134,16 +134,23 @@ func forgetEntries(dir string, entries []sessionindex.Entry, via string) {
 }
 
 // refuseUnusableState stops a command while the state directory holds an
-// index this version must not touch: a version 1 sessions.json, or one that is
-// corrupt or from a newer version. A missing one passes. So does one that
-// cannot be resolved or read, which shows nothing to protect; a command that
-// needs it fails on its own.
+// index this version must not touch, as refuseUnusableIndexIn judges it. A
+// state directory that cannot be resolved passes too.
 func refuseUnusableState() error {
 	dir, err := state.Dir()
 	if err != nil {
 		return nil
 	}
-	_, err = readSessionIndexIn(dir)
+	return refuseUnusableIndexIn(dir)
+}
+
+// refuseUnusableIndexIn refuses the index in the state directory dir when this
+// version must not touch it: a version 1 sessions.json, or one that is corrupt
+// or from a newer version. A missing one passes. So does one that cannot be
+// read, which shows nothing to protect; a command that needs it fails on its
+// own.
+func refuseUnusableIndexIn(dir string) error {
+	_, err := readSessionIndexIn(dir)
 	if _, unreadable := errors.AsType[*fs.PathError](err); unreadable {
 		return nil
 	}
