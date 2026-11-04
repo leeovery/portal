@@ -474,7 +474,8 @@ func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedChai
 	if err := cfg.DisableTTYSignals(); err != nil {
 		cfg.Logger.Warn("disable terminal signals failed", payload.logAttrs("error", err)...)
 	}
-	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", parkedChainArgv(parked, payload), true)
+	args := []string{"sh", "-c", parkedResumeChain(parked, payload)}
+	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
 }
 
 // parkedChainTrap keeps the parked shell alive through a group interrupt or
@@ -554,17 +555,6 @@ func parkedResumeChain(parked parkedChain, payload resumeChainPayload) string {
 		parkedChainDraw(parked, payload) + "; " +
 		shellquote.Join(resumeChainArgv(parked.Exe, resumeRecoverSubcommand, payload)) +
 		parkedChainBackstop(parked)
-}
-
-// parkedChainArgv is the argv a waiting session's shell runs its chain under.
-func parkedChainArgv(parked parkedChain, payload resumeChainPayload) []string {
-	return []string{"sh", "-c", parkedResumeChain(parked, payload)}
-}
-
-// isParkedResumeChain reports whether argv is a shell running a parked chain,
-// as parkedChainArgv composes one, whatever path names the shell.
-func isParkedResumeChain(argv []string) bool {
-	return len(argv) == 3 && argv[1] == "-c" && strings.HasPrefix(argv[2], parkedChainTrap)
 }
 
 // syscall.Exec returns only on failure, and that path must end through

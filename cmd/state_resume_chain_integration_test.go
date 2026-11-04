@@ -3,13 +3,11 @@
 package cmd_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -17,7 +15,6 @@ import (
 	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
@@ -194,13 +191,24 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("opening a waiting session draws its panel in the theme in force", func(t *testing.T) {
+	// Portal sends a waiting session nothing as it attaches: zmx's own SIGWINCH
+	// on every attach is the redraw, so this is zmx's contract. The second
+	// attach is at the size the first left the session at, so only that signal
+	// can redraw the panel.
+	t.Run("zmx redraws a waiting panel in the theme in force on an attach at an unchanged size", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)
 		w.awaitPanel(t)
+		p := w.portal(t, "open", waitingSession)
+		w.awaitClients(t, waitingSession, 1)
+		w.awaitWaiterAt(t, portalTermCols, portalTermRows)
+		picker := p.mark()
+		p.typeIn(t, "\x1b")
+		p.awaitAfter(t, picker, pickerMark)
+		w.awaitClients(t, waitingSession, 0)
 		w.setTheme(t, "nord")
 
 		mark := w.logSize()
-		w.portal(t, "open", waitingSession)
+		p.typeIn(t, "\r")
 		w.awaitClients(t, waitingSession, 1)
 
 		w.awaitDrawIn(t, mark, "nord")
@@ -246,38 +254,4 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			t.Error("the session ended; Enter hands it its shell")
 		}
 	})
-}
-
-// No terminal attaches, so only the repaint can redraw the panel: zmx sends a
-// SIGWINCH of its own with every attach. The repaint reads the session's real
-// process; only its signal is the test's, sent once proved to the group of a
-// process of the test's zmx dir.
-func TestRepaintReachesAWaiterAgainstZmx(t *testing.T) {
-	binary := buildPortalBinary(t)
-	w := newWaitingWorld(t, binary)
-	w.awaitPanel(t)
-	// The size zmx starts a session at: the waiter, and its SIGWINCH watch, are up.
-	w.awaitWaiterAt(t, 120, 24)
-	w.setTheme(t, "nord")
-	t.Setenv("PORTAL_STATE_DIR", w.stateDir)
-	session, err := w.b.Session(t.Context(), waitingSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sink := logtest.Install(t)
-	var sent []string
-
-	mark := w.logSize()
-	cmd.RepaintWaiting(t, w.b, waitingSession, func(pid int, sig syscall.Signal) error {
-		sent = append(sent, fmt.Sprintf("%d %v", pid, sig))
-		if pid >= 0 {
-			return fmt.Errorf("the repaint signals a group, not pid %d", pid)
-		}
-		return zmxtest.SignalGroup(w.b, -pid, sig)
-	})
-
-	if want := []string{fmt.Sprintf("%d %v", -session.PID, syscall.SIGWINCH)}; !slices.Equal(sent, want) {
-		t.Fatalf("signals = %q, want %q; the repaint logged:\n%s", sent, want, sink.Body())
-	}
-	w.awaitDrawIn(t, mark, "nord")
 }

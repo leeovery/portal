@@ -276,9 +276,9 @@ func TestRunResumeWait_Resize(t *testing.T) {
 	})
 
 	t.Run("it redraws when a signal settles at the drawn size", func(t *testing.T) {
-		// A repaint asked for on attach: a SIGWINCH at a size
-		// that has not changed, owed a redraw all the same so the panel takes
-		// up the theme as it is now.
+		// zmx's SIGWINCH on an attach: a signal at a size that has not
+		// changed, owed a redraw all the same so the panel takes up the theme
+		// as it is now.
 		payload := drawnPayload()
 		h := startResumeResize(t, payload, func() (int, int, error) {
 			return payload.Width, payload.Height, nil

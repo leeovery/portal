@@ -8,14 +8,10 @@ import (
 
 	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/proctest"
-	"golang.org/x/sys/unix"
 )
 
 // processes is the reader every proof reads through; tests replace it.
 var processes proctest.Reader = proctest.Kernel{}
-
-// groupOf reads the process group a pid is in; tests replace it.
-var groupOf = unix.Getpgid
 
 // ownedBy reports whether pid is a process started for dir: its environment
 // sets ZMX_DIR to exactly dir, or its parent chain reaches one whose does. The
@@ -39,18 +35,6 @@ func signalOwned(pid int, dir string, sig syscall.Signal) error {
 		return fmt.Errorf("pid %d is no process of %s, so it is not signalled", pid, dir)
 	}
 	return syscall.Kill(pid, sig)
-}
-
-// signalGroupOwned sends sig to the group pgid leads if pgid is a process
-// started for dir that leads its own group, proved as the signal is sent.
-func signalGroupOwned(pgid int, dir string, sig syscall.Signal) error {
-	if pgid <= 1 || !ownedBy(pgid, dir) {
-		return fmt.Errorf("pid %d is no process of %s, so its group is not signalled", pgid, dir)
-	}
-	if group, err := groupOf(pgid); err != nil || group != pgid {
-		return fmt.Errorf("pid %d leads no process group of its own, so none is signalled", pgid)
-	}
-	return syscall.Kill(-pgid, sig)
 }
 
 // owned lists the processes started for dir. The listing only names the pids

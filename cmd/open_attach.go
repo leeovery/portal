@@ -109,9 +109,8 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 	return reopenPickerFunc(c.cmd, c.backend, landing)
 }
 
-// attach runs one attach, a waiting session's panel asked to repaint first,
-// however the terminal reaches it. An exec returns only if it fails, so beside
-// its error the outcome is the zero one.
+// attach runs one attach. An exec returns only if it fails, so beside its
+// error the outcome is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
@@ -121,7 +120,6 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 	if len(command.Argv) == 0 {
 		return runner.Outcome{}, fmt.Errorf("attach session %q: the backend gave no command to run", name)
 	}
-	repaintWaiting(ctx, c.backend, name)
 	// Inside a session the command switches that session's clients and exits
 	// at once, which the runner refuses: the terminal moves through switchTo.
 	if command.Switches {

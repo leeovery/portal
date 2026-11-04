@@ -280,13 +280,3 @@ func StopDaemon(t *testing.T, b *zmx.Backend, name string) int {
 func Signal(b *zmx.Backend, pid int, sig syscall.Signal) error {
 	return signalOwned(pid, b.Dir(), sig)
 }
-
-// SignalGroup sends sig to the process group pgid leads, as kill(-pgid)
-// does, if pgid is a process of b's directory leading its own group, proved
-// as the signal is sent, and fails, sending nothing, otherwise. The proof of
-// the leader vouches for the group: a process joins a group only within its
-// own session, and zmx starts each of its sessions' processes in a session
-// of its own.
-func SignalGroup(b *zmx.Backend, pgid int, sig syscall.Signal) error {
-	return signalGroupOwned(pgid, b.Dir(), sig)
-}
