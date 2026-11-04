@@ -160,8 +160,11 @@ func sessionNameRefusal(session, current string) error {
 // so the prompt lands below it whatever the terminal's height. Only a
 // transcript with something in it is replayed: one that saved none, an empty
 // one and one that can't be read write nothing at all. One failing part way is
-// closed as a whole one is, so the shell inherits nothing its bytes set; its
-// cause is recorded.
+// cut and closed as a whole one is, so the shell inherits nothing its bytes
+// set; its cause is recorded. A capture zmx opened with modes but closed in a
+// form this build doesn't read is replayed whole, its cursor placement with
+// it, so that is recorded too: zmx changing its closing state would otherwise
+// bring the prompt back over the rows unseen.
 func replayTranscript(cfg hydrateConfig) {
 	if cfg.File == "" {
 		return
@@ -178,8 +181,11 @@ func replayTranscript(cfg hydrateConfig) {
 	defer func() { _ = file.Close() }()
 	start := time.Now()
 	out := &replayWriter{w: cfg.Stdout}
-	err = copyTranscriptContent(out, file)
+	closeUnread, err := copyTranscriptContent(out, file)
 	took := time.Since(start)
+	if closeUnread {
+		cfg.Logger.Warn("scrollback closing state not recognised, so replayed whole", "session", cfg.Session, "path", cfg.File)
+	}
 	if out.started {
 		_, _ = io.WriteString(cfg.Stdout, hydrateResetPostamble)
 		settleReplay(cfg)
@@ -204,23 +210,24 @@ func settleReplay(cfg hydrateConfig) {
 
 // copyTranscriptContent copies the transcript's rows to w: it reads the head
 // first and cuts the modes its capture opened with from it, then holds back
-// the end the closing state sits in until the read is done. A read failing
-// part way never reached that end, so what it held back goes out whole.
-func copyTranscriptContent(w io.Writer, r io.Reader) error {
+// the end the closing state sits in until the read is done, and cuts that
+// state from it. The end of a read failing part way is cut too: no row places
+// the cursor, so the cut takes a closing state the read reached and nothing
+// else. closeUnread reports a whole capture led by modes, so one zmx took,
+// whose end holds no closing state the cut recognises.
+func copyTranscriptContent(w io.Writer, r io.Reader) (closeUnread bool, err error) {
 	head, err := readTranscriptHead(r)
-	_, rows := vtcapture.Modes(head)
+	modes, rows := vtcapture.Modes(head)
 	held := &heldEnd{w: w, end: rows}
 	if err == nil {
 		_, err = io.Copy(held, r)
 	}
-	end := held.end
-	if err == nil {
-		end = vtcapture.TrimClose(end)
-	}
+	end := vtcapture.TrimClose(held.end)
+	closeUnread = err == nil && len(modes) > 0 && len(end) == len(held.end)
 	if _, writeErr := w.Write(end); err == nil {
 		err = writeErr
 	}
-	return err
+	return closeUnread, err
 }
 
 // readTranscriptHead reads the first hydrateStateWindow bytes of r, which
@@ -488,17 +495,25 @@ const parkedChainTrap = "trap : INT QUIT TERM; "
 // path while an answered session's shell runs, so the tail's own gate comes
 // first: a flag proved lowered ends the chain, and one that can't be looked
 // for counts as still raised. Past the gate it takes the tail's own steps in
-// the tail's order, since no Portal binary is left to take them, the shell
-// that can't be found among them: it is /bin/sh, as resolveShell has it.
+// the tail's order, since no Portal binary is left to take them.
 func parkedChainBackstop(parked parkedChain) string {
 	answeredGate := `if ` + flagProvedLowered(parked.Flag) + `; then exit $s; fi`
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
 	clearFlag := shellquote.Join([]string{"rm", "-f", "--", parked.Flag}) + ` 2>/dev/null`
-	shell := `command -v "$SHELL" >/dev/null 2>&1 || SHELL=` + fallbackShell + `; exec "$SHELL" ` + loginShellFlag
 	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(parked.Exe) + ` ]; then ` +
 		answeredGate + `; ` + reset + `; ` + clearFlag +
-		`; stty sane 2>/dev/null; ` + shell + `; fi;; esac; exit $s`
+		`; stty sane 2>/dev/null; ` + backstopLoginShell + `; fi;; esac; exit $s`
 }
+
+// backstopLoginShell execs the session's login shell, found as resolveShell
+// finds it: a $SHELL holding a slash must be a file it can run, and a bare one
+// must be on PATH. command -v won't do for a path, since dash answers for any
+// path that exists, a directory or a file it can't run among them, and the
+// exec would then fail and end the session. One that can't be found is
+// /bin/sh, exported as $SHELL as the Go hand-off has it.
+const backstopLoginShell = `case $SHELL in */*) [ -f "$SHELL" ] && [ -x "$SHELL" ];; ` +
+	`*) command -v "$SHELL" >/dev/null 2>&1;; esac || export SHELL=` + fallbackShell +
+	`; exec "$SHELL" ` + loginShellFlag
 
 // flagProvedLowered is a shell test that succeeds only when the flag at path
 // is proved lowered, as the chain's Go steps read it too (flagLowered):

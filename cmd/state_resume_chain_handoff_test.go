@@ -242,6 +242,13 @@ func TestHandOffToHookOrShell_HandsTheShellItFinds(t *testing.T) {
 		}
 	})
 
+	t.Run("it leaves the $SHELL it found as the session has it", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		if got := shellEnvAtExec(t, log.Discard(), ""); got != "myshell" {
+			t.Errorf("$SHELL at the exec = %q, want the session's own %q", got, "myshell")
+		}
+	})
+
 	t.Run("it follows a command with the shell PATH finds", func(t *testing.T) {
 		t.Setenv("SHELL", "myshell")
 		want := []string{"sh", "-c", "trap : TERM; make dev; exec '" + shell + "' -l"}
@@ -287,6 +294,9 @@ func TestHandOffToHookOrShell_FallsBackToShForAShellItCannotFind(t *testing.T) {
 			if got := warn.AttrString(t, "path"); got != shell {
 				t.Errorf("WARN path = %q, want the shell it couldn't find, %q", got, shell)
 			}
+			if got := warn.AttrString(t, "target"); got != "/bin/sh" {
+				t.Errorf("WARN target = %q, want the shell it hands instead, /bin/sh", got)
+			}
 		})
 
 		t.Run("it follows a command with /bin/sh for "+name, func(t *testing.T) {
@@ -300,6 +310,31 @@ func TestHandOffToHookOrShell_FallsBackToShForAShellItCannotFind(t *testing.T) {
 			}
 		})
 	}
+
+	shells := map[string]string{
+		"a path with no shell at it": filepath.Join(t.TempDir(), "zsh"),
+		"a name PATH doesn't hold":   "nosuchshell",
+		"nothing":                    "",
+	}
+	for name, shell := range shells {
+		for handed, command := range map[string]string{"its shell": "", "a command": "make dev"} {
+			t.Run("it hands /bin/sh on as the $SHELL of a session handed "+handed+" whose $SHELL is "+name, func(t *testing.T) {
+				t.Setenv("SHELL", shell)
+				if got := shellEnvAtExec(t, log.Discard(), command); got != "/bin/sh" {
+					t.Errorf("$SHELL at the exec = %q, want /bin/sh", got)
+				}
+			})
+		}
+	}
+}
+
+// shellEnvAtExec hands a session on and returns the $SHELL the exec would
+// hand it: the exec passes this process's environment.
+func shellEnvAtExec(t *testing.T, logger *slog.Logger, command string) string {
+	t.Helper()
+	var shell string
+	handOffToHookOrShell(logger, func(string, []string) { shell = os.Getenv("SHELL") }, command)
+	return shell
 }
 
 // wantLoginShell is the argv a session's shell is handed with: run as a login

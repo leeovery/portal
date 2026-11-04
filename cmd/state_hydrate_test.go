@@ -129,6 +129,10 @@ type stubExecShell struct {
 	called bool
 	target string
 	args   []string
+
+	// shellEnv is the $SHELL the exec hands on: it passes this process's
+	// environment.
+	shellEnv string
 }
 
 func (s *stubExecShell) fn() func(string, []string) {
@@ -138,6 +142,7 @@ func (s *stubExecShell) fn() func(string, []string) {
 		s.called = true
 		s.target = prog
 		s.args = args
+		s.shellEnv = os.Getenv("SHELL")
 	}
 }
 
@@ -305,6 +310,64 @@ func (f writerFunc) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// A capture led by modes is one zmx took, and zmx closes every capture with
+// the cursor's placement; one whose close the cut doesn't read is replayed
+// whole, placement and all, so it is recorded. A transcript the tmux backend
+// saved has no lead and no such close.
+func TestHydrate_ReplayRecordsACloseItCannotRead(t *testing.T) {
+	const unrecognised = "scrollback closing state not recognised, so replayed whole"
+	const lead, rows = "\x1b[?1004h\x1b[?2004h", "$ claude\r\n\x1b[1mworking on it\x1b[0m\r\n$ "
+	cases := []struct {
+		name, body, replayed string
+		warns                bool
+	}{
+		{
+			// A cursor style after the pen: a form a later zmx could close with.
+			name:     "a capture zmx led with modes and closed in a form the cut doesn't read is replayed whole but for its lead, and recorded",
+			body:     lead + rows + "\x1b[3;3H\x1b[0m\x1b[5 q",
+			replayed: rows + "\x1b[3;3H\x1b[0m\x1b[5 q",
+			warns:    true,
+		},
+		{
+			name:     "a capture zmx closed in a form the cut reads records nothing",
+			body:     lead + rows + "\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\",
+			replayed: rows,
+		},
+		{
+			name:     "a transcript with no lead, as the tmux backend saved, is replayed whole and records nothing",
+			body:     "\x1b[1mrow-1\x1b[0m\r\nrow-2\r\n",
+			replayed: "\x1b[1mrow-1\x1b[0m\r\nrow-2\r\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newHydrateWorld(t)
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			stdout := new(bytes.Buffer)
+			cfg := w.config(&stubExecShell{})
+			cfg.File, cfg.Stdout, cfg.Logger = transcript(t, tc.body), stdout, logger
+
+			runHydrate(t.Context(), cfg)
+
+			if want := hydrateResetPreamble + tc.replayed + hydrateResetPostamble; stdout.String() != want {
+				t.Errorf("stdout = %q, want %q", stdout.String(), want)
+			}
+			if !tc.warns {
+				if body := sink.Body(); strings.Contains(body, unrecognised) {
+					t.Errorf("recorded a close it read as one it didn't: %q", body)
+				}
+				return
+			}
+			warn := execLogLine(t, sink.Body(), "WARN", unrecognised)
+			for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File} {
+				if !strings.Contains(warn, attr) {
+					t.Errorf("WARN %q does not carry %s", warn, attr)
+				}
+			}
+		})
+	}
+}
+
 func TestHydrate_TranscriptUnreadable(t *testing.T) {
 	cases := []struct {
 		name string
@@ -368,45 +431,49 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 		}
 	})
 
-	// The modes a part-read opened with are cut as a whole one's are; what its
-	// rows set, a pen or the alternate screen among it, must not reach the
-	// shell, and a state that looks like zmx's closing one is no end the read
-	// reached.
-	t.Run("a transcript failing part way is closed and settled as a whole one is, and logged as cut short", func(t *testing.T) {
-		w := newHydrateWorld(t)
-		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-		stdout := new(bytes.Buffer)
-		settled := false
-		exec := &stubExecShell{}
-		cfg := w.config(exec)
-		const read = "row-1\x1b[?1049h\x1b[31mrow-2\x1b[2;6H\x1b[0m"
-		cfg.File, cfg.Stdout, cfg.Logger = "/saved/proj-a1b2.bin", stdout, logger
-		cfg.OpenTranscript = func(string) (io.ReadCloser, error) {
-			return io.NopCloser(io.MultiReader(strings.NewReader("\x1b[?1004h"+read), failingReader{errors.New("device went away")})), nil
-		}
-		cfg.Settle = func() { settled = true }
-
-		runHydrate(t.Context(), cfg)
-
-		if want := hydrateResetPreamble + read + hydrateResetPostamble; stdout.String() != want {
-			t.Errorf("stdout = %q, want %q", stdout.String(), want)
-		}
-		if !settled {
-			t.Error("the part replayed was never let settle")
-		}
-		warn := execLogLine(t, sink.Body(), "WARN", "scrollback replay cut short")
-		for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File, "bytes=" + strconv.Itoa(len(read)), "error=device went away"} {
-			if !strings.Contains(warn, attr) {
-				t.Errorf("WARN %q does not carry %s", warn, attr)
+	// A part-read is cut as a whole one is: the modes it opened with, and the
+	// state closing it once the read has reached that state. No row places the
+	// cursor, so the cut takes nothing else.
+	const lead, rows, closer = "\x1b[?1004h\x1b[?2004h", "$ claude\r\n\x1b[1mworking on it\x1b[0m\r\n$ ", "\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\"
+	for name, read := range map[string]string{"before its close": lead + rows, "after its close": lead + rows + closer} {
+		t.Run("a transcript failing part way, "+name+", is cut, closed and settled as a whole one is, and logged as cut short", func(t *testing.T) {
+			w := newHydrateWorld(t)
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			stdout := new(bytes.Buffer)
+			settled := false
+			exec := &stubExecShell{}
+			cfg := w.config(exec)
+			cfg.File, cfg.Stdout, cfg.Logger = "/saved/proj-a1b2.bin", stdout, logger
+			cfg.OpenTranscript = func(string) (io.ReadCloser, error) {
+				return io.NopCloser(io.MultiReader(strings.NewReader(read), failingReader{errors.New("device went away")})), nil
 			}
-		}
-		if body := sink.Body(); strings.Contains(body, "scrollback missing") || strings.Contains(body, "scrollback replayed") {
-			t.Errorf("a part-read was recorded as a missing or a whole replay: %q", body)
-		}
-		if !exec.called {
-			t.Error("the session was never handed on")
-		}
-	})
+			cfg.Settle = func() { settled = true }
+
+			runHydrate(t.Context(), cfg)
+
+			if want := hydrateResetPreamble + rows + hydrateResetPostamble; stdout.String() != want {
+				t.Errorf("stdout = %q, want %q", stdout.String(), want)
+			}
+			if !settled {
+				t.Error("the part replayed was never let settle")
+			}
+			warn := execLogLine(t, sink.Body(), "WARN", "scrollback replay cut short")
+			for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File, "bytes=" + strconv.Itoa(len(rows)), "error=device went away"} {
+				if !strings.Contains(warn, attr) {
+					t.Errorf("WARN %q does not carry %s", warn, attr)
+				}
+			}
+			body := sink.Body()
+			for _, msg := range []string{"scrollback missing", "scrollback replayed", "scrollback closing state not recognised"} {
+				if strings.Contains(body, msg) {
+					t.Errorf("a part-read was recorded as %q: %q", msg, body)
+				}
+			}
+			if !exec.called {
+				t.Error("the session was never handed on")
+			}
+		})
+	}
 }
 
 // failingReader fails every read with its error.
@@ -481,6 +548,18 @@ func TestHydrate_HandOff(t *testing.T) {
 
 		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, []string{"-sh"}) {
 			t.Errorf("exec = %q %q, want /bin/sh run as -sh", exec.target, exec.args)
+		}
+	})
+
+	t.Run("a session whose shell is gone is handed /bin/sh, as its $SHELL too", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		exec := &stubExecShell{}
+
+		runHydrate(t.Context(), w.config(exec))
+
+		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, []string{"-sh"}) || exec.shellEnv != "/bin/sh" {
+			t.Errorf("exec = %q %q with $SHELL %q, want /bin/sh run as -sh with $SHELL /bin/sh", exec.target, exec.args, exec.shellEnv)
 		}
 	})
 

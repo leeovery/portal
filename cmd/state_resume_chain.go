@@ -151,9 +151,16 @@ func execHandOff(logger *slog.Logger, execShell func(prog string, args []string)
 
 // handOffToHookOrShell gives a session answered on the panel or recovered by
 // the tail the same invocation as one that never waited. An empty command
-// means no registration.
+// means no registration. A session handed /bin/sh gets it as its $SHELL too,
+// as the backstop's tail has it, so one handed it in place of a $SHELL that
+// can't be found, and whatever it starts, inherit a $SHELL that runs: the exec
+// hands on this process's environment.
 func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args []string), command string) {
 	shell := resolveShell(logger)
+	if shell == fallbackShell {
+		// Setenv fails only for a malformed name.
+		_ = os.Setenv("SHELL", fallbackShell)
+	}
 	if command == "" {
 		execHandOff(logger, execShell, shell, loginShellArgv(shell), false)
 		return
@@ -179,7 +186,7 @@ func resolveShell(logger *slog.Logger) string {
 	}
 	found, err := exec.LookPath(shell)
 	if err != nil {
-		logger.Warn("shell not found, so the session gets "+fallbackShell, "path", shell, "error", err)
+		logger.Warn("shell not found, so the session gets the fallback shell", "path", shell, "target", fallbackShell, "error", err)
 		return fallbackShell
 	}
 	return found

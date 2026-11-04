@@ -74,6 +74,22 @@ type parkedRun struct {
 // flag at flag, with the stubs ahead of the system's own tools on PATH.
 func runParkedChain(t *testing.T, exe, flag string, env ...string) parkedRun {
 	t.Helper()
+	return runParkedChainUnder(t, "/bin/sh", exe, flag, env...)
+}
+
+// parkedChainInterpreters are the shells a test runs the chain under:
+// /bin/sh, which production parks it under, and dash, which is /bin/sh on
+// many a Linux, where it is installed.
+func parkedChainInterpreters() []string {
+	interpreters := []string{"/bin/sh"}
+	if dash, err := exec.LookPath("dash"); err == nil {
+		interpreters = append(interpreters, dash)
+	}
+	return interpreters
+}
+
+func runParkedChainUnder(t *testing.T, interpreter, exe, flag string, env ...string) parkedRun {
+	t.Helper()
 	dir := t.TempDir()
 	shell := stageExecutable(t, dir, "user-shell", backstopShell)
 	bin := filepath.Join(dir, "bin")
@@ -88,7 +104,7 @@ func runParkedChain(t *testing.T, exe, flag string, env ...string) parkedRun {
 	}
 	t.Cleanup(func() { _ = transcript.Close() })
 
-	parked := exec.Command("/bin/sh", "-c", parkedResumeChain(parkedChain{Exe: exe, Flag: flag}, samplePayload()))
+	parked := exec.Command(interpreter, "-c", parkedResumeChain(parkedChain{Exe: exe, Flag: flag}, samplePayload()))
 	parked.Env = append(os.Environ(),
 		"SHELL="+shell,
 		"PATH="+bin+":/bin:/usr/bin",
@@ -217,21 +233,55 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		})
 	}
 
-	// The tail's login /bin/sh reads its home's profile, so the home is the
-	// test's own.
-	t.Run("a tail gone from the baked path hands the session /bin/sh when the user's shell is gone too", func(t *testing.T) {
-		_, flag := backstopFlag(t, true)
+	// The tail's login /bin/sh reads its home's profile, which records the
+	// $SHELL it was handed.
+	unrunnable := []struct {
+		name  string
+		shell func(t *testing.T) string
+	}{
+		{name: "a path with nothing at it", shell: func(t *testing.T) string { return filepath.Join(t.TempDir(), "zsh") }},
+		{name: "a file it can't run", shell: func(t *testing.T) string {
+			path := filepath.Join(t.TempDir(), "zsh")
+			if err := os.WriteFile(path, []byte(backstopShell), 0o600); err != nil {
+				t.Fatalf("stage the unrunnable shell: %v", err)
+			}
+			return path
+		}},
+		{name: "a directory", shell: func(t *testing.T) string { return t.TempDir() }},
+		{name: "a name PATH doesn't hold", shell: func(*testing.T) string { return "nosuchshell" }},
+		{name: "nothing", shell: func(*testing.T) string { return "" }},
+	}
+	for _, interpreter := range parkedChainInterpreters() {
+		for _, tc := range unrunnable {
+			t.Run("under "+interpreter+", a tail gone from the baked path hands a session whose $SHELL is "+tc.name+" /bin/sh, as its $SHELL too", func(t *testing.T) {
+				_, flag := backstopFlag(t, true)
+				home := t.TempDir()
+				if err := os.WriteFile(filepath.Join(home, ".profile"), []byte(`echo "profile $SHELL" >> "$PANE_TRANSCRIPT"`+"\n"), 0o600); err != nil {
+					t.Fatalf("stage the profile: %v", err)
+				}
 
-		run := runParkedChain(t, filepath.Join(t.TempDir(), "portal"), flag,
-			"SHELL="+filepath.Join(t.TempDir(), "zsh"), "HOME="+t.TempDir())
+				run := runParkedChainUnder(t, interpreter, filepath.Join(t.TempDir(), "portal"), flag,
+					"SHELL="+tc.shell(t), "HOME="+home)
 
-		if want := hydrateResetPreamble + "stty sane\n"; run.transcript != want {
-			t.Errorf("session transcript = %q, want %q", run.transcript, want)
+				if want := hydrateResetPreamble + "stty sane\n" + "profile /bin/sh\n"; run.transcript != want {
+					t.Errorf("session transcript = %q, want %q", run.transcript, want)
+				}
+				if run.backstopStderr != "" || run.status != 0 {
+					t.Errorf("stderr %q, status %d; want /bin/sh run, exiting 0 with nothing to read", run.backstopStderr, run.status)
+				}
+			})
 		}
-		if run.backstopStderr != "" || run.status != 0 {
-			t.Errorf("stderr %q, status %d; want /bin/sh run, exiting 0 with nothing to read", run.backstopStderr, run.status)
-		}
-	})
+
+		t.Run("under "+interpreter+", a tail gone from the baked path hands a session the shell its $SHELL names", func(t *testing.T) {
+			_, flag := backstopFlag(t, true)
+
+			run := runParkedChainUnder(t, interpreter, filepath.Join(t.TempDir(), "portal"), flag)
+
+			if run.transcript != recovered {
+				t.Errorf("session transcript = %q, want %q", run.transcript, recovered)
+			}
+		})
+	}
 
 	lowered := []struct {
 		name  string

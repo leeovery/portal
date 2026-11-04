@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -228,6 +229,17 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		answerEnter(t, &probe, samplePayload())
 
 		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+	})
+
+	t.Run("it hands a session whose shell is gone /bin/sh, as its $SHELL too", func(t *testing.T) {
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		var probe resumeWaitProbe
+		answerEnter(t, &probe, samplePayload())
+
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+		if probe.execShellEnv != "/bin/sh" {
+			t.Errorf("$SHELL at the exec = %q, want /bin/sh", probe.execShellEnv)
+		}
 	})
 
 	t.Run("it treats an already-absent marker as cleared", func(t *testing.T) {

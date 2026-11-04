@@ -41,6 +41,10 @@ type resumeRecoverProbe struct {
 	execArgs  []string
 	execCalls int
 
+	// execShellEnv is the $SHELL the exec hands on: it passes this process's
+	// environment.
+	execShellEnv string
+
 	signalsOnCalls   int
 	signalsOnErr     error
 	execsAtSignalsOn int
@@ -90,6 +94,7 @@ func withRecoverProbe(cfg resumeRecoverConfig, p *resumeRecoverProbe) resumeReco
 		p.order = append(p.order, "exec")
 		p.execProg = prog
 		p.execArgs = args
+		p.execShellEnv = os.Getenv("SHELL")
 		p.execCalls++
 	}
 	return cfg
@@ -118,6 +123,19 @@ func TestRunResumeRecover(t *testing.T) {
 		}
 
 		assertRecovered(t, &probe, sink)
+	})
+
+	t.Run("it hands a session whose shell is gone /bin/sh, as its $SHELL too", func(t *testing.T) {
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		probe := resumeRecoverProbe{raised: true}
+
+		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
+			t.Fatalf("runResumeRecover() error = %v", err)
+		}
+
+		if probe.execProg != "/bin/sh" || !slices.Equal(probe.execArgs, []string{"-sh"}) || probe.execShellEnv != "/bin/sh" {
+			t.Errorf("exec = %q %q with $SHELL %q, want /bin/sh run as -sh with $SHELL /bin/sh", probe.execProg, probe.execArgs, probe.execShellEnv)
+		}
 	})
 
 	t.Run("it treats a flag it can't look for as still raised", func(t *testing.T) {
