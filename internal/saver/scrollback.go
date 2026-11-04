@@ -216,7 +216,7 @@ func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) int {
 		}
 	}
 	if reaped > 0 {
-		captureLogger.Info("cleaned", "reaped", reaped)
+		captureLogger.Debug("cleaned", "reaped", reaped)
 	}
 	return reaped
 }

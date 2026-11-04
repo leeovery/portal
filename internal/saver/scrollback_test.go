@@ -421,7 +421,7 @@ func TestPoll_RemovesScrollbackNoEntryNames(t *testing.T) {
 				t.Errorf("%s: %v, want it left", target, err)
 			}
 		}
-		rec := sink.Records().Matching("capture", "cleaned").Only(t, "the clean")
+		rec := sink.Records().Matching("capture", "cleaned").AtExactLevel(slog.LevelDebug).Only(t, "the clean, at DEBUG: the poll's summary carries the count")
 		if got := rec.IntAttr(t, "reaped"); got != 2 {
 			t.Errorf("the clean reaped %d, want the two abandoned temp files", got)
 		}

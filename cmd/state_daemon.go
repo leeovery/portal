@@ -32,11 +32,14 @@ const (
 	// Gone-dir projects are inert clutter rather than a correctness hazard,
 	// hence the slow cadence.
 	projectCleanupInterval = time.Hour
-	// flushAsking is how long the final flush may ask sessions for their
-	// history, and flushBound how long the shutdown waits for it, naming
-	// included: a kill's SIGHUP must still end the daemon promptly.
-	flushAsking = 4 * time.Second
-	flushBound  = 5 * time.Second
+	// shutdownBound is how long, from the first SIGTERM or SIGHUP, the work
+	// in flight and the final flush have before the daemon exits without
+	// them: a poll held on commit.lock must not keep a successor meeting a
+	// live daemon.pid. S10's kill barrier waits longer than this.
+	shutdownBound = 6 * time.Second
+	// flushNaming is the end of the bound the final flush keeps for naming
+	// what it wrote: it stops asking for histories that long before.
+	flushNaming = time.Second
 )
 
 // daemonSaver is the saver's cycle as the daemon runs it.
@@ -55,27 +58,39 @@ type daemonDeps struct {
 	Projects *project.Store
 	// Ticks drives the loop, each tick carrying the time it fired.
 	Ticks <-chan time.Time
-	// FlushAsking and FlushBound bound the final flush, as flushAsking and
-	// flushBound do in production.
-	FlushAsking, FlushBound time.Duration
+	// Signals carries the SIGTERMs and SIGHUPs that end the daemon.
+	Signals <-chan os.Signal
+	// ShutdownBound and FlushNaming bound the shutdown, as shutdownBound and
+	// flushNaming do in production.
+	ShutdownBound, FlushNaming time.Duration
 
 	// absences is the run of ticks the saver session has read as lost.
 	absences           int
 	lastPoll           time.Time
 	lastProjectCleanup time.Time
-	shutdownSignal     atomic.Pointer[os.Signal]
+	// signalled is the signal that began the shutdown, if one did.
+	signalled atomic.Pointer[shutdownSignal]
+	// ended is set by whichever logs the shutdown first: the loop, its flush
+	// done, or runLoop, its bound passed.
+	ended atomic.Bool
 }
 
-func (d *daemonDeps) recordShutdownSignal(sig os.Signal) {
-	d.shutdownSignal.Store(&sig)
+// shutdownSignal is the first SIGTERM or SIGHUP and when it came.
+type shutdownSignal struct {
+	sig os.Signal
+	at  time.Time
+}
+
+func (d *daemonDeps) recordShutdownSignal(sig os.Signal, at time.Time) {
+	d.signalled.Store(&shutdownSignal{sig: sig, at: at})
 }
 
 func (d *daemonDeps) shutdownReason() string {
-	p := d.shutdownSignal.Load()
-	if p == nil {
+	s := d.signalled.Load()
+	if s == nil {
 		return "exit"
 	}
-	switch *p {
+	switch s.sig {
 	case syscall.SIGHUP:
 		return "sighup"
 	case syscall.SIGTERM:
@@ -89,10 +104,17 @@ var daemonTickLoopFunc = defaultDaemonTickLoop
 
 var acquireDaemonLock = state.AcquireDaemonLock
 
+// heldDaemonLock is the daemon's lock from its acquire until the process
+// exits, which releases it. It is never closed, and is held here to stay
+// reachable: a collected *os.File's finalizer would close its fd, releasing
+// the lock while daemon.pid still names this live process.
+var heldDaemonLock *os.File
+
 // The acquire call, its error guard and WritePIDFile must stay immediately
 // consecutive statements: no other work may land between them.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
-	lockFile, err := acquireDaemonLock(deps.Dir)
+	var err error
+	heldDaemonLock, err = acquireDaemonLock(deps.Dir)
 	if err != nil {
 		if errors.Is(err, state.ErrDaemonLockHeld) {
 			daemonLogger.Warn("another daemon holds the lock; exiting")
@@ -102,21 +124,45 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("acquire daemon lock: %w", err)
 	}
 	if err := state.WritePIDFile(deps.Dir, os.Getpid()); err != nil {
-		_ = lockFile.Close()
 		return fmt.Errorf("write PID file: %w", err)
 	}
 	if err := state.WriteVersionFile(deps.Dir, deps.Version, daemonLogger); err != nil {
-		_ = lockFile.Close()
 		return fmt.Errorf("write version file: %w", err)
 	}
 
 	daemonLogger.Info("lock acquired", "session", deps.Backend.Current())
 
-	err = daemonTickLoopFunc(ctx, deps)
-	// Closed only here, which keeps lockFile reachable for the daemon's whole
-	// life: a collected *os.File's finalizer closes its fd, releasing the lock.
-	_ = lockFile.Close()
-	return err
+	return deps.runLoop(ctx, daemonTickLoopFunc)
+}
+
+// runLoop runs loop until it returns, or until a SIGTERM or SIGHUP ends the
+// daemon. The first cancels the loop, whose work in flight and final flush
+// then have ShutdownBound; past it, or at a second signal, the daemon ends
+// without them, which their atomic writes and the lock's release at exit
+// make safe.
+func (d *daemonDeps) runLoop(ctx context.Context, loop func(context.Context, *daemonDeps) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- loop(ctx, d) }()
+
+	select {
+	case err := <-done:
+		return err
+	case sig := <-d.Signals:
+		d.recordShutdownSignal(sig, time.Now())
+		cancel()
+	}
+	bound := time.NewTimer(d.ShutdownBound)
+	defer bound.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-bound.C:
+	case <-d.Signals:
+	}
+	d.logShutdown(false)
+	return nil
 }
 
 // The self-check runs on every tick, ahead of the poll, which stands down
@@ -211,8 +257,9 @@ func (d *daemonDeps) tick(ctx context.Context, at time.Time) {
 	d.sweepStaleHooks(at)
 }
 
-// poll runs one of the saver's polls, summarising one that did anything in
-// one INFO line: a quiet poll, every five seconds, logs nothing at INFO.
+// poll runs one of the saver's polls, summarising in one INFO line one that
+// claimed, dropped, captured or removed anything: a quiet poll, every five
+// seconds, logs nothing at INFO.
 func (d *daemonDeps) poll(ctx context.Context) {
 	start := time.Now()
 	result, err := d.Saver.Poll(ctx)
@@ -225,9 +272,9 @@ func (d *daemonDeps) poll(ctx context.Context) {
 		daemonLogger.Warn("poll failed", "error", err)
 	case !result.Quiet():
 		captureLogger.Info("poll complete",
-			"entries", result.Claimed,
-			"natural_churn", result.Dropped,
-			"sessions", result.Captured,
+			"claimed", result.Claimed,
+			"dropped", result.Dropped,
+			"captured", result.Captured,
 			"reaped", result.Removed,
 			log.Took(start),
 		)
@@ -252,64 +299,43 @@ func (d *daemonDeps) maybeCleanProjects(at time.Time) {
 // token-shaped.
 func (d *daemonDeps) sweepStaleHooks(time.Time) {}
 
-// shutdown takes the final flush and logs the daemon's end.
+// shutdown takes the final flush and logs the daemon's end. The flush asks
+// for histories until FlushNaming before the shutdown's bound, keeping the
+// rest for naming what it wrote.
 func (d *daemonDeps) shutdown() error {
 	start := time.Now()
-	result, err := d.flush()
+	ctx, cancel := context.WithDeadline(context.Background(), d.shutdownDeadline(start).Add(-d.FlushNaming))
+	defer cancel()
+	result, err := d.Saver.Flush(ctx)
 	switch {
 	case errors.Is(err, saver.ErrRestoring):
 		daemonLogger.Debug("final flush stood down", "error", err)
 	case err != nil:
 		daemonLogger.Warn("final flush failed", "error", err)
 	case !result.Quiet():
-		captureLogger.Info("flush complete", "sessions", result.Captured, log.Took(start))
+		captureLogger.Info("flush complete", "captured", result.Captured, log.Took(start))
 	}
-	daemonLogger.Info("shutdown", "reason", d.shutdownReason(), "flush_completed", err == nil)
+	d.logShutdown(err == nil)
 	return nil
 }
 
-// flush runs the saver's flush, asking for histories for up to FlushAsking
-// and waiting for it up to FlushBound. A flush past its bound is left to the
-// process's exit, which every file it is writing survives whole, each write
-// being atomic.
-func (d *daemonDeps) flush() (saver.Result, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), d.FlushAsking)
-	defer cancel()
-	type flushed struct {
-		result saver.Result
-		err    error
+// shutdownDeadline is when the shutdown's bound passes: ShutdownBound after
+// the signal that began it, or after from for a shutdown no signal began.
+func (d *daemonDeps) shutdownDeadline(from time.Time) time.Time {
+	if s := d.signalled.Load(); s != nil {
+		from = s.at
 	}
-	done := make(chan flushed, 1)
-	go func() {
-		result, err := d.Saver.Flush(ctx)
-		done <- flushed{result, err}
-	}()
-	select {
-	case f := <-done:
-		return f.result, f.err
-	case <-time.After(d.FlushBound):
-		return saver.Result{}, fmt.Errorf("the final flush ran past its %s bound", d.FlushBound)
+	return from.Add(d.ShutdownBound)
+}
+
+// logShutdown logs the daemon's end, once, whoever reaches it first.
+func (d *daemonDeps) logShutdown(flushCompleted bool) {
+	if d.ended.CompareAndSwap(false, true) {
+		daemonLogger.Info("shutdown", "reason", d.shutdownReason(), "flush_completed", flushCompleted)
 	}
 }
 
-// cancelOnShutdownSignal cancels the daemon on its first SIGHUP or SIGTERM,
-// recording which, until ctx ends; stop undoes the catch.
-func (d *daemonDeps) cancelOnShutdownSignal(ctx context.Context, cancel context.CancelFunc) (stop func()) {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM)
-	go func() {
-		select {
-		case sig := <-signals:
-			// Recorded before the cancel: the shutdown reads it after.
-			d.recordShutdownSignal(sig)
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return func() { signal.Stop(signals) }
-}
-
-func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time) *daemonDeps {
+func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time, signals <-chan os.Signal) *daemonDeps {
 	// Neither store failing aborts the daemon's primary job: a nil hook store
 	// keeps a dropped session's hook, a nil project store prunes nothing.
 	hookStore, err := loadHookStore()
@@ -321,14 +347,15 @@ func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time) *daemo
 		daemonLogger.Warn("load project store failed; stale-project prune disabled", "error", err)
 	}
 	return &daemonDeps{
-		Dir:         dir,
-		Version:     Version(),
-		Backend:     b,
-		Saver:       saver.New(saver.Config{Backend: b, StateDir: dir, Hooks: hookStore, Now: time.Now}),
-		Projects:    projectStore,
-		Ticks:       ticks,
-		FlushAsking: flushAsking,
-		FlushBound:  flushBound,
+		Dir:           dir,
+		Version:       Version(),
+		Backend:       b,
+		Saver:         saver.New(saver.Config{Backend: b, StateDir: dir, Hooks: hookStore, Now: time.Now}),
+		Projects:      projectStore,
+		Ticks:         ticks,
+		Signals:       signals,
+		ShutdownBound: shutdownBound,
+		FlushNaming:   flushNaming,
 		// Anchored to the daemon's start, so the prune first runs an
 		// interval in.
 		lastProjectCleanup: time.Now(),
@@ -355,15 +382,13 @@ var stateDaemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		signals := make(chan os.Signal, 2)
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM)
+		defer signal.Stop(signals)
 		ticker := time.NewTicker(daemonTick)
 		defer ticker.Stop()
-		deps := newDaemonDeps(dir, b, ticker.C)
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		defer deps.cancelOnShutdownSignal(ctx, cancel)()
-
-		return defaultDaemonRun(ctx, deps)
+		return defaultDaemonRun(context.Background(), newDaemonDeps(dir, b, ticker.C, signals))
 	},
 }
 

@@ -71,7 +71,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 
 ## Saver
 
-- **Host.** `portal state daemon` runs inside a `_portal-saver` zmx session, which keeps it alive the way tmux does today. The singleton lock, pid and version files and the orphan sweep stay. Self-supervision compares the saver session's pid from `List()`.
+- **Host.** `portal state daemon` runs inside a `_portal-saver` zmx session, which keeps it alive the way tmux does today. The singleton lock, pid and version files and the orphan sweep stay. Self-supervision compares the saver session's pid from `Session("_portal-saver")` with its own. A SIGTERM or SIGHUP ends it through a final flush: from the signal, what it has in flight and the flush get about 6 s before it exits without them, and a second signal exits at once. It holds its lock until the process exits.
 - **Index.** Polled every 5 s; committed when it changes. Portal records the created time and pid of every session it creates, restore included; zmx keeps created time in whole seconds, so the pair tells a recreated session apart (see Names).
 - **Scrollback.** Captured at most once a minute per session, and only when its content has changed. Sessions flagged hydrating or resume-pending are skipped. A poll starts no capture once about 3 s of its captures have passed, and never cuts one short; a session it doesn't reach is captured at the next poll.
 - **Drops.**

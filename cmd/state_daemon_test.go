@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/saver"
@@ -29,14 +29,19 @@ type fakeSaver struct {
 	polls, flushes          int
 	pollResult, flushResult saver.Result
 	pollErr, flushErr       error
-	// onFlush, when set, answers each flush in place of the script.
-	onFlush func(ctx context.Context) (saver.Result, error)
+	// onPoll and onFlush, when set, answer each poll or flush in place of the
+	// script.
+	onPoll, onFlush func(ctx context.Context) (saver.Result, error)
 }
 
-func (f *fakeSaver) Poll(context.Context) (saver.Result, error) {
+func (f *fakeSaver) Poll(ctx context.Context) (saver.Result, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.polls++
+	onPoll := f.onPoll
+	f.mu.Unlock()
+	if onPoll != nil {
+		return onPoll(ctx)
+	}
 	return f.pollResult, f.pollErr
 }
 
@@ -64,13 +69,55 @@ func newTestDaemon(t *testing.T, s daemonSaver) (*daemonDeps, *backendtest.Fake)
 	t.Helper()
 	fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: os.Getpid()})
 	return &daemonDeps{
-		Dir:         t.TempDir(),
-		Version:     "test",
-		Backend:     fake,
-		Saver:       s,
-		FlushAsking: time.Second,
-		FlushBound:  2 * time.Second,
+		Dir:           t.TempDir(),
+		Version:       "test",
+		Backend:       fake,
+		Saver:         s,
+		ShutdownBound: 2 * time.Second,
+		FlushNaming:   500 * time.Millisecond,
 	}, fake
+}
+
+// releaseHeldDaemonLock closes, at cleanup, the lock a daemon run holds until
+// the process exits, so a test's run leaves no fd behind it.
+func releaseHeldDaemonLock(t *testing.T) {
+	t.Cleanup(func() {
+		if heldDaemonLock != nil {
+			_ = heldDaemonLock.Close()
+		}
+	})
+}
+
+// runningLoop is a daemon's run of the tick loop under runLoop, and when the
+// loop itself ends, which an abandoned one does after runLoop has returned.
+type runningLoop struct {
+	returned <-chan error
+	ended    <-chan struct{}
+}
+
+func startLoop(t *testing.T, deps *daemonDeps) runningLoop {
+	t.Helper()
+	returned := make(chan error, 1)
+	ended := make(chan struct{})
+	go func() {
+		returned <- deps.runLoop(t.Context(), func(ctx context.Context, d *daemonDeps) error {
+			defer close(ended)
+			return defaultDaemonTickLoop(ctx, d)
+		})
+	}()
+	return runningLoop{returned: returned, ended: ended}
+}
+
+// awaitReturn is runLoop's return, failing the test past within.
+func (r runningLoop) awaitReturn(t *testing.T, within time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-r.returned:
+		return err
+	case <-time.After(within):
+		t.Fatalf("the daemon still ran %s on", within)
+		return nil
+	}
 }
 
 // realSaver makes deps's saver the production one, over its Fake and state
@@ -98,6 +145,7 @@ func TestStateDaemon_StartsHoldingItsLockThenWritingItsPIDAndVersion(t *testing.
 	if err := state.WritePIDFile(dir, 42); err != nil {
 		t.Fatal(err)
 	}
+	releaseHeldDaemonLock(t)
 
 	var ran *daemonDeps
 	var heldWhileRunning bool
@@ -128,14 +176,17 @@ func TestStateDaemon_StartsHoldingItsLockThenWritingItsPIDAndVersion(t *testing.
 	if got := rec.AttrString(t, "session"); got != saver.SessionName {
 		t.Errorf("lock acquired session = %q, want the session the daemon runs in", got)
 	}
-	if ran.Saver == nil || ran.Ticks == nil || ran.FlushAsking != flushAsking || ran.FlushBound != flushBound {
-		t.Errorf("the loop ran with %+v, want a saver, a ticker and the production flush bounds", ran)
+	if ran.Saver == nil || ran.Ticks == nil || ran.Signals == nil || ran.ShutdownBound != shutdownBound || ran.FlushNaming != flushNaming {
+		t.Errorf("the loop ran with %+v, want a saver, a ticker, the shutdown signals and the production shutdown bounds", ran)
 	}
-	lock, err := state.AcquireDaemonLock(dir)
-	if err != nil {
-		t.Fatalf("daemon.lock once the daemon returned: %v, want it released", err)
+	// Held until the process exits: daemon.pid must never name a live
+	// process that holds no lock.
+	if lock, err := state.AcquireDaemonLock(dir); !errors.Is(err, state.ErrDaemonLockHeld) {
+		if lock != nil {
+			_ = lock.Close()
+		}
+		t.Errorf("daemon.lock once the daemon returned: %v, want it still held", err)
 	}
-	_ = lock.Close()
 }
 
 func TestStateDaemon_RefusesAnIndexItMustNotTouch(t *testing.T) {
@@ -261,22 +312,125 @@ func TestDaemonLoop_PollsOnItsTicksAndFlushesAtShutdown(t *testing.T) {
 	s := &fakeSaver{}
 	deps, _ := newTestDaemon(t, s)
 	ticks := make(chan time.Time)
-	deps.Ticks = ticks
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- defaultDaemonTickLoop(ctx, deps) }()
+	signals := make(chan os.Signal, 1)
+	deps.Ticks, deps.Signals = ticks, signals
+	sink := logtest.Install(t)
+	loop := startLoop(t, deps)
 
 	for n := range 6 {
 		ticks <- second(n)
 	}
-	cancel()
+	signals <- syscall.SIGTERM
 
-	if err := <-done; err != nil {
+	if err := loop.awaitReturn(t, deps.ShutdownBound); err != nil {
 		t.Errorf("the loop = %v, want a clean shutdown", err)
 	}
 	if polls, flushes := s.counts(); polls != 2 || flushes != 1 {
 		t.Errorf("polls %d, flushes %d; want polls at 0 s and 5 s, then the final flush", polls, flushes)
 	}
+	assertShutdown(t, sink, "signal", "true")
+}
+
+func TestRunLoop_BoundsTheShutdownFromItsSignal(t *testing.T) {
+	t.Run("a poll held on commit.lock when the signal lands still ends the daemon at the bound", func(t *testing.T) {
+		s := &fakeSaver{}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound = 200 * time.Millisecond
+		held := commitlock.HoldForTest(t, deps.Dir)
+		polling := make(chan struct{})
+		// As a poll's UpdateThen waits, deaf to the poll's context, up to the
+		// lock's own 5 s bound.
+		s.onPoll = func(context.Context) (saver.Result, error) {
+			close(polling)
+			lock, err := commitlock.Acquire(deps.Dir)
+			if err == nil {
+				_ = lock.Close()
+			}
+			return saver.Result{}, err
+		}
+		ticks := make(chan time.Time, 1)
+		signals := make(chan os.Signal, 1)
+		deps.Ticks, deps.Signals = ticks, signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		ticks <- second(0)
+		<-polling
+		signalled := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, 2*time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		if took := time.Since(signalled); took < deps.ShutdownBound {
+			t.Errorf("the daemon ended %s after its signal, want it to give its work the %s bound", took, deps.ShutdownBound)
+		}
+		if _, flushes := s.counts(); flushes != 0 {
+			t.Errorf("flushes = %d, want none: the held poll had the whole bound", flushes)
+		}
+		assertShutdown(t, sink, "signal", "false")
+
+		_ = held.Close()
+		<-loop.ended
+		assertShutdown(t, sink, "signal", "false")
+	})
+
+	t.Run("a second signal ends the daemon at once", func(t *testing.T) {
+		flushing, release := make(chan struct{}), make(chan struct{})
+		s := &fakeSaver{onFlush: func(context.Context) (saver.Result, error) {
+			close(flushing)
+			<-release
+			return saver.Result{}, nil
+		}}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound = time.Minute
+		signals := make(chan os.Signal, 1)
+		deps.Signals = signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		signals <- syscall.SIGHUP
+		<-flushing
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		assertShutdown(t, sink, "sighup", "false")
+
+		close(release)
+		<-loop.ended
+		assertShutdown(t, sink, "sighup", "false")
+	})
+
+	t.Run("a flush that finishes within the bound completes, asking until FlushNaming before it", func(t *testing.T) {
+		asking := make(chan time.Time, 1)
+		s := &fakeSaver{onFlush: func(ctx context.Context) (saver.Result, error) {
+			deadline, _ := ctx.Deadline()
+			asking <- deadline
+			return saver.Result{Captured: 1}, nil
+		}}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound, deps.FlushNaming = time.Minute, 10*time.Second
+		signals := make(chan os.Signal, 1)
+		deps.Signals = signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		before := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		after := time.Now()
+		asks := deps.ShutdownBound - deps.FlushNaming
+		if deadline := <-asking; deadline.Before(before.Add(asks)) || deadline.After(after.Add(asks)) {
+			t.Errorf("the flush asked until %s, want %s from the signal", deadline.Format(time.RFC3339Nano), asks)
+		}
+		sink.Records().Matching("capture", "flush complete").Only(t, "the flush summary")
+		assertShutdown(t, sink, "signal", "true")
+	})
 }
 
 func TestDaemonPoll_Logs(t *testing.T) {
@@ -291,7 +445,7 @@ func TestDaemonPoll_Logs(t *testing.T) {
 		deps.tick(t.Context(), second(5))
 
 		rec := sink.Records().Matching("capture", "poll complete").AtExactLevel(slog.LevelInfo).Only(t, "one poll summary")
-		for key, want := range map[string]int64{"entries": 1, "natural_churn": 0, "sessions": 1, "reaped": 0} {
+		for key, want := range map[string]int64{"claimed": 1, "dropped": 0, "captured": 1, "reaped": 0} {
 			if got := rec.IntAttr(t, key); got != want {
 				t.Errorf("poll complete %s = %d, want %d", key, got, want)
 			}
@@ -355,7 +509,7 @@ func TestDaemonShutdown(t *testing.T) {
 				s := &fakeSaver{}
 				deps, _ := newTestDaemon(t, s)
 				if sig != nil {
-					deps.recordShutdownSignal(sig)
+					deps.recordShutdownSignal(sig, time.Now())
 				}
 				sink := logtest.Install(t)
 
@@ -366,13 +520,7 @@ func TestDaemonShutdown(t *testing.T) {
 				if _, flushes := s.counts(); flushes != 1 {
 					t.Errorf("flushes = %d, want 1", flushes)
 				}
-				rec := sink.Records().Matching("daemon", "shutdown").AtExactLevel(slog.LevelInfo).Only(t, "the shutdown line")
-				if got := rec.AttrString(t, "reason"); got != reason {
-					t.Errorf("shutdown reason = %q, want %q", got, reason)
-				}
-				if got := rec.AttrString(t, "flush_completed"); got != "true" {
-					t.Errorf("flush_completed = %s, want true", got)
-				}
+				assertShutdown(t, sink, reason, "true")
 				if got := sink.Records().Matching("capture", "flush complete"); len(got) != 0 {
 					t.Errorf("logged %+v, want no summary of a flush that saved nothing", got)
 				}
@@ -387,8 +535,8 @@ func TestDaemonShutdown(t *testing.T) {
 		_ = deps.shutdown()
 
 		rec := sink.Records().Matching("capture", "flush complete").AtExactLevel(slog.LevelInfo).Only(t, "the flush summary")
-		if got := rec.IntAttr(t, "sessions"); got != 2 {
-			t.Errorf("flush complete sessions = %d, want 2", got)
+		if got := rec.IntAttr(t, "captured"); got != 2 {
+			t.Errorf("flush complete captured = %d, want 2", got)
 		}
 		rec.RequireDuration(t, "took")
 	})
@@ -400,7 +548,7 @@ func TestDaemonShutdown(t *testing.T) {
 		_ = deps.shutdown()
 
 		sink.Records().Matching("daemon", "final flush failed").AtExactLevel(slog.LevelWarn).Only(t, "the failed flush's WARN")
-		assertFlushCompleted(t, sink, "false")
+		assertShutdown(t, sink, "exit", "false")
 	})
 
 	t.Run("a restore in progress skips the flush quietly", func(t *testing.T) {
@@ -412,40 +560,7 @@ func TestDaemonShutdown(t *testing.T) {
 		if got := sink.Records().AtExactLevel(slog.LevelWarn); len(got) != 0 {
 			t.Errorf("logged %+v, want no WARN for a restore", got)
 		}
-		assertFlushCompleted(t, sink, "false")
-	})
-
-	t.Run("it asks for histories only within FlushAsking, and waits for the flush no longer than FlushBound", func(t *testing.T) {
-		release := make(chan struct{})
-		t.Cleanup(func() { close(release) })
-		asking := make(chan time.Duration, 1)
-		s := &fakeSaver{onFlush: func(ctx context.Context) (saver.Result, error) {
-			deadline, ok := ctx.Deadline()
-			if !ok {
-				deadline = time.Now().Add(time.Hour)
-			}
-			asking <- time.Until(deadline)
-			<-release
-			return saver.Result{}, nil
-		}}
-		deps, _ := newTestDaemon(t, s)
-		deps.FlushAsking, deps.FlushBound = 20*time.Millisecond, 50*time.Millisecond
-		sink := logtest.Install(t)
-
-		start := time.Now()
-		_ = deps.shutdown()
-
-		if took := time.Since(start); took > time.Second {
-			t.Errorf("shutdown took %s, want it back once the 50ms bound ran out", took)
-		}
-		if left := <-asking; left > deps.FlushAsking {
-			t.Errorf("the flush could ask for %s, want no longer than FlushAsking", left)
-		}
-		rec := sink.Records().Matching("daemon", "final flush failed").AtExactLevel(slog.LevelWarn).Only(t, "the overrun's WARN")
-		if got := rec.AttrString(t, "error"); !strings.Contains(got, "bound") {
-			t.Errorf("final flush failed error = %q, want it to name the bound", got)
-		}
-		assertFlushCompleted(t, sink, "false")
+		assertShutdown(t, sink, "exit", "false")
 	})
 
 	t.Run("the saver's flush writes and names a changed session's scrollback", func(t *testing.T) {
@@ -454,9 +569,9 @@ func TestDaemonShutdown(t *testing.T) {
 		work := userSession("work", 4101)
 		fake.Add(work)
 		fake.SetHistory("work", []byte("the first screen"))
+		sink := logtest.Install(t)
 		deps.tick(t.Context(), second(0))
 		fake.SetHistory("work", []byte("the last screen"))
-		sink := logtest.Install(t)
 
 		_ = deps.shutdown()
 
@@ -468,22 +583,27 @@ func TestDaemonShutdown(t *testing.T) {
 			t.Errorf("work's scrollback = %q, %v; want the last screen", got, err)
 		}
 		sink.Records().Matching("capture", "flush complete").Only(t, "the flush summary")
-		assertFlushCompleted(t, sink, "true")
+		assertShutdown(t, sink, "exit", "true")
 	})
 }
 
-func assertFlushCompleted(t *testing.T, sink *logtest.Sink, want string) {
+// assertShutdown checks the daemon logged its end once, at INFO, for reason,
+// its flush completed or not.
+func assertShutdown(t *testing.T, sink *logtest.Sink, reason, flushCompleted string) {
 	t.Helper()
-	rec := sink.Records().Matching("daemon", "shutdown").Only(t, "the shutdown line")
-	if got := rec.AttrString(t, "flush_completed"); got != want {
-		t.Errorf("flush_completed = %s, want %s", got, want)
+	rec := sink.Records().Matching("daemon", "shutdown").AtExactLevel(slog.LevelInfo).Only(t, "the shutdown line")
+	if got := rec.AttrString(t, "reason"); got != reason {
+		t.Errorf("shutdown reason = %q, want %q", got, reason)
+	}
+	if got := rec.AttrString(t, "flush_completed"); got != flushCompleted {
+		t.Errorf("flush_completed = %s, want %s", got, flushCompleted)
 	}
 }
 
 func TestShutdownReason_MapsSignalsAndDefaultsToExit(t *testing.T) {
 	for want, sig := range map[string]os.Signal{"sighup": syscall.SIGHUP, "signal": syscall.SIGTERM, "exit": syscall.SIGINT} {
 		deps := &daemonDeps{}
-		deps.recordShutdownSignal(sig)
+		deps.recordShutdownSignal(sig, epoch)
 		if got := deps.shutdownReason(); got != want {
 			t.Errorf("shutdownReason after %v = %q; want %q", sig, got, want)
 		}
@@ -499,6 +619,7 @@ func TestMaybeCleanProjects(t *testing.T) {
 	t.Run("it prunes a gone project an interval after the last prune, and not before", func(t *testing.T) {
 		store, _ := seedProjectsJSON(t, gone)
 		deps := &daemonDeps{Projects: store, lastProjectCleanup: epoch}
+		logtest.Install(t)
 
 		deps.maybeCleanProjects(epoch.Add(projectCleanupInterval - time.Second))
 		if got := projectPaths(t, store); len(got) != 1 {
@@ -535,6 +656,7 @@ func TestMaybeCleanProjects(t *testing.T) {
 		store, _ := seedProjectsJSON(t, gone)
 		deps, _ := newTestDaemon(t, &fakeSaver{})
 		deps.Projects, deps.lastProjectCleanup = store, epoch
+		logtest.Install(t)
 
 		deps.tick(t.Context(), epoch.Add(projectCleanupInterval))
 		if got := projectPaths(t, store); len(got) != 1 {

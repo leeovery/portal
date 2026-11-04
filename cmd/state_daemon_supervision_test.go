@@ -109,6 +109,7 @@ func TestDaemon_SelfEjectSkipsTheShutdownFlushAndLeavesItsPIDFile(t *testing.T) 
 	deps.Ticks = ticks
 	var exits atomic.Int32
 	withOsExitFake(t, func(int) { exits.Add(1) })
+	releaseHeldDaemonLock(t)
 	sink := logtest.Install(t)
 
 	done := make(chan error, 1)

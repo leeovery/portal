@@ -127,11 +127,12 @@ func TestDaemonSIGTERMFlushesScrollbackAgainstZmx(t *testing.T) {
 		t.Fatalf("create work: %v", err)
 	}
 
+	// Whatever screen the first poll caught, the shell's echo or none yet.
 	entry, ok := awaitEntry(t, d.StateDir, "work", func(e sessionindex.Entry) bool {
-		return e.SameCreation(made.Created, made.PID) && strings.Contains(scrollbackOf(d.StateDir, e), "first-screen")
+		return e.SameCreation(made.Created, made.PID) && e.ScrollbackFile != ""
 	})
 	if !ok {
-		t.Fatalf("the daemon never named work's first screen, holding %+v\n--- portal.log ---\n%s",
+		t.Fatalf("the daemon never claimed work and named its scrollback, holding %+v\n--- portal.log ---\n%s",
 			entry, portaltest.ReadPortalLogSafe(d.StateDir))
 	}
 
@@ -169,7 +170,7 @@ func TestDaemonSIGTERMFlushesScrollbackAgainstZmx(t *testing.T) {
 		t.Errorf("the scrollback the index names at exit:\n%q\nwant the second screen, flushed", got)
 	}
 	logged := portaltest.ReadPortalLogSafe(d.StateDir)
-	for _, want := range []string{"capture: flush complete sessions=1", "daemon: shutdown reason=signal flush_completed=true"} {
+	for _, want := range []string{"capture: flush complete captured=1", "daemon: shutdown reason=signal flush_completed=true"} {
 		if !strings.Contains(logged, want) {
 			t.Errorf("portal.log:\n%s\nwant %q", logged, want)
 		}
