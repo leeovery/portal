@@ -190,3 +190,25 @@ func filterEnvKeys(env []string, keys ...string) []string {
 	}
 	return out
 }
+
+// appendSandboxRegistryDir extends a state dir's daemon ownership to
+// subprocess enumerations; the registry file is re-read each time, so
+// appending after the env slice was built is fine.
+func appendSandboxRegistryDir(t *testing.T, dir string) {
+	t.Helper()
+	path := os.Getenv(state.SandboxRegistryEnv)
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("portaltest: open sandbox registry for append: %v", err)
+	}
+	if _, err := f.WriteString(dir + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("portaltest: append sandbox registry: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("portaltest: close sandbox registry: %v", err)
+	}
+}

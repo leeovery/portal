@@ -137,13 +137,12 @@ func TestPreviewHermetic_NoFIFOReferences(t *testing.T) {
 	}
 }
 
-func TestPreviewHermetic_TestFilesDoNotImportTmuxtestOrRestoretest(t *testing.T) {
+func TestPreviewHermetic_TestFilesDoNotImportTmuxtest(t *testing.T) {
 	// Assembled from fragments so the forbidden paths never appear contiguously
 	// here — this file is one of the files scanned, and would self-trip.
 	const importPathPrefix = `"github.com/leeovery/portal/internal/`
 	forbiddenImports := []string{
 		importPathPrefix + "tmux" + `test"`,
-		importPathPrefix + "restore" + `test"`,
 	}
 
 	matches, err := filepath.Glob("*_test.go")
@@ -161,7 +160,7 @@ func TestPreviewHermetic_TestFilesDoNotImportTmuxtestOrRestoretest(t *testing.T)
 		src := string(data)
 		for _, imp := range forbiddenImports {
 			if strings.Contains(src, imp) {
-				t.Errorf("%s imports forbidden test-only package %s — internal/tui tests must not depend on real-tmux or restore drivers",
+				t.Errorf("%s imports forbidden test-only package %s — internal/tui tests must not depend on a real-tmux driver",
 					path, imp)
 			}
 		}

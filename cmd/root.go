@@ -37,10 +37,8 @@ var bootstrapExempt = map[string]bool{
 // The state check spares version, which reads no state; doctor, which reports
 // an unusable sessions.json itself and writes none; current, which only reads
 // it and shows the name alone when it can't, since footers run it on every
-// refresh; and the hidden state
-// commands, which are still the tmux version's saver: they work on its version
-// 1 sessions.json until the zmx saver replaces them, and no other command
-// reaches them.
+// refresh; and the hidden state commands, the helpers a restored session runs:
+// a refused helper exits, and the session it runs in ends with it.
 var stateCheckExempt = map[string]bool{
 	"current": true,
 	"doctor":  true,

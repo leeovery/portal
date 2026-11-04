@@ -1,6 +1,3 @@
-// Package state owns Portal's session-resurrection state: the sessions.json
-// schema and its capture/commit path, the scrollback and FIFO plumbing, and the
-// daemon's on-disk runtime files.
 package state
 
 import (

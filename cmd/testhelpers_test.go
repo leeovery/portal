@@ -88,14 +88,6 @@ func withBackendDeps(t *testing.T, deps BackendDeps) {
 	t.Cleanup(func() { backendDeps = nil })
 }
 
-// withCommitNowDeps installs deps as the package-level commit-now seam for the
-// rest of the test and registers the restore in the same breath.
-func withCommitNowDeps(t *testing.T, deps CommitNowDeps) {
-	t.Helper()
-	commitNowDeps = &deps
-	t.Cleanup(func() { commitNowDeps = nil })
-}
-
 // withFuncSeam installs replacement as the package-level function seam at seam
 // for the rest of the test and registers the restore in the same breath. The
 // family it serves is staged through one helper rather than one per seam because
@@ -109,6 +101,14 @@ func withFuncSeam[F any](t *testing.T, seam *F, replacement F) {
 	original := *seam
 	*seam = replacement
 	t.Cleanup(func() { *seam = original })
+}
+
+// withOsExitFake swaps the osExit seam. The replacement is expected to panic
+// after recording: were it to return, the caller would run on past an exit the
+// real os.Exit would never return from.
+func withOsExitFake(t *testing.T, fake func(int)) {
+	t.Helper()
+	withFuncSeam(t, &osExit, fake)
 }
 
 // readFileBytes returns nil on ENOENT, so callers can distinguish "file absent"

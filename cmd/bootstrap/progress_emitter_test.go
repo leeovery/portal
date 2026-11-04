@@ -18,17 +18,14 @@ func TestRun_EmitsProgressEventPerStepInOrder(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
+	// The indices are the loading page's step numbering, which internal/tui
+	// keys its labels to.
 	want := []StepEvent{
-		{Index: 1, Name: stepEnsureServer},
-		{Index: 2, Name: stepRegisterHooks},
 		{Index: 3, Name: stepSetRestoring},
 		{Index: 4, Name: stepSweepOrphanDaemons},
 		{Index: 5, Name: stepEnsureSaver},
 		{Index: 6, Name: stepRestore},
-		{Index: 7, Name: stepEagerSignalHydrate},
 		{Index: 8, Name: stepClearRestoring},
-		{Index: 9, Name: stepCleanStaleMarkers},
-		{Index: 10, Name: stepSweepOrphanFIFOs},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("emitted %d events, want %d: %+v", len(got), len(want), got)
@@ -48,18 +45,13 @@ func TestRun_NoEmitterIsNoOp(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
-	want := []string{
-		"EnsureServer", "RegisterPortalHooks", "Set", "SweepOrphanDaemons",
-		"EnsureSaver", "Restore", "EagerSignalHydrate", "Clear",
-		"CleanStaleMarkers", "Sweep",
-	}
-	if !equalCalls(r.calls, want) {
-		t.Errorf("call order = %v, want %v", r.calls, want)
+	if !equalCalls(r.calls, wantAllCalls) {
+		t.Errorf("call order = %v, want %v", r.calls, wantAllCalls)
 	}
 }
 
 func TestRun_FatalStepStopsEmitting(t *testing.T) {
-	r := &stepRecorder{EnsureServerErr: context.Canceled}
+	r := &stepRecorder{SetErr: context.Canceled}
 	o := newOrchestrator(r, nil)
 
 	var got []StepEvent
@@ -68,9 +60,9 @@ func TestRun_FatalStepStopsEmitting(t *testing.T) {
 	})
 
 	if _, _, err := o.Run(ctx); err == nil {
-		t.Fatal("Run returned nil error, want fatal from EnsureServer")
+		t.Fatal("Run returned nil error, want fatal from SetRestoring")
 	}
 	if len(got) != 0 {
-		t.Errorf("emitted %d events on fatal step 1, want 0: %+v", len(got), got)
+		t.Errorf("emitted %d events on a fatal first step, want 0: %+v", len(got), got)
 	}
 }

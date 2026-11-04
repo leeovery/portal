@@ -134,7 +134,7 @@ func TestBareTargetGuard_ScansEveryPackageAddressingTmux(t *testing.T) {
 	t.Run("it derives the scanned package set from the packages importing internal/tmux", func(t *testing.T) {
 		byPath := targetComposingPackageDirs(t)
 
-		for _, want := range []string{cmdImportPath, tmuxImportPath, "github.com/leeovery/portal/internal/restore"} {
+		for _, want := range []string{cmdImportPath, tmuxImportPath, "github.com/leeovery/portal/internal/tmuxtest"} {
 			if _, ok := byPath[want]; !ok {
 				t.Errorf("derived package set %v holds no entry for %s", slices.Sorted(maps.Keys(byPath)), want)
 			}

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/xdg"
 )
 
@@ -20,10 +19,6 @@ const (
 	portalLogName     = "portal.log"
 	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
-
-	// pendingScrollbackPrefix opens the token-derived scrollback name. The
-	// namespaces are disjoint: a positional key always ends "__<window>.<pane>".
-	pendingScrollbackPrefix = "pane-"
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
@@ -88,28 +83,6 @@ func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubd
 
 func ScrollbackFile(dir, paneKey string) string {
 	return filepath.Join(dir, scrollbackSubdir, paneKey+".bin")
-}
-
-// positionalScrollbackFile is ScrollbackFile(dir, paneKey) in the relative
-// forward-slashed shape a Pane record stores.
-func positionalScrollbackFile(paneKey string) string {
-	return filepath.ToSlash(filepath.Join(scrollbackSubdir, paneKey+".bin"))
-}
-
-// PendingScrollbackFile is the token-derived name a frozen pane's scrollback is
-// re-filed under, in the relative forward-slashed shape a Pane record stores.
-func PendingScrollbackFile(token string) string {
-	return filepath.ToSlash(filepath.Join(scrollbackSubdir, pendingScrollbackPrefix+token+".bin"))
-}
-
-// PendingScrollbackPath is PendingScrollbackFile(token) under dir. ok is false
-// for a token the pane-token rule refuses, which also keeps a token from naming
-// a path outside the scrollback directory.
-func PendingScrollbackPath(dir, token string) (path string, ok bool) {
-	if !nanoid.IsTokenShaped(token) {
-		return "", false
-	}
-	return joinStored(dir, PendingScrollbackFile(token)), true
 }
 
 func FIFOPath(dir, paneKey string) string {
