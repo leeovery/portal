@@ -385,13 +385,14 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	// doesn't answer costs one listing's bound, not one per check.
 	sessions, listErr := deps.ListSessions(ctx)
 	listed := func(context.Context) ([]backend.Session, error) { return sessions, listErr }
+	idle := nothingToSave(sessions, listErr, dir, dirErr)
 
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
-		checkSaver(ctx, deps.Saver),
-		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle),
+		checkSaver(ctx, deps.Saver, idle),
+		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),

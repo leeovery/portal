@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -44,7 +45,32 @@ func readOnlySaver(deps *DoctorDeps) doctorSaver {
 // saverReadPhrase words a saver doctor could not read.
 const saverReadPhrase = "could not read " + saver.SessionName
 
-func checkSaver(ctx context.Context, s doctorSaver) checkResult {
+// nothingToSave reports an install with nothing yet for a saver to save: no
+// live session but the saver's own, and no entry in sessions.json. A listing
+// or an index doctor can't read shows no such thing, so it reports false.
+func nothingToSave(sessions []backend.Session, listErr error, dir string, dirErr error) bool {
+	if listErr != nil || dirErr != nil {
+		return false
+	}
+	for _, s := range sessions {
+		if s.Name != saver.SessionName {
+			return false
+		}
+	}
+	idx, err := sessionindex.Read(dir)
+	return err == nil && idx.Len() == 0
+}
+
+// missingSaver is a check of a saver that isn't running: info while there is
+// nothing to save, saying so, and a failure, saying failed, otherwise.
+func missingSaver(name string, nothingToSave bool, idle, failed string) checkResult {
+	if nothingToSave {
+		return checkResult{name: name, status: checkInfo, detail: idle}
+	}
+	return checkResult{name: name, status: checkFail, detail: failed}
+}
+
+func checkSaver(ctx context.Context, s doctorSaver, nothingToSave bool) checkResult {
 	const name = "saver"
 	if s == nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase}
@@ -54,7 +80,9 @@ func checkSaver(ctx context.Context, s doctorSaver) checkResult {
 	case err != nil:
 		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + err.Error()}
 	case !present:
-		return checkResult{name: name, status: checkFail, detail: saver.SessionName + " not running — run portal open to start it"}
+		return missingSaver(name, nothingToSave,
+			saver.SessionName+" not running — nothing to save yet",
+			saver.SessionName+" not running — run portal open to start it")
 	}
 	return checkResult{name: name, status: checkPass, detail: saver.SessionName + " up"}
 }
@@ -64,8 +92,9 @@ func checkSaver(ctx context.Context, s doctorSaver) checkResult {
 // Portal's save daemon. A daemon still starting is waited for up to settle,
 // as the saver's own ensure waits, so one on its way up isn't failed. A
 // daemon recording another version, or none, still runs and saves; the next
-// bootstrap replaces it, so it is reported, never failed.
-func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, version string, settle time.Duration) checkResult {
+// bootstrap replaces it, so it is reported, never failed. With no saver, it
+// reads as checkSaver does.
+func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, version string, settle time.Duration, nothingToSave bool) checkResult {
 	const name = "daemon"
 	if s == nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase}
@@ -78,7 +107,9 @@ func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, v
 	case r.saverErr != nil:
 		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + r.saverErr.Error()}
 	case !r.present:
-		return checkResult{name: name, status: checkFail, detail: "not running (no " + saver.SessionName + ")"}
+		return missingSaver(name, nothingToSave,
+			"not running (no "+saver.SessionName+"; nothing to save yet)",
+			"not running (no "+saver.SessionName+")")
 	case errors.Is(r.pidErr, state.ErrPIDFileAbsent):
 		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("not running (no daemon.pid; %s runs pid %d)", saver.SessionName, r.running)}
 	case r.pidErr != nil:
