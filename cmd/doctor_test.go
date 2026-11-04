@@ -246,9 +246,9 @@ func TestDoctorZmxBinaryCheck(t *testing.T) {
 		assertCheck(t, got, checkPass, doctorZmxPath)
 	})
 
-	t.Run("it fails with the install hint when zmx is not on PATH", func(t *testing.T) {
+	t.Run("it fails naming the zmx it needs when zmx is not on PATH", func(t *testing.T) {
 		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing})), "zmx")
-		assertCheck(t, got, checkFail, "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx")
+		assertCheck(t, got, checkFail, "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1")
 	})
 
 	t.Run("it looks up the zmx program", func(t *testing.T) {
@@ -333,7 +333,7 @@ func TestDoctorSessionsCheck(t *testing.T) {
 			"wedged":  {err: backend.ErrTimeout},
 		}
 		assertCheck(t, sessionsCheck(t, silentSessions("crashed", "wedged"), answers.read), checkFail,
-			"2 of 2 not answering: crashed (refuses connections: its daemon has crashed; `zmx list` clears its socket), wedged (no answer)")
+			"2 of 2 not answering: crashed (refuses connections: a zmx process may still hold it; try again in a moment), wedged (no answer)")
 	})
 
 	t.Run("it names Portal's own sessions too", func(t *testing.T) {

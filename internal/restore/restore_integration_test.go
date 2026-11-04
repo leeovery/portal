@@ -181,10 +181,10 @@ func (w *rebootWorld) restorer(t *testing.T, b *zmx.Backend) (*restore.Restorer,
 	return r, sink
 }
 
-func (w *rebootWorld) restore(t *testing.T, b *zmx.Backend, opts ...restore.Option) {
+func (w *rebootWorld) restore(t *testing.T, b *zmx.Backend) {
 	t.Helper()
 	r, sink := w.restorer(t, b)
-	if res, want := r.Restore(t.Context(), opts...), (restore.Result{Restored: 1}); res != want {
+	if res, want := r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
 		t.Fatalf("Restore = %+v, want %+v\n%s", res, want, sink.Body())
 	}
 }
@@ -389,10 +389,11 @@ func TestRestoreAgainstZmx(t *testing.T) {
 		w.checkRestored(t, b)
 	})
 
-	// decision 58: a logout, every zmx daemon dying or a crash ends the saver
-	// with the sessions, so no saver saw them end, and the bootstrap that
-	// finds none brings this boot's sessions back with the rest.
-	t.Run("with no saver running, a session of this boot comes back", func(t *testing.T) {
+	// decisions 58 and 62: a logout, every zmx daemon dying or a crash ends
+	// the saver with the sessions, so no saver saw them end, and the bootstrap
+	// that finds none marks this boot's owed and brings them back with the
+	// rest.
+	t.Run("with no saver running, a session of this boot marked owed comes back", func(t *testing.T) {
 		w := saveSession(t, binary, "eager")
 		b := w.logout(t)
 		r, sink := w.restorer(t, b)
@@ -400,7 +401,11 @@ func TestRestoreAgainstZmx(t *testing.T) {
 			t.Fatalf("Restore = %+v, want this boot's session left to the saver that ran\n%s", res, sink.Body())
 		}
 
-		w.restore(t, b, restore.NoSaverRan())
+		if err := r.MarkOwed(t.Context()); err != nil {
+			t.Fatalf("MarkOwed: %v", err)
+		}
+
+		w.restore(t, b)
 
 		if !harnesstest.PollUntil(t, helperSettle, 20*time.Millisecond, w.hookRan) {
 			t.Fatalf("the resume hook never ran\n--- portal.log ---\n%s", portaltest.ReadPortalLogSafe(w.saver.StateDir))

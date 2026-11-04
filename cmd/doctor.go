@@ -472,7 +472,7 @@ func unansweredReason(ctx context.Context, protocolVersion func(context.Context,
 	case errors.Is(err, backend.ErrNoSuchSession):
 		return ""
 	case errors.Is(err, zmx.ErrRefusing):
-		return "refuses connections: " + crashedDaemon
+		return "refuses connections: " + stillHeld
 	case err != nil || version == zmx.ProtocolVersion:
 		return "no answer"
 	default:

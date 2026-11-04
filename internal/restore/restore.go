@@ -99,29 +99,46 @@ func New(cfg Config) (*Restorer, error) {
 // it restores.
 func (r *Restorer) SetProgress(fn func(n, m int)) { r.progress = fn }
 
-// Option changes one Restore.
-type Option func(*run)
-
-// NoSaverRan is the restore of a bootstrap that found no saver running. The
-// saver's world ended with the sessions, by a logout, every zmx daemon dying
-// or a crash, so no saver saw them end: every entry not live comes back, this
-// boot's included.
-func NoSaverRan() Option { return func(r *run) { r.everyEntry = true } }
+// MarkOwed marks owed, under the commit lock, every saved entry whose session
+// the backend doesn't list, Portal's own aside. A bootstrap that finds no
+// saver running calls it before any saver can commit: the saver's world ended
+// with those sessions, by a logout, every zmx daemon dying or a crash, so no
+// saver saw them end, and each restore brings them back, this boot's
+// included, until one is made again or found live. It fails, marking nothing,
+// when the backend can't be listed or the marks can't be written. An index it
+// can't read holds nothing a saver could drop, so it marks nothing there and
+// leaves the failure for Restore to report.
+func (r *Restorer) MarkOwed(ctx context.Context) error {
+	if _, err := sessionindex.Read(r.dir); err != nil {
+		return nil
+	}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+	listed := names(live)
+	_, err = sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
+		for _, e := range idx.Entries() {
+			if !listed[e.Name] && !backend.IsPortalOwned(e.Name) {
+				idx.Owe(e.Name)
+			}
+		}
+		return nil
+	})
+	return err
+}
 
 // Restore makes again, in index order, the session of every saved entry the
-// backend doesn't list, Portal's own aside. Unless NoSaverRan, it skips an
-// entry from this boot, whose session ended while a saver watched and is the
-// saver's to drop; with no boot time to judge by, every entry may predate the
-// boot. A session it can't make keeps its entry for the next bootstrap. It
-// asks the backend nothing when sessions.json can't be read, makes nothing
-// when the backend can't be listed, and makes no further session once ctx
-// ends.
-func (r *Restorer) Restore(ctx context.Context, opts ...Option) Result {
+// backend doesn't list, Portal's own aside, that is owed a restore or may
+// predate this boot. It skips any other entry from this boot, whose session
+// ended while a saver watched and is the saver's to drop; with no boot time
+// to judge by, every entry may predate the boot. A session it can't make
+// keeps its entry for the next bootstrap. It asks the backend nothing when
+// sessions.json can't be read, makes nothing when the backend can't be
+// listed, and makes no further session once ctx ends.
+func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r}
-	for _, opt := range opts {
-		opt(pass)
-	}
 	pass.restore(ctx)
 	r.logger.Info("restore complete", "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
 	return pass.res
@@ -130,10 +147,8 @@ func (r *Restorer) Restore(ctx context.Context, opts ...Option) Result {
 // run is one Restore: what it did, and how many warnings its sessions drew.
 type run struct {
 	*Restorer
-	// everyEntry restores this boot's entries as well.
-	everyEntry bool
-	res        Result
-	anomalous  int
+	res       Result
+	anomalous int
 }
 
 func (r *run) restore(ctx context.Context) {
@@ -167,14 +182,11 @@ func (r *run) restore(ctx context.Context) {
 
 // due is the entries to restore.
 func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
-	listed := make(map[string]bool, len(live))
-	for _, s := range live {
-		listed[s.Name] = true
-	}
-	predates := r.predating()
+	listed := names(live)
+	rule := r.claimRule(r.dir)
 	var due []sessionindex.Entry
 	for _, e := range entries {
-		if why := skipped(e, listed, predates); why != "" {
+		if why := skipped(e, listed, rule); why != "" {
 			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
 			continue
 		}
@@ -183,25 +195,25 @@ func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessio
 	return due
 }
 
-// predating reports whether an entry may predate this boot, as the claim rule
-// judges it, or for every entry when no saver ran.
-func (r *run) predating() func(sessionindex.Entry) bool {
-	if r.everyEntry {
-		return func(sessionindex.Entry) bool { return true }
+// names is the set of the sessions' names.
+func names(sessions []backend.Session) map[string]bool {
+	set := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		set[s.Name] = true
 	}
-	return r.claimRule(r.dir).MayPredateBoot
+	return set
 }
 
 // skipped says why the entry's session is not restored, and is empty when it
 // is: its session is listed, answering or not, it is one of Portal's own, or
-// it can't predate this boot.
-func skipped(e sessionindex.Entry, listed map[string]bool, predates func(sessionindex.Entry) bool) string {
+// it is owed no restore and can't predate this boot, as rule judges it.
+func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule) string {
 	switch {
 	case listed[e.Name]:
 		return "it is live"
 	case backend.IsPortalOwned(e.Name):
 		return "it is one of Portal's own"
-	case !predates(e):
+	case !e.Owed && !rule.MayPredateBoot(e):
 		return "it ended this boot"
 	}
 	return ""

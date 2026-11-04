@@ -79,11 +79,11 @@ func TestPerSessionCalls(t *testing.T) {
 			}
 		})
 
-		t.Run(op.name+" reports a refusing socket from this boot as not answering", func(t *testing.T) {
+		t.Run(op.name+" reports a refusing socket from this boot that a process may hold as not answering", func(t *testing.T) {
 			dir := socketDir(t)
 			refusing(t, dir, "busy")
 
-			err := op.call(t.Context(), newBackend(t, dir), "busy")
+			err := op.call(t.Context(), held(newBackend(t, dir), dir, "busy"), "busy")
 
 			if !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
 				t.Errorf("%s(busy) = %v, want ErrTimeout and not ErrNoSuchSession", op.name, err)
@@ -367,7 +367,7 @@ func TestAttachCommand(t *testing.T) {
 		} {
 			t.Run("inside "+tt.inside, func(t *testing.T) {
 				env := append(slices.Clone(tt.env), "TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
-				cmd, err := newBackend(t, dir, env...).AttachCommand(t.Context(), "work")
+				cmd, err := held(newBackend(t, dir, env...), dir, "busy").AttachCommand(t.Context(), "work")
 				if err != nil {
 					t.Fatalf("AttachCommand: %v", err)
 				}
@@ -577,11 +577,11 @@ func TestProtocolVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports a refusing socket as refusing", func(t *testing.T) {
+	t.Run("it reports a refusing socket a process may hold as refusing", func(t *testing.T) {
 		dir := socketDir(t)
 		refusing(t, dir, "crashed")
 
-		_, err := newBackend(t, dir).ProtocolVersion(t.Context(), "crashed")
+		_, err := held(newBackend(t, dir), dir, "crashed").ProtocolVersion(t.Context(), "crashed")
 		if !errors.Is(err, zmx.ErrRefusing) || !errors.Is(err, backend.ErrTimeout) {
 			t.Errorf("ProtocolVersion of a refusing socket = %v, want ErrRefusing wrapping ErrTimeout", err)
 		}

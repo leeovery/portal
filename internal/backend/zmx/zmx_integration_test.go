@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -109,7 +110,13 @@ func rawInfo(t *testing.T, b *zmx.Backend, name string) []byte {
 // returns the socket's path.
 func crash(t *testing.T, b *zmx.Backend, name string) string {
 	t.Helper()
-	if err := zmxtest.Signal(b, zmxtest.Daemon(t, b, name), syscall.SIGKILL); err != nil {
+	return crashBy(t, b, name, syscall.SIGKILL)
+}
+
+// crashBy is crash by sig: SIGHUP, too, leaves the daemon's socket behind.
+func crashBy(t *testing.T, b *zmx.Backend, name string, sig syscall.Signal) string {
+	t.Helper()
+	if err := zmxtest.Signal(b, zmxtest.Daemon(t, b, name), sig); err != nil {
 		t.Fatal(err)
 	}
 	socket := filepath.Join(b.Dir(), name)
@@ -645,23 +652,84 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("it holds a SIGKILLed daemon's socket from this boot as not answering, and leaves it alone", func(t *testing.T) {
+	for name, sig := range map[string]syscall.Signal{"SIGKILL": syscall.SIGKILL, "SIGHUP": syscall.SIGHUP} {
+		t.Run("it reads the socket a "+name+" leaves from this boot as gone, once no process holds it, and zmx replaces it on Create", func(t *testing.T) {
+			b := zmxtest.New(t)
+			mustCreate(t, b, "crashed", t.TempDir(), "sleep", "1000")
+			mustCreate(t, b, "alive", t.TempDir(), "sleep", "1000")
+			socket := crashBy(t, b, "crashed", sig)
+			ctx := t.Context()
+
+			if got := listed(t, b); strings.Join(got, ",") != "alive" {
+				t.Errorf("List = %v, want only alive", got)
+			}
+			if exists, err := b.Exists(ctx, "crashed"); exists || err != nil {
+				t.Errorf("Exists(crashed) = %v, %v; want false, nil", exists, err)
+			}
+			if err := b.Kill(ctx, "crashed"); !errors.Is(err, backend.ErrNoSuchSession) {
+				t.Errorf("Kill of a stale socket = %v, want ErrNoSuchSession", err)
+			}
+			if _, err := os.Lstat(socket); err != nil {
+				t.Errorf("the stale socket is gone after Portal's calls: %v; only zmx removes it", err)
+			}
+			if _, err := b.Create(ctx, "crashed", t.TempDir(), []string{"sleep", "1000"}); err != nil {
+				t.Errorf("Create over a stale socket = %v, want zmx to replace it", err)
+			}
+			if got := session(t, b, "crashed"); !got.Answered {
+				t.Errorf("recreated session = %+v, want it answering", got)
+			}
+		})
+	}
+
+	// zmx kill asks the daemon over its socket. The daemon unlinks the socket,
+	// hangs up the session's program, then exits: it is not signalled itself,
+	// and leaves no socket behind.
+	t.Run("a zmx kill from outside Portal hangs up the session's program and leaves no socket", func(t *testing.T) {
 		b := zmxtest.New(t)
-		mustCreate(t, b, "crashed", t.TempDir(), "sleep", "1000")
-		mustCreate(t, b, "alive", t.TempDir(), "sleep", "1000")
-		socket := crash(t, b, "crashed")
-		before, err := os.Stat(socket)
-		if err != nil {
-			t.Fatal(err)
+		hup := filepath.Join(t.TempDir(), "hup")
+		mustCreate(t, b, "killed", t.TempDir(), "sh", "-c", `trap 'echo hup > "$0"; exit 0' HUP; while :; do sleep 0.05; done`, hup)
+
+		kill := exec.Command(zmxtest.Binary(t), "kill", "killed")
+		kill.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
+		if out, err := kill.CombinedOutput(); err != nil {
+			t.Fatalf("zmx kill: %v\n%s", err, out)
 		}
 
-		assertNotAnswering(t, b, "crashed")
-		if got := session(t, b, "alive"); !got.Answered {
-			t.Errorf("alive listed as %+v, want it answering", got)
+		if _, err := os.Lstat(filepath.Join(b.Dir(), "killed")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat the socket after zmx kill = %v; want it gone", err)
 		}
-		after, err := os.Stat(socket)
-		if err != nil || !os.SameFile(before, after) {
-			t.Errorf("the refusing socket after Portal's calls: %v; want it left as it was", err)
+		if exists, err := b.Exists(t.Context(), "killed"); exists || err != nil {
+			t.Errorf("Exists(killed) = %v, %v; want false, nil", exists, err)
+		}
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+			got, err := os.ReadFile(hup)
+			return err == nil && string(got) == "hup\n"
+		}) {
+			t.Error("the session's program never caught a SIGHUP")
+		}
+	})
+
+	t.Run("a daemon of its own protocol discards zmx 0.8.1's framing, answering nothing", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "current", t.TempDir(), "sleep", "1000")
+
+		if older, err := b.OlderZmx(t.Context(), "current"); older || !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("OlderZmx = %v, %v; want false, ErrTimeout", older, err)
+		}
+		if got := session(t, b, "current"); !got.Answered {
+			t.Errorf("session after the probe = %+v, want it answering still", got)
+		}
+	})
+
+	t.Run("it ends a session with zmx's own kill, and frees its name", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "ended", t.TempDir(), "sleep", "1000")
+
+		if err := b.KillByCLI(t.Context(), "ended"); err != nil {
+			t.Fatalf("KillByCLI = %v, want nil", err)
+		}
+		if got := listed(t, b); len(got) != 0 {
+			t.Errorf("List = %v, want nothing", got)
 		}
 	})
 

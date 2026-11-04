@@ -42,6 +42,26 @@ func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	}
 }
 
+func TestPersistentPreRunE_CLIBootstrapSaysOnceThatItWaitsForAnother(t *testing.T) {
+	for name, waited := range map[string]bool{"waited": true, "ran straight away": false} {
+		t.Run(name, func(t *testing.T) {
+			resetBootstrapOnce(t)
+			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &emittingRunner{waited: waited, steps: 7}})
+			withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+
+			_, stderr, err := runRootCmd(t, "list")
+			if err != nil {
+				t.Fatalf("portal list: %v", err)
+			}
+
+			want := map[bool]string{true: "Waiting for another Portal to finish starting…\n", false: ""}[waited]
+			if got := stderr.String(); got != want {
+				t.Errorf("stderr = %q, want %q: one line for the wait, nothing for the steps", got, want)
+			}
+		})
+	}
+}
+
 func TestPersistentPreRunE_RunsTheBootstrapTheGateOwes(t *testing.T) {
 	for _, owed := range []bool{true, false} {
 		name := map[bool]string{true: "owed", false: "not owed"}[owed]

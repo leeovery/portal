@@ -10,7 +10,7 @@ import (
 	"github.com/leeovery/portal/internal/proctable"
 )
 
-// processTable is the part of internal/proctable AttachClients reads.
+// processTable is the part of internal/proctable the Backend reads.
 type processTable struct {
 	list     func() ([]proctable.Process, error)
 	readArgs func(pid int) (proctable.Args, error)
@@ -69,22 +69,28 @@ func (b *Backend) AttachClients(name string) ([]backend.ClientProcess, error) {
 	return clients, nil
 }
 
-// attachedName is the session zmx attach names in argv, before any prefix,
-// read as zmx's parseAttachArgs reads it: flags only before the name, each
-// --labels taking a value of its own or after =, the first other word the
-// name, and none at all naming the prefix alone. An argv zmx answers with help
-// or an error attaches nothing.
+// attachedName is the session zmx attach names in argv, before any prefix, as
+// attachTarget reads it.
 func attachedName(argv []string) (string, bool) {
 	if len(argv) < 2 || filepath.Base(argv[0]) != program || !attachVerbs[argv[1]] {
 		return "", false
 	}
-	for i := 2; i < len(argv); i++ {
-		switch arg := argv[i]; {
+	return attachTarget(argv[2:])
+}
+
+// attachTarget is the session zmx attach's arguments name, before any prefix,
+// read as zmx's parseAttachArgs reads them: flags only before the name, each
+// --labels taking a value of its own or after =, the first other word the
+// name, and none at all naming the prefix alone. Arguments zmx answers with
+// help or an error attach nothing.
+func attachTarget(args []string) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; {
 		case arg == "--help" || arg == "-h":
 			return "", false
 		case strings.HasPrefix(arg, labelsFlag+"="):
 		case arg == labelsFlag:
-			if i++; i == len(argv) {
+			if i++; i == len(args) {
 				return "", false
 			}
 		default:

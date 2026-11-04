@@ -25,15 +25,20 @@ const (
 	KillCeiling   = 5 * time.Second
 )
 
+// JudgeRun bounds a judgement of the saver's protocol: a read in Portal's
+// protocol, a read in an older zmx's, and the kill of a saver judged
+// unusable. Ensure's caller keeps its judge of a saver made within it.
+const JudgeRun = 2*ReadCeiling + KillCeiling
+
 // holderRun is the longest a holder of saver.lock runs, each wait at its
 // bound and each backend call at its ceiling: the ensure's wait for a saver
 // still starting (ReadyWait, then the read in flight); the recycle's stop (a
 // read of the session, TermWait, the kill bound, then the session's kill: a
-// read, the kill, a read); then the create, and the wait for its daemon
-// (ReadyWait, then the read in flight).
+// read, the kill, a read); then the create, its judgement, and the wait for
+// its daemon (ReadyWait, then the read in flight).
 const holderRun = ReadyWait + ReadCeiling +
 	ReadCeiling + TermWait + killWait + ReadCeiling + KillCeiling + ReadCeiling +
-	CreateCeiling + ReadyWait + ReadCeiling
+	CreateCeiling + JudgeRun + ReadyWait + ReadCeiling
 
 // LockWait bounds the wait for saver.lock: a holder's longest run, with 15 s
 // over for what no bound covers, the proofs' ps calls and the reads of the

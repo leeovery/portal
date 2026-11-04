@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +13,9 @@ import (
 )
 
 type emittingRunner struct {
+	// waited sends the event a long wait for another bootstrap sends, before
+	// any step.
+	waited   bool
 	steps    int
 	warnings []bootstrap.Warning
 	err      error
@@ -19,6 +23,9 @@ type emittingRunner struct {
 
 func (r *emittingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
+	if r.waited && emit != nil {
+		emit(bootstrap.StepEvent{Waiting: true})
+	}
 	if r.err == nil {
 		for i := 1; i <= r.steps; i++ {
 			if emit != nil {
@@ -98,6 +105,25 @@ func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
 		if idx != i+1 {
 			t.Errorf("progress order[%d] = %d, want %d (exact step order)", i, idx, i+1)
 		}
+	}
+}
+
+func TestBootstrapProgressPipe_CarriesTheWaitAheadOfTheSteps(t *testing.T) {
+	runner := &emittingRunner{waited: true, steps: 1}
+	pipe := newBootstrapProgressPipe()
+	pipe.start(context.Background(), runner)
+
+	msgs := drainPipe(t, pipe.receiver())
+
+	want := []tui.BootstrapProgressMsg{{Waiting: true}, {Index: 1}}
+	var got []tui.BootstrapProgressMsg
+	for _, m := range msgs {
+		if pm, ok := m.(tui.BootstrapProgressMsg); ok {
+			got = append(got, pm)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("progress msgs = %+v, want %+v", got, want)
 	}
 }
 

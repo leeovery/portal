@@ -153,7 +153,7 @@ func TestKillCommand(t *testing.T) {
 
 		_, _, err := runRootCmd(t, "kill", "crashed-Lp4s")
 
-		want := "session crashed-Lp4s refuses connections: " + crashedDaemon
+		want := "session crashed-Lp4s refuses connections: " + stillHeld
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v, want %q", err, want)
 		}

@@ -138,17 +138,28 @@ func TestCreate(t *testing.T) {
 		ran(t, log, "args")
 	})
 
-	t.Run("it refuses a refusing socket from this boot without running zmx, which would replace it", func(t *testing.T) {
+	t.Run("it refuses a refusing socket from this boot that a process may hold without running zmx, which would replace it", func(t *testing.T) {
 		binary, log := fakeZmx(t, createdLine)
 		dir := socketDir(t)
 		refusing(t, dir, "busy")
 
-		_, err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "busy", t.TempDir(), nil)
+		_, err := held(newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin"), dir, "busy").Create(t.Context(), "busy", t.TempDir(), nil)
 
 		if exists, ok := errors.AsType[*backend.SessionExistsError](err); !ok || exists.Held != "busy" {
 			t.Errorf("Create(busy) = %v, want a SessionExistsError held as busy", err)
 		}
 		notRun(t, log)
+	})
+
+	t.Run("it leaves a refusing socket from this boot that no process holds for zmx to replace", func(t *testing.T) {
+		binary, log := fakeZmx(t, createdLine)
+		dir := socketDir(t)
+		refusing(t, dir, "crashed")
+
+		if _, err := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin").Create(t.Context(), "crashed", t.TempDir(), nil); err != nil {
+			t.Errorf("Create over a socket no process holds = %v, want nil", err)
+		}
+		ran(t, log, "args")
 	})
 
 	t.Run("it gives up on a run past its ceiling", func(t *testing.T) {
@@ -186,7 +197,8 @@ type createResult struct {
 
 // createBringingUp runs Create of name with a fake zmx that prints its
 // created line and then waits, as zmx's attach does while its daemon starts,
-// until up has run here and brought the session's daemon up.
+// until up has run here and brought the session's daemon up. The daemon is a
+// process holding the name throughout.
 func createBringingUp(t *testing.T, dir, name string, up func()) createResult {
 	t.Helper()
 	return createBringingUpWithin(t, dir, name, ceiling, up)
@@ -197,7 +209,7 @@ func createBringingUpWithin(t *testing.T, dir, name string, probe time.Duration,
 	t.Helper()
 	ready := filepath.Join(t.TempDir(), "up")
 	binary, log := fakeZmx(t, createdLine+"; while [ ! -e "+ready+" ]; do sleep 0.01; done")
-	b := newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin")
+	b := held(newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin"), dir, name)
 	zmx.ShortenCeilings(b, probe)
 
 	type returned struct {

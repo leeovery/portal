@@ -24,7 +24,11 @@ func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, str
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	if latched {
-		if err := state.WriteLatch(dir, runningLatch()); err != nil {
+		latch, err := runningLatch()
+		if err != nil {
+			t.Fatalf("read this boot's id: %v", err)
+		}
+		if err := state.WriteLatch(dir, latch); err != nil {
 			t.Fatalf("write the latch: %v", err)
 		}
 	}
@@ -37,7 +41,49 @@ func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, str
 	return fake, dir
 }
 
-func TestProductionGate_WarmCommandAsksOnePresenceCheckAndRunsNoBootstrap(t *testing.T) {
+// everyOp is every call the Fake records.
+var everyOp = []backendtest.Op{
+	backendtest.OpList, backendtest.OpSession, backendtest.OpExists, backendtest.OpCreate, backendtest.OpAttachCommand,
+	backendtest.OpKill, backendtest.OpDetach, backendtest.OpHistory, backendtest.OpLeaderEnv, backendtest.OpAttachClients,
+}
+
+func TestProductionGate_WarmPathAsksTheBackendOnlyWhetherTheSaverIsThere(t *testing.T) {
+	fake, dir := productionGate(t, true, true)
+	for _, op := range everyOp {
+		if op != backendtest.OpExists {
+			fake.Fail(op, fmt.Errorf("%s called on the warm path", op))
+		}
+	}
+
+	runner, err := owedBootstrap(t.Context())
+
+	if runner != nil || err != nil {
+		t.Fatalf("owedBootstrap = %v, %v; want no bootstrap owed", runner, err)
+	}
+	if calls := fake.Calls(); len(calls) != 1 || calls[0].Op != backendtest.OpExists || calls[0].Name != saver.SessionName {
+		t.Errorf("backend calls = %+v, want the one presence check of %s", calls, saver.SessionName)
+	}
+	if _, err := os.Stat(state.BootstrapLock(dir)); !os.IsNotExist(err) {
+		t.Errorf("stat bootstrap.lock = %v; want it never taken on the warm path", err)
+	}
+}
+
+// decision 61: a raised restoring flag is a bootstrap under way or cut short.
+func TestProductionGate_RaisedRestoringFlagOwesTheBootstrap(t *testing.T) {
+	fake, dir := productionGate(t, true, true)
+	if err := state.Restoring.Set(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := panicOf(func() { _, _, _ = runRootCmd(t, "list") }); !strings.Contains(got, "bootstrapExe reached") {
+		t.Errorf("portal list panicked with %q; want the bootstrap's exe seam reached", got)
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("backend calls = %+v, want none: the flag owes the bootstrap before the saver is asked", calls)
+	}
+}
+
+func TestProductionGate_WarmCommandRunsNoBootstrap(t *testing.T) {
 	for _, args := range [][]string{{"list"}, {"open"}} {
 		t.Run("portal "+strings.Join(args, " "), func(t *testing.T) {
 			fake, dir := productionGate(t, true, true)
@@ -54,11 +100,6 @@ func TestProductionGate_WarmCommandAsksOnePresenceCheckAndRunsNoBootstrap(t *tes
 
 			if exists := fake.CallsTo(backendtest.OpExists); len(exists) != 1 || exists[0].Name != saver.SessionName {
 				t.Errorf("Exists calls = %+v, want the one presence check of %s", exists, saver.SessionName)
-			}
-			for _, op := range []backendtest.Op{backendtest.OpSession, backendtest.OpCreate, backendtest.OpKill} {
-				if calls := fake.CallsTo(op); len(calls) != 0 {
-					t.Errorf("%s calls = %+v on the warm path, want none", op, calls)
-				}
 			}
 			if _, err := os.Stat(state.BootstrapLock(dir)); !os.IsNotExist(err) {
 				t.Errorf("stat bootstrap.lock = %v; want it never taken on the warm path", err)

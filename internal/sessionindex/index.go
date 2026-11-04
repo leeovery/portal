@@ -110,6 +110,30 @@ func (idx *Index) setField(name, op, value string, level slog.Level, field func(
 	}
 }
 
+// Owe marks the session's entry owed a restore, reporting whether that
+// changed it. It changes only an entry the session has. Its caller is
+// restore, which a guard holds to.
+func (idx *Index) Owe(name string) bool {
+	i := idx.indexOf(name)
+	if i < 0 || idx.sessions[i].Owed {
+		return false
+	}
+	idx.sessions[i].Owed = true
+	idx.changes = append(idx.changes, change{op: "set-owed", session: name})
+	return true
+}
+
+// repay clears the owed mark of the entry at i, recording why, and reports
+// whether it had one.
+func (idx *Index) repay(i int, why string) bool {
+	if !idx.sessions[i].Owed {
+		return false
+	}
+	idx.sessions[i].Owed = false
+	idx.changes = append(idx.changes, change{op: "clear-owed", session: idx.sessions[i].Name, detail: why})
+	return true
+}
+
 // Remove drops the session's entry, reporting whether there was one. No
 // method makes an entry under the name again in the same Update. Its callers
 // are kill and the saver's drop of a session that ended, which a guard holds

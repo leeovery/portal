@@ -33,11 +33,18 @@ type Process struct {
 	Err  error
 }
 
-// FakeProcesses has AttachClients read procs in place of the system's
-// process table, or fail the listing with err.
+// FakeProcesses has the Backend read procs in place of the system's process
+// table, or fail the listing with err.
 func FakeProcesses(b *Backend, procs []Process, err error) {
+	FakeProcessesFrom(b, func() ([]Process, error) { return procs, err })
+}
+
+// FakeProcessesFrom has the Backend read, at each read, the processes table
+// returns, or fail the listing with table's error.
+func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
 	b.processes = processTable{
 		list: func() ([]proctable.Process, error) {
+			procs, err := table()
 			if err != nil {
 				return nil, err
 			}
@@ -48,6 +55,7 @@ func FakeProcesses(b *Backend, procs []Process, err error) {
 			return list, nil
 		},
 		readArgs: func(pid int) (proctable.Args, error) {
+			procs, _ := table()
 			for _, p := range procs {
 				if p.PID == pid {
 					return p.Args, p.Err

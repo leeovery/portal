@@ -33,14 +33,14 @@ func TestPortalBinaryZmxMissing(t *testing.T) {
 			name:     "open prints error to stderr and exits 1",
 			args:     []string{"open"},
 			wantErr:  true,
-			wantMsg:  "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx",
+			wantMsg:  "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1",
 			wantCode: 1,
 		},
 		{
 			name:     "list's bootstrap prints error to stderr and exits 1",
 			args:     []string{"list"},
 			wantErr:  true,
-			wantMsg:  "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx",
+			wantMsg:  "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1",
 			wantCode: 1,
 		},
 		{

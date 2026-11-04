@@ -134,10 +134,13 @@ type BootstrapCompleteMsg struct {
 // Index is the 1-based canonical bootstrap step number. No friendly label rides
 // here — that would be a second, drift-prone encoding of loading_progress.go's
 // mapping. RestoreN/RestoreM are the restore counter, both zero meaning none.
+// Waiting marks the one message, before any step, saying the bootstrap waits
+// for another Portal's to finish.
 type BootstrapProgressMsg struct {
 	Index    int
 	RestoreN int
 	RestoreM int
+	Waiting  bool
 }
 
 // Drives the in-TUI error state instead of dismissing the loading page.
@@ -1708,22 +1711,13 @@ func (m Model) refetchSessionsAfterRestore() tea.Cmd {
 	}
 }
 
-// On the cold concurrent route it deliberately leaves sessionsLoaded false:
-// deciding the landing page here would latch defaultPageEvaluated against the
-// stale pre-restore list, and the post-restore refetch could never re-decide;
-// that refetch's landing opens a pending kill prompt. With no refetch to come,
-// the listing the loading page took in opens it here, or the first one, still
-// to land, does: left pending, the prompt drops every key but Ctrl+C.
+// It deliberately leaves sessionsLoaded false: the loading page runs only
+// behind a bootstrap's receiver, so its listing predates the restore, and
+// deciding the landing page here would latch defaultPageEvaluated against it,
+// where the post-restore refetch could never re-decide. That refetch's
+// landing opens a pending kill prompt.
 func (m *Model) transitionFromLoading() {
 	m.activePage = PageSessions
-	if m.progressReceiver != nil {
-		return
-	}
-	m.sessionsLoaded = true
-	m.evaluateDefaultPage()
-	if m.listed {
-		m.applyKillAsk()
-	}
 }
 
 // Both loading gates dismiss through here, so the sequence holds whichever of
@@ -1785,16 +1779,6 @@ func (m Model) Init() tea.Cmd {
 			return LoadingMinElapsedMsg{}
 		})
 		cmds = append(cmds, m.fetchSessionsCmd(), loadingPadTick, m.loadProjects())
-		if m.progressReceiver == nil {
-			// Warm route: the orchestrator already ran before this Init, so
-			// satisfy the bootstrapComplete gate from the first tick. On the cold
-			// route the channel owns the terminal BootstrapCompleteMsg, and
-			// synthesizing one here would dismiss the loading page before the
-			// orchestrator finished.
-			// Carries no warnings: the message's field is the orchestrator's set
-			// alone, and the staged set reaches the gate off the model.
-			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{} })
-		}
 	default:
 		cmds = append(cmds, m.fetchSessionsCmd(), m.loadProjects())
 	}

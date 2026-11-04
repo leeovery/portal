@@ -18,6 +18,7 @@ func TestCodec(t *testing.T) {
 		in := sessionindex.IndexOf([]sessionindex.Entry{
 			{Name: "dotfiles-PpaTER", Label: "dots", Dir: "/code/dotfiles", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/dotfiles-PpaTER.bin"},
 			{Name: "bare"},
+			{Name: "owed-Lp4s9a", CreatedAt: time.Unix(1793001000, 0).UTC(), Owed: true},
 		})
 		in.Version, in.SavedAt = sessionindex.SchemaVersion, time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC)
 		data, err := sessionindex.Encode(in)

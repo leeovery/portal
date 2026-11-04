@@ -115,6 +115,41 @@ func TestLabelStateTransitions(t *testing.T) {
 	}
 }
 
+func TestWaitingLabel(t *testing.T) {
+	waited := tui.BootstrapProgressMsg{Waiting: true}
+
+	t.Run("absent until the bootstrap says it waits", func(t *testing.T) {
+		if got := labelState(through(1).View(), tui.LabelWaiting); got != tui.LabelState(-1) {
+			t.Errorf("waiting label state = %v; want no waiting label", got)
+		}
+	})
+
+	t.Run("leads the labels, the only one active, until the first step", func(t *testing.T) {
+		v := feed(tui.LoadingProgress{}, waited).View()
+		if v.Labels[0].Text != tui.LabelWaiting {
+			t.Errorf("first label = %q; want %q", v.Labels[0].Text, tui.LabelWaiting)
+		}
+		assertStates(t, v, map[string]tui.LabelState{
+			tui.LabelWaiting:           tui.LabelActive,
+			tui.LabelCheckingZmx:       tui.LabelPending,
+			tui.LabelStartingTheSaver:  tui.LabelPending,
+			tui.LabelRestoringSessions: tui.LabelPending,
+		})
+		if v.BarFraction != 0 {
+			t.Errorf("bar fraction = %v; want 0: waiting is no step", v.BarFraction)
+		}
+	})
+
+	t.Run("done once a step completes", func(t *testing.T) {
+		v := feed(tui.LoadingProgress{}, waited, tui.BootstrapProgressMsg{Index: 1}).View()
+		assertStates(t, v, map[string]tui.LabelState{
+			tui.LabelWaiting:          tui.LabelDone,
+			tui.LabelCheckingZmx:      tui.LabelDone,
+			tui.LabelStartingTheSaver: tui.LabelActive,
+		})
+	})
+}
+
 func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
 	if got := labelState(through(3).View(), tui.LabelStartingTheSaver); got != tui.LabelActive {
 		t.Errorf("Starting the saver after step 3 = %v; want active (its last step, 4, not done)", got)
@@ -250,7 +285,7 @@ func TestFailedViewFailsTheStepsLabel(t *testing.T) {
 }
 
 func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
-	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true}
+	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true, "Waiting": true}
 	tp := reflect.TypeFor[tui.BootstrapProgressMsg]()
 	got := map[string]bool{}
 	for field := range tp.Fields() {
@@ -258,7 +293,7 @@ func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
 	}
 	for name := range got {
 		if !want[name] {
-			t.Errorf("BootstrapProgressMsg carries field %q — only Index/RestoreN/RestoreM may ride the wire (the label mapping is loading_progress.go's sole authority)", name)
+			t.Errorf("BootstrapProgressMsg carries field %q — only Index/RestoreN/RestoreM/Waiting may ride the wire (the label mapping is loading_progress.go's sole authority)", name)
 		}
 	}
 	for name := range want {

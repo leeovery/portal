@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,9 @@ type productionBootstrap struct {
 	backend backend.Backend
 	host    *saverhost.Host
 	running state.Latch
+	// bootErr is why this boot's id couldn't be read, leaving running
+	// incomplete.
+	bootErr error
 	gate    bootstrap.Gate
 }
 
@@ -49,17 +53,18 @@ func newProductionBootstrap() (*productionBootstrap, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &productionBootstrap{dir: dir, backend: b, host: host, running: runningLatch()}
+	p := &productionBootstrap{dir: dir, backend: b, host: host}
+	p.running, p.bootErr = runningLatch()
 	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, Present: host.Present, Logger: bootstrapLogger}
 	return p, nil
 }
 
 // runningLatch is the latch a bootstrap of this boot and this binary writes.
 // A boot id the kernel won't give leaves it incomplete, so never current: every
-// command then bootstraps, and none can record it.
-func runningLatch() state.Latch {
-	id, _ := bootid.Read()
-	return state.Latch{BootID: id, Version: Version()}
+// command then bootstraps, none can record it, and each warns of it.
+func runningLatch() (state.Latch, error) {
+	id, err := bootid.Read()
+	return state.Latch{BootID: id, Version: Version()}, err
 }
 
 // runner is the bootstrap, run one at a time under bootstrap.lock. The saver
@@ -92,8 +97,8 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 		FlagSweeper: &bootstrap.FlagSweepCore{Dir: p.dir, List: p.backend.List, RunsHelper: restorer.RunsHelper, Logger: bootstrapLogger},
 		Saver:       bootSaver{Ensurer: ensurer, host: p.host},
 		Protocol:    zmx.ProtocolVersion,
-		Restore:     bootstrap.SessionRestorer{Restorer: restorer},
-		Latch:       latchWriter{dir: p.dir, latch: p.running},
+		Restore:     restorer,
+		Latch:       latchWriter{dir: p.dir, latch: p.running, bootErr: p.bootErr},
 		Logger:      bootstrapLogger,
 	}
 	return bootstrap.Locked{Lock: p.lock, Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
@@ -144,9 +149,14 @@ func (dir restoringFlag) Lower() error {
 	return err
 }
 
+var (
+	_ bootstrap.Restorer            = (*restore.Restorer)(nil)
+	_ bootstrap.RestoreProgressSink = (*restore.Restorer)(nil)
+)
+
 // bootSaver is the saver's lifecycle as the bootstrap's saver step asks for
-// it, the protocol read from the saver session's daemon by the zmx driver on
-// the directory the environment names.
+// it, the saver session's daemon read, and ended, by the zmx driver on the
+// directory the environment names.
 type bootSaver struct {
 	*saverhost.Ensurer
 	host *saverhost.Host
@@ -154,18 +164,51 @@ type bootSaver struct {
 
 func (s bootSaver) Present(ctx context.Context) (bool, error) { return s.host.Present(ctx) }
 
+// Protocol is the protocol version the saver session's daemon answers in, or
+// bootstrap.ErrOlderZmx for one that takes Portal's request and answers it
+// nothing, but answers zmx 0.8.1's framing.
 func (s bootSaver) Protocol(ctx context.Context) (int, error) {
-	driver, err := bindZmxAt(zmxProgram, zmx.DirFor(os.Environ()))
+	driver, err := saverDriver()
 	if err != nil {
 		return 0, err
 	}
-	return driver.ProtocolVersion(ctx, saver.SessionName)
+	version, err := driver.ProtocolVersion(ctx, saver.SessionName)
+	if !errors.Is(err, backend.ErrTimeout) || errors.Is(err, zmx.ErrRefusing) {
+		return version, err
+	}
+	if older, _ := driver.OlderZmx(ctx, saver.SessionName); older {
+		return 0, fmt.Errorf("%w: %w", bootstrap.ErrOlderZmx, err)
+	}
+	return 0, err
 }
 
-// latchWriter writes latch in the state directory dir.
+// End ends the saver session with the kill of the zmx on PATH, the binary
+// that made it.
+func (s bootSaver) End(ctx context.Context) error {
+	driver, err := saverDriver()
+	if err != nil {
+		return err
+	}
+	return driver.KillByCLI(ctx, saver.SessionName)
+}
+
+// saverDriver is the zmx driver on PATH's zmx in the directory the
+// environment names.
+func saverDriver() (*zmx.Backend, error) {
+	return bindZmxAt(zmxProgram, zmx.DirFor(os.Environ()))
+}
+
+// latchWriter writes latch in the state directory dir, or fails with
+// bootstrap.ErrNoBootID when bootErr says this boot's id couldn't be read.
 type latchWriter struct {
-	dir   string
-	latch state.Latch
+	dir     string
+	latch   state.Latch
+	bootErr error
 }
 
-func (w latchWriter) WriteLatch() error { return state.WriteLatch(w.dir, w.latch) }
+func (w latchWriter) WriteLatch() error {
+	if w.bootErr != nil {
+		return fmt.Errorf("%w: %w", bootstrap.ErrNoBootID, w.bootErr)
+	}
+	return state.WriteLatch(w.dir, w.latch)
+}

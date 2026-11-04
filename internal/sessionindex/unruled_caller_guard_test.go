@@ -23,17 +23,19 @@ const (
 // fn is empty.
 type unruledCaller struct{ pkg, fn string }
 
-// Remove and Restored change an entry with no claim rule consulted: Remove
-// drops one, and Restored adopts whatever creation an entry records. Anywhere
-// else, either would stand for a replace the rule never judged. Remove's
-// callers are kill and the saver's drop of a session that ended. Restored's
-// is restore.
+// Remove, Restored and Owe change an entry with no claim rule consulted:
+// Remove drops one, Restored adopts whatever creation an entry records, and
+// Owe keeps one from every drop. Anywhere else, the first two would stand for
+// a replace the rule never judged, and Owe would bring back a session the
+// saver saw end. Remove's callers are kill and the saver's drop of a session
+// that ended. Restored's and Owe's are restore.
 var unruledCallers = map[string][]unruledCaller{
 	"Remove": {
 		{pkg: modulePath + "/cmd", fn: "forgetSession"},
 		{pkg: modulePath + "/internal/saver", fn: "drop"},
 	},
 	"Restored": {{pkg: modulePath + "/internal/restore"}},
+	"Owe":      {{pkg: modulePath + "/internal/restore"}},
 }
 
 // guardLane is a build the guard scans.
@@ -153,6 +155,14 @@ func claim(idx *sessionindex.Index) {
 	idx.Remove("a")
 }
 `
+	const owes = `package fixture
+
+import "github.com/leeovery/portal/internal/sessionindex"
+
+func mark(idx *sessionindex.Index) {
+	idx.Owe("a")
+}
+`
 	const methodNamedAsAllowed = `package fixture
 
 import "github.com/leeovery/portal/internal/sessionindex"
@@ -230,6 +240,15 @@ func elsewhere(s store, r remover) {
 				"fixture.go:8: Remove in forgetSession",
 				"fixture.go:13: Remove in elsewhere",
 			},
+		},
+		{
+			name: "it reports Owe from a package not named, the saver's among them",
+			pkg:  modulePath + "/internal/saver", src: owes,
+			want: []string{"fixture.go:6: Owe in mark"},
+		},
+		{
+			name: "it allows Owe anywhere in internal/restore",
+			pkg:  modulePath + "/internal/restore", src: owes,
 		},
 		{
 			name: "it reports a Remove promoted through an embedded index",

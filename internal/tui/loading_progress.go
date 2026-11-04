@@ -9,6 +9,9 @@ const (
 	LabelCheckingZmx       = "Checking zmx"
 	LabelStartingTheSaver  = "Starting the saver"
 	LabelRestoringSessions = "Restoring sessions"
+	// LabelWaiting leads the labels only once the bootstrap has waited a while
+	// for another Portal's to finish.
+	LabelWaiting = "Waiting for another Portal"
 )
 
 // One increment per distinct completed step, not per label. Keep in lockstep
@@ -73,21 +76,26 @@ type LoadingProgress struct {
 	completedSteps map[int]bool
 	restoreN       int
 	restoreM       int
+	waiting        bool
 }
 
 // Apply is idempotent per step index, so a duplicate or out-of-order event
 // never double-advances the bar. It assumes the producer emits every
 // per-session event (RestoreM > 0) before the restore step's completion tick.
 func (p LoadingProgress) Apply(e BootstrapProgressMsg) LoadingProgress {
-	if _, mapped := stepLabelTable[e.Index]; !mapped {
+	_, mapped := stepLabelTable[e.Index]
+	if !mapped && !e.Waiting {
 		return p
 	}
 
 	next := p.clone()
-	if e.Index == restoreStep && e.RestoreM > 0 {
+	switch {
+	case e.Waiting:
+		next.waiting = true
+	case e.Index == restoreStep && e.RestoreM > 0:
 		next.restoreN = e.RestoreN
 		next.restoreM = e.RestoreM
-	} else {
+	default:
 		next.completedSteps[e.Index] = true
 	}
 	return next
@@ -102,6 +110,7 @@ func (p LoadingProgress) clone() LoadingProgress {
 		completedSteps: steps,
 		restoreN:       p.restoreN,
 		restoreM:       p.restoreM,
+		waiting:        p.waiting,
 	}
 }
 
@@ -119,8 +128,11 @@ func (p LoadingProgress) view(failedStep int, message string) LoadingProgressVie
 	failedLabel := LabelForStepIndex(failedStep)
 	v := LoadingProgressView{
 		BarFraction: float64(len(p.completedSteps)) / float64(totalBootstrapSteps),
-		Labels:      make([]LoadingLabel, 0, len(labelOrder)),
+		Labels:      make([]LoadingLabel, 0, len(labelOrder)+1),
 		Message:     message,
+	}
+	if p.waiting {
+		v.Labels = append(v.Labels, LoadingLabel{Text: LabelWaiting, State: p.waitState()})
 	}
 	for _, text := range labelOrder {
 		state := p.labelState(text)
@@ -139,6 +151,15 @@ func (p LoadingProgress) view(failedStep int, message string) LoadingProgressVie
 // LabelForStepIndex returns "" for an out-of-range index.
 func LabelForStepIndex(index int) string {
 	return stepLabelTable[index]
+}
+
+// The waiting label is active until the first step completes: the wait for
+// the other Portal is over once this bootstrap runs a step.
+func (p LoadingProgress) waitState() LabelState {
+	if len(p.completedSteps) == 0 {
+		return LabelActive
+	}
+	return LabelDone
 }
 
 // A label is done once every constituent step completed; the active label is the

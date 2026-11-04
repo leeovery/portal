@@ -3,6 +3,7 @@ package sessionindex_test
 import (
 	"errors"
 	"log/slog"
+	"maps"
 	"os"
 	"strings"
 	"syscall"
@@ -35,7 +36,7 @@ func unwritableStateDir(t *testing.T) string {
 func TestUpdate_Logging(t *testing.T) {
 	t.Run("each landed change logs at INFO under its own op with via", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old"},{"name":"b"},{"name":"e","created_at":"2026-11-02T08:00:00Z"},{"name":"f","label":"F"}]}`)
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old"},{"name":"b"},{"name":"e","created_at":"2026-11-02T08:00:00Z"},{"name":"f","label":"F"},{"name":"g"}]}`)
 		sink := logtest.Install(t)
 
 		_, err := sessionindex.Update(dir, "tui", func(idx *sessionindex.Index) error {
@@ -47,6 +48,7 @@ func TestUpdate_Logging(t *testing.T) {
 			idx.Restored(sessionindex.Entry{Name: "e", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC)}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
 			idx.SetScrollback("e", "scrollback/e.bin")
 			idx.RecordCwd("e", "/work/e")
+			idx.Owe("g")
 			return nil
 		})
 		if err != nil {
@@ -64,6 +66,7 @@ func TestUpdate_Logging(t *testing.T) {
 			{"restored", "e", "2026-11-04T09:00:00Z", slog.LevelInfo},
 			{"set-scrollback", "e", "scrollback/e.bin", slog.LevelInfo},
 			{"record-cwd", "e", "/work/e", slog.LevelDebug},
+			{"set-owed", "g", "", slog.LevelInfo},
 		} {
 			rec := sink.Records().Matching("sessions", want.op).Only(t, want.op)
 			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: want.level, Msg: want.op, Component: "sessions", Op: want.op, Via: "tui"})
@@ -73,6 +76,29 @@ func TestUpdate_Logging(t *testing.T) {
 			if got := rec.AttrOrEmpty("value"); got != want.value {
 				t.Errorf("%s value = %q, want %q", want.op, got, want.value)
 			}
+		}
+	})
+
+	t.Run("an owed mark cleared logs at INFO, saying why", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","created_at":"2026-11-04T10:00:00Z","pid":4242,"owed":true},{"name":"b","created_at":"2026-11-02T08:00:00Z","owed":true}]}`)
+		sink := logtest.Install(t)
+
+		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
+			idx.Claim("a", "", liveCreation, 4242, ruleRestoring())
+			idx.Restored(sessionindex.Entry{Name: "b", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC), Owed: true}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 1717)
+			return nil
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		cleared := sink.Records().Matching("sessions", "clear-owed")
+		why := map[string]string{}
+		for _, rec := range cleared {
+			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "clear-owed", Component: "sessions", Op: "clear-owed", Via: "internal"})
+			why[rec.AttrString(t, "session")] = rec.AttrString(t, "detail")
+		}
+		if want := map[string]string{"a": "its session is live", "b": "restore made it"}; !maps.Equal(why, want) {
+			t.Errorf("clear-owed records = %v, want %v", why, want)
 		}
 	})
 

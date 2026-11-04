@@ -325,44 +325,6 @@ func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
 	}
 }
 
-func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]Session{{}}}
-
-	m := New(lister,
-		WithBootstrapping(true),
-		WithProjectStore(stubProjectStore{}),
-	)
-
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	model, _ = model.Update(SessionsMsg{Sessions: nil})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after empty SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	callsBefore := lister.calls
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-
-	final := model.(Model)
-	if final.ActivePage() != PageProjects {
-		t.Fatalf("AC5: warm boot with zero sessions must land on PageProjects, got %v", final.ActivePage())
-	}
-
-	if completeCmd != nil {
-		drainBatchToModel(t, final, completeCmd)
-	}
-	if lister.calls != callsBefore {
-		t.Errorf("warm route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
-	}
-}
-
 func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 	sessions := []Session{{Name: "live-session"}}
 	lister := &coldBootStepLister{steps: [][]Session{sessions}}

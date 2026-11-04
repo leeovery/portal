@@ -23,9 +23,18 @@ import (
 // it stays bounded.
 const ReadyWait = 10 * time.Second
 
-// ErrNotReady is a saver whose daemon did not come up: its session ended, or
-// within ReadyWait its daemon held no lock or recorded another version.
-var ErrNotReady = errors.New("the saver's daemon did not come up")
+// The ways ensure fails, each a cause the bootstrap words for the user.
+var (
+	// ErrNotReady is a saver whose daemon did not come up: its session ended,
+	// or within ReadyWait its daemon held no lock or recorded another version.
+	ErrNotReady = errors.New("the saver's daemon did not come up")
+	// ErrUnread is a saver whose session couldn't be read, so couldn't be
+	// judged.
+	ErrUnread = errors.New("the saver couldn't be read")
+	// ErrNotReplaced is a saver a recycle couldn't stop, whose daemon still
+	// runs.
+	ErrNotReplaced = errors.New("the saver's daemon couldn't be replaced")
+)
 
 // Reasons a live saver is replaced.
 const (
@@ -65,18 +74,21 @@ func (h *Host) Ensurer(d Daemon) (*Ensurer, error) {
 }
 
 // EnsureSaver ensures the saver runs the Ensurer's Daemon, as the Host's
-// ensure does.
-func (e *Ensurer) EnsureSaver(ctx context.Context) error {
-	return e.host.ensure(ctx, e.daemon)
+// ensure does, judging a saver it creates by made.
+func (e *Ensurer) EnsureSaver(ctx context.Context, made func(context.Context) error) error {
+	return e.host.ensure(ctx, e.daemon, made)
 }
 
 // ensure keeps a live saver whose daemon records d's version, stopping any
 // other, then creates the saver where there is none and waits for its daemon
-// to hold the lock and record the version. It holds saver.lock throughout,
-// creating the state directory for it. A saver another process creates first
-// counts once its daemon does the same. A saver that can't be read, can't be
-// stopped or doesn't come up is an error, never a wait past its bounds.
-func (h *Host) ensure(ctx context.Context, d Daemon) error {
+// to hold the lock and record the version. Before that wait, made, when
+// given, judges the saver created, and its error ends ensure. It holds
+// saver.lock throughout, creating the state directory for it. A saver another
+// process creates first counts once its daemon does the same. A saver that
+// can't be read (ErrUnread), can't be stopped while its daemon runs
+// (ErrNotReplaced) or doesn't come up (ErrNotReady) is an error, never a wait
+// past its bounds.
+func (h *Host) ensure(ctx context.Context, d Daemon, made func(context.Context) error) error {
 	release, err := h.lockCreating(ctx)
 	if err != nil {
 		return err
@@ -94,13 +106,27 @@ func (h *Host) ensure(ctx context.Context, d Daemon) error {
 		}
 		logger.Info("recycle", "target_pid", r.session, "reason", reason)
 		if err := h.stop(ctx, r.session); err != nil {
-			return fmt.Errorf("recycle the saver: %w", err)
+			return h.notStopped(r.session, err)
 		}
 	}
 	if err := h.create(ctx, d.Exe); err != nil {
 		return err
 	}
+	if made != nil {
+		if err := made(ctx); err != nil {
+			return err
+		}
+	}
 	return h.awaitReady(ctx, d.Version)
+}
+
+// notStopped is a recycle's stop of the daemon pid that failed with err:
+// ErrNotReplaced while pid still runs.
+func (h *Host) notStopped(pid int, err error) error {
+	if h.running(pid) {
+		return fmt.Errorf("recycle the saver: %w: %w", ErrNotReplaced, err)
+	}
+	return fmt.Errorf("recycle the saver: %w", err)
 }
 
 // settled reads the saver for its judgement, waiting up to ReadyWait while
@@ -113,7 +139,7 @@ func (h *Host) settled(ctx context.Context) (readiness, error) {
 	case err != nil:
 		return r, fmt.Errorf("wait for the saver's daemon: %w", err)
 	case r.sessionErr != nil:
-		return r, fmt.Errorf("read the saver: %w", r.sessionErr)
+		return r, fmt.Errorf("%w: %w", ErrUnread, r.sessionErr)
 	}
 	return r, nil
 }

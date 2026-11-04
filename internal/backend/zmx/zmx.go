@@ -72,7 +72,7 @@ type Backend struct {
 	hostname func() (string, error)
 	booted   func() (time.Time, error)
 	limits   ceilings
-	// processes is the process table AttachClients reads.
+	// processes is the process table AttachClients and unheld read.
 	processes processTable
 }
 

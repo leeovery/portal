@@ -113,6 +113,7 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 			Index:    ev.Step.Index,
 			RestoreN: ev.RestoreN,
 			RestoreM: ev.RestoreM,
+			Waiting:  ev.Step.Waiting,
 		}
 	}
 }

@@ -182,7 +182,7 @@ func TestRenameCommand(t *testing.T) {
 
 		_, _, err := runRootCmd(t, "rename", "api work")
 
-		want := "session " + currentSessionName + " refuses connections: " + crashedDaemon
+		want := "session " + currentSessionName + " refuses connections: " + stillHeld
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v, want %q", err, want)
 		}

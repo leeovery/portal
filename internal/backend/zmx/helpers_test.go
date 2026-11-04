@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/shellquote"
 )
 
@@ -34,7 +35,8 @@ func socketDir(t *testing.T) string {
 }
 
 // newBackend binds a Backend to dir with the given environment, a fixed
-// hostname and short ceilings. Its binary runs nothing.
+// hostname, short ceilings and a process table holding no process. Its binary
+// runs nothing.
 func newBackend(t *testing.T, dir string, environ ...string) *zmx.Backend {
 	t.Helper()
 	return newBackendRunning(t, "/nonexistent/zmx", dir, environ...)
@@ -49,7 +51,30 @@ func newBackendRunning(t *testing.T, binary, dir string, environ ...string) *zmx
 		Hostname: func() (string, error) { return hostname, nil },
 	})
 	zmx.ShortenCeilings(b, ceiling)
+	zmx.FakeProcesses(b, nil, nil)
 	return b
+}
+
+// held has b read a process table in which a zmx daemon holds each of names
+// in dir, so a refusal from its socket may be a live daemon's full listen
+// backlog. It returns b.
+func held(b *zmx.Backend, dir string, names ...string) *zmx.Backend {
+	procs := make([]zmx.Process, len(names))
+	for i, name := range names {
+		procs[i] = daemonOf(100+i, dir, name)
+	}
+	zmx.FakeProcesses(b, procs, nil)
+	return b
+}
+
+// daemonOf is zmx's daemon for the session name in dir as the process table
+// shows it: no terminal, and the argv and environment of the zmx attach it
+// forked from.
+func daemonOf(pid int, dir, name string) zmx.Process {
+	return zmx.Process{
+		Process: proctable.Process{PID: pid, PPID: 1, Command: "zmx"},
+		Args:    proctable.Args{Argv: []string{"/opt/bin/zmx", "attach", name, "/bin/sh"}, Env: []string{"ZMX_DIR=" + dir}},
+	}
 }
 
 func mustNew(t *testing.T, cfg zmx.Config) *zmx.Backend {
@@ -197,7 +222,7 @@ func ending(d *daemon, c net.Conn) {
 
 // refusing leaves a socket at dir/name that refuses every connection, as a
 // SIGKILLed zmx daemon's does, and as a live one's does while its listen
-// backlog is full.
+// backlog is full. Only held tells the two apart.
 func refusing(t *testing.T, dir, name string) {
 	t.Helper()
 	l, err := net.Listen("unix", filepath.Join(dir, name))

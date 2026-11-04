@@ -145,7 +145,7 @@ func bootstrapFor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	warnings, err := runBootstrap(cmd.Context(), runner)
+	warnings, err := runBootstrap(bootstrap.WithProgressEmitter(cmd.Context(), waitNotice(cmd.ErrOrStderr())), runner)
 	if err != nil {
 		return err
 	}
@@ -156,6 +156,16 @@ func bootstrapFor(cmd *cobra.Command, args []string) error {
 	}
 	bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 	return nil
+}
+
+// waitNotice is a command's progress off the picker: one line on w should its
+// bootstrap wait a while for another Portal's, and nothing of its steps.
+func waitNotice(w io.Writer) bootstrap.ProgressEmitter {
+	return func(ev bootstrap.StepEvent) {
+		if ev.Waiting {
+			_, _ = fmt.Fprintln(w, "Waiting for another Portal to finish starting…")
+		}
+	}
 }
 
 // inChain reports whether cmd or any command above it is named in set.

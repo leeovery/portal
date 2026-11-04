@@ -122,15 +122,22 @@ func TestPoll_DropsAnEntryMissingFromTwoPollsTenSecondsApart(t *testing.T) {
 
 func TestPoll_NeverDrops(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		created func(w *world) time.Time
+		name string
+		kept func(w *world) sessionindex.Entry
 	}{
-		{"an entry created before this boot, for the next bootstrap to restore", func(w *world) time.Time { return w.beforeBoot() }},
-		{"an entry recording no creation", func(*world) time.Time { return time.Time{} }},
+		{"an entry created before this boot, for the next bootstrap to restore", func(w *world) sessionindex.Entry {
+			return sessionindex.Entry{Name: "kept", Label: "Kept", CreatedAt: w.beforeBoot()}
+		}},
+		{"an entry recording no creation", func(*world) sessionindex.Entry {
+			return sessionindex.Entry{Name: "kept", Label: "Kept"}
+		}},
+		{"an entry of this boot owed a restore, its session ended with no saver to see it", func(w *world) sessionindex.Entry {
+			return sessionindex.Entry{Name: "kept", Label: "Kept", CreatedAt: w.thisBoot(0), PID: 4000, Owed: true}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newWorld(t)
-			kept := sessionindex.Entry{Name: "kept", Label: "Kept", CreatedAt: tc.created(w)}
+			kept := tc.kept(w)
 			w.seed(entryOf(w.live("api", 1)), kept)
 
 			w.poll()
@@ -142,6 +149,26 @@ func TestPoll_NeverDrops(t *testing.T) {
 				t.Errorf("kept = %+v, %v; want %+v untouched", got, ok, kept)
 			}
 		})
+	}
+}
+
+func TestPoll_RepaysAnOwedEntryItFindsLive(t *testing.T) {
+	w := newWorld(t)
+	live := w.live("api", 1)
+	owed := entryOf(live)
+	owed.Owed = true
+	w.seed(owed, entryOf(w.live("web", 2)))
+
+	w.poll()
+
+	if got, ok := w.entry("api"); !ok || got.Owed {
+		t.Fatalf("api = %+v, %v; want it owed no more once its session is found live", got, ok)
+	}
+	w.fake.Remove("api")
+	w.after(5 * time.Second)
+	w.after(10 * time.Second)
+	if _, ok := w.entry("api"); ok {
+		t.Error("api is kept, want it dropped as any session of this boot that ends under a saver")
 	}
 }
 

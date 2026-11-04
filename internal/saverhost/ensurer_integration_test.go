@@ -84,7 +84,7 @@ func saverRunning(t *testing.T, dir portaltest.SaverDir) int {
 
 func ensure(t *testing.T, e *saverhost.Ensurer, dir portaltest.SaverDir) int {
 	t.Helper()
-	if err := e.EnsureSaver(t.Context()); err != nil {
+	if err := e.EnsureSaver(t.Context(), nil); err != nil {
 		t.Fatalf("EnsureSaver: %v\n--- portal.log ---\n%s", err, portaltest.ReadPortalLogSafe(dir.StateDir))
 	}
 	return saverRunning(t, dir)

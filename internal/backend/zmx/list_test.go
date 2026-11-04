@@ -91,15 +91,28 @@ func TestList(t *testing.T) {
 		}
 	})
 
-	t.Run("it keeps a refusing socket from this boot, with only its name, and leaves it in place", func(t *testing.T) {
+	t.Run("it keeps a refusing socket from this boot that a process may hold, with only its name, and leaves it in place", func(t *testing.T) {
 		dir := socketDir(t)
 		refusing(t, dir, "busy")
 
-		if got := list(t, newBackend(t, dir)); len(got) != 1 || got[0] != (backend.Session{Name: "busy"}) {
+		if got := list(t, held(newBackend(t, dir), dir, "busy")); len(got) != 1 || got[0] != (backend.Session{Name: "busy"}) {
 			t.Errorf("List = %+v, want busy with only its name: a live daemon with a full backlog refuses too", got)
 		}
 		if _, err := os.Lstat(filepath.Join(dir, "busy")); err != nil {
 			t.Errorf("the refusing socket after List: %v", err)
+		}
+	})
+
+	t.Run("it leaves out a refusing socket from this boot that no process holds, and leaves the socket in place", func(t *testing.T) {
+		dir := socketDir(t)
+		refusing(t, dir, "crashed")
+		serve(t, dir, "alive", answering(infoFrame(t)))
+
+		if got := list(t, newBackend(t, dir)); len(got) != 1 || got[0].Name != "alive" {
+			t.Errorf("List = %+v, want only alive", got)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "crashed")); err != nil {
+			t.Errorf("the stale socket after List: %v; only zmx removes it", err)
 		}
 	})
 
@@ -113,16 +126,18 @@ func TestList(t *testing.T) {
 		}
 	})
 
-	t.Run("it keeps a refusing socket, with only its name, when it cannot read the boot time", func(t *testing.T) {
+	t.Run("without the boot time it judges a refusing socket by its holders alone", func(t *testing.T) {
 		dir := socketDir(t)
 		stale(t, dir, "crashed")
+		stale(t, dir, "busy")
 		b := mustNew(t, zmx.Config{
 			Dir:      dir,
 			BootTime: func() (time.Time, error) { return time.Time{}, errors.New("no boot time") },
 		})
+		held(b, dir, "busy")
 
-		if got := list(t, b); len(got) != 1 || got[0] != (backend.Session{Name: "crashed"}) {
-			t.Errorf("List = %+v, want crashed with only its name", got)
+		if got := list(t, b); len(got) != 1 || got[0] != (backend.Session{Name: "busy"}) {
+			t.Errorf("List = %+v, want busy with only its name, and crashed, which no process holds, left out", got)
 		}
 	})
 

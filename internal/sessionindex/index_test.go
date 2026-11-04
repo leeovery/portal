@@ -162,6 +162,23 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestOwe(t *testing.T) {
+	idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a"}, {Name: "b"}})
+
+	if !idx.Owe("a") {
+		t.Error("Owe(a) = false, want true for the mark it made")
+	}
+	if idx.Owe("a") {
+		t.Error("Owe(a) again = true, want false: it was owed already")
+	}
+	if idx.Owe("c") {
+		t.Error("Owe(c) = true, want false for a session with no entry")
+	}
+	if got := idx.Entries(); len(got) != 2 || !got[0].Owed || got[1].Owed {
+		t.Errorf("sessions = %+v, want a owed and b not, and no entry made for c", got)
+	}
+}
+
 func labelOf(idx sessionindex.Index, name string) string {
 	e, _ := idx.Lookup(name)
 	return e.Label

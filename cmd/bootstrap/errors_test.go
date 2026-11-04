@@ -104,9 +104,43 @@ func TestSaverDownWarning_returnsExactSpecCopy(t *testing.T) {
 
 func TestSessionsUnlistedWarning_returnsExactCopy(t *testing.T) {
 	assertLines(t, SessionsUnlistedWarning(), []string{
-		"Portal couldn't list zmx's sessions — restoration skipped.",
+		"Portal couldn't list zmx's sessions — restoration skipped; it will try again on the next command.",
 		"Run `portal doctor` for details.",
 	})
+}
+
+func TestWarnings_returnExactCopy(t *testing.T) {
+	for name, tc := range map[string]struct {
+		got  Warning
+		want []string
+	}{
+		"the saver unread": {SaverUnreadWarning(), []string{
+			"Portal couldn't read its save daemon — sessions may not be captured.",
+			"Run `portal doctor` for details.",
+		}},
+		"the old saver not replaced": {SaverNotReplacedWarning(), []string{
+			"Portal couldn't replace its save daemon — the old one is still saving.",
+			"Run `portal doctor` for details.",
+		}},
+		"zmx's protocol unjudged": {UnjudgedWarning(), []string{
+			"Portal couldn't tell which protocol zmx speaks — restoration skipped; it will try again on the next command.",
+			"Run `portal doctor` for details.",
+		}},
+		"the sessions owed unmarked": {OwedUnmarkedWarning(), []string{
+			"Portal couldn't record which sessions to restore — restoration skipped; it will try again on the next command.",
+			"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+		}},
+		"this boot's id unread": {BootIDUnreadWarning(), []string{
+			"Portal couldn't read this boot's id — it will start in full on every command.",
+			"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+		}},
+		"the latch unwritten": {LatchUnwrittenWarning(), []string{
+			"Portal couldn't record that it has started — it will start in full again on the next command.",
+			"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+		}},
+	} {
+		t.Run(name, func(t *testing.T) { assertLines(t, tc.got, tc.want) })
+	}
 }
 
 func TestUnrestoredWarning_countsTheSessions(t *testing.T) {

@@ -83,18 +83,19 @@ func sessionFault(name string, err error, unanswered string) (error, bool) {
 		return gone, true
 	}
 	switch {
-	// Before the timeout it wraps: a crashed daemon never answers.
+	// ErrRefusing wraps ErrTimeout, so it is asked first.
 	case errors.Is(err, zmx.ErrRefusing):
-		return fmt.Errorf("session %s refuses connections: %s", name, crashedDaemon), true
+		return fmt.Errorf("session %s refuses connections: %s", name, stillHeld), true
 	case errors.Is(err, backend.ErrTimeout):
 		return fmt.Errorf("session %s is not answering; %s", name, unanswered), true
 	}
 	return nil, false
 }
 
-// crashedDaemon words a session whose daemon refuses connections, for kill
-// and doctor alike.
-const crashedDaemon = "its daemon has crashed; `zmx list` clears its socket"
+// stillHeld words a session whose socket refuses connections while a zmx
+// process may still hold it, for kill and doctor alike: a daemon with its
+// listen backlog full refuses for a moment.
+const stillHeld = "a zmx process may still hold it; try again in a moment"
 
 // sessionGoneError words a refusal of name as one the backend does not hold,
 // naming the spelling it does hold where there is one, and reports whether

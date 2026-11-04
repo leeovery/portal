@@ -75,10 +75,10 @@ func (d *drops) judge(idx *sessionindex.Index, l listing, rule sessionindex.Rule
 
 // judged is every entry of idx a drop may remove that is not held: one
 // recording a creation of this boot, older than the listing, of a session not
-// Portal's own. One that may predate the boot is kept for the next bootstrap
-// to restore, and one created since the listing was taken is newer than it. A
-// held entry the index no longer records with the creation it was held at is
-// let go.
+// Portal's own, and owed no restore. One that may predate the boot, or is
+// owed a restore, is kept for the next bootstrap to restore, and one created
+// since the listing was taken is newer than it. A held entry the index no
+// longer records with the creation it was held at is let go.
 func (d *drops) judged(idx *sessionindex.Index, l listing, rule sessionindex.Rule) []sessionindex.Entry {
 	held := map[string]sessionindex.Entry{}
 	var judged []sessionindex.Entry
@@ -86,7 +86,7 @@ func (d *drops) judged(idx *sessionindex.Index, l listing, rule sessionindex.Rul
 		switch h, ok := d.held[e.Name]; {
 		case ok && e.SameCreation(h.CreatedAt, h.PID):
 			held[e.Name] = h
-		case !backend.IsPortalOwned(e.Name) && !rule.MayPredateBoot(e) && e.CreatedAt.Before(l.at.Truncate(time.Second)):
+		case !backend.IsPortalOwned(e.Name) && !e.Owed && !rule.MayPredateBoot(e) && e.CreatedAt.Before(l.at.Truncate(time.Second)):
 			judged = append(judged, e)
 		}
 	}
