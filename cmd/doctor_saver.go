@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/devversion"
@@ -59,12 +60,12 @@ func checkSaver(ctx context.Context, s doctorSaver) checkResult {
 }
 
 // checkDaemon judges the daemon alive when daemon.pid names the process the
-// saver session runs, and Prove, reading the process table, finds that
-// process neither gone nor another program's. By the backend's word it is the
-// session's live process, so a proof that can't be read leaves that judgement
-// standing. A daemon recording another version, or none, still runs and
-// saves; the next bootstrap replaces it, so it is reported, never failed.
-func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, version string) checkResult {
+// saver session runs and Prove, reading the process table, finds that process
+// Portal's save daemon. A daemon still starting is waited for up to settle,
+// as the saver's own ensure waits, so one on its way up isn't failed. A
+// daemon recording another version, or none, still runs and saves; the next
+// bootstrap replaces it, so it is reported, never failed.
+func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, version string, settle time.Duration) checkResult {
 	const name = "daemon"
 	if s == nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase}
@@ -72,29 +73,84 @@ func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, v
 	if dirErr != nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: stateDirStandDownPhrase}
 	}
-	running, present, err := s.SaverPID(ctx)
+	r := settledDaemon(ctx, s, dir, settle)
 	switch {
-	case err != nil:
-		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + err.Error()}
-	case !present:
+	case r.saverErr != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + r.saverErr.Error()}
+	case !r.present:
 		return checkResult{name: name, status: checkFail, detail: "not running (no " + saver.SessionName + ")"}
-	}
-	pid, err := state.ReadPIDFile(dir)
-	switch {
-	case errors.Is(err, state.ErrPIDFileAbsent):
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("not running (no daemon.pid; %s runs pid %d)", saver.SessionName, running)}
-	case err != nil:
+	case errors.Is(r.pidErr, state.ErrPIDFileAbsent):
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("not running (no daemon.pid; %s runs pid %d)", saver.SessionName, r.running)}
+	case r.pidErr != nil:
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read daemon.pid"}
-	case pid != running:
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("daemon.pid names pid %d, but %s runs pid %d", pid, saver.SessionName, running)}
+	case r.pid != r.running:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("daemon.pid names pid %d, but %s runs pid %d", r.pid, saver.SessionName, r.running)}
 	}
-	switch err := s.Prove(pid); {
+	switch err := s.Prove(r.pid); {
 	case errors.Is(err, saverhost.ErrGone):
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("not running (pid %d has exited)", pid)}
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("not running (pid %d has exited)", r.pid)}
 	case errors.Is(err, saverhost.ErrNotSaverDaemon):
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("pid %d, which %s runs, isn't Portal's save daemon", pid, saver.SessionName)}
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("pid %d, which %s runs, isn't Portal's save daemon", r.pid, saver.SessionName)}
+	case err != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: fmt.Sprintf("could not read pid %d to prove it Portal's save daemon", r.pid)}
 	}
-	return daemonVersionResult(name, pid, dir, version)
+	return daemonVersionResult(name, r.pid, dir, version)
+}
+
+// daemonSettlePoll spaces the reads of a daemon still starting, as the
+// saver's own waits space theirs.
+const daemonSettlePoll = 50 * time.Millisecond
+
+// daemonReading is one read of the process the saver session runs and of
+// daemon.pid, which is read only while there is a session.
+type daemonReading struct {
+	running  int
+	present  bool
+	saverErr error
+	pid      int
+	pidErr   error
+}
+
+func readDaemon(ctx context.Context, s doctorSaver, dir string) daemonReading {
+	var r daemonReading
+	r.running, r.present, r.saverErr = s.SaverPID(ctx)
+	if r.saverErr == nil && r.present {
+		r.pid, r.pidErr = state.ReadPIDFile(dir)
+	}
+	return r
+}
+
+// starting reports a saver session whose daemon has yet to record itself:
+// daemon.pid absent, or naming a process the session doesn't run.
+func (r daemonReading) starting() bool {
+	if r.saverErr != nil || !r.present {
+		return false
+	}
+	return errors.Is(r.pidErr, state.ErrPIDFileAbsent) || (r.pidErr == nil && r.pid != r.running)
+}
+
+// settledDaemon reads the daemon, then, only while it is starting, again
+// until it isn't or settle has passed, and returns the last reading.
+func settledDaemon(ctx context.Context, s doctorSaver, dir string, settle time.Duration) daemonReading {
+	r := readDaemon(ctx, s, dir)
+	if !r.starting() {
+		return r
+	}
+	deadline := time.NewTimer(settle)
+	defer deadline.Stop()
+	tick := time.NewTicker(daemonSettlePoll)
+	defer tick.Stop()
+	for r.starting() {
+		select {
+		case <-ctx.Done():
+			return r
+		case <-deadline.C:
+			return r
+		case <-tick.C:
+			r = readDaemon(ctx, s, dir)
+		}
+	}
+	return r
 }
 
 // daemonVersionResult passes a daemon recording this Portal's version, a
@@ -129,4 +185,20 @@ func checkPendingResumes(dir string, dirErr error, sessions []backend.Session, l
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read the resume-pending flags"}
 	}
 	return checkResult{name: name, status: checkInfo, detail: pluralCount(waiting, "session waiting to resume", "sessions waiting to resume")}
+}
+
+// waitingSessions counts the sessions listed in sessions whose resume panel
+// waits, as the state directory dir's flags say.
+func waitingSessions(dir string, sessions []backend.Session) (int, error) {
+	pending, err := pendingResumeFlags{dir: dir}.ListPendingResumeSessions()
+	if err != nil {
+		return 0, err
+	}
+	waiting := 0
+	for _, s := range sessions {
+		if _, ok := pending[s.Name]; ok {
+			waiting++
+		}
+	}
+	return waiting, nil
 }

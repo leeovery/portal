@@ -87,6 +87,9 @@ func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 	if deps.Saver == nil {
 		deps.Saver = runningSaver(t, deps.StateDir, deps.Version)
 	}
+	if deps.DaemonSettle == 0 {
+		deps.DaemonSettle = testDaemonSettle
+	}
 	if deps.ListSessions == nil {
 		deps.ListSessions = backendtest.New(backend.Session{Name: "api-x7Kd9a"}).List
 	}

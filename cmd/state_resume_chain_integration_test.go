@@ -160,6 +160,20 @@ func (w *waitingWorld) setTheme(t *testing.T, slug string) {
 	t.Fatal("the world names no prefs.json")
 }
 
+// leftAtTermSize attaches a terminal to the waiting session and leaves it for
+// the picker, so the session's tty stays at the size every test terminal has.
+func (w *waitingWorld) leftAtTermSize(t *testing.T) *portalTerm {
+	t.Helper()
+	p := w.portal(t, "open", waitingSession)
+	w.awaitClients(t, waitingSession, 1)
+	w.awaitWaiterAt(t, portalTermCols, portalTermRows)
+	mark := p.mark()
+	p.typeIn(t, "\x1b")
+	p.awaitAfter(t, mark, pickerMark)
+	w.awaitClients(t, waitingSession, 0)
+	return p
+}
+
 func (w *waitingWorld) hookRan() bool {
 	_, err := os.Stat(filepath.Join(w.work, hookMark))
 	return err == nil
@@ -192,30 +206,49 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	})
 
 	// Portal sends a waiting session nothing as it attaches: zmx's own SIGWINCH
-	// on every attach is the redraw, so this is zmx's contract. The second
-	// attach is at the size the first left the session at, so only that signal
-	// can redraw the panel.
-	t.Run("zmx redraws a waiting panel in the theme in force on an attach at an unchanged size", func(t *testing.T) {
-		w := newWaitingWorld(t, binary)
-		w.awaitPanel(t)
-		p := w.portal(t, "open", waitingSession)
-		w.awaitClients(t, waitingSession, 1)
-		w.awaitWaiterAt(t, portalTermCols, portalTermRows)
-		picker := p.mark()
-		p.typeIn(t, "\x1b")
-		p.awaitAfter(t, picker, pickerMark)
-		w.awaitClients(t, waitingSession, 0)
-		w.setTheme(t, "nord")
+	// on every attach, a switch's included, is the redraw, so these hold zmx to
+	// its contract. Each attach is at the size an earlier one left the session
+	// at, so only that signal can redraw the panel.
+	for _, tc := range []struct {
+		name string
+		// arrive readies a way to the waiting session, then returns the step
+		// that takes it.
+		arrive func(t *testing.T, w *waitingWorld, picker *portalTerm) func()
+	}{
+		{"a pick from the picker", func(t *testing.T, w *waitingWorld, picker *portalTerm) func() {
+			return func() { picker.typeIn(t, "\r") }
+		}},
+		{"portal open typed in another session, switching its runner", func(t *testing.T, w *waitingWorld, _ *portalTerm) func() {
+			w.create(t, "other")
+			q := w.portal(t, "open", "other")
+			w.awaitClients(t, "other", 1)
+			q.awaitRunner(t, "other")
+			return func() { q.openTyped(t, waitingSession) }
+		}},
+		{"portal open typed in another session under a plain zmx client, which zmx switches", func(t *testing.T, w *waitingWorld, _ *portalTerm) func() {
+			w.create(t, "other")
+			raw := w.start(t, zmxtest.Binary(t), "attach", "other")
+			w.awaitClients(t, "other", 1)
+			return func() { raw.openTyped(t, waitingSession) }
+		}},
+	} {
+		t.Run("zmx redraws a waiting panel in the theme in force on "+tc.name+" at an unchanged size", func(t *testing.T) {
+			w := newWaitingWorld(t, binary)
+			w.awaitPanel(t)
+			picker := w.leftAtTermSize(t)
+			attach := tc.arrive(t, w, picker)
+			w.setTheme(t, "nord")
 
-		mark := w.logSize()
-		p.typeIn(t, "\r")
-		w.awaitClients(t, waitingSession, 1)
+			mark := w.logSize()
+			attach()
+			w.awaitClients(t, waitingSession, 1)
 
-		w.awaitDrawIn(t, mark, "nord")
-		if !w.flagRaised(t) {
-			t.Error("the redraw lowered the session's flag; it still waits")
-		}
-	})
+			w.awaitDrawIn(t, mark, "nord")
+			if !w.flagRaised(t) {
+				t.Error("the redraw lowered the session's flag; it still waits")
+			}
+		})
+	}
 
 	t.Run("Escape on the panel of a session only a raw client shows detaches it through the backend", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)

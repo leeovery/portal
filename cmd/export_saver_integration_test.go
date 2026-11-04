@@ -2,16 +2,12 @@
 
 package cmd
 
-import (
-	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/saverhost"
-)
+import "github.com/leeovery/portal/internal/backend"
 
-// ErrSignalsNothing is every signal the saver host doctor reads through is
-// asked to send.
-var ErrSignalsNothing = errSignalsNothing
+// DoctorSaver is what doctor reads of the saver.
+type DoctorSaver = doctorSaver
 
 // ReadOnlySaverHost is the saver host doctor reads b's saver through.
-func ReadOnlySaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
+func ReadOnlySaverHost(b backend.Backend, stateDir string) (DoctorSaver, error) {
 	return newReadOnlySaverHost(b, stateDir)
 }

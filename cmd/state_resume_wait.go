@@ -208,7 +208,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 
 	settled := resumeStartupSettle(cfg)
 	// Only the window start-up opened compares the size before it redraws: a
-	// SIGWINCH may be a repaint request at an unchanged size.
+	// SIGWINCH may be zmx attaching a client at an unchanged size.
 	signalled := false
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	cfg.InputArriving = false

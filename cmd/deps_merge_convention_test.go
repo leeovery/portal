@@ -9,12 +9,14 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/spawn"
 )
 
@@ -68,6 +70,9 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		}
 		if deps.Version != Version() {
 			t.Errorf("Version = %q; want this binary's %q", deps.Version, Version())
+		}
+		if deps.DaemonSettle != saverhost.ReadyWait {
+			t.Errorf("DaemonSettle = %v; want saverhost.ReadyWait, %v", deps.DaemonSettle, saverhost.ReadyWait)
 		}
 	})
 
@@ -257,6 +262,15 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got := resolveDoctorDeps().Version; got != "9.9.9-sentinel" {
 					t.Errorf("Version = %q; want the injected 9.9.9-sentinel", got)
+				}
+			},
+		},
+		{
+			field:  "DaemonSettle",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{DaemonSettle: 7 * time.Millisecond}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().DaemonSettle; got != 7*time.Millisecond {
+					t.Errorf("DaemonSettle = %v; want the injected 7ms", got)
 				}
 			},
 		},

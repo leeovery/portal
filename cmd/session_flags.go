@@ -3,15 +3,15 @@ package cmd
 import (
 	"time"
 
-	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tui"
 )
 
-// pendingSettleBound outlasts the longest a hydrate helper keeps its session
-// hydrating once its replay is done, about 7 s: the read of the session's
-// creation (hydrateSessionBound) and its claim's wait for commit.lock (5 s).
-// So a restored session left waiting on its panel has its dot by then.
+// pendingSettleBound outlasts the time a restored session takes to raise its
+// resume-pending flag, which it does while still hydrating: its transcript's
+// replay, the replay's settle (hydrateSettleSleep) and the mark. The rest is
+// for a large transcript on a machine under load; the settle's reads end
+// sooner, once no session is hydrating.
 const pendingSettleBound = 10 * time.Second
 
 // pendingResumeFlags reads the sessions waiting on their resume panel from
@@ -52,20 +52,4 @@ func pickerFlagReaders() (tui.PendingResumeReader, tui.HydratingReader) {
 		return nil, nil
 	}
 	return pendingResumeFlags{dir: dir}, hydratingFlags{dir: dir}
-}
-
-// waitingSessions counts the sessions listed in sessions whose resume panel
-// waits, as the state directory dir's flags say.
-func waitingSessions(dir string, sessions []backend.Session) (int, error) {
-	pending, err := pendingResumeFlags{dir: dir}.ListPendingResumeSessions()
-	if err != nil {
-		return 0, err
-	}
-	waiting := 0
-	for _, s := range sessions {
-		if _, ok := pending[s.Name]; ok {
-			waiting++
-		}
-	}
-	return waiting, nil
 }

@@ -227,20 +227,20 @@ func TestOnlyDoctorFixRunsTheHookRepair(t *testing.T) {
 
 const saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
 
-// doctorSaverReads are the saver methods a doctor source may reach, through
-// the host or its doctorSaver interface: the reads. Every other method of the
-// host takes saver.lock, signals or creates, so a method it gains is one of
-// those until it is named here.
+// doctorSaverReads are the saverhost Host methods a doctor source may reach:
+// the reads. Every other method of the host takes saver.lock, signals or
+// creates, so a method it gains is one of those until it is named here.
 var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
 
 // doctorSignallers are cmd's ways to a process and the hosts that signal
-// through one. Doctor reaches none of them: its host refuses every signal.
+// through one.
 var doctorSignallers = []string{"signalProcess", "newSaverHost", "saverHostSignalling"}
 
 // doctorSaverReaches reports each "<file>:<line>: <reach>" a doctor source
-// makes past the saver's reads: a method of the host or of doctorSaver other
-// than a read, declared or used, or one of cmd's signallers. The read-only
-// diagnosis must signal nothing and leave the saver as it found it.
+// makes past the saver's reads. The host doctor is given exposes the reads
+// alone, which TestReadOnlySaverHostOnlyReads pins, so this is the way round
+// it: a host doctor builds or holds, any method of it but a read, or one of
+// cmd's signallers.
 func doctorSaverReaches(pkg sourceguardtest.TypedPackage) []string {
 	return reachesIn(pkg, doctorSaverReach)
 }
@@ -250,7 +250,7 @@ func doctorSaverReach(pkg sourceguardtest.TypedPackage, ident *ast.Ident, _ stri
 	if obj == nil || obj.Pkg() == nil {
 		return ""
 	}
-	if fn, ok := obj.(*types.Func); ok && isSaverMethod(fn) && !slices.Contains(doctorSaverReads, fn.Name()) {
+	if fn, ok := obj.(*types.Func); ok && isHostMethod(fn) && !slices.Contains(doctorSaverReads, fn.Name()) {
 		return "saver method " + fn.Name()
 	}
 	if obj.Pkg().Name() == "cmd" && obj.Parent() == obj.Pkg().Scope() && slices.Contains(doctorSignallers, obj.Name()) {
@@ -259,9 +259,8 @@ func doctorSaverReach(pkg sourceguardtest.TypedPackage, ident *ast.Ident, _ stri
 	return ""
 }
 
-// isSaverMethod reports whether fn is a method of saverhost's Host or of
-// cmd's doctorSaver.
-func isSaverMethod(fn *types.Func) bool {
+// isHostMethod reports whether fn is a method of saverhost's Host.
+func isHostMethod(fn *types.Func) bool {
 	recv := fn.Signature().Recv()
 	if recv == nil {
 		return false
@@ -274,8 +273,7 @@ func isSaverMethod(fn *types.Func) bool {
 	if !ok || named.Obj().Pkg() == nil {
 		return false
 	}
-	pkg, name := named.Obj().Pkg(), named.Obj().Name()
-	return (pkg.Path() == saverhostPkgPath && name == "Host") || (pkg.Name() == "cmd" && name == "doctorSaver")
+	return named.Obj().Pkg().Path() == saverhostPkgPath && named.Obj().Name() == "Host"
 }
 
 func runDoctorSaverReadsGuard(t harnesstest.TestingT, pkg sourceguardtest.TypedPackage) {
@@ -319,13 +317,6 @@ func checkSaver(ctx context.Context, h *saverhost.Host) { _, _ = h.Stop(ctx) }`,
 
 var ensurer = (*saverhost.Host).Ensurer`,
 			[]string{"doctor.go:5: saver method Ensurer"}},
-		{"a stop added to doctorSaver", `import "context"
-
-type doctorSaver interface {
-	Present(ctx context.Context) (bool, error)
-	Stop(ctx context.Context) (bool, error)
-}`,
-			[]string{"doctor.go:7: saver method Stop"}},
 		{"a signal sent", `import "syscall"
 
 var signalProcess = syscall.Kill

@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
@@ -28,22 +31,32 @@ const (
 	// may be a live process on the machine running the tests, so nothing
 	// reads it or signals it.
 	doctorSaverPID = 4242
+	// testDaemonSettle is how long a test waits on a daemon still starting:
+	// long enough to read it more than once.
+	testDaemonSettle = 200 * time.Millisecond
 )
 
 // saverAnswers stands in for the saver doctor reads: whether it is there and
 // the pid it runs, or err for both reads, and proof for every pid it is asked
-// to prove, each of which it records.
+// to prove, each of which it records. It counts the reads of the pid it runs,
+// calling onRead, when set, with each one's count before it answers.
 type saverAnswers struct {
 	present bool
 	pid     int
 	err     error
 	proof   error
 	proved  []int
+	reads   int
+	onRead  func(n int)
 }
 
 func (s *saverAnswers) Present(context.Context) (bool, error) { return s.present, s.err }
 
 func (s *saverAnswers) SaverPID(context.Context) (int, bool, error) {
+	s.reads++
+	if s.onRead != nil {
+		s.onRead(s.reads)
+	}
 	return s.pid, s.present, s.err
 }
 
@@ -109,7 +122,23 @@ func newDaemonInstall(t *testing.T) daemonInstall {
 
 func (d daemonInstall) check(t *testing.T, version string) checkResult {
 	t.Helper()
-	return checkDaemon(t.Context(), d.saver, d.dir, nil, version)
+	return d.checkWithin(t, version, testDaemonSettle)
+}
+
+func (d daemonInstall) checkWithin(t *testing.T, version string, settle time.Duration) checkResult {
+	t.Helper()
+	return checkDaemon(t.Context(), d.saver, d.dir, nil, version, settle)
+}
+
+// recordOnRead records the daemon at pid when the saver is read the nth
+// time, as a daemon starting records itself while doctor reads.
+func (d daemonInstall) recordOnRead(t *testing.T, n, pid int) {
+	t.Helper()
+	d.saver.onRead = func(read int) {
+		if read == n {
+			recordDaemon(t, d.dir, pid, doctorVersion)
+		}
+	}
 }
 
 func TestDoctorDaemonCheck(t *testing.T) {
@@ -123,12 +152,12 @@ func TestDoctorDaemonCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("it passes on the saver's word when the proof can't be read", func(t *testing.T) {
+	t.Run("it is not evaluable when the proof can't be read", func(t *testing.T) {
 		d := newDaemonInstall(t)
 		recordDaemon(t, d.dir, doctorSaverPID, doctorVersion)
 		d.saver.proof = fmt.Errorf("%w: ps: not supported", saverhost.ErrUnreadable)
 
-		assertCheck(t, d.check(t, doctorVersion), checkPass, "running (pid 4242, version 1.2.3)")
+		assertCheck(t, d.check(t, doctorVersion), checkNotEvaluable, "could not read pid 4242 to prove it Portal's save daemon")
 	})
 
 	for _, tc := range []struct {
@@ -197,13 +226,13 @@ func TestDoctorDaemonCheck(t *testing.T) {
 			detail string
 		}{
 			{"no saver to read", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), nil, t.TempDir(), nil, doctorVersion)
+				return checkDaemon(t.Context(), nil, t.TempDir(), nil, doctorVersion, testDaemonSettle)
 			}, "could not read _portal-saver"},
 			{"a saver the backend can't tell", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), &saverAnswers{err: backend.ErrTimeout}, t.TempDir(), nil, doctorVersion)
+				return checkDaemon(t.Context(), &saverAnswers{err: backend.ErrTimeout}, t.TempDir(), nil, doctorVersion, testDaemonSettle)
 			}, "could not read _portal-saver: backend did not answer in time"},
 			{"no state dir", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), &saverAnswers{present: true, pid: doctorSaverPID}, "", errors.New("no home"), doctorVersion)
+				return checkDaemon(t.Context(), &saverAnswers{present: true, pid: doctorSaverPID}, "", errors.New("no home"), doctorVersion, testDaemonSettle)
 			}, stateDirStandDownPhrase},
 			{"a daemon.pid that doesn't parse", func(t *testing.T) checkResult {
 				d := newDaemonInstall(t)
@@ -218,6 +247,67 @@ func TestDoctorDaemonCheck(t *testing.T) {
 			})
 		}
 	})
+}
+
+// A saver session whose daemon has yet to record itself is the window the
+// saver's own ensure waits through, and doctor waits through it too.
+func TestDoctorDaemonCheck_WaitsForADaemonStarting(t *testing.T) {
+	t.Run("it passes a daemon.pid that lands within the wait", func(t *testing.T) {
+		d := newDaemonInstall(t)
+		d.recordOnRead(t, 3, doctorSaverPID)
+
+		assertCheck(t, d.checkWithin(t, doctorVersion, time.Minute), checkPass, "running (pid 4242, version 1.2.3)")
+	})
+
+	t.Run("it passes a daemon.pid that comes to name the saver's process within the wait", func(t *testing.T) {
+		d := newDaemonInstall(t)
+		recordDaemon(t, d.dir, 5151, doctorVersion)
+		d.recordOnRead(t, 3, doctorSaverPID)
+
+		assertCheck(t, d.checkWithin(t, doctorVersion, time.Minute), checkPass, "running (pid 4242, version 1.2.3)")
+	})
+
+	t.Run("it fails a daemon.pid that never lands, once the wait has passed", func(t *testing.T) {
+		d := newDaemonInstall(t)
+		start := time.Now()
+
+		assertCheck(t, d.checkWithin(t, doctorVersion, testDaemonSettle), checkFail, "not running (no daemon.pid; _portal-saver runs pid 4242)")
+		if took := time.Since(start); took < testDaemonSettle {
+			t.Errorf("judged after %v, before the wait of %v passed", took, testDaemonSettle)
+		}
+		// A ticker fires no faster than its period, however loaded the
+		// machine, so more reads than the wait holds polls is a wait past it.
+		if most := 2 + int(testDaemonSettle/daemonSettlePoll); d.saver.reads < 2 || d.saver.reads > most {
+			t.Errorf("the saver was read %d times; a daemon starting is read again, at most %d times in the wait", d.saver.reads, most)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T, d daemonInstall)
+	}{
+		{"a daemon recorded as the saver's process", func(t *testing.T, d daemonInstall) {
+			recordDaemon(t, d.dir, doctorSaverPID, doctorVersion)
+		}},
+		{"no saver session", func(t *testing.T, d daemonInstall) { d.saver.present = false }},
+		{"a saver the backend can't tell", func(t *testing.T, d daemonInstall) { d.saver.err = backend.ErrTimeout }},
+		{"a daemon.pid that doesn't parse", func(t *testing.T, d daemonInstall) {
+			if err := os.WriteFile(state.DaemonPID(d.dir), []byte("not a pid\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run("it reads the saver once, waiting for nothing, with "+tc.name, func(t *testing.T) {
+			d := newDaemonInstall(t)
+			tc.stage(t, d)
+
+			d.checkWithin(t, doctorVersion, testDaemonSettle)
+
+			if d.saver.reads != 1 {
+				t.Errorf("the saver was read %d times, want 1", d.saver.reads)
+			}
+		})
+	}
 }
 
 func TestDoctorPendingResumesCheck(t *testing.T) {
@@ -328,5 +418,45 @@ func TestDoctorLeavesTheInstallAsItFoundIt(t *testing.T) {
 		if !slices.Contains([]backendtest.Op{backendtest.OpList, backendtest.OpExists, backendtest.OpSession}, call.Op) {
 			t.Errorf("doctor called %s on the backend; it only reads", call.Op)
 		}
+	}
+}
+
+// The host doctor reads through holds the saver host's three reads and no
+// host, so what it can do is its method set: no stop, no ensure, no signal.
+// Its proof reads a live process, this test's own, from the process table.
+func TestReadOnlySaverHostOnlyReads(t *testing.T) {
+	withFuncSeam(t, &signalProcess, func(pid int, sig syscall.Signal) error {
+		t.Errorf("signalProcess(%d, %v) through the read-only host", pid, sig)
+		return nil
+	})
+	fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: os.Getpid()})
+	fake.SetReachEnv([]string{"ZMX_DIR=" + t.TempDir()})
+	host, err := newReadOnlySaverHost(fake, t.TempDir())
+	if err != nil {
+		t.Fatalf("newReadOnlySaverHost: %v", err)
+	}
+
+	typ := reflect.TypeOf(host)
+	var methods []string
+	for m := range typ.Methods() {
+		methods = append(methods, m.Name)
+	}
+	if want := []string{"Present", "Prove", "SaverPID"}; !slices.Equal(methods, want) {
+		t.Errorf("%v's methods = %q, want only the reads %q", typ, methods, want)
+	}
+	for field := range typ.Fields() {
+		if field.Type.Kind() != reflect.Func {
+			t.Errorf("%v holds %s, a %v; it holds the reads alone", typ, field.Name, field.Type)
+		}
+	}
+
+	if present, err := host.Present(t.Context()); err != nil || !present {
+		t.Errorf("Present = %v, %v; want the saver found", present, err)
+	}
+	if pid, present, err := host.SaverPID(t.Context()); err != nil || !present || pid != os.Getpid() {
+		t.Errorf("SaverPID = %d, %v, %v; want %d", pid, present, err, os.Getpid())
+	}
+	if err := host.Prove(os.Getpid()); !errors.Is(err, saverhost.ErrNotSaverDaemon) {
+		t.Errorf("Prove(this test) = %v; want it read and found no save daemon", err)
 	}
 }

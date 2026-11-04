@@ -16,7 +16,6 @@ import (
 
 	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/internal/portaltest"
-	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
@@ -144,26 +143,26 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 	})
 }
 
-// The host doctor reads the saver through is asked to stop a real saver: it
-// sends its daemon nothing, so the daemon runs on in its session.
-func TestDoctorsSaverHostSignalsNothingAgainstZmx(t *testing.T) {
+// The host doctor reads the saver through reads a real saver as the
+// lifecycle's host does: its session, the process it runs, proved its daemon.
+func TestDoctorsSaverHostReadsTheSaverAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	d := portaltest.StartSaverDaemon(t, binary)
 	host, err := cmd.ReadOnlySaverHost(d.Backend, d.StateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := host.Prove(d.PID); err != nil {
-		t.Fatalf("the host doesn't prove the saver's daemon, so a stop would never reach a signal: %v", err)
-	}
 
-	if _, err := host.Stop(t.Context()); !errors.Is(err, cmd.ErrSignalsNothing) {
-		t.Errorf("Stop = %v, want %v", err, cmd.ErrSignalsNothing)
+	if present, err := host.Present(t.Context()); err != nil || !present {
+		t.Errorf("Present = %v, %v; want the saver found", present, err)
+	}
+	if pid, present, err := host.SaverPID(t.Context()); err != nil || !present || pid != d.PID {
+		t.Errorf("SaverPID = %d, %v, %v; want the daemon's %d", pid, present, err, d.PID)
+	}
+	if err := host.Prove(d.PID); err != nil {
+		t.Errorf("Prove(%d) = %v; want the saver's daemon proved", d.PID, err)
 	}
 	if d.Signal(0) != nil {
 		t.Error("the daemon is gone")
-	}
-	if held, err := d.Backend.Exists(t.Context(), saver.SessionName); err != nil || !held {
-		t.Errorf("Exists(%s) = %v, %v; want the saver left", saver.SessionName, held, err)
 	}
 }
