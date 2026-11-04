@@ -9,7 +9,8 @@ import (
 	"github.com/leeovery/portal/internal/legacyindex"
 )
 
-// fullyPopulatedJSON is a sessions.json as the tmux version wrote it.
+// fullyPopulatedJSON is a sessions.json as the tmux version wrote it, each
+// window's layout stored as Portal's JSON-in-a-string geometry.
 const fullyPopulatedJSON = `{
   "version": 1,
   "saved_at": "2026-04-17T10:30:00.123456789Z",
@@ -24,7 +25,7 @@ const fullyPopulatedJSON = `{
         {
           "index": 0,
           "name": "main",
-          "layout": "b25f,200x50,0,0",
+          "layout": "{\"V\":2,\"L\":{\"t\":\"h\",\"w\":200,\"h\":50,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":100,\"h\":50,\"x\":0,\"y\":0,\"l\":0,\"i\":0,\"I\":\"%1\"},{\"t\":\"p\",\"w\":99,\"h\":50,\"x\":101,\"y\":0,\"l\":0,\"i\":1,\"I\":\"%2\"}]}}",
           "zoomed": false,
           "active": true,
           "panes": [
@@ -57,7 +58,7 @@ const fullyPopulatedJSON = `{
         {
           "index": 1,
           "name": "shell",
-          "layout": "abcd,80x24,0,0",
+          "layout": "{\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"l\":0,\"i\":0,\"I\":\"%3\"}}",
           "zoomed": true,
           "active": true,
           "panes": [
@@ -91,7 +92,7 @@ func fullyPopulatedIndex() legacyindex.Index {
 					{
 						Index:  0,
 						Name:   "main",
-						Layout: "b25f,200x50,0,0",
+						Layout: `{"V":2,"L":{"t":"h","w":200,"h":50,"x":0,"y":0,"c":[{"t":"p","w":100,"h":50,"x":0,"y":0,"l":0,"i":0,"I":"%1"},{"t":"p","w":99,"h":50,"x":101,"y":0,"l":0,"i":1,"I":"%2"}]}}`,
 						Zoomed: false,
 						Active: true,
 						Panes: []legacyindex.Pane{
@@ -121,7 +122,7 @@ func fullyPopulatedIndex() legacyindex.Index {
 					{
 						Index:  1,
 						Name:   "shell",
-						Layout: "abcd,80x24,0,0",
+						Layout: `{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"l":0,"i":0,"I":"%3"}}`,
 						Zoomed: true,
 						Active: true,
 						Panes: []legacyindex.Pane{
