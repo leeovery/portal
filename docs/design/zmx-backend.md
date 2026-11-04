@@ -73,7 +73,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 
 - **Host.** `portal state daemon` runs inside a `_portal-saver` zmx session, which keeps it alive the way tmux does today. The singleton lock, pid and version files and the orphan sweep stay. Self-supervision compares the saver session's pid from `List()`.
 - **Index.** Polled every 5 s; committed when it changes. Portal records the created time and pid of every session it creates, restore included; zmx keeps created time in whole seconds, so the pair tells a recreated session apart (see Names).
-- **Scrollback.** Captured at most once a minute per session, and only when its content has changed. Sessions flagged hydrating or resume-pending are skipped. A poll's captures share about 3 s; a session they don't reach is captured at the next poll.
+- **Scrollback.** Captured at most once a minute per session, and only when its content has changed. Sessions flagged hydrating or resume-pending are skipped. A poll starts no capture once about 3 s of its captures have passed, and never cuts one short; a session it doesn't reach is captured at the next poll.
 - **Drops.**
   - A session missing from two polls at least 10 s apart is dropped. An entry created before this boot, or recording no creation, is never dropped, so a session whose restore failed comes back at the next bootstrap.
   - If at least three of the entries the saver may drop, and at least half of them, are missing at once, whether they went in one poll or over several, it drops none of them while it runs, unless one is listed again, and logs a WARN. That covers a zmx upgrade or a mass crash. The entries it holds count no further, so a session ending on its own later is still dropped.

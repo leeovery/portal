@@ -29,11 +29,13 @@ const (
 	// directory must be to be one a crash left, not one a write has under
 	// way.
 	abandonedAfter = time.Hour
+	// captureBudget is how long into a poll's captures it may start another
+	// History. One under way is never cut short, keeping the backend's own
+	// ceiling, so a session whose history takes longer than the budget is
+	// still saved, and a poll's captures take at most the budget and one
+	// call.
+	captureBudget = 3 * time.Second
 )
-
-// captureBudget bounds, together, the History calls one poll makes, so
-// sessions that don't answer delay the poll's commit by no more than it.
-var captureBudget = 3 * time.Second
 
 var captureLogger = log.For("capture")
 
@@ -42,6 +44,7 @@ var captureLogger = log.For("capture")
 type scrollback struct {
 	backend backend.Backend
 	dir     string
+	now     func() time.Time
 	// creations is what the saver last did with each creation's history, by
 	// the creation's scrollback file.
 	creations map[string]creation
@@ -76,8 +79,7 @@ type capture struct {
 // index last named. A session the poll's captureBudget runs out before is not
 // asked, so stays due. It returns what it wrote, for the index to name.
 func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
-	ctx, cancel := context.WithTimeoutCause(ctx, captureBudget, fmt.Errorf("the poll's %s for captures ran out: %w", captureBudget, backend.ErrTimeout))
-	defer cancel()
+	until := sb.now().Add(captureBudget)
 	listed := map[string]creation{}
 	var written []capture
 	for _, live := range l.answered {
@@ -86,7 +88,7 @@ func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 			continue
 		}
 		memo := sb.creations[file]
-		if ctx.Err() == nil && memo.due(l.at) && !state.Flagged(sb.dir, live.Name) {
+		if ctx.Err() == nil && sb.now().Before(until) && memo.due(l.at) && !state.Flagged(sb.dir, live.Name) {
 			memo.asked = l.at
 			if c, ok := sb.save(ctx, live, file, memo); ok {
 				written = append(written, c)

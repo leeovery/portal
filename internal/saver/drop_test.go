@@ -254,6 +254,50 @@ func TestPoll_HoldsAMassVanish(t *testing.T) {
 		}
 	})
 
+	t.Run("a vanish among the entries not held is held, those held not counted among those it may drop", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 8)
+		w.poll()
+		for _, name := range names[:4] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+		sink := logtest.Install(t)
+
+		for _, name := range names[4:7] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+		w.after(10 * time.Second)
+		w.after(time.Minute)
+
+		if got := w.names(); !slices.Equal(got, names) {
+			t.Errorf("entries = %v, want every one held: three of the four not held missing is a mass vanish", got)
+		}
+		rec := sink.Records().Matching("sessions", "drops-held").Only(t, "the second hold")
+		if got := rec.IntAttr(t, "sessions"); got != 3 {
+			t.Errorf("the hold counts %d sessions, want the 3 missing since", got)
+		}
+	})
+
+	t.Run("a held name whose entry now records another pid, created the same second, is judged afresh", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 6)
+		w.poll()
+		for _, name := range names[:3] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+
+		w.claim(backend.Session{Name: names[0], Created: w.thisBoot(0), PID: 5000}, "/proj/"+names[0])
+		w.after(5 * time.Second)
+		w.after(10 * time.Second)
+
+		if got, want := w.names(), names[1:]; !slices.Equal(got, want) {
+			t.Errorf("entries = %v, want %v: %s's later creation, never listed, dropped", got, want, names[0])
+		}
+	})
+
 	t.Run("a held name whose entry now records another creation is judged afresh, its wait begun anew", func(t *testing.T) {
 		w := newWorld(t)
 		names := stageLive(w, 6)

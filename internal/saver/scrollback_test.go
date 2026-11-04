@@ -16,7 +16,6 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -221,79 +220,120 @@ func TestPoll_CapturesScrollback(t *testing.T) {
 	})
 }
 
-func TestPoll_BoundsItsCapturesTogether(t *testing.T) {
-	t.Run("a poll's History calls share one deadline, 3 s at most", func(t *testing.T) {
+func TestPoll_StartsNoCaptureOnceItsBudgetIsSpent(t *testing.T) {
+	t.Run("it starts no History 3 s into a poll's captures, so a session it doesn't reach is saved at a later poll", func(t *testing.T) {
 		w := newWorld(t)
-		for i, name := range []string{"api", "web"} {
-			w.live(name, i)
+		var sessions []backend.Session
+		for i := range 5 {
+			name := fmt.Sprintf("s%d", i)
+			sessions = append(sessions, w.live(name, i))
 			w.fake.SetHistory(name, []byte(name+"'s screen"))
 		}
-		var deadlines []time.Time
-		w.race.onHistory = func(ctx context.Context, _ string) {
-			deadline, ok := ctx.Deadline()
-			if !ok {
-				t.Error("a capture ran with no deadline")
-			}
-			if left := time.Until(deadline); left > 3*time.Second {
-				t.Errorf("a capture had %s left, want 3 s at most", left)
-			}
-			deadlines = append(deadlines, deadline)
-		}
-
-		w.poll()
-
-		if len(deadlines) != 2 || !deadlines[0].Equal(deadlines[1]) {
-			t.Errorf("captures ran to deadlines %v, want both to one", deadlines)
-		}
-	})
-
-	t.Run("a session the budget doesn't reach is asked at the next poll, and one it ran out on a minute on", func(t *testing.T) {
-		saver.SetCaptureBudget(t, 20*time.Millisecond)
-		w := newWorld(t)
-		stalled, reached := w.live("api", 1), w.live("web", 2)
-		w.fake.SetHistory("api", []byte("api's screen"))
-		w.fake.SetHistory("web", []byte("web's screen"))
-		w.race.onHistory = func(ctx context.Context, name string) {
-			if name != "api" {
-				return
-			}
-			select {
-			case <-ctx.Done():
-			case <-time.After(5 * time.Second):
-				t.Error("api's History ran 5 s, want it cut short by the poll's budget")
-			}
-		}
-		sink := logtest.Install(t)
+		w.race.onHistory = func(context.Context, string) { w.clock.at = w.clock.at.Add(1200 * time.Millisecond) }
 
 		mark := w.mark()
 		w.poll()
-		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "api" {
-			t.Errorf("History asked %+v, want api alone, the budget spent on it", calls)
-		}
-		rec := sink.Records().Matching("capture", "capture skipped").AtExactLevel(slog.LevelDebug).Only(t, "api's skipped capture")
-		if err := rec.ErrorAttr(t, "error"); rec.AttrString(t, "session") != "api" || !errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("record = %+v, want api's capture skipped on the budget's ErrTimeout", rec)
-		}
-
-		w.race.onHistory = nil
-		mark = w.mark()
-		w.after(time.Second)
-		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "web" {
-			t.Errorf("History asked %+v at the next poll, want web alone", calls)
-		}
-		if got, _ := w.read(scrollbackFile(t, reached)); got != "web's screen" {
-			t.Errorf("web's scrollback = %q, want its history", got)
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"s0", "s1", "s2"}) {
+			t.Errorf("History asked %v, want those started 0, 1.2 and 2.4 s in, and none 3.6 s in", got)
 		}
 
 		mark = w.mark()
-		w.after(59 * time.Second)
-		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "api" {
-			t.Errorf("History asked %+v a minute on, want api alone", calls)
+		w.after(5 * time.Second)
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"s3", "s4"}) {
+			t.Errorf("History asked %v at the next poll, want those the budget didn't reach", got)
 		}
-		if got, _ := w.read(scrollbackFile(t, stalled)); got != "api's screen" {
-			t.Errorf("api's scrollback = %q, want its history", got)
+		for _, s := range sessions {
+			if got, _ := w.entry(s.Name); got.ScrollbackFile != scrollbackFile(t, s) {
+				t.Errorf("%s's ScrollbackFile = %q, want every session's capture named", s.Name, got.ScrollbackFile)
+			}
 		}
 	})
+
+	t.Run("a slow listing takes nothing from the captures' budget", func(t *testing.T) {
+		w := newWorld(t)
+		api := w.live("api", 1)
+		w.fake.SetHistory("api", []byte("api's screen"))
+		w.race.afterList = func() { w.clock.at = w.clock.at.Add(5 * time.Second) }
+
+		w.poll()
+
+		if got, _ := w.entry("api"); got.ScrollbackFile != scrollbackFile(t, api) {
+			t.Errorf("api's ScrollbackFile = %q, want it captured after a 5 s listing", got.ScrollbackFile)
+		}
+	})
+
+	t.Run("a History running past the budget is never cut short: its capture is named, and the sessions after it are asked at the next poll", func(t *testing.T) {
+		w := newWorld(t)
+		slow, next := w.live("api", 1), w.live("web", 2)
+		w.fake.SetHistory("api", []byte("api's screen"))
+		w.fake.SetHistory("web", []byte("web's screen"))
+		w.race.onHistory = func(ctx context.Context, name string) {
+			if _, ok := ctx.Deadline(); ok {
+				t.Errorf("%s's History ran to a deadline, want only the backend's own ceiling", name)
+			}
+			if name == "api" {
+				w.clock.at = w.clock.at.Add(5 * time.Second)
+			}
+		}
+
+		mark := w.mark()
+		w.poll()
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"api"}) {
+			t.Errorf("History asked %v, want api alone, 5 s of the 3 s budget", got)
+		}
+		if got, _ := w.read(scrollbackFile(t, slow)); got != "api's screen" {
+			t.Errorf("api's scrollback = %q, want its history", got)
+		}
+		if got, _ := w.entry("api"); got.ScrollbackFile != scrollbackFile(t, slow) {
+			t.Errorf("api's ScrollbackFile = %q, want its capture named", got.ScrollbackFile)
+		}
+
+		mark = w.mark()
+		w.after(time.Second)
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"web"}) {
+			t.Errorf("History asked %v at the next poll, want web alone", got)
+		}
+		if got, _ := w.entry("web"); got.ScrollbackFile != scrollbackFile(t, next) {
+			t.Errorf("web's ScrollbackFile = %q, want its capture named", got.ScrollbackFile)
+		}
+	})
+
+	t.Run("a History timing out on its own ceiling ends the poll's captures, the sessions after it asked at the next poll", func(t *testing.T) {
+		w := newWorld(t)
+		w.live("api", 1)
+		w.live("web", 2)
+		w.fake.SetHistory("api", []byte("api's screen"))
+		w.fake.SetHistory("web", []byte("web's screen"))
+		w.race.onHistory = func(_ context.Context, name string) {
+			if name == "api" {
+				w.clock.at = w.clock.at.Add(10 * time.Second)
+				w.fake.Fail(backendtest.OpHistory, fmt.Errorf("history %q: no answer in 10s: %w", name, backend.ErrTimeout))
+			}
+		}
+
+		mark := w.mark()
+		w.poll()
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"api"}) {
+			t.Errorf("History asked %v, want api alone", got)
+		}
+
+		w.fake.Fail(backendtest.OpHistory, nil)
+		mark = w.mark()
+		w.after(time.Second)
+		if got := historyAsked(w, mark); !slices.Equal(got, []string{"web"}) {
+			t.Errorf("History asked %v at the next poll, want web alone, api waiting a minute", got)
+		}
+	})
+}
+
+// historyAsked is the name each History call the Fake has taken since mark
+// asked, in order.
+func historyAsked(w *world, mark int) []string {
+	var names []string
+	for _, c := range w.calls(backendtest.OpHistory, mark) {
+		names = append(names, c.Name)
+	}
+	return names
 }
 
 func failHistory(err error) func(w *world) {

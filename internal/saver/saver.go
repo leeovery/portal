@@ -36,8 +36,8 @@ type Config struct {
 	// Hooks is the store whose resume hooks go with the entries a poll drops
 	// or replaces; nil keeps every hook.
 	Hooks *hooks.Store
-	// Now is the saver's clock, which the drop timing and every throttle are
-	// measured on; nil is time.Now.
+	// Now is the saver's clock, which the drop timing, every throttle and the
+	// captures' budget are measured on; nil is time.Now.
 	Now func() time.Time
 }
 
@@ -67,7 +67,7 @@ func New(cfg Config) *Saver {
 		hooks:      cfg.Hooks,
 		now:        now,
 		drops:      &drops{missing: map[string]time.Time{}, held: map[string]sessionindex.Entry{}},
-		scrollback: &scrollback{backend: cfg.Backend, dir: cfg.StateDir, creations: map[string]creation{}},
+		scrollback: &scrollback{backend: cfg.Backend, dir: cfg.StateDir, now: now, creations: map[string]creation{}},
 	}
 }
 
