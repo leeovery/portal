@@ -55,7 +55,7 @@ func TestDoctorKeyConfig(t *testing.T) {
 			if line != want {
 				t.Errorf("prefs.json %q: key-config line = %q; want %q", tc.content, line, want)
 			}
-			if want := "  6 checks passed"; summary != want {
+			if want := "  7 checks passed"; summary != want {
 				t.Errorf("prefs.json %q: summary = %q; want %q", tc.content, summary, want)
 			}
 		}
@@ -74,7 +74,7 @@ func TestDoctorKeyConfig(t *testing.T) {
 		if want := "  ✓ key config: detach alt+x, ctrl+o; detach_to_shell alt+shift+d; kill off"; line != want {
 			t.Errorf("key-config line = %q; want %q", line, want)
 		}
-		if want := "  7 checks passed"; summary != want {
+		if want := "  8 checks passed"; summary != want {
 			t.Errorf("summary = %q; want %q, the passing key config counted", summary, want)
 		}
 	})
@@ -87,7 +87,7 @@ func TestDoctorKeyConfig(t *testing.T) {
 		if line != want {
 			t.Errorf("key-config line = %q; want %q", line, want)
 		}
-		if want := "  6 checks passed"; summary != want {
+		if want := "  7 checks passed"; summary != want {
 			t.Errorf("summary = %q; want %q, a warning counted as neither a pass nor a failure", summary, want)
 		}
 	})

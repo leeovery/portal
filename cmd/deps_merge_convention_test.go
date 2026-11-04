@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
@@ -99,10 +100,11 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		}
 	})
 
-	t.Run("it loads no project or prefs store when one is injected", func(t *testing.T) {
+	t.Run("it loads no hook, project or prefs store when one is injected", func(t *testing.T) {
 		staged := stageApplicationSupportConfig(t)
 
 		withDoctorDeps(t, DoctorDeps{
+			HookStore:    hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json")),
 			ProjectStore: project.NewStore(filepath.Join(t.TempDir(), "projects.json")),
 			PrefsStore:   prefs.NewStore(filepath.Join(t.TempDir(), "prefs.json")),
 		})
@@ -130,6 +132,7 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
 func doctorSeamCases() []seamCase {
+	sentinelHookStore := hooks.NewStore("/sentinel/hooks.json")
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
 	sentinelPrefsStore := prefs.NewStore("/sentinel/prefs.json")
 	sentinelDetector := fakeTerminalDetector{id: spawn.NewIdentity("com.sentinel.term", "Sentinel")}
@@ -193,6 +196,15 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got, err := resolveDoctorDeps().ProtocolVersion(t.Context(), "s"); err != nil || got != 7 {
 					t.Errorf("ProtocolVersion() = (%d, %v); want the injected seam's 7", got, err)
+				}
+			},
+		},
+		{
+			field:  "HookStore",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{HookStore: sentinelHookStore}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().HookStore; got != sentinelHookStore {
+					t.Errorf("HookStore = %p; want the injected store %p", got, sentinelHookStore)
 				}
 			},
 		},
@@ -280,14 +292,14 @@ func stageApplicationSupportConfig(t *testing.T) stagedConfig {
 	configHome := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
-	for _, envVar := range []string{"PORTAL_PROJECTS_FILE", "PORTAL_PREFS_FILE"} {
+	for _, envVar := range []string{"PORTAL_HOOKS_FILE", "PORTAL_PROJECTS_FILE", "PORTAL_PREFS_FILE"} {
 		t.Setenv(envVar, "")
 	}
 
 	staged := stagedConfig{
 		oldDir: filepath.Join(home, "Library", "Application Support", "portal"),
 		newDir: filepath.Join(configHome, "portal"),
-		files:  []string{"projects.json", "prefs.json"},
+		files:  []string{"hooks.json", "projects.json", "prefs.json"},
 	}
 	if err := os.MkdirAll(staged.oldDir, 0o755); err != nil {
 		t.Fatalf("stage Application Support dir: %v", err)

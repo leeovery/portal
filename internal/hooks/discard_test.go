@@ -298,7 +298,7 @@ func TestDiscard(t *testing.T) {
 	t.Run("it leaves every other entry byte-unchanged", func(t *testing.T) {
 		seed := `{"` + hookstest.SubjectSeedA + `":{"on-resume":"claude --resume abc123"},` +
 			`"` + hookstest.SubjectSeedB + `":{"on-resume":{"command":"npm start","resume":"lazy","extra":[1, 2]}},` +
-			`"` + hookstest.UnjudgeableSeedA + `":{"on-resume":"vim ."}}`
+			`"` + hookstest.TmuxEraSeedA + `":{"on-resume":"vim ."}}`
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
 		before := decodeHooksFile(t, path)
 
@@ -310,7 +310,7 @@ func TestDiscard(t *testing.T) {
 		if len(after) != 2 {
 			t.Fatalf("hooks.json holds %d keys, want 2: %v", len(after), after)
 		}
-		for _, key := range []string{hookstest.SubjectSeedB, hookstest.UnjudgeableSeedA} {
+		for _, key := range []string{hookstest.SubjectSeedB, hookstest.TmuxEraSeedA} {
 			if got, want := compactJSON(t, after[key]["on-resume"]), compactJSON(t, before[key]["on-resume"]); got != want {
 				t.Errorf("%s on-resume = %s, want %s", key, got, want)
 			}

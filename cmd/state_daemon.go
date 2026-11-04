@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/saver"
@@ -32,6 +34,9 @@ const (
 	// Gone-dir projects are inert clutter rather than a correctness hazard,
 	// hence the slow cadence.
 	projectCleanupInterval = time.Hour
+	// A hook goes with its session's entry; the sweep is only the backstop
+	// for one left behind, so it shares the projects' cadence.
+	hookSweepInterval = time.Hour
 	// shutdownBound is how long, from the first SIGTERM or SIGHUP, the work
 	// in flight and the final flush have before the daemon exits without
 	// them: a poll held on commit.lock must not keep a successor meeting a
@@ -59,6 +64,8 @@ type daemonDeps struct {
 	Saver   daemonSaver
 	// Projects is the store the idle cleanup prunes; nil prunes nothing.
 	Projects *project.Store
+	// Hooks is the store the idle sweep prunes; nil prunes nothing.
+	Hooks *hooks.Store
 	// Ticks drives the loop, each tick carrying the time it fired.
 	Ticks <-chan time.Time
 	// Signals carries the SIGTERMs and SIGHUPs that end the daemon.
@@ -71,6 +78,7 @@ type daemonDeps struct {
 	absences           int
 	lastPoll           time.Time
 	lastProjectCleanup time.Time
+	lastHookSweep      time.Time
 	// signalled is the signal that began the shutdown, if one did.
 	signalled atomic.Pointer[shutdownSignal]
 	// ended is set by whichever logs the shutdown first: the loop, its flush
@@ -257,7 +265,7 @@ func (d *daemonDeps) tick(ctx context.Context, at time.Time) {
 		return
 	}
 	d.maybeCleanProjects(at)
-	d.sweepStaleHooks(at)
+	d.sweepStaleHooks(ctx, at)
 }
 
 // poll runs one of the saver's polls, summarising in one INFO line one that
@@ -296,11 +304,18 @@ func (d *daemonDeps) maybeCleanProjects(at time.Time) {
 	d.lastProjectCleanup = at
 }
 
-// sweepStaleHooks is where an idle tick reaps the hooks no session and no
-// entry names. It reaps none yet: hooks.StaleKeys judges by tmux's pane
-// tokens, and would reap the hook of every zmx session whose name is
-// token-shaped.
-func (d *daemonDeps) sweepStaleHooks(time.Time) {}
+// sweepStaleHooks reaps, on an idle tick an interval after the last sweep, the
+// hooks no listed session and no index entry names. The sweep logs its own
+// outcome, a stand-down at DEBUG and a failure at WARN, so its error is not
+// logged again here. The anchor moves whatever the outcome, so a failing sweep
+// waits an interval like any other.
+func (d *daemonDeps) sweepStaleHooks(ctx context.Context, at time.Time) {
+	if d.Hooks == nil || at.Sub(d.lastHookSweep) < hookSweepInterval {
+		return
+	}
+	_, _ = hooksweep.Run(ctx, hooksweep.Sources{List: d.Backend.List, StateDir: d.Dir}, d.Hooks)
+	d.lastHookSweep = at
+}
 
 // shutdown takes the final flush and logs the daemon's end. The flush asks
 // for histories until FlushNaming before the shutdown's bound, keeping the
@@ -340,7 +355,8 @@ func (d *daemonDeps) logShutdown(flushCompleted bool) {
 
 func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time, signals <-chan os.Signal) *daemonDeps {
 	// Neither store failing aborts the daemon's primary job: a nil hook store
-	// keeps a dropped session's hook, a nil project store prunes nothing.
+	// keeps a dropped session's hook and sweeps nothing, a nil project store
+	// prunes nothing.
 	hookStore, err := loadHookStore()
 	if err != nil {
 		daemonLogger.Warn("load hook store failed; a dropped session's resume hook is kept", "error", err)
@@ -355,13 +371,15 @@ func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time, signal
 		Backend:       b,
 		Saver:         saver.New(saver.Config{Backend: b, StateDir: dir, Hooks: hookStore, Now: time.Now}),
 		Projects:      projectStore,
+		Hooks:         hookStore,
 		Ticks:         ticks,
 		Signals:       signals,
 		ShutdownBound: shutdownBound,
 		FlushNaming:   flushNaming,
-		// Anchored to the daemon's start, so the prune first runs an
+		// Anchored to the daemon's start, so each prune first runs an
 		// interval in.
 		lastProjectCleanup: time.Now(),
+		lastHookSweep:      time.Now(),
 	}
 }
 

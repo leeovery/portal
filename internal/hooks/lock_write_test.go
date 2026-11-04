@@ -168,7 +168,7 @@ func TestMutationLockTimeoutLogging(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 
 		sink := logtest.Install(t)
-		removed, err := hooks.NewStore(path).CleanStale(enumerating())
+		removed, err := hooks.NewStore(path).CleanStale(listing(), noIndex)
 		if !errors.Is(err, hooks.ErrLockHeld) {
 			t.Fatalf("CleanStale error = %v, want errors.Is ErrLockHeld", err)
 		}

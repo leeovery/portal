@@ -20,9 +20,7 @@ const tmuxPkgPath = "github.com/leeovery/portal/internal/tmux"
 // phase of docs/design/zmx-backend.md that moves it off, so a phase shrinks the
 // list by deleting its lines. In cmd, which mixes zmx and tmux code, an entry
 // names a file; elsewhere it names a package directory.
-var tmuxImportAllowList = map[string]int{
-	"internal/hooksweep": 3,
-}
+var tmuxImportAllowList = map[string]int{}
 
 // tmuxTestOnlyPackages serve tests alone, so they are outside the guard; they
 // go with internal/tmux in phase 5.

@@ -145,10 +145,10 @@ func TestHooksListLocationColumn(t *testing.T) {
 
 	t.Run("it leaves the location empty for a key that names no session", func(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
-			hookSessionA:               {"on-resume": "npm start"},
-			hookstest.SubjectSeedA:     {"on-resume": "claude --resume abc"},
-			hookstest.UnjudgeableSeedA: {"on-resume": "make dev"},
-			"gone-Zx81Qa":              {"on-resume": "true"},
+			hookSessionA:           {"on-resume": "npm start"},
+			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc"},
+			hookstest.TmuxEraSeedA: {"on-resume": "make dev"},
+			"gone-Zx81Qa":          {"on-resume": "true"},
 		})
 		inSession(t, "", backend.Session{Name: hookSessionA})
 
@@ -481,12 +481,12 @@ func TestHooksRmCommand(t *testing.T) {
 
 	t.Run("it removes the --pane-key entry verbatim, outside any session", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
-			hookstest.SubjectSeedA:     {"on-resume": "claude --resume xyz"},
-			hookstest.UnjudgeableSeedA: {"on-resume": "npm start"},
+			hookstest.SubjectSeedA: {"on-resume": "claude --resume xyz"},
+			hookstest.TmuxEraSeedA: {"on-resume": "npm start"},
 		})
 		inSession(t, "")
 
-		for _, key := range []string{hookstest.SubjectSeedA, hookstest.UnjudgeableSeedA} {
+		for _, key := range []string{hookstest.SubjectSeedA, hookstest.TmuxEraSeedA} {
 			if _, err := runHookRm(t, "--pane-key", key); err != nil {
 				t.Fatalf("hook rm --pane-key %s: %v", key, err)
 			}

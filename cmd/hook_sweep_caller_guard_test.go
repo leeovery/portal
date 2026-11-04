@@ -7,6 +7,8 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -14,7 +16,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -64,38 +65,63 @@ func TestHooksCleanStale_NoBootstrapStepIsAnAutomaticCaller(t *testing.T) {
 const (
 	hooksPkgPath     = "github.com/leeovery/portal/internal/hooks"
 	hooksweepPkgPath = "github.com/leeovery/portal/internal/hooksweep"
+	modulePath       = "github.com/leeovery/portal"
 )
 
-// hookSweepReferences reports each "<file>:<line>: <reach>" a cmd source
-// outside the tmux state commands makes for the hook sweep: an import of its
-// package, hooks.StaleKeys, the (*hooks.Store).CleanStale method in any form
-// (a call, a method value or expression, or promoted through an embedded
-// store), or an interface's CleanStale taking a func(hooks.Snapshot), the
-// shape of a seam over it. Each is judged by the object an identifier names,
-// not by how the source spelled it. StaleKeys reaps a token-shaped key absent
-// from tmux's live pane tokens, and a six-character alphanumeric zmx name such
-// as notes1 is token-shaped, so every hook keyed by one would be deleted.
-// Reflection, and a state_*.go helper called from another cmd file, are
-// outside its bound, accepted.
+// hookSweepCallers are the production sources, by module path, that may reach
+// the hook sweep: the daemon, whose idle tick runs it, and doctor, whose
+// diagnosis counts what it would remove and whose --fix runs it.
+var hookSweepCallers = []string{"cmd/state_daemon.go", "cmd/doctor.go"}
+
+// hookSweepOwners are the packages the guard does not judge: hooksweep, which
+// is the sweep, and hooks, which declares the rule and the clean it runs.
+var hookSweepOwners = []string{"internal/hooks", "internal/hooksweep"}
+
+// judgedBySweepGuard reports whether the production source at the module path
+// file is one the guard judges: neither a caller nor in an owning package.
+func judgedBySweepGuard(file string) bool {
+	return !slices.Contains(hookSweepCallers, file) && !slices.Contains(hookSweepOwners, path.Dir(file))
+}
+
+// hookSweepImports reports each "<file>:<line>: <import>" a judged source
+// makes of the sweep's package.
+func hookSweepImports(sources []sourceguardtest.ParsedSource) []string {
+	var found []string
+	for _, source := range sources {
+		file := filepath.ToSlash(source.Path)
+		if !judgedBySweepGuard(file) {
+			continue
+		}
+		for _, spec := range source.File.Imports {
+			if p, err := strconv.Unquote(spec.Path.Value); err == nil && p == hooksweepPkgPath {
+				found = append(found, fmt.Sprintf("%s:%d: %s", file, source.Position(spec.Pos()).Line, hooksweepPkgPath))
+			}
+		}
+	}
+	return found
+}
+
+// hookSweepReferences reports each "<file>:<line>: <reach>" a judged source
+// in pkg makes for the hook sweep: hooks.StaleKeys, the
+// (*hooks.Store).CleanStale method in any form (a call, a method value or
+// expression, or promoted through an embedded store), or an interface's
+// CleanStale taking a func(hooks.Snapshot), the shape of a seam over it. Each
+// is judged by the object an identifier names, not by how the source spelled
+// it. Removing a hook loses the user's resume command, and a hook goes with
+// its session's entry; the sweep is the backstop for one left behind, and
+// nothing else may judge a key stale. Reflection, and a caller's helper
+// called from another file, are outside its bound, accepted.
 func hookSweepReferences(pkg sourceguardtest.TypedPackage) []string {
 	var found []string
 	for _, source := range pkg.Sources {
-		name := filepath.Base(source.Path)
-		if strings.HasPrefix(name, "state_") {
+		file := filepath.ToSlash(source.Path)
+		if !judgedBySweepGuard(file) {
 			continue
-		}
-		at := func(n ast.Node, reach string) {
-			found = append(found, fmt.Sprintf("%s:%d: %s", name, source.Position(n.Pos()).Line, reach))
-		}
-		for _, spec := range source.File.Imports {
-			if path, err := strconv.Unquote(spec.Path.Value); err == nil && path == hooksweepPkgPath {
-				at(spec, hooksweepPkgPath)
-			}
 		}
 		ast.Inspect(source.File, func(n ast.Node) bool {
 			if ident, ok := n.(*ast.Ident); ok {
 				if reach := hookSweepReach(pkg.Object(ident)); reach != "" {
-					at(ident, reach)
+					found = append(found, fmt.Sprintf("%s:%d: %s", file, source.Position(ident.Pos()).Line, reach))
 				}
 			}
 			return true
@@ -141,56 +167,103 @@ func takesSnapshotFunc(sig *types.Signature) bool {
 	return false
 }
 
-// runHookSweepGuard fails on each reference hookSweepReferences finds, and
-// when it scanned nothing.
-func runHookSweepGuard(t harnesstest.TestingT, pkg sourceguardtest.TypedPackage) {
+// hooksImporters returns the module path of every package whose production
+// sources import internal/hooks: only such a package can name the store's
+// clean or the rule, so only they are type-checked.
+func hooksImporters(t *testing.T) []string {
 	t.Helper()
-	if len(pkg.Sources) == 0 {
-		t.Fatalf("the hook sweep guard scanned no sources")
+	out, err := exec.Command("go", "list", "-f", "{{.ImportPath}}\t{{join .Imports \" \"}}", modulePath+"/...").Output()
+	if err != nil {
+		t.Fatalf("go list the module's packages: %v", err)
 	}
-	for _, found := range hookSweepReferences(pkg) {
-		t.Errorf("%s; in cmd, only the tmux state commands may judge a hook key stale", found)
+	var pkgs []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		importPath, imports, _ := strings.Cut(line, "\t")
+		if slices.Contains(strings.Fields(imports), hooksPkgPath) {
+			pkgs = append(pkgs, strings.TrimPrefix(strings.TrimPrefix(importPath, modulePath), "/"))
+		}
 	}
+	return pkgs
 }
 
-func TestOnlyTheTmuxStateCommandsReachTheHookSweep(t *testing.T) {
-	checker := sourceguardtest.NewTypeChecker(t, ".")
+// modulePackage type-checks the package at the module path dir, its sources
+// named by module path.
+func modulePackage(t *testing.T, root, dir string) sourceguardtest.TypedPackage {
+	t.Helper()
+	pkg := sourceguardtest.NewTypeChecker(t, filepath.Join(root, filepath.FromSlash(dir))).Package(t)
+	for i, source := range pkg.Sources {
+		rel, err := filepath.Rel(root, source.Path)
+		if err != nil {
+			t.Fatalf("relativise %s: %v", source.Path, err)
+		}
+		pkg.Sources[i].Path = filepath.ToSlash(rel)
+	}
+	return pkg
+}
 
-	t.Run("it finds no reference outside the state commands", func(t *testing.T) {
-		runHookSweepGuard(t, checker.Package(t))
-	})
+func TestOnlyTheDaemonAndDoctorReachTheHookSweep(t *testing.T) {
+	root, sources := sourceguardtest.RepoSources(t, sourceguardtest.NonTestSources)
 
-	t.Run("it fails when it scans nothing", func(t *testing.T) {
-		rec := &harnesstest.Recorder{}
-		rec.Run(func() { runHookSweepGuard(rec, sourceguardtest.TypedPackage{}) })
-		if !rec.Failed() {
-			t.Error("the guard passed over no sources")
+	t.Run("it finds no import of the sweep outside the daemon and doctor", func(t *testing.T) {
+		for _, found := range hookSweepImports(sources) {
+			t.Errorf("%s; only the daemon and doctor may reach the hook sweep", found)
 		}
 	})
 
-	// cmd no longer imports the sweep, so its export data is outside the type
-	// checker's reach; the import rule reads syntax alone and needs none.
+	t.Run("it finds no reach for the sweep outside the daemon and doctor", func(t *testing.T) {
+		importers := hooksImporters(t)
+		if !slices.Contains(importers, "cmd") {
+			t.Fatalf("the packages importing %s are %v, without cmd; the guard is not looking where the callers are", hooksPkgPath, importers)
+		}
+		for _, dir := range importers {
+			if slices.Contains(hookSweepOwners, dir) {
+				continue
+			}
+			for _, found := range hookSweepReferences(modulePackage(t, root, dir)) {
+				t.Errorf("%s; only the daemon and doctor may judge a hook key stale", found)
+			}
+		}
+	})
+
+	// The guard is only as good as its callers' reach: were either to stop
+	// reaching the sweep, an allowance would stand for a caller that no longer
+	// exists.
+	t.Run("it finds both callers importing the sweep", func(t *testing.T) {
+		for _, caller := range hookSweepCallers {
+			if !slices.ContainsFunc(sources, func(s sourceguardtest.ParsedSource) bool {
+				return filepath.ToSlash(s.Path) == caller && slices.ContainsFunc(s.File.Imports, func(spec *ast.ImportSpec) bool {
+					return spec.Path.Value == strconv.Quote(hooksweepPkgPath)
+				})
+			}) {
+				t.Errorf("%s no longer imports %s; drop it from hookSweepCallers", caller, hooksweepPkgPath)
+			}
+		}
+	})
+
 	t.Run("it judges an import of the sweep", func(t *testing.T) {
-		const src = "package cmd\n\nimport _ \"" + hooksweepPkgPath + "\"\n"
-		for name, want := range map[string][]string{
-			"hooks.go":        {"hooks.go:3: " + hooksweepPkgPath},
-			"state_daemon.go": nil,
+		const src = "package x\n\nimport _ \"" + hooksweepPkgPath + "\"\n"
+		for file, want := range map[string][]string{
+			"cmd/hooks.go":              {"cmd/hooks.go:3: " + hooksweepPkgPath},
+			"cmd/state_resume_draw.go":  {"cmd/state_resume_draw.go:3: " + hooksweepPkgPath},
+			"internal/saver/saver.go":   {"internal/saver/saver.go:3: " + hooksweepPkgPath},
+			"cmd/bootstrap/steps.go":    {"cmd/bootstrap/steps.go:3: " + hooksweepPkgPath},
+			"cmd/state_daemon.go":       nil,
+			"cmd/doctor.go":             nil,
+			"internal/hooksweep/run.go": nil,
 		} {
 			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, name, src, sourceguardtest.ParseMode)
+			parsed, err := parser.ParseFile(fset, file, src, sourceguardtest.ParseMode)
 			if err != nil {
 				t.Fatalf("parse fixture: %v", err)
 			}
-			pkg := sourceguardtest.TypedPackage{
-				Sources: []sourceguardtest.ParsedSource{{Path: name, Fset: fset, File: file}},
-				Info:    &types.Info{},
-			}
-			if got := hookSweepReferences(pkg); !slices.Equal(got, want) {
-				t.Errorf("hookSweepReferences(%s) = %q, want %q", name, got, want)
+			got := hookSweepImports([]sourceguardtest.ParsedSource{{Path: file, Fset: fset, File: parsed}})
+			if !slices.Equal(got, want) {
+				t.Errorf("hookSweepImports(%s) = %q, want %q", file, got, want)
 			}
 		}
 	})
 
+	checker := sourceguardtest.NewTypeChecker(t, ".")
 	for _, tc := range []struct {
 		name, body string
 		want       []string
@@ -198,33 +271,33 @@ func TestOnlyTheTmuxStateCommandsReachTheHookSweep(t *testing.T) {
 		{"StaleKeys under an alias", `import h "github.com/leeovery/portal/internal/hooks"
 
 var stale = h.StaleKeys`,
-			[]string{"hooks.go:5: hooks.StaleKeys"}},
+			[]string{"%s:5: hooks.StaleKeys"}},
 		{"a call", `import "github.com/leeovery/portal/internal/hooks"
 
-func prune(s *hooks.Store) { _, _ = s.CleanStale(nil) }`,
-			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+func prune(s *hooks.Store) { _, _ = s.CleanStale(nil, nil) }`,
+			[]string{"%s:5: (*hooks.Store).CleanStale"}},
 		{"a method value", `import "github.com/leeovery/portal/internal/hooks"
 
 func prune(s *hooks.Store) { clean := s.CleanStale; _ = clean }`,
-			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+			[]string{"%s:5: (*hooks.Store).CleanStale"}},
 		{"a method expression", `import "github.com/leeovery/portal/internal/hooks"
 
 var clean = (*hooks.Store).CleanStale`,
-			[]string{"hooks.go:5: (*hooks.Store).CleanStale"}},
+			[]string{"%s:5: (*hooks.Store).CleanStale"}},
 		{"a method promoted through an embedded store", `import "github.com/leeovery/portal/internal/hooks"
 
 type store struct{ *hooks.Store }
 
-func prune(s store) { _, _ = s.CleanStale(nil) }`,
-			[]string{"hooks.go:7: (*hooks.Store).CleanStale"}},
+func prune(s store) { _, _ = s.CleanStale(nil, nil) }`,
+			[]string{"%s:7: (*hooks.Store).CleanStale"}},
 		{"a seam typed as an interface", `import "github.com/leeovery/portal/internal/hooks"
 
 type cleaner interface {
-	CleanStale(func(hooks.Snapshot) ([]string, error)) ([]string, error)
+	CleanStale(func(hooks.Snapshot) ([]string, error), func() ([]string, error)) ([]string, error)
 }
 
-func prune(c cleaner) { _, _ = c.CleanStale(nil) }`,
-			[]string{"hooks.go:6: a CleanStale seam taking func(hooks.Snapshot)", "hooks.go:9: a CleanStale seam taking func(hooks.Snapshot)"}},
+func prune(c cleaner) { _, _ = c.CleanStale(nil, nil) }`,
+			[]string{"%s:6: a CleanStale seam taking func(hooks.Snapshot)", "%s:9: a CleanStale seam taking func(hooks.Snapshot)"}},
 		{"a project store's CleanStale", `import "github.com/leeovery/portal/internal/project"
 
 type cleaner interface{ CleanStale() ([]project.Project, error) }
@@ -233,15 +306,23 @@ func prune(s *project.Store, c cleaner) { _, _ = s.CleanStale(); _, _ = c.CleanS
 			nil},
 	} {
 		src := "package cmd\n\n" + tc.body + "\n"
-		t.Run("it judges "+tc.name, func(t *testing.T) {
-			if got := hookSweepReferences(checker.Sources(t, map[string]string{"hooks.go": src})); !slices.Equal(got, tc.want) {
-				t.Errorf("hookSweepReferences = %q, want %q", got, tc.want)
-			}
-		})
-		t.Run("it lets a state command reach "+tc.name, func(t *testing.T) {
-			if got := hookSweepReferences(checker.Sources(t, map[string]string{"state_daemon.go": src})); len(got) != 0 {
-				t.Errorf("hookSweepReferences = %q, want none for a state command", got)
-			}
-		})
+		for _, file := range []string{"cmd/hooks.go", "internal/saver/saver.go"} {
+			t.Run("it judges "+tc.name+" in "+file, func(t *testing.T) {
+				var want []string
+				for _, w := range tc.want {
+					want = append(want, fmt.Sprintf(w, file))
+				}
+				if got := hookSweepReferences(checker.Sources(t, map[string]string{file: src})); !slices.Equal(got, want) {
+					t.Errorf("hookSweepReferences = %q, want %q", got, want)
+				}
+			})
+		}
+		for _, file := range append(slices.Clone(hookSweepCallers), "internal/hooksweep/sweep.go", "internal/hooks/store.go") {
+			t.Run("it lets "+file+" reach "+tc.name, func(t *testing.T) {
+				if got := hookSweepReferences(checker.Sources(t, map[string]string{file: src})); len(got) != 0 {
+					t.Errorf("hookSweepReferences = %q, want none for %s", got, file)
+				}
+			})
+		}
 	}
 }

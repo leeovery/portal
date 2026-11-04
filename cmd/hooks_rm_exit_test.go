@@ -70,9 +70,9 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 	})
 
 	t.Run("it exits non-zero when --pane-key names no entry", func(t *testing.T) {
-		got := runRmCase(t, rmCase{extra: []string{"--pane-key", hookstest.UnjudgeableSeedA}, wantErr: true})
+		got := runRmCase(t, rmCase{extra: []string{"--pane-key", hookstest.TmuxEraSeedA}, wantErr: true})
 
-		if want := fmt.Sprintf("no resume hook registered for %s", hookstest.UnjudgeableSeedA); got.err.Error() != want {
+		if want := fmt.Sprintf("no resume hook registered for %s", hookstest.TmuxEraSeedA); got.err.Error() != want {
 			t.Errorf("error = %q, want %q", got.err.Error(), want)
 		}
 	})
@@ -92,7 +92,7 @@ func TestHooksRmExitsZeroOnlyWhenItRemoved(t *testing.T) {
 				wantErr: true,
 			},
 			{name: "current session naming no entry", current: hookSessionA, seeded: another, wantErr: true},
-			{name: "--pane-key naming no entry", current: hookSessionA, seeded: another, extra: []string{"--pane-key", hookstest.UnjudgeableSeedA}, wantErr: true},
+			{name: "--pane-key naming no entry", current: hookSessionA, seeded: another, extra: []string{"--pane-key", hookstest.TmuxEraSeedA}, wantErr: true},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				got := runRmCase(t, tt)

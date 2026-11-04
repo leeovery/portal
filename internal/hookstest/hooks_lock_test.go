@@ -111,3 +111,28 @@ func TestAssertLockWarn(t *testing.T) {
 		}
 	})
 }
+
+func TestAssertSidecarHeld(t *testing.T) {
+	t.Run("it passes while another description holds the sidecar exclusively", func(t *testing.T) {
+		_, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
+		hookstest.HoldHooksSidecar(t, path)
+
+		rec := &harnesstest.Recorder{}
+		rec.Run(func() { hookstest.AssertSidecarHeld(rec, path) })
+
+		if rec.Failed() {
+			t.Errorf("a held sidecar reported a failure: %s", rec.Report())
+		}
+	})
+
+	t.Run("it fails when nothing holds the sidecar", func(t *testing.T) {
+		_, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
+
+		rec := &harnesstest.Recorder{}
+		rec.Run(func() { hookstest.AssertSidecarHeld(rec, path) })
+
+		if len(rec.Errors) != 1 {
+			t.Errorf("got %d errors, want exactly 1: %v", len(rec.Errors), rec.Errors)
+		}
+	})
+}
