@@ -20,6 +20,7 @@ func TestViaWireValues(t *testing.T) {
 		{"hydrate", hooks.ViaHydrate, "hydrate"},
 		{"doctor", hooks.ViaDoctor, "doctor"},
 		{"panel", hooks.ViaPanel, "panel"},
+		{"tui", hooks.ViaTUI, "tui"},
 		// An unset Via must read as absent. Were the vocabulary numbered from
 		// zero, every zero-valued Via would impersonate the first surface.
 		{"the unset zero value", hooks.Via(0), ""},

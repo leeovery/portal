@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/xdg"
@@ -90,8 +91,15 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		hookKey, err := currentSession()
+		b, err := sessionBackend()
 		if err != nil {
+			return err
+		}
+		hookKey, err := currentSessionIn(b)
+		if err != nil {
+			return err
+		}
+		if err := claimForHook(cmd.Context(), b, hookKey); err != nil {
 			return err
 		}
 
@@ -102,6 +110,17 @@ var hooksSetCmd = &cobra.Command{
 
 		return store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command, Resume: mode}, hooks.ViaCLI)
 	},
+}
+
+// claimForHook claims the session's entry before its hook is written, as
+// rename does before a label: a hook beside an entry left by an earlier
+// creation would go with it when a later claim replaced that entry.
+func claimForHook(ctx context.Context, b backend.Backend, name string) error {
+	live, err := liveSession(ctx, b, name, "no hook is set")
+	if err != nil {
+		return err
+	}
+	return claimSession("cli", live, nil)
 }
 
 // resumeModeFlag reads the registration's resume-mode pin: an unpassed flag

@@ -39,34 +39,31 @@ func Read(dir string) (Index, error) {
 	return Decode(data)
 }
 
-// Outcome is what a written Update dropped: the sessions whose entries it
-// removed, and those whose entries it replaced with another creation's, each
-// in the order fn made the changes. What Portal keeps beside an entry goes
-// with it, so a caller forgets these names once Update returns.
+// Outcome is what a written Update dropped, each entry as Update read it: those
+// fn removed, and those it replaced with an entry made afresh, in the order
+// they were read. What Portal keeps beside an entry goes with it, so a caller
+// forgets these entries once Update returns.
 type Outcome struct {
-	Removed  []string
-	Replaced []string
+	Removed  []Entry
+	Replaced []Entry
 }
 
-// Dropped is every name the outcome lists, once each.
-func (o Outcome) Dropped() []string {
-	var names []string
-	for _, name := range slices.Concat(o.Removed, o.Replaced) {
-		if !slices.Contains(names, name) {
-			names = append(names, name)
-		}
-	}
-	return names
+// Dropped is every entry the outcome lists.
+func (o Outcome) Dropped() []Entry {
+	return slices.Concat(o.Removed, o.Replaced)
 }
 
-func outcomeOf(changes []change) Outcome {
+// outcomeOf compares the entries read with the index fn left. It judges by the
+// entries, not the change log: an fn that removes a name and claims it again
+// leaves an entry under the name that is not the one read.
+func outcomeOf(read []Entry, idx Index) Outcome {
 	var o Outcome
-	for _, c := range changes {
-		switch c.op {
-		case opRemove:
-			o.Removed = append(o.Removed, c.session)
-		case opReplace:
-			o.Replaced = append(o.Replaced, c.session)
+	for _, was := range read {
+		switch {
+		case idx.indexOf(was.Name) < 0:
+			o.Removed = append(o.Removed, was)
+		case idx.fresh[was.Name]:
+			o.Replaced = append(o.Replaced, was)
 		}
 	}
 	return o
@@ -93,6 +90,7 @@ func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	read := slices.Clone(idx.Sessions)
 	if err := fn(&idx); err != nil {
 		return Outcome{}, err
 	}
@@ -114,7 +112,7 @@ func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
 	for _, c := range idx.changes {
 		logger.Log(context.Background(), c.level, c.op, c.attrs(via)...)
 	}
-	return outcomeOf(idx.changes), nil
+	return outcomeOf(read, idx), nil
 }
 
 func (c change) attrs(via string) []any {

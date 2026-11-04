@@ -13,6 +13,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
@@ -20,8 +21,23 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
+// keptCreated is the creation whose scrollback stageKept writes.
+var keptCreated = time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+
+// keptScrollback is the scrollback file stageKept writes for name, as an
+// index entry records it.
+func keptScrollback(t *testing.T, name string) string {
+	t.Helper()
+	file, err := state.SessionScrollbackFile(name, keptCreated, 1717)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
 // stageKept gives each named session everything Portal keeps beside its index
-// entry in the state directory dir: both flags and a scrollback file.
+// entry in the state directory dir: both flags, and a scrollback file, which
+// the session's entry, where it has one, records.
 func stageKept(t *testing.T, dir string, names ...string) {
 	t.Helper()
 	for _, name := range names {
@@ -30,14 +46,18 @@ func stageKept(t *testing.T, dir string, names ...string) {
 				t.Fatal(err)
 			}
 		}
-		path, err := state.SessionScrollbackPath(dir, name)
-		if err != nil {
-			t.Fatal(err)
-		}
+		file := keptScrollback(t, name)
+		path := filepath.Join(dir, filepath.FromSlash(file))
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte("transcript"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.SetScrollback(name, file)
+			return nil
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,11 +85,7 @@ func keptFor(t *testing.T, dir string, store *hooks.Store, name string) []string
 			kept = append(kept, string(flag))
 		}
 	}
-	path, err := state.SessionScrollbackPath(dir, name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(keptScrollback(t, name)))); !errors.Is(err, os.ErrNotExist) {
 		kept = append(kept, "scrollback")
 	}
 	held, err := store.Load(hooks.ViaInternal)
@@ -117,6 +133,22 @@ func TestKill_Forgets(t *testing.T) {
 		assertKept(t, dir, store, "api-x7Kd9a", nil)
 	})
 
+	t.Run("it forgets the flags and hook of a session the index holds no entry for, keeping a scrollback no entry names", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		dir := stageKill(t, fake)
+		stageKept(t, dir, "api-x7Kd9a")
+		store, _ := stageHooks(t, "api-x7Kd9a")
+		sink := logtest.Install(t)
+
+		if _, stderr, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil {
+			t.Fatalf("kill: %v\nstderr: %s", err, stderr)
+		}
+
+		assertKept(t, dir, store, "api-x7Kd9a", []string{"scrollback"})
+		r := sink.Records().Matching("sessions", "forget").Only(t, "forget record")
+		logtest.AssertRecord(t, r, logtest.RecordWant{Level: slog.LevelInfo, Msg: "forget", Component: "sessions", Op: "forget", Via: "cli"})
+	})
+
 	t.Run("a kill the backend refuses forgets nothing", func(t *testing.T) {
 		fake := backendtest.New(backend.Session{Name: "wedged-Lp4s"})
 		fake.StopAnswering("wedged-Lp4s")
@@ -131,23 +163,26 @@ func TestKill_Forgets(t *testing.T) {
 		assertKept(t, dir, store, "wedged-Lp4s", everythingKept)
 	})
 
-	t.Run("a kill whose index write fails forgets nothing", func(t *testing.T) {
-		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
-		dir := stageKill(t, fake, "api-x7Kd9a")
-		stageKept(t, dir, "api-x7Kd9a")
-		store, _ := stageHooks(t, "api-x7Kd9a")
-		if err := os.Chmod(dir, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	for name, indexed := range map[string]bool{"an entry": true, "no entry": false} {
+		t.Run("a kill whose index write fails, of a session with "+name+", forgets nothing", func(t *testing.T) {
+			fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+			dir := stageKill(t, fake)
+			if indexed {
+				storedLabel(t, dir, "api-x7Kd9a", "api work")
+			}
+			stageKept(t, dir, "api-x7Kd9a")
+			store, _ := stageHooks(t, "api-x7Kd9a")
+			commitlock.HoldForTest(t, dir)
+			commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 
-		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+			_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
 
-		if err == nil || !strings.HasPrefix(err.Error(), "killed api-x7Kd9a, but could not remove it from the session index: ") {
-			t.Fatalf("kill = %v, want the index failure reported", err)
-		}
-		assertKept(t, dir, store, "api-x7Kd9a", everythingKept)
-	})
+			if err == nil || !strings.HasPrefix(err.Error(), "killed api-x7Kd9a, but could not remove it from the session index: ") {
+				t.Fatalf("kill = %v, want the index failure reported", err)
+			}
+			assertKept(t, dir, store, "api-x7Kd9a", everythingKept)
+		})
+	}
 
 	// The order is commit.lock, then the hooks lock: the index write has landed,
 	// and its lock is released, before the hook's removal waits on its own.
@@ -178,7 +213,7 @@ func TestRename_ForgetsAnEarlierCreation(t *testing.T) {
 	t.Run("a label claimed over an earlier creation's entry forgets what that one kept", func(t *testing.T) {
 		fake, _ := stageRename(t)
 		dir := seedSessionsJSON(t, `{"version": 2, "sessions": [`+
-			`{"name": "`+currentSessionName+`", "label": "old", "created_at": "2026-10-28T09:00:00Z", "scrollback_file": "scrollback/`+currentSessionName+`.bin"}]}`)
+			`{"name": "`+currentSessionName+`", "label": "old", "created_at": "2026-10-28T09:00:00Z"}]}`)
 		stageKept(t, dir, currentSessionName)
 		store, _ := stageHooks(t, currentSessionName)
 
@@ -205,6 +240,136 @@ func TestRename_ForgetsAnEarlierCreation(t *testing.T) {
 	})
 }
 
+// A session saved before the boot, then brought back by a restore that read
+// back no creation for it, keeps what it was saved with: the next claim of it
+// takes the entry over rather than replacing it.
+func TestClaim_KeepsAnEntryRestoreRecordedNoCreationFor(t *testing.T) {
+	saved := sessionindex.Entry{
+		Name: currentSessionName, Label: "api work", Dir: "/work/api", Cwd: "/work/api/src",
+		CreatedAt: testBoot.AddDate(0, 0, -3), PID: 1717,
+	}
+	stage := func(t *testing.T) (*backendtest.Fake, string, *hooks.Store) {
+		t.Helper()
+		fake, _ := stageRename(t)
+		dir := os.Getenv("PORTAL_STATE_DIR")
+		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
+			idx.Claim(saved.Name, saved.Dir, saved.CreatedAt, saved.PID, claimRule(dir))
+			if err := idx.SetLabel(saved.Name, saved.Label); err != nil {
+				return err
+			}
+			idx.RecordCwd(saved.Name, saved.Cwd)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		stageKept(t, dir, currentSessionName)
+		store, _ := stageHooks(t, currentSessionName)
+		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
+			if idx.Restored(currentSessionName, time.Time{}, 0) {
+				t.Error("Restored of no creation = true, want it to record nothing")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return fake, dir, store
+	}
+	assertAdopted := func(t *testing.T, dir, label string) {
+		t.Helper()
+		want := saved
+		want.Label, want.CreatedAt, want.PID, want.ScrollbackFile = label, renameCreated, renamePID, keptScrollback(t, currentSessionName)
+		if got := entryOf(t, dir, currentSessionName); !got.CreatedAt.Equal(want.CreatedAt) || !sameButCreation(got, want) {
+			t.Errorf("entry = %+v\nwant %+v", got, want)
+		}
+	}
+
+	t.Run("the live session shows the saved label before any claim", func(t *testing.T) {
+		fake, _, _ := stage(t)
+		live, err := fake.Session(context.Background(), currentSessionName)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		shown, err := readShownIndex()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := shown.show(live); got.Label != "api work" || got.Dir != "/work/api" {
+			t.Errorf("shown = %+v, want the saved label and dir", got)
+		}
+	})
+
+	t.Run("a rename takes the entry over, keeping its dir, cwd, scrollback, flags and hook", func(t *testing.T) {
+		_, dir, store := stage(t)
+
+		if _, _, err := runRootCmd(t, "rename", "api work 2"); err != nil {
+			t.Fatalf("rename: %v", err)
+		}
+
+		assertAdopted(t, dir, "api work 2")
+		assertKept(t, dir, store, currentSessionName, everythingKept)
+	})
+
+	t.Run("a hook set takes the entry over, keeping its label, dir, cwd, scrollback and flags", func(t *testing.T) {
+		_, dir, store := stage(t)
+
+		if _, err := runHookSet(t, "claude --resume"); err != nil {
+			t.Fatalf("hook set: %v", err)
+		}
+
+		assertAdopted(t, dir, "api work")
+		assertKept(t, dir, store, currentSessionName, everythingKept)
+	})
+}
+
+func sameButCreation(a, b sessionindex.Entry) bool {
+	a.CreatedAt, b.CreatedAt = time.Time{}, time.Time{}
+	return a == b
+}
+
+// bareReadback is a backend whose Create reads back nothing of the session it
+// made but its name, as one whose readback failed does.
+type bareReadback struct{ *backendtest.Fake }
+
+func (b bareReadback) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+	if _, err := b.Fake.Create(ctx, name, dir, command); err != nil {
+		return backend.Session{}, err
+	}
+	return backend.Session{Name: name}, nil
+}
+
+// A session minted with no creation read back has an entry recording none,
+// which a later claim takes over: a hook set on it survives a rename.
+func TestClaim_KeepsTheHookOfASessionMintedWithNoCreation(t *testing.T) {
+	fake := backendtest.New()
+	stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+	withBackendDeps(t, BackendDeps{Backend: fake})
+	minted, err := newIndexingCreator(context.Background(), &recordingProjectStore{}, bareReadback{fake}, "cli").CreateFromDir(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("CreateFromDir: %v", err)
+	}
+	if e := entryOf(t, stateDir, minted); !e.CreatedAt.IsZero() {
+		t.Fatalf("minted entry = %+v, want it to record no creation", e)
+	}
+	fake.SetCurrent(minted)
+	_, hooksFile := hooksFileInTempDir(t, nil)
+
+	if _, err := runHookSet(t, "claude --resume"); err != nil {
+		t.Fatalf("hook set: %v", err)
+	}
+	if _, _, err := runRootCmd(t, "rename", "api work"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	if got := readHooksJSON(t, hooksFile)[minted]["on-resume"].Command; got != "claude --resume" {
+		t.Errorf("hook = %q, want it kept through the rename", got)
+	}
+	held, _ := fake.Held(minted)
+	if e := entryOf(t, stateDir, minted); e.Label != "api work" || !e.CreatedAt.Equal(held.Created) || e.PID != held.PID || e.Dir == "" {
+		t.Errorf("entry = %+v, want the label on the live creation, the minted dir kept", e)
+	}
+}
+
 func TestUpdateSessionIndex_Forgets(t *testing.T) {
 	t.Run("a claim replacing an earlier creation's entry, as a mint's does, forgets it", func(t *testing.T) {
 		dir := seedSessionsJSON(t, `{"version": 2, "sessions": [`+
@@ -213,16 +378,43 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		stageKept(t, dir, "api-x7Kd9a", "web-Qm3pLz")
 		store, _ := stageHooks(t, "api-x7Kd9a", "web-Qm3pLz")
 
-		err := updateSessionIndex("tui", func(idx *sessionindex.Index) error {
-			idx.Claim("api-x7Kd9a", "/work/api", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
-			return nil
-		})
+		err := claimSession("tui", claimed{Name: "api-x7Kd9a", Dir: "/work/api", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil)
 		if err != nil {
-			t.Fatalf("updateSessionIndex: %v", err)
+			t.Fatalf("claimSession: %v", err)
 		}
 
 		assertKept(t, dir, store, "api-x7Kd9a", nil)
 		assertKept(t, dir, store, "web-Qm3pLz", everythingKept)
+	})
+
+	t.Run("a replaced entry's own scrollback goes, and the scrollback a later write names stays", func(t *testing.T) {
+		dir := seedSessionsJSON(t, `{"version": 2, "sessions": [{"name": "api-x7Kd9a", "created_at": "2026-10-28T09:00:00Z"}]}`)
+		stageKept(t, dir, "api-x7Kd9a")
+		stageHooks(t)
+		created := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+		later, err := state.SessionScrollbackFile("api-x7Kd9a", created, 4242)
+		if err != nil {
+			t.Fatal(err)
+		}
+		laterPath := filepath.Join(dir, filepath.FromSlash(later))
+		if err := os.WriteFile(laterPath, []byte("the new creation's transcript"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		err = claimSession("cli", claimed{Name: "api-x7Kd9a", Created: created, PID: 4242}, func(idx *sessionindex.Index) error {
+			idx.SetScrollback("api-x7Kd9a", later)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("claimSession: %v", err)
+		}
+
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(keptScrollback(t, "api-x7Kd9a")))); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat the replaced entry's scrollback = %v, want it removed", err)
+		}
+		if _, err := os.Stat(laterPath); err != nil {
+			t.Errorf("stat the new entry's scrollback = %v, want it kept", err)
+		}
 	})
 
 	t.Run("an update that drops nothing reads no hooks.json", func(t *testing.T) {

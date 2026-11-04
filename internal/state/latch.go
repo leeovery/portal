@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/fileutil"
 )
 
@@ -63,8 +64,9 @@ func ReadLatch(dir string) (Latch, error) {
 // LatchCurrent reports whether the latch in dir was written by a bootstrap
 // of this boot and this version, as running records them. A latch that is
 // missing, unreadable or corrupt is not current. Nor is a match on a latch
-// lacking either half, which says nothing about the bootstrap that wrote it.
+// lacking either half, or on devversion.Unidentified, a version any build
+// that can't say what it is reports: neither says which bootstrap wrote it.
 func LatchCurrent(dir string, running Latch) bool {
 	latch, err := ReadLatch(dir)
-	return err == nil && running.complete() && latch == running
+	return err == nil && running.complete() && running.Version != devversion.Unidentified && latch == running
 }

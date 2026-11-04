@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -75,11 +74,11 @@ var listCmd = &cobra.Command{
 		useLong := (listToTTY() || longFlag) && !shortFlag
 		format := func(s backend.Session) string { return s.Name }
 		if useLong {
-			idx, err := listLabels(longFlag)
+			shown, err := listLabels(longFlag)
 			if err != nil {
 				return err
 			}
-			format = func(s backend.Session) string { return formatSessionLong(shownSession(s, &idx)) }
+			format = func(s backend.Session) string { return formatSessionLong(shown.show(s)) }
 		}
 
 		w := cmd.OutOrStdout()
@@ -95,12 +94,12 @@ var listCmd = &cobra.Command{
 // listLabels is the index the long form takes its labels from. Asked for
 // with --long, an index that cannot be read fails the listing. A terminal's
 // default long form loses only its labels to one, so it reads as empty.
-func listLabels(asked bool) (sessionindex.Index, error) {
-	idx, err := readSessionIndex()
+func listLabels(asked bool) (shownIndex, error) {
+	shown, err := readShownIndex()
 	if err != nil && !asked {
-		return sessionindex.Index{}, nil
+		return shownIndex{}, nil
 	}
-	return idx, err
+	return shown, err
 }
 
 func listToTTY() bool {

@@ -1,11 +1,12 @@
-// Package bootid reads the identity the kernel gives the machine's current
-// boot: drawn afresh at each boot and fixed for its life. It is not the boot
-// time, which Linux works out from a clock and so drifts between readings.
+// Package bootid reads what the kernel says of the machine's current boot:
+// the id it draws afresh at each boot and fixes for the boot's life, and when
+// the boot began.
 package bootid
 
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Read returns the current boot's id. An OS whose kernel keeps none fails
@@ -19,4 +20,16 @@ func Read() (string, error) {
 		return "", errors.New("read boot id: the kernel reported an empty one")
 	}
 	return id, nil
+}
+
+// BootTime returns when the current boot began. Unlike the id it is worked
+// out against the wall clock, to the second on linux, so it moves when the
+// clock is stepped: compare a time against it with room to spare. An OS that
+// keeps none fails with errors.ErrUnsupported.
+func BootTime() (time.Time, error) {
+	at, err := bootTime()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read boot time: %w", err)
+	}
+	return at, nil
 }

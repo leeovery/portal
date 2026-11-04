@@ -31,7 +31,7 @@ var renameCmd = &cobra.Command{
 // itself, resets the label to the name. via is the surface asking, as
 // updateSessionIndex records it.
 func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via string) error {
-	live, err := liveSession(ctx, b, name)
+	live, err := liveSession(ctx, b, name, "its label is unchanged")
 	if err != nil {
 		return err
 	}
@@ -40,21 +40,24 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 	// recorded dir is only ever where Portal minted the session, and the live
 	// cwd frozen in its place would regroup the session by an exact key it
 	// does not match.
-	return updateSessionIndex(via, func(idx *sessionindex.Index) error {
-		idx.Claim(name, "", live.Created, live.PID)
+	return claimSession(via, live, func(idx *sessionindex.Index) error {
 		return idx.SetLabel(name, label)
 	})
 }
 
-// liveSession reads the session rename labels, wording one that fails as kill
-// does. One that does not answer is refused: a label written without its
-// creation time would pass to whatever session next takes the name.
-func liveSession(ctx context.Context, b backend.Backend, name string) (backend.Session, error) {
+// liveSession reads the session a claim is for, wording one that fails as kill
+// does, unchanged saying what the refusal leaves. One that does not answer is
+// refused: what a claim ties to a creation it can't read would pass to
+// whatever session next takes the name.
+func liveSession(ctx context.Context, b backend.Backend, name, unchanged string) (claimed, error) {
 	s, err := b.Session(ctx, name)
-	if fault, ok := sessionFault(name, err, "its label is unchanged"); ok {
-		return backend.Session{}, fault
+	if fault, ok := sessionFault(name, err, unchanged); ok {
+		return claimed{}, fault
 	}
-	return s, err
+	if err != nil {
+		return claimed{}, err
+	}
+	return claimed{Name: name, Created: s.Created, PID: s.PID}, nil
 }
 
 // pickerLabeller labels from the picker as portal rename does.

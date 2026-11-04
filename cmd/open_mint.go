@@ -7,7 +7,6 @@ import (
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/session"
-	"github.com/leeovery/portal/internal/sessionindex"
 )
 
 // indexingCreator mints sessions through the backend and claims each one's
@@ -32,10 +31,7 @@ func (c indexingCreator) CreateFromDir(dir string, command []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	err = updateSessionIndex(c.via, func(idx *sessionindex.Index) error {
-		idx.Claim(created.Name, created.Dir, created.At, created.PID)
-		return nil
-	})
+	err = claimSession(c.via, claimed{Name: created.Name, Dir: created.Dir, Created: created.At, PID: created.PID}, nil)
 	// The store warns of a failed write itself; one before it, taking the
 	// lock or reading the index, is the caller's to report.
 	if err != nil && !fileutil.IsWriteFailure(err) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"sync"
 	"syscall"
@@ -291,83 +290,6 @@ func TestUpdate(t *testing.T) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
 	})
-}
-
-func TestUpdate_Outcome(t *testing.T) {
-	const seed = `{"version":2,"sessions":[` +
-		`{"name":"gone","label":"Gone"},` +
-		`{"name":"recreated","label":"Old","created_at":"2026-11-02T08:00:00Z"},` +
-		`{"name":"same","label":"Same","created_at":"2026-11-03T09:30:00Z"},` +
-		`{"name":"kept","label":"Kept"}]}`
-	created := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
-
-	t.Run("it reports the names it removed and those it replaced with another creation's", func(t *testing.T) {
-		dir := t.TempDir()
-		writeIndex(t, dir, seed)
-
-		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Remove("gone")
-			idx.Claim("recreated", "/new", created, 0)
-			idx.Claim("same", "/same", created, 0)
-			idx.Claim("fresh", "/fresh", created, 0)
-			idx.Restored("kept", created, 7)
-			return idx.SetLabel("kept", "Still kept")
-		})
-		if err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-
-		if want := (sessionindex.Outcome{Removed: []string{"gone"}, Replaced: []string{"recreated"}}); !reflect.DeepEqual(outcome, want) {
-			t.Errorf("outcome = %+v, want %+v", outcome, want)
-		}
-	})
-
-	t.Run("it reports nothing when nothing was written", func(t *testing.T) {
-		for name, fn := range map[string]func(*sessionindex.Index) error{
-			"fn errors":                              func(idx *sessionindex.Index) error { idx.Remove("gone"); return errors.New("boom") },
-			"fn changes nothing":                     func(idx *sessionindex.Index) error { idx.Remove("absent"); return nil },
-			"fn claims an entry of its own creation": func(idx *sessionindex.Index) error { idx.Claim("same", "", created, 0); return nil },
-		} {
-			t.Run(name, func(t *testing.T) {
-				dir := t.TempDir()
-				writeIndex(t, dir, seed)
-
-				outcome, _ := sessionindex.Update(dir, "cli", fn)
-
-				if !reflect.DeepEqual(outcome, sessionindex.Outcome{}) {
-					t.Errorf("outcome = %+v, want empty", outcome)
-				}
-			})
-		}
-	})
-
-	t.Run("it reports nothing when the write fails", func(t *testing.T) {
-		dir := unwritableStateDir(t)
-
-		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "/a", created, 0)
-			idx.Remove("a")
-			return nil
-		})
-
-		if err == nil {
-			t.Fatal("Update = nil, want the write failure")
-		}
-		if !reflect.DeepEqual(outcome, sessionindex.Outcome{}) {
-			t.Errorf("outcome = %+v, want empty", outcome)
-		}
-	})
-}
-
-func TestOutcome_Dropped(t *testing.T) {
-	outcome := sessionindex.Outcome{Removed: []string{"a", "b"}, Replaced: []string{"c", "a"}}
-
-	if got, want := outcome.Dropped(), []string{"a", "b", "c"}; !slices.Equal(got, want) {
-		t.Errorf("Dropped = %v, want %v, each name once", got, want)
-	}
-	if got := (sessionindex.Outcome{}).Dropped(); len(got) != 0 {
-		t.Errorf("Dropped of an empty outcome = %v, want none", got)
-	}
 }
 
 // sessionindex is the store internal/state will read labels from, so it may

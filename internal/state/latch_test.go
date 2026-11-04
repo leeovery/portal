@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -45,6 +46,18 @@ func TestLatch(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a latch an unidentified build wrote is not current to the same build", func(t *testing.T) {
+		dir := t.TempDir()
+		unidentified := state.Latch{BootID: running.BootID, Version: devversion.Unidentified}
+		if err := state.WriteLatch(dir, unidentified); err != nil {
+			t.Fatal(err)
+		}
+
+		if state.LatchCurrent(dir, unidentified) {
+			t.Error("LatchCurrent = true, want false: the version names no one build")
+		}
+	})
 
 	t.Run("no latch is not current", func(t *testing.T) {
 		dir := t.TempDir()

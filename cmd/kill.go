@@ -8,6 +8,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -24,18 +25,16 @@ var killCmd = &cobra.Command{
 	},
 }
 
-// killSession kills the session and removes its index entry. A session already
-// gone keeps no entry either; one that may still be running keeps its own. via
-// is the surface asking, as updateSessionIndex records it.
+// killSession kills the session and forgets it: its index entry, and what
+// Portal keeps beside it. A session already gone keeps nothing either; one
+// that may still be running keeps everything. via is the surface asking, as
+// updateSessionIndex records it.
 func killSession(ctx context.Context, b backend.Backend, name, via string) error {
 	killed := b.Kill(ctx, name)
 	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {
 		return killError(name, killed)
 	}
-	removed := updateSessionIndex(via, func(idx *sessionindex.Index) error {
-		idx.Remove(name)
-		return nil
-	})
+	removed := forgetSession(name, via)
 	switch {
 	case killed != nil && removed != nil:
 		return fmt.Errorf("%w, and its session index entry could not be removed: %w", killError(name, killed), removed)
@@ -43,6 +42,27 @@ func killSession(ctx context.Context, b backend.Backend, name, via string) error
 		return killError(name, killed)
 	case removed != nil:
 		return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, removed)
+	}
+	return nil
+}
+
+// forgetSession removes the session's index entry and forgets what Portal
+// keeps beside it, whether or not the index held one: a hook or flag may be
+// left with no entry to go with it.
+func forgetSession(name, via string) error {
+	dir, err := state.EnsureDir()
+	if err != nil {
+		return err
+	}
+	held := false
+	if err := updateSessionIndexIn(dir, via, func(idx *sessionindex.Index) error {
+		held = idx.Remove(name)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !held {
+		forgetEntries(dir, []sessionindex.Entry{{Name: name}}, via)
 	}
 	return nil
 }

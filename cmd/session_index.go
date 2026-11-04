@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"time"
 
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -24,16 +25,8 @@ func (e legacyIndexError) Error() string {
 
 func (legacyIndexError) Unwrap() error { return sessionindex.ErrLegacyIndex }
 
-// readSessionIndex reads sessions.json from the state directory; a missing
-// file is an empty index.
-func readSessionIndex() (sessionindex.Index, error) {
-	dir, err := state.Dir()
-	if err != nil {
-		return sessionindex.Index{}, err
-	}
-	return readSessionIndexIn(dir)
-}
-
+// readSessionIndexIn reads sessions.json from the state directory dir; a
+// missing file is an empty index.
 func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 	idx, err := sessionindex.Read(dir)
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
@@ -48,33 +41,66 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 // updateSessionIndex runs fn on the state directory's index under the commit
 // lock, writing it back when fn changed something, and makes the directory
 // first: the lock lives in it. Once the write has landed and the lock is
-// released, it forgets each session whose entry the write removed or replaced.
-// via is cli, tui or internal.
+// released, it forgets each entry the write removed or replaced. via is cli,
+// tui or internal.
 func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
+	return updateSessionIndexIn(dir, via, fn)
+}
+
+func updateSessionIndexIn(dir, via string, fn func(*sessionindex.Index) error) error {
 	outcome, err := sessionindex.Update(dir, via, fn)
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
 		return legacyIndexError{path: sessionindex.Path(dir)}
 	}
-	forgetDropped(dir, outcome.Dropped(), via)
+	forgetEntries(dir, outcome.Dropped(), via)
 	return err
 }
 
-// forgetDropped forgets each of names, sessions whose entries are gone from
-// the index in dir.
-func forgetDropped(dir string, names []string, via string) {
-	if len(names) == 0 {
+// claimRule is the rule each claim judges by; tests fix the boot it reads.
+var claimRule = state.ClaimRule
+
+// claimed is a live session as its backend reports it, for a claim of its
+// entry: Dir is where Portal minted it, empty for any other claimer.
+type claimed struct {
+	Name, Dir string
+	Created   time.Time
+	PID       int
+}
+
+// claimSession claims the live session's entry by the one rule every claim
+// judges by, then runs then, when given, on the index in the same write, so
+// what then changes is this creation's.
+func claimSession(via string, live claimed, then func(*sessionindex.Index) error) error {
+	dir, err := state.EnsureDir()
+	if err != nil {
+		return err
+	}
+	rule := claimRule(dir)
+	return updateSessionIndexIn(dir, via, func(idx *sessionindex.Index) error {
+		idx.Claim(live.Name, live.Dir, live.Created, live.PID, rule)
+		if then == nil {
+			return nil
+		}
+		return then(idx)
+	})
+}
+
+// forgetEntries forgets each of entries, as the index in dir held them before
+// a write dropped them.
+func forgetEntries(dir string, entries []sessionindex.Entry, via string) {
+	if len(entries) == 0 {
 		return
 	}
 	store, err := loadHookStore()
-	for _, name := range names {
+	for _, entry := range entries {
 		if err != nil {
-			indexLogger.Warn("forget", "op", "forget", "session", name, "detail", "kept its resume hook", "error", err, "via", via)
+			indexLogger.Warn("forget", "op", "forget", "session", entry.Name, "detail", "kept its resume hook", "error", err, "via", via)
 		}
-		state.Forget(dir, store, name, via)
+		state.Forget(dir, store, entry, via)
 	}
 }
 

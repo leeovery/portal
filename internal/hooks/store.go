@@ -224,10 +224,12 @@ func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
 	return s.removeEntry(key, event, via, removal{op: "rm"})
 }
 
-// Discard is the resume panel's removal route. It removes the entry for key and
-// event only when its command is exactly shown, the command the panel put in
-// front of the user; an entry holding any other command, whatever its resume
-// mode, is nothing to remove and answers as an absent one does. Otherwise it
+// Discard is the removal route for a caller that judged a command before
+// removing it: the resume panel, and forgetting a dropped session. It removes
+// the entry for key and event only when its command is exactly shown, the
+// command the panel put in front of the user or the forget read; an entry
+// holding any other command, whatever its resume mode, is nothing to remove
+// and answers as an absent one does. Otherwise it
 // keeps Remove's contract, but its breadcrumb is filed under op=discard and
 // carries the removed command as value, so the destroyed registration can be
 // copied back out of the log.

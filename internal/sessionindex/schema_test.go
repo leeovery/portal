@@ -119,15 +119,98 @@ func TestCodec(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown fields are ignored", func(t *testing.T) {
-		idx, err := sessionindex.Decode([]byte(`{"version":2,"future":1,"sessions":[{"name":"a","extra":true}]}`))
+	t.Run("unknown fields decode beside the known ones and encode again as read", func(t *testing.T) {
+		in := `{"version":2,"saved_at":"2026-11-02T09:30:00Z","future":{"x":[1,2]},"sessions":[{"name":"a","label":"A","extra":true,"more":"m"},{"name":"b"}]}`
+		idx, err := sessionindex.Decode([]byte(in))
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "a" {
-			t.Errorf("sessions = %+v, want one named a", idx.Sessions)
+		if len(idx.Sessions) != 2 || idx.Sessions[0].Name != "a" || idx.Sessions[0].Label != "A" {
+			t.Errorf("sessions = %+v, want a labelled A and b", idx.Sessions)
+		}
+
+		data, err := sessionindex.Encode(idx)
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		assertSameJSON(t, data, in)
+	})
+}
+
+func TestUpdate_KeepsUnknownFields(t *testing.T) {
+	const seed = `{"version":2,"saved_at":"2026-11-01T00:00:00Z","future":{"x":[1,2]},"sessions":[` +
+		`{"name":"a","label":"A","created_at":"2026-11-03T06:00:00Z","extra":true},` +
+		`{"name":"b","more":{"deep":"value"}}]}`
+
+	for name, fn := range map[string]func(*sessionindex.Index) error{
+		"another entry changes": func(idx *sessionindex.Index) error { return idx.SetLabel("b", "B") },
+		"the entry itself changes": func(idx *sessionindex.Index) error {
+			idx.RecordCwd("a", "/work/a")
+			return nil
+		},
+		"the entry is adopted by a claim": func(idx *sessionindex.Index) error {
+			idx.Claim("a", "", liveCreation, 4242, ruleRestoring())
+			return nil
+		},
+	} {
+		t.Run("a rewrite keeps the root's and each entry's unknown members when "+name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeIndex(t, dir, seed)
+
+			if _, err := sessionindex.Update(dir, "cli", fn); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+
+			var raw struct {
+				Future   json.RawMessage              `json:"future"`
+				Sessions []map[string]json.RawMessage `json:"sessions"`
+			}
+			if err := json.Unmarshal(readFile(t, dir), &raw); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			assertSameJSON(t, raw.Future, `{"x":[1,2]}`)
+			assertSameJSON(t, raw.Sessions[0]["extra"], `true`)
+			assertSameJSON(t, raw.Sessions[1]["more"], `{"deep":"value"}`)
+		})
+	}
+
+	t.Run("an entry replaced whole drops the members the earlier creation's entry carried", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","created_at":"2026-11-04T09:00:00Z","extra":true}]}`)
+
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring())
+			return nil
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		var raw struct {
+			Sessions []map[string]json.RawMessage `json:"sessions"`
+		}
+		if err := json.Unmarshal(readFile(t, dir), &raw); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if _, ok := raw.Sessions[0]["extra"]; ok {
+			t.Errorf("entry = %v, want the earlier creation's extra gone with it", raw.Sessions[0])
 		}
 	})
+}
+
+// assertSameJSON compares JSON documents by value, ignoring layout and key
+// order.
+func assertSameJSON(t *testing.T, got []byte, want string) {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("unmarshal %s: %v", got, err)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("unmarshal %s: %v", want, err)
+	}
+	if !reflect.DeepEqual(g, w) {
+		t.Errorf("JSON = %s, want %s", got, want)
+	}
 }
 
 func TestDecode_Refusals(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // Flag is a file in the state directory whose presence is the fact it
@@ -17,7 +18,7 @@ type Flag string
 const Restoring Flag = "restoring"
 
 // SessionFlag is a directory of flags in the state directory, one empty file
-// per session, named after it.
+// per session, named by the session's file stem.
 type SessionFlag string
 
 const (
@@ -37,8 +38,8 @@ func (f Flag) Set(dir string) error { return setFlagFile(dir, f.Path(dir)) }
 // Clear lowers the flag, reporting whether it was raised.
 func (f Flag) Clear(dir string) (bool, error) { return removeIfPresent(f.Path(dir)) }
 
-// Exists reports whether the flag is raised. A flag that can't be looked for
-// is an error, never a lowered flag.
+// Exists reports whether the flag is raised: whether a regular file stands at
+// its path. A flag that can't be looked for is an error, never a lowered flag.
 func (f Flag) Exists(dir string) (bool, error) { return flagFileExists(f.Path(dir)) }
 
 // Path is the session's flag file in dir. A name that is not a single path
@@ -52,7 +53,9 @@ func (f SessionFlag) Path(dir, name string) (string, error) {
 
 func (f SessionFlag) dir(dir string) string { return filepath.Join(dir, string(f)) }
 
-func (f SessionFlag) path(dir, name string) string { return filepath.Join(f.dir(dir), name) }
+func (f SessionFlag) path(dir, name string) string {
+	return filepath.Join(f.dir(dir), fileStem(name))
+}
 
 // Set raises the session's flag, making its directory first. Raising a raised
 // flag changes nothing.
@@ -73,8 +76,9 @@ func (f SessionFlag) Clear(dir, name string) (bool, error) {
 	return removeIfPresent(path)
 }
 
-// Exists reports whether the session's flag is raised. A flag that can't be
-// looked for is an error, never a lowered flag.
+// Exists reports whether the session's flag is raised: whether a regular file
+// stands at its path. A flag that can't be looked for is an error, never a
+// lowered flag.
 func (f SessionFlag) Exists(dir, name string) (bool, error) {
 	path, err := f.Path(dir, name)
 	if err != nil {
@@ -84,7 +88,8 @@ func (f SessionFlag) Exists(dir, name string) (bool, error) {
 }
 
 // List names the sessions whose flag is raised, in name order. A directory
-// not made yet raises none; anything in it but a regular file is no flag.
+// not made yet raises none; anything in it but a regular file named by a
+// session's stem, a .DS_Store or a directory, is no flag.
 func (f SessionFlag) List(dir string) ([]string, error) {
 	entries, err := os.ReadDir(f.dir(dir))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -95,10 +100,11 @@ func (f SessionFlag) List(dir string) ([]string, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if e.Type().IsRegular() {
-			names = append(names, e.Name())
+		if name, ok := nameOfStem(e.Name()); ok && e.Type().IsRegular() {
+			names = append(names, name)
 		}
 	}
+	slices.Sort(names)
 	return names, nil
 }
 
@@ -127,10 +133,14 @@ func removeIfPresent(path string) (bool, error) {
 	return err == nil, err
 }
 
+// flagFileExists counts only a regular file as a raised flag.
 func flagFileExists(path string) (bool, error) {
-	_, err := os.Lstat(path)
+	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().IsRegular(), nil
 }

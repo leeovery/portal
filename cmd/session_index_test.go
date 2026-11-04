@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
@@ -152,16 +154,16 @@ func TestLegacyIndexStop(t *testing.T) {
 	}
 }
 
-func TestReadSessionIndex(t *testing.T) {
+func TestReadShownIndex(t *testing.T) {
 	t.Run("it reads a missing sessions.json as an empty index", func(t *testing.T) {
 		dir := isolateStateDir(t)
 
-		idx, err := readSessionIndex()
+		shown, err := readShownIndex()
 		if err != nil {
-			t.Fatalf("readSessionIndex: %v", err)
+			t.Fatalf("readShownIndex: %v", err)
 		}
-		if len(idx.Sessions) != 0 {
-			t.Errorf("sessions = %+v, want none", idx.Sessions)
+		if len(shown.idx.Sessions) != 0 {
+			t.Errorf("sessions = %+v, want none", shown.idx.Sessions)
 		}
 		if _, err := os.Stat(sessionindex.Path(dir)); !os.IsNotExist(err) {
 			t.Errorf("sessions.json stat = %v, want it still absent", err)
@@ -172,12 +174,32 @@ func TestReadSessionIndex(t *testing.T) {
 		dir := isolateStateDir(t)
 		storedLabel(t, dir, "api-x7Kd9a", "api")
 
-		idx, err := readSessionIndex()
+		shown, err := readShownIndex()
 		if err != nil {
-			t.Fatalf("readSessionIndex: %v", err)
+			t.Fatalf("readShownIndex: %v", err)
 		}
-		if got, _ := idx.Lookup("api-x7Kd9a"); got.Label != "api" {
+		if got, _ := shown.idx.Lookup("api-x7Kd9a"); got.Label != "api" {
 			t.Errorf("label = %q, want %q", got.Label, "api")
+		}
+	})
+
+	t.Run("it judges entries by the claim rule", func(t *testing.T) {
+		thisBoot := sessionindex.Entry{Name: "api-x7Kd9a", Label: "api", CreatedAt: testBoot.Add(time.Hour), PID: 1717}
+		dir := seedIndex(t, thisBoot)
+		withFuncSeam(t, &claimRule, func(got string) sessionindex.Rule {
+			if got != dir {
+				t.Errorf("claimRule(%q), want the state directory %q", got, dir)
+			}
+			return sessionindex.Rule{}
+		})
+
+		shown, err := readShownIndex()
+		if err != nil {
+			t.Fatalf("readShownIndex: %v", err)
+		}
+		live := backend.Session{Name: "api-x7Kd9a", Created: testBoot.Add(2 * time.Hour), PID: 4242, Answered: true}
+		if got := shown.show(live); got.Label != "api" {
+			t.Errorf("show = %+v, want the label the zero rule's adoption keeps", got)
 		}
 	})
 }

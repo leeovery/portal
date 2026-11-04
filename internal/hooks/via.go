@@ -19,6 +19,9 @@ const (
 	ViaDoctor
 	// ViaPanel is a waiting pane's resume panel answering the user's discard.
 	ViaPanel
+	// ViaTUI is the picker, forgetting a session whose index entry one of its
+	// actions dropped.
+	ViaTUI
 )
 
 var viaNames = map[Via]string{
@@ -27,6 +30,7 @@ var viaNames = map[Via]string{
 	ViaHydrate:  "hydrate",
 	ViaDoctor:   "doctor",
 	ViaPanel:    "panel",
+	ViaTUI:      "tui",
 }
 
 // String returns the logged value, and the empty string for a Via outside the

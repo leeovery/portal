@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // Write-phase sentinels let a caller errors.Is which step of AtomicWrite failed.
@@ -15,8 +16,9 @@ var (
 	// temp file: the closed error_class space has no separate mkdir phase.
 	ErrWriteTempCreate = errors.New("write-failed-temp-create")
 	ErrWriteWrite      = errors.New("write-failed-write")
-	// AtomicWrite has no explicit Sync, so Close is where deferred write errors
-	// surface and maps here.
+	// ErrWriteFsync covers the temp file's sync and close before the rename,
+	// and the directory's sync after it. A directory sync that fails has left
+	// the file replaced, but not durably.
 	ErrWriteFsync  = errors.New("write-failed-fsync")
 	ErrWriteRename = errors.New("write-failed-rename")
 )
@@ -65,6 +67,11 @@ func AtomicWrite0600(path string, data []byte) error {
 // AtomicWrite writes data to path via temp-file-and-rename, creating the parent
 // directory if absent and removing the temp file on any error.
 //
+// It is durable once it returns nil: the temp file is synced before the rename,
+// so the rename never lands naming bytes still in cache, and the directory
+// after it, so a crash or power loss can't undo the rename. On darwin a sync
+// is F_FULLFSYNC, which flushes the drive's own cache as well.
+//
 // A path that is a symlink is written through: the rename lands on the file the
 // link names, and the link stays. Renaming over the link itself would replace it
 // with a regular file, silently detaching a config file kept in a dotfiles
@@ -92,6 +99,12 @@ func AtomicWrite(path string, data []byte) error {
 		return fmt.Errorf("%w: failed to write temp file: %w", ErrWriteWrite, err)
 	}
 
+	if err := syncFile(tmp); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%w: failed to sync temp file: %w", ErrWriteFsync, err)
+	}
+
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("%w: failed to close temp file: %w", ErrWriteFsync, err)
@@ -102,6 +115,30 @@ func AtomicWrite(path string, data []byte) error {
 		return fmt.Errorf("%w: failed to rename temp file: %w", ErrWriteRename, err)
 	}
 
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("%w: failed to sync directory after rename: %w", ErrWriteFsync, err)
+	}
+
+	return nil
+}
+
+var (
+	syncFile = (*os.File).Sync
+	syncDir  = syncDirectory
+)
+
+// syncDirectory syncs the directory dir, so a rename into it is durable. A
+// filesystem that can't sync a directory, answering EINVAL or ENOTSUP, has
+// nothing more to flush.
+func syncDirectory(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		return err
+	}
 	return nil
 }
 

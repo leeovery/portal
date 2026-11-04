@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 )
 
@@ -39,9 +41,14 @@ type Index struct {
 	SavedAt  time.Time `json:"saved_at"`
 	Sessions []Entry   `json:"sessions"`
 
-	// changes are the label and removal mutations made since the index was
+	// changes are the mutations made through Index's methods since it was
 	// read, logged by Update once its write lands.
 	changes []change
+	// fresh names the sessions whose entries were made afresh since the index
+	// was read, rather than changed from the entry read.
+	fresh map[string]bool
+	// unknown holds the members this version does not model, as a JSON object.
+	unknown string
 }
 
 // Entry is one session. Label is empty while the session shows its name. Dir
@@ -56,6 +63,97 @@ type Entry struct {
 	CreatedAt      time.Time `json:"created_at,omitzero"`
 	PID            int       `json:"pid,omitempty"`
 	ScrollbackFile string    `json:"scrollback_file,omitempty"`
+
+	// unknown holds the members this version does not model, as a JSON
+	// object, kept as a string so an Entry stays comparable.
+	unknown string
+}
+
+// Members a newer version adds are carried through every rewrite as read: an
+// older saver still running across an upgrade must not erase what the newer
+// binary records.
+type (
+	indexFields Index
+	entryFields Entry
+)
+
+var (
+	indexKeys = jsonKeys(reflect.TypeFor[indexFields]())
+	entryKeys = jsonKeys(reflect.TypeFor[entryFields]())
+)
+
+func (idx Index) MarshalJSON() ([]byte, error) {
+	return marshalWithUnknown(indexFields(idx), idx.unknown)
+}
+
+func (idx *Index) UnmarshalJSON(data []byte) error {
+	var fields indexFields
+	unknown, err := unmarshalWithUnknown(data, &fields, indexKeys)
+	if err != nil {
+		return err
+	}
+	*idx = Index(fields)
+	idx.unknown = unknown
+	return nil
+}
+
+func (e Entry) MarshalJSON() ([]byte, error) {
+	return marshalWithUnknown(entryFields(e), e.unknown)
+}
+
+func (e *Entry) UnmarshalJSON(data []byte) error {
+	var fields entryFields
+	unknown, err := unmarshalWithUnknown(data, &fields, entryKeys)
+	if err != nil {
+		return err
+	}
+	*e = Entry(fields)
+	e.unknown = unknown
+	return nil
+}
+
+// marshalWithUnknown encodes fields, a struct, followed by the members of
+// unknown, a JSON object or empty.
+func marshalWithUnknown(fields any, unknown string) ([]byte, error) {
+	known, err := json.Marshal(fields)
+	if err != nil || unknown == "" {
+		return known, err
+	}
+	if string(known) == "{}" {
+		return []byte(unknown), nil
+	}
+	return append(known[:len(known)-1], ","+unknown[1:]...), nil
+}
+
+// unmarshalWithUnknown decodes data into fields, returning every member whose
+// key is not among known as one JSON object, or empty when there is none.
+func unmarshalWithUnknown(data []byte, fields any, known []string) (string, error) {
+	if err := json.Unmarshal(data, fields); err != nil {
+		return "", err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return "", err
+	}
+	for _, key := range known {
+		delete(members, key)
+	}
+	if len(members) == 0 {
+		return "", nil
+	}
+	unknown, err := json.Marshal(members)
+	return string(unknown), err
+}
+
+// jsonKeys is every member name t's json tags give its fields.
+func jsonKeys(t reflect.Type) []string {
+	var keys []string
+	for field := range t.Fields() {
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
 }
 
 func emptyIndex() Index {
@@ -75,7 +173,7 @@ func Encode(idx Index) ([]byte, error) {
 // Decode errors on malformed JSON, a missing version field, a version other
 // than SchemaVersion (a *VersionError, judged before the body, whose shape the
 // other version may not share), and an entry with an empty or repeated name.
-// Unknown fields are ignored.
+// Members this version does not model are kept, for Encode to write again.
 func Decode(data []byte) (Index, error) {
 	var head struct {
 		Version *int `json:"version"`

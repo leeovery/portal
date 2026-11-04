@@ -39,7 +39,7 @@ func stageRename(t *testing.T) (*backendtest.Fake, string) {
 func labelLive(t *testing.T, dir, label string) {
 	t.Helper()
 	if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(currentSessionName, renameDir, renameCreated, renamePID)
+		idx.Claim(currentSessionName, renameDir, renameCreated, renamePID, claimRule(dir))
 		return idx.SetLabel(currentSessionName, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", currentSessionName, label, err)

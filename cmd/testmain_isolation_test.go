@@ -17,11 +17,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/prefs"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
+
+// testBoot is the boot the package's claims judge by: before every creation
+// a fixture records, unless it means one saved before the boot.
+var testBoot = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 // pinToolchainCaches re-exports the cache locations the Go toolchain would
 // otherwise derive from HOME, so a subprocess `go build` keeps using the
@@ -97,6 +103,10 @@ func TestMain(m *testing.M) {
 	// Neutralised package-wide: production dispatches this on its own goroutine, so
 	// a test reaching loadPrefsStore would leave a write racing its own teardown.
 	persistTranslation = func(*prefs.Store, string) {}
+	// Fixed package-wide, so what a fixture's dates make of an entry is the
+	// same on every machine, whenever it booted. state.ClaimRule's own suite
+	// pins the flags this rule leaves out.
+	claimRule = func(string) sessionindex.Rule { return sessionindex.NewRule(testBoot, nil) }
 
 	// Detection reads the terminal's identity from the environment, scrubbed
 	// here, and from this process's ancestry, which leads to the developer's own

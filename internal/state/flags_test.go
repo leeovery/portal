@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -14,6 +15,29 @@ import (
 
 // unsafeNames are names that are not a single path element.
 var unsafeNames = []string{"", ".", "..", "/", "a/b", "../escape", "nul\x00byte"}
+
+// Each stem is a session's name, then the first 12 hex digits of the SHA-256
+// of the name's bytes, worked out apart from the code.
+const (
+	apiStem       = "api-x7Kd9a-2b7b3c0a554a"
+	neighbourStem = "api-x7Kd9a-2-69c2a1faefed"
+	webStem       = "web-Qm3pLz-1f66150b103c"
+	fooUpperHash  = "1cbec737f863"
+	// The stems "" and "." would have, which name no session.
+	emptyNameHash = "e3b0c44298fc"
+	dotNameHash   = "cdb4ee2aea69"
+)
+
+// foldsCase reports whether the filesystem holding dir takes two names that
+// differ only in case for one.
+func foldsCase(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "CaseProbe")
+	writeFile(t, probe, "")
+	defer func() { _ = os.Remove(probe) }()
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err == nil
+}
 
 // withUmask runs the test under mask, so a mode the code asks for is not
 // mistaken for one the default umask happened to give.
@@ -83,6 +107,17 @@ func TestFlag(t *testing.T) {
 		assertMode(t, state.Restoring.Path(dir), 0o600)
 	})
 
+	t.Run("a directory at its path is no raised flag", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(state.Restoring.Path(dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, err := state.Restoring.Exists(dir); err != nil || got {
+			t.Errorf("Exists = %v, %v; want false", got, err)
+		}
+	})
+
 	t.Run("a flag that can't be looked for is an error, not a lowered flag", func(t *testing.T) {
 		blocker := filepath.Join(t.TempDir(), "file")
 		if err := os.WriteFile(blocker, nil, 0o600); err != nil {
@@ -124,7 +159,7 @@ func TestSessionFlag(t *testing.T) {
 			}
 		})
 
-		t.Run(string(flag)+" is a file named after the session, made 0600 in a directory made 0700", func(t *testing.T) {
+		t.Run(string(flag)+" is a file named by the session's name and its hash, made 0600 in a directory made 0700", func(t *testing.T) {
 			withUmask(t, 0)
 			dir := filepath.Join(t.TempDir(), "state")
 
@@ -133,7 +168,7 @@ func TestSessionFlag(t *testing.T) {
 			}
 
 			path, err := flag.Path(dir, "api-x7Kd9a")
-			if want := filepath.Join(dir, string(flag), "api-x7Kd9a"); err != nil || path != want {
+			if want := filepath.Join(dir, string(flag), apiStem); err != nil || path != want {
 				t.Errorf("Path = %q, %v; want %q", path, err, want)
 			}
 			assertMode(t, dir, 0o700)
@@ -141,7 +176,7 @@ func TestSessionFlag(t *testing.T) {
 			assertMode(t, path, 0o600)
 		})
 
-		t.Run(string(flag)+" lists none before its directory is made, and only regular files once it is", func(t *testing.T) {
+		t.Run(string(flag)+" lists none before its directory is made, and once it is only regular files named by a session's stem", func(t *testing.T) {
 			dir := t.TempDir()
 			if got, err := flag.List(dir); err != nil || len(got) != 0 {
 				t.Errorf("List of no directory = %v, %v; want none", got, err)
@@ -150,14 +185,63 @@ func TestSessionFlag(t *testing.T) {
 			if err := flag.Set(dir, "api-x7Kd9a"); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Mkdir(filepath.Join(dir, string(flag), "not-a-flag"), 0o700); err != nil {
+			flagDir := filepath.Join(dir, string(flag))
+			if err := os.Mkdir(filepath.Join(flagDir, webStem), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, stray := range []string{".DS_Store", "api-x7Kd9a", "api-x7Kd9a-000000000000", "-" + emptyNameHash, ".-" + dotNameHash} {
+				writeFile(t, filepath.Join(flagDir, stray), "")
+			}
+			if err := os.Symlink(filepath.Join(flagDir, apiStem), filepath.Join(flagDir, "Foo-"+fooUpperHash)); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := flag.List(dir); err != nil || !slices.Equal(got, []string{"api-x7Kd9a"}) {
-				t.Errorf("List = %v, %v; want the regular file alone", got, err)
+				t.Errorf("List = %v, %v; want api-x7Kd9a alone", got, err)
+			}
+		})
+
+		t.Run(string(flag)+" counts only a regular file as raised", func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, string(flag), apiStem), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(dir, "elsewhere"), filepath.Join(dir, string(flag), webStem)); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dir, "elsewhere"), "")
+
+			for _, name := range []string{"api-x7Kd9a", "web-Qm3pLz"} {
+				if got, err := flag.Exists(dir, name); err != nil || got {
+					t.Errorf("Exists(%s) = %v, %v; want false", name, got, err)
+				}
 			}
 		})
 	}
+
+	t.Run("names one filesystem may fold together keep a flag each", func(t *testing.T) {
+		dir := t.TempDir()
+		upper, _ := state.Hydrating.Path(dir, "Foo")
+		lower, _ := state.Hydrating.Path(dir, "foo")
+		if strings.EqualFold(upper, lower) {
+			t.Fatalf("Path(Foo) = %q and Path(foo) = %q fold to one name", upper, lower)
+		}
+		if err := state.Hydrating.Set(dir, "Foo"); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, err := state.Hydrating.Exists(dir, "foo"); err != nil || got {
+			t.Errorf("Exists(foo) = %v, %v; want false, Foo's flag being Foo's", got, err)
+		}
+		if removed, err := state.Hydrating.Clear(dir, "foo"); err != nil || removed {
+			t.Errorf("Clear(foo) = %v, %v; want nothing removed", removed, err)
+		}
+		if got, err := state.Hydrating.List(dir); err != nil || !slices.Equal(got, []string{"Foo"}) {
+			t.Errorf("List = %v, %v; want Foo alone, still raised", got, err)
+		}
+		if !foldsCase(t, dir) {
+			t.Log("this filesystem keeps case, so only the paths' comparison tested the rule")
+		}
+	})
 
 	t.Run("the two flags of one session are separate files", func(t *testing.T) {
 		dir := t.TempDir()
