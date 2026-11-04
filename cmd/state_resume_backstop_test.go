@@ -16,7 +16,7 @@ import (
 // among the programs it ran.
 const (
 	backstopShell = `#!/bin/sh
-echo shell >> "$PANE_TRANSCRIPT"
+echo "shell $*" >> "$PANE_TRANSCRIPT"
 `
 	backstopStty = `#!/bin/sh
 echo "stty $*" >> "$PANE_TRANSCRIPT"
@@ -162,9 +162,9 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			return path
 		}},
 	}
-	recovered := hydrateResetPreamble + "stty sane\n" + "shell\n"
+	recovered := hydrateResetPreamble + "stty sane\n" + "shell -l\n"
 	for _, tc := range unstartable {
-		t.Run("a tail "+tc.name+" resets the session, lowers its flag and restores the terminal before the user's shell", func(t *testing.T) {
+		t.Run("a tail "+tc.name+" resets the session, lowers its flag and restores the terminal before the user's login shell", func(t *testing.T) {
 			stateDir, flag := backstopFlag(t, true)
 
 			run := runParkedChain(t, tc.stage(t), flag)

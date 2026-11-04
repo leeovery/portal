@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -143,31 +144,39 @@ func TestHandOffToHookOrShell(t *testing.T) {
 		wantPresent string
 	}{
 		{
-			name:        "it hands a pane with no command its shell alone",
+			name:        "it hands a session with no command its login shell, as zmx starts a fresh one's",
 			shellEnv:    "/bin/zsh",
 			wantProg:    "/bin/zsh",
-			wantArgs:    []string{"/bin/zsh"},
+			wantArgs:    []string{"-zsh"},
 			wantPresent: "false",
 		},
 		{
-			name:        "it hands a pane with no command /bin/sh when SHELL is unset",
+			name:        "it hands a session with no command /bin/sh when SHELL is unset",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"/bin/sh"},
+			wantArgs:    []string{"-sh"},
 			wantPresent: "false",
 		},
 		{
-			name:        "it hands a pane its command under sh followed by its shell",
+			name:        "it hands a session its command under sh followed by its login shell",
 			shellEnv:    "/bin/zsh",
 			command:     "claude --resume 'x'",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "trap : TERM; claude --resume 'x'; exec /bin/zsh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; claude --resume 'x'; exec '/bin/zsh' -l"},
 			wantPresent: "true",
 		},
 		{
 			name:        "it follows the command with /bin/sh when SHELL is unset",
 			command:     "make dev",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec /bin/sh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec '/bin/sh' -l"},
+			wantPresent: "true",
+		},
+		{
+			name:        "it quotes a shell whose path a word split would break",
+			shellEnv:    "/Applications/My Shells/fish",
+			command:     "make dev",
+			wantProg:    "/bin/sh",
+			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec '/Applications/My Shells/fish' -l"},
 			wantPresent: "true",
 		},
 	}
@@ -211,4 +220,10 @@ func TestHandOffToHookOrShell(t *testing.T) {
 			}
 		})
 	}
+}
+
+// wantLoginShell is the argv a session's shell is handed with: run as a login
+// shell, as zmx runs a fresh session's, its base name after a dash.
+func wantLoginShell(shell string) []string {
+	return []string{"-" + filepath.Base(shell)}
 }

@@ -3,220 +3,111 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestHydrateReplayedLog_EmitsScrollbackReplayedBytesTookOnSuccessPath(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-rep__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	payload := []byte("line1\nline2\nline3\n")
-	if err := os.WriteFile(scrollback, payload, 0o600); err != nil {
-		t.Fatalf("seed scrollback: %v", err)
-	}
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "rep:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
-	if !strings.Contains(info, fmt.Sprintf("bytes=%d", len(payload))) {
-		t.Errorf("scrollback replayed INFO missing bytes=%d: %q", len(payload), info)
-	}
-	if !strings.Contains(info, "took=") {
-		t.Errorf("scrollback replayed INFO missing took=: %q", info)
-	}
-}
-
-func TestHydrateReplayedLog_BytesEqualsCopyCountForPopulatedFile(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-pop__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	// NUL, non-UTF8 and escape bytes so the count is verbatim byte length rather
+func TestHydrateReplayedLog(t *testing.T) {
+	// NUL, non-UTF8 and escape bytes, so the count is the byte length rather
 	// than a rune count.
-	payload := []byte("line1\r\nline2\x00\xff\x1b[31mred\x1b[0m")
-	if err := os.WriteFile(scrollback, payload, 0o600); err != nil {
-		t.Fatalf("seed scrollback: %v", err)
+	for name, body := range map[string]string{
+		"a populated transcript": "line1\r\nline2\x00\xff\x1b[31mred\x1b[0m",
+		"an empty transcript":    "",
+		"a 5MB transcript":       string(bytes.Repeat([]byte("A"), 5*1024*1024)),
+	} {
+		t.Run("it records the bytes a replay of "+name+" wrote", func(t *testing.T) {
+			w := newHydrateWorld(t)
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			cfg := w.config(&stubExecShell{})
+			cfg.File, cfg.Logger = transcript(t, body), logger
+
+			runHydrate(t.Context(), cfg)
+
+			rec := sink.Records().Matching("hydrate", "scrollback replayed").Only(t, "the replay's record")
+			if got := rec.IntAttr(t, "bytes"); got != int64(len(body)) {
+				t.Errorf("bytes = %d, want %d", got, len(body))
+			}
+			if info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed"); !strings.Contains(info, fmt.Sprintf("bytes=%d", len(body))) {
+				t.Errorf("INFO %q does not render bytes=%d", info, len(body))
+			}
+		})
 	}
 
-	signalFIFOAsync(t, fifo)
+	t.Run("its took spans the copy, never the settle after it", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		cfg := w.config(&stubExecShell{})
+		cfg.File, cfg.Logger = transcript(t, "CONTENT"), logger
+		cfg.Settle = func() { time.Sleep(hydrateSettleSleep) }
 
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "pop:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
+		runHydrate(t.Context(), cfg)
 
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
+		rec := sink.Records().Matching("hydrate", "scrollback replayed").Only(t, "the replay's record")
+		if took := rec.DurationAttr(t, "took"); took >= hydrateSettleSleep {
+			t.Errorf("took = %v, want the copy alone, well under the %v settle", took, hydrateSettleSleep)
+		}
+	})
+
+	t.Run("it precedes the exec INFO", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		cfg := w.config(&stubExecShell{})
+		cfg.File, cfg.Logger = transcript(t, "DUMP"), logger
+
+		runHydrate(t.Context(), cfg)
+
+		assertLoggedBeforeExec(t, sink.Body(), "INFO scrollback replayed")
+	})
+
+	t.Run("it is not recorded for a transcript that could not be read", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		cfg := w.config(&stubExecShell{})
+		cfg.File, cfg.Logger = filepath.Join(t.TempDir(), "absent.bin"), logger
+
+		runHydrate(t.Context(), cfg)
+
+		if strings.Contains(sink.Body(), "scrollback replayed") {
+			t.Errorf("an unread transcript recorded a replay: %q", sink.Body())
+		}
+	})
+}
+
+func TestHydrateFileMissingLog(t *testing.T) {
+	cases := map[string]func(t *testing.T) string{
+		"missing":          func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.bin") },
+		"refused":          func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") },
+		"failing part way": func(t *testing.T) string { return t.TempDir() },
 	}
+	for name, file := range cases {
+		t.Run("a transcript "+name+" records one scrollback missing INFO naming the file, before the exec INFO", func(t *testing.T) {
+			w := newHydrateWorld(t)
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			cfg := w.config(&stubExecShell{})
+			cfg.File, cfg.Logger = file(t), logger
 
-	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
-	if !strings.Contains(info, fmt.Sprintf("bytes=%d", len(payload))) {
-		t.Errorf("bytes must equal io.Copy count (%d): %q", len(payload), info)
-	}
+			runHydrate(t.Context(), cfg)
 
-	// Read as a structured int attr: the rendered bytes=N is indistinguishable
-	// from a stringified count.
-	rec := sink.Records().Matching("hydrate", "scrollback replayed").Only(t, "hydrate scrollback replayed record")
-	if got := rec.IntAttr(t, "bytes"); got != int64(len(payload)) {
-		t.Errorf("bytes attr = %d, want %d", got, len(payload))
+			body := sink.Body()
+			if n := countLogLines(body, "INFO", "scrollback missing"); n != 1 {
+				t.Fatalf("got %d scrollback missing INFOs, want 1: %q", n, body)
+			}
+			info := execLogLine(t, body, "INFO", "scrollback missing")
+			if !strings.Contains(info, "path="+cfg.File) || strings.Contains(info, "target=") {
+				t.Errorf("INFO %q, want it to name the file by the path attr", info)
+			}
+			assertLoggedBeforeExec(t, body, "INFO scrollback missing")
+		})
 	}
 }
 
-func TestHydrateReplayedLog_ZeroByteScrollbackEmitsBytesZero(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-zero__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	if err := os.WriteFile(scrollback, []byte(""), 0o600); err != nil {
-		t.Fatalf("seed empty scrollback: %v", err)
-	}
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "zero:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
-	if !strings.Contains(info, "bytes=0") {
-		t.Errorf("zero-byte scrollback must emit bytes=0: %q", info)
-	}
-}
-
-func TestHydrateReplayedLog_FiveMegabyteFileReportsExactByteCount(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-big__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	const size = 5 * 1024 * 1024
-	payload := bytes.Repeat([]byte("A"), size)
-	if err := os.WriteFile(scrollback, payload, 0o600); err != nil {
-		t.Fatalf("seed 5MB scrollback: %v", err)
-	}
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "big:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
-	if !strings.Contains(info, fmt.Sprintf("bytes=%d", size)) {
-		t.Errorf("5MB file must report exact byte count bytes=%d: %q", size, info)
-	}
-}
-
-func TestHydrateReplayedLog_TookIsDurationAcrossReplayNotSettleSleep(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-dur__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	if err := os.WriteFile(scrollback, []byte("CONTENT"), 0o600); err != nil {
-		t.Fatalf("seed scrollback: %v", err)
-	}
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "dur:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	rec := sink.Records().Matching("hydrate", "scrollback replayed").Only(t, "hydrate scrollback replayed record")
-	took := rec.DurationAttr(t, "took")
-	// took spans the io.Copy only, never the 100ms settle sleep.
-	if took >= hydrateSettleSleep {
-		t.Errorf("took = %v, must be the copy duration (well under the %v settle sleep), not the settle sleep", took, hydrateSettleSleep)
-	}
-}
-
-func TestHydrateReplayedLog_PrecedesExecINFOAndFiresOnce(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-ord__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	if err := os.WriteFile(scrollback, []byte("DUMP"), 0o600); err != nil {
-		t.Fatalf("seed scrollback: %v", err)
-	}
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "ord:0.0",
-		OpenFIFO: openFIFOWithTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	body := sink.Body()
-
-	if n := countLogLines(body, "INFO", "scrollback replayed"); n != 1 {
-		t.Fatalf("want exactly one INFO scrollback replayed, got %d: %q", n, body)
-	}
-
-	replayedIdx := strings.Index(body, "INFO scrollback replayed")
-	execIdx := strings.Index(body, "INFO exec")
-	if replayedIdx < 0 {
-		t.Fatalf("no INFO scrollback replayed line: %q", body)
-	}
-	if execIdx < 0 {
-		t.Fatalf("no INFO exec line: %q", body)
-	}
-	if replayedIdx >= execIdx {
-		t.Errorf("scrollback replayed INFO must precede the exec INFO; replayedIdx=%d execIdx=%d body=%q", replayedIdx, execIdx, body)
-	}
-}
-
-func TestHydrateReplayedLog_NotEmittedOnTimeoutPath(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-not__0.0.fifo")
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "not:0.0",
-		OpenFIFO: instantTimeoutOpenFIFO, HandleTimeout: handleHydrateTimeout, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	if strings.Contains(sink.Body(), "scrollback replayed") {
-		t.Errorf("timeout path must NOT emit scrollback replayed: %q", sink.Body())
-	}
-}
-
-func TestHydrateReplayedLog_NotEmittedOnFileMissingPath(t *testing.T) {
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-fm__0.0.fifo")
-	scrollback := filepath.Join(dir, "missing-sb")
-
-	signalFIFOAsync(t, fifo)
-
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	cfg := hydrateCfg(t, hydrateCfgOpts{FIFO: fifo, File: scrollback, HookKey: "fm:0.0",
-		OpenFIFO: openFIFOWithTimeout, HandleFileMissing: handleHydrateFileMissing, Logger: logger})
-
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
-
-	if strings.Contains(sink.Body(), "scrollback replayed") {
-		t.Errorf("file-missing path must NOT emit scrollback replayed: %q", sink.Body())
+// assertLoggedBeforeExec fails unless line comes before the exec INFO in body.
+func assertLoggedBeforeExec(t *testing.T, body, line string) {
+	t.Helper()
+	at, execAt := strings.Index(body, line), strings.Index(body, "INFO exec")
+	if at < 0 || execAt < 0 || at >= execAt {
+		t.Errorf("%q at %d, the exec INFO at %d; want it first: %q", line, at, execAt, body)
 	}
 }

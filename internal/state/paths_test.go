@@ -191,59 +191,6 @@ func TestAccessors(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("builds scrollback file path from paneKey", func(t *testing.T) {
-		got := state.ScrollbackFile(dir, "work__0.1")
-		want := filepath.Join(dir, "scrollback", "work__0.1.bin")
-		if got != want {
-			t.Errorf("ScrollbackFile = %q; want %q", got, want)
-		}
-	})
-
-	t.Run("builds hydration FIFO path from paneKey", func(t *testing.T) {
-		got := state.FIFOPath(dir, "work__0.1")
-		want := filepath.Join(dir, "hydrate-work__0.1.fifo")
-		if got != want {
-			t.Errorf("FIFOPath = %q; want %q", got, want)
-		}
-	})
-}
-
-func TestPaneKeyFromFIFOPath(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "absolute path with hydrate prefix and .fifo suffix",
-			in:   "/var/lib/portal/state/hydrate-work__0.1.fifo",
-			want: "work__0.1",
-		},
-		{
-			name: "basename only with hydrate prefix and .fifo suffix",
-			in:   "hydrate-foo__0.0.fifo",
-			want: "foo__0.0",
-		},
-		{
-			name: "round-trips state.FIFOPath",
-			in:   state.FIFOPath("/tmp/portal-state", "myproj__1.2"),
-			want: "myproj__1.2",
-		},
-		{
-			name: "idempotent on input lacking prefix and suffix",
-			in:   "already-bare",
-			want: "already-bare",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := state.PaneKeyFromFIFOPath(c.in)
-			if got != c.want {
-				t.Errorf("PaneKeyFromFIFOPath(%q) = %q; want %q", c.in, got, c.want)
-			}
-		})
-	}
 }
 
 func assertDirMode(t *testing.T, path string, want os.FileMode) {

@@ -186,7 +186,6 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"spawn":           {},
 		"spawntest":       {},
 		"state":           {},
-		"statetest":       {},
 		"storelog":        {},
 		"theme":           {},
 		"themetest":       {},

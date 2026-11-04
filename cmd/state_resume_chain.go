@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // The flags the resume chain's subcommands are addressed by. --session names
@@ -152,12 +154,33 @@ func execHandOff(logger *slog.Logger, execShell func(prog string, args []string)
 func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args []string), command string) {
 	shell := resolveShell()
 	if command == "" {
-		execHandOff(logger, execShell, shell, []string{shell}, false)
+		execHandOff(logger, execShell, shell, loginShellArgv(shell), false)
 		return
 	}
 	prog, args := hookExecArgs(command, shell)
 	execHandOff(logger, execShell, prog, args, true)
 }
+
+// resolveShell is the shell a session is handed: $SHELL, or else /bin/sh, as
+// zmx picks a fresh session's.
+func resolveShell() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	return shell
+}
+
+// loginShellArgv is the argv a session's shell is exec'd with: a login shell,
+// as zmx starts a fresh session's, named by its base name after a dash.
+func loginShellArgv(shell string) []string {
+	return []string{"-" + filepath.Base(shell)}
+}
+
+// loginShellFlag asks for a login shell where a shell script execs one: sh
+// has no way to set the dash argv[0] zmx starts a session's shell with, and
+// every shell that can log in takes this flag.
+const loginShellFlag = "-l"
 
 // resumeRegistrationOrLog answers the zero value for a registration carrying no
 // command as it does for a miss, so a session with nothing to run never waits.
@@ -196,9 +219,9 @@ const hookShellTrap = "trap : TERM; "
 // hookExecArgs composes the argv a session's registered command is run as. The
 // command is spliced into the -c script unquoted, so sh's own parser handles
 // any embedded quotes, and the trailing exec leaves the session on its own
-// shell, so it closes on the first exit.
+// login shell, so it closes on the first exit.
 func hookExecArgs(command, shell string) (prog string, args []string) {
-	return "/bin/sh", []string{"sh", "-c", hookShellTrap + command + "; exec " + shell}
+	return "/bin/sh", []string{"sh", "-c", hookShellTrap + command + "; exec " + shellquote.Single(shell) + " " + loginShellFlag}
 }
 
 // A session whose kill keys could not be given back is still handed on: a

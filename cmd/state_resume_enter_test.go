@@ -37,7 +37,7 @@ func assertHookHandOff(t *testing.T, p *resumeWaitProbe, command string) {
 func assertShellHandOff(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
 	shell := resolveShell()
-	assertExec(t, p, shell, []string{shell}, false)
+	assertExec(t, p, shell, wantLoginShell(shell), false)
 }
 
 func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []string, wantHook bool) {
@@ -226,7 +226,7 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		var probe resumeWaitProbe
 		answerEnter(t, &probe, samplePayload())
 
-		assertExec(t, &probe, "/bin/sh", []string{"/bin/sh"}, false)
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
 	})
 
 	t.Run("it treats an already-absent marker as cleared", func(t *testing.T) {
@@ -256,7 +256,7 @@ func TestResumeAnswerEnter_HookShapeMatchesTheHelper(t *testing.T) {
 		var helperArgs []string
 		logger, _ := logtest.NewCaptureLogger(t)
 		execLookedUpRegistration(hydrateConfig{
-			HookKey:   payload.Session,
+			Session:   payload.Session,
 			Logger:    logger,
 			HookStore: store,
 			ExecShell: func(prog string, args []string) {

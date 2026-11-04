@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -15,7 +14,7 @@ const paneOptionFixtureSocketPrefix = "ptl-paneopt-"
 
 func readResumePending(t *testing.T, ts *tmuxtest.Socket, target tmux.Target) string {
 	t.Helper()
-	out := ts.Run(t, "display-message", "-p", "-t", string(target), "#{"+state.ResumePendingOption+"}")
+	out := ts.Run(t, "display-message", "-p", "-t", string(target), "#{"+resumePendingOption+"}")
 	return strings.TrimRight(out, "\n")
 }
 
@@ -34,14 +33,14 @@ func TestUnsetPaneOption_RealTmux(t *testing.T) {
 		ts, client := seedPaneOptionServer(t, sessionName)
 		target := tmux.PaneIDTarget(sessionPaneIDs(t, ts, sessionName)[0])
 
-		if err := client.SetPaneOption(target, state.ResumePendingOption, "1"); err != nil {
+		if err := client.SetPaneOption(target, resumePendingOption, "1"); err != nil {
 			t.Fatalf("SetPaneOption: %v", err)
 		}
 		if got := readResumePending(t, ts, target); got != "1" {
 			t.Errorf("marker after set = %q, want %q", got, "1")
 		}
 
-		if err := client.UnsetPaneOption(target, state.ResumePendingOption); err != nil {
+		if err := client.UnsetPaneOption(target, resumePendingOption); err != nil {
 			t.Fatalf("UnsetPaneOption: %v", err)
 		}
 		if got := readResumePending(t, ts, target); got != "" {
@@ -54,10 +53,10 @@ func TestUnsetPaneOption_RealTmux(t *testing.T) {
 		ts, client := seedPaneOptionServer(t, sessionName)
 		target := tmux.PaneIDTarget(sessionPaneIDs(t, ts, sessionName)[0])
 
-		if err := client.UnsetPaneOption(target, state.ResumePendingOption); err != nil {
+		if err := client.UnsetPaneOption(target, resumePendingOption); err != nil {
 			t.Fatalf("first unset of a never-set marker: %v", err)
 		}
-		if err := client.UnsetPaneOption(target, state.ResumePendingOption); err != nil {
+		if err := client.UnsetPaneOption(target, resumePendingOption); err != nil {
 			t.Fatalf("second unset of an absent marker: %v", err)
 		}
 		if got := readResumePending(t, ts, target); got != "" {
@@ -69,7 +68,7 @@ func TestUnsetPaneOption_RealTmux(t *testing.T) {
 		const sessionName = "paneopt-gone"
 		_, client := seedPaneOptionServer(t, sessionName)
 
-		err := client.UnsetPaneOption(tmux.PaneIDTarget("%99999"), state.ResumePendingOption)
+		err := client.UnsetPaneOption(tmux.PaneIDTarget("%99999"), resumePendingOption)
 		if err == nil {
 			t.Fatal("expected an error for a target no live pane answers to, got nil")
 		}
@@ -82,7 +81,7 @@ func TestReadPaneOption_RealTmux(t *testing.T) {
 		ts, client := seedPaneOptionServer(t, sessionName)
 		target := tmux.PaneIDTarget(sessionPaneIDs(t, ts, sessionName)[0])
 
-		got, err := client.ReadPaneOption(target, state.ResumePendingOption)
+		got, err := client.ReadPaneOption(target, resumePendingOption)
 		if err != nil {
 			t.Fatalf("ReadPaneOption on a never-set marker: %v", err)
 		}
@@ -90,10 +89,10 @@ func TestReadPaneOption_RealTmux(t *testing.T) {
 			t.Errorf("marker before set = %q, want an empty read", got)
 		}
 
-		if err := client.SetPaneOption(target, state.ResumePendingOption, "1"); err != nil {
+		if err := client.SetPaneOption(target, resumePendingOption, "1"); err != nil {
 			t.Fatalf("SetPaneOption: %v", err)
 		}
-		got, err = client.ReadPaneOption(target, state.ResumePendingOption)
+		got, err = client.ReadPaneOption(target, resumePendingOption)
 		if err != nil {
 			t.Fatalf("ReadPaneOption after set: %v", err)
 		}
@@ -101,10 +100,10 @@ func TestReadPaneOption_RealTmux(t *testing.T) {
 			t.Errorf("marker after set = %q, want %q", got, "1")
 		}
 
-		if err := client.UnsetPaneOption(target, state.ResumePendingOption); err != nil {
+		if err := client.UnsetPaneOption(target, resumePendingOption); err != nil {
 			t.Fatalf("UnsetPaneOption: %v", err)
 		}
-		got, err = client.ReadPaneOption(target, state.ResumePendingOption)
+		got, err = client.ReadPaneOption(target, resumePendingOption)
 		if err != nil {
 			t.Fatalf("ReadPaneOption after unset: %v", err)
 		}
@@ -117,7 +116,7 @@ func TestReadPaneOption_RealTmux(t *testing.T) {
 		const sessionName = "paneopt-read-gone"
 		_, client := seedPaneOptionServer(t, sessionName)
 
-		got, err := client.ReadPaneOption(tmux.PaneIDTarget("%99999"), state.ResumePendingOption)
+		got, err := client.ReadPaneOption(tmux.PaneIDTarget("%99999"), resumePendingOption)
 		if err == nil {
 			t.Fatalf("ReadPaneOption = (%q, nil); a gone pane must not read as an absent marker", got)
 		}

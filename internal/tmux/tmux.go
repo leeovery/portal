@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
@@ -279,7 +278,7 @@ func (c *Client) CurrentSessionName() (string, error) {
 // therefore a resolved pane with no hook identity yet, never a pane that is
 // gone.
 func (c *Client) ResolveHookKey(paneID Target) (string, error) {
-	return c.ReadPaneOption(paneID, state.PortalPaneIDOption)
+	return c.ReadPaneOption(paneID, PortalPaneIDOption)
 }
 
 func (c *Client) KillSession(name string) error {
@@ -589,10 +588,15 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 // see HookKeyFormat.
 const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
 
+// PortalPaneIDOption names the tmux pane user-option holding a pane's durable
+// identity token. Every format string, option argument and stamp must compose
+// the name from here rather than restate the literal, so no two sites can drift.
+const PortalPaneIDOption = "@portal-pane-id"
+
 // HookKeyFormat yields a pane's hook key: the pane's durable token and nothing
 // else. It carries no session component and no coordinates, so no tmux operation
 // that moves a pane can recompute it. An un-stamped pane yields an empty key.
-const HookKeyFormat = "#{" + state.PortalPaneIDOption + "}"
+const HookKeyFormat = "#{" + PortalPaneIDOption + "}"
 
 // PaneHookRow describes one live pane for the hook machinery. Token is the
 // pane's @portal-pane-id, empty for a pane that carries no stamp. Location is

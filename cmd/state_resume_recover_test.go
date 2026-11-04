@@ -226,8 +226,9 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	if p.execProg != shell {
 		t.Errorf("exec target = %q, want %q", p.execProg, shell)
 	}
-	if !slices.Equal(p.execArgs, []string{shell}) {
-		t.Errorf("exec argv = %q, want %q", p.execArgs, []string{shell})
+	login := wantLoginShell(shell)
+	if !slices.Equal(p.execArgs, login) {
+		t.Errorf("exec argv = %q, want the login shell %q", p.execArgs, login)
 	}
 
 	rec := sink.Records().Matching("hydrate", "exec").Only(t, "the tail's exec marker")
@@ -237,8 +238,8 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	if got := rec.AttrOrEmpty("target"); got != shell {
 		t.Errorf("exec marker target = %q, want %q", got, shell)
 	}
-	if got := rec.AttrOrEmpty("args"); got != shell {
-		t.Errorf("exec marker args = %q, want %q", got, shell)
+	if got := rec.AttrOrEmpty("args"); got != login[0] {
+		t.Errorf("exec marker args = %q, want %q", got, login[0])
 	}
 	if got := rec.AttrOrEmpty("hook_present"); got != "false" {
 		t.Errorf("exec marker hook_present = %q, want %q", got, "false")
