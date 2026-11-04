@@ -372,6 +372,8 @@ type tuiConfig struct {
 	sessionCreator   tui.SessionCreator
 	history          tui.HistoryReader
 	dirRunner        resolver.CommandRunner
+	pendingReader    tui.PendingResumeReader
+	hydrating        tui.HydratingReader
 	initialMode      prefs.SessionListMode
 	theme            theme.Nomination
 	themeKeys        theme.RawKeys
@@ -442,6 +444,8 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		AliasEditor:      cfg.aliasEditor,
 		History:          cfg.history,
 		DirRunner:        cfg.dirRunner,
+		PendingReader:    cfg.pendingReader,
+		Hydrating:        cfg.hydrating,
 		ModePersister:    cfg.modePersister,
 		ThemePersister:   cfg.themePersister,
 		CWD:              cfg.cwd,
@@ -464,6 +468,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		Flash:            landing.flash,
 		KillAsk:          landing.kill,
 	}
+	deps.PendingSettleBound = pendingSettleBound
 	if landing.search != nil {
 		deps.Search = landing.search
 	} else {
@@ -578,8 +583,6 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 
 	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b, stateRunners{})
 
-	// No pending-resume or skeleton-marker reader: nothing is saved or restored
-	// yet, so no session is waiting.
 	cfg := tuiConfig{
 		lister:         pickerLister{ctx: cmd.Context(), b: b},
 		killer:         pickerKiller{ctx: cmd.Context(), b: b},
@@ -620,6 +623,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	}
 
 	cfg.currentSession = b.Current()
+	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
 
 	m := buildTUIModel(cfg, launch.landing, launch.command)
 	// Staged rather than written: a direct write while the TUI holds the screen

@@ -118,6 +118,9 @@ func TestMain(m *testing.M) {
 	signalProcess = func(pid int, sig syscall.Signal) error {
 		panic(fmt.Sprintf("cmd tests: signalProcess(%d, %v) reached without withFuncSeam", pid, sig))
 	}
+	repaintSignal = func(pid int, sig syscall.Signal) error {
+		panic(fmt.Sprintf("cmd tests: repaintSignal(%d, %v) reached without withFuncSeam", pid, sig))
+	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed
 	// here, and from this process's ancestry, which leads to the developer's own

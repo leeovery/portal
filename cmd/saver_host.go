@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -14,11 +15,26 @@ import (
 // are no processes of the test's.
 var signalProcess = syscall.Kill
 
+// errSignalsNothing is every signal a read-only saver host is asked to send.
+var errSignalsNothing = errors.New("this saver host signals nothing")
+
 // newSaverHost runs b's saver's lifecycle over the state directory stateDir,
 // proving its daemon by the marks of b's saver session and signalling
-// through signalProcess. It refuses a b whose reach names no directory, by
-// whose saver session's name alone a saver in any directory would be proved.
+// through signalProcess.
 func newSaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
+	return saverHostSignalling(b, stateDir, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) })
+}
+
+// newReadOnlySaverHost reads b's saver as newSaverHost's host does, and
+// refuses every signal it is asked to send, for doctor, which stops nothing.
+func newReadOnlySaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
+	return saverHostSignalling(b, stateDir, func(int, syscall.Signal) error { return errSignalsNothing })
+}
+
+// saverHostSignalling is b's saver's host over stateDir, sending its signals
+// through signal. It refuses a b whose reach names no directory, by whose
+// saver session's name alone a saver in any directory would be proved.
+func saverHostSignalling(b backend.Backend, stateDir string, signal func(pid int, sig syscall.Signal) error) (*saverhost.Host, error) {
 	marks, err := zmx.SessionMarks(saver.SessionName, b.ReachEnv())
 	if err != nil {
 		return nil, err
@@ -27,6 +43,6 @@ func newSaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
 		Backend:  b,
 		StateDir: stateDir,
 		Marks:    marks,
-		Signal:   func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
+		Signal:   signal,
 	})
 }

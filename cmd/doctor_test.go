@@ -75,11 +75,18 @@ func writeSessionsJSON(t *testing.T, dir string, data []byte) {
 }
 
 // withHealthyRuntime fills every unset runtime seam with a healthy answer: a
-// Fake holding one answering session, zmx on PATH and a protocol 1 daemon. It
-// also stubs the host-terminal seams so no doctor test invokes a real
-// detector, which would read the process tree and the live tmux server.
+// Fake holding one answering session, zmx on PATH, a protocol 1 daemon, and a
+// saver whose daemon, of this Portal's version, records itself in the state
+// dir when that dir is there. It also stubs the host-terminal seams so no
+// doctor test invokes a real detector, which would read the process tree.
 func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 	t.Helper()
+	if deps.Version == "" {
+		deps.Version = doctorVersion
+	}
+	if deps.Saver == nil {
+		deps.Saver = runningSaver(t, deps.StateDir, deps.Version)
+	}
 	if deps.ListSessions == nil {
 		deps.ListSessions = backendtest.New(backend.Session{Name: "api-x7Kd9a"}).List
 	}
@@ -160,14 +167,17 @@ func TestDoctorAllChecksPassExitsZero(t *testing.T) {
 		"  ✓ zmx: " + doctorZmxPath + "\n" +
 		"  ✓ zmx dir: " + zmxDir + "\n" +
 		"  ✓ sessions: 1 session answering\n" +
+		"  ✓ saver: _portal-saver up\n" +
+		"  ✓ daemon: running (pid 4242, version " + doctorVersion + ")\n" +
 		"  ✓ state dir: " + dir + "\n" +
 		"  ✓ sessions.json: 1 session indexed\n" +
 		"  ✓ stale hooks: no hooks\n" +
 		"  ✓ stale projects: no stale projects\n" +
+		"    pending resumes: 0 sessions waiting to resume\n" +
 		defaultKeyConfigLine + "\n" +
 		"    host terminal: unsupported (remote session)\n" +
 		"    resume mode: " + installResumeModeOf(nil).String() + "\n" +
-		"  8 checks passed\n"
+		"  10 checks passed\n"
 	if got := outBuf.String(); got != want {
 		t.Errorf("report =\n%s\nwant\n%s", got, want)
 	}
@@ -195,19 +205,25 @@ func TestDoctorZeroValueCheckResultNotHealthy(t *testing.T) {
 	}
 }
 
-func TestDoctorFreshInstallIsHealthy(t *testing.T) {
+// A fresh install has run no Portal command, so no saver: that is its one
+// failure, and every line about what Portal has made passes.
+func TestDoctorFreshInstallFailsOnlyOnTheSaver(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	zmxDir := filepath.Join(t.TempDir(), "zmx")
-	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: backendtest.New().List}))
-	if err != nil {
-		t.Fatalf("Execute err = %v; want nil on a fresh install", err)
+	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: backendtest.New().List, Saver: &saverAnswers{}}))
+	if err != ErrDoctorUnhealthy {
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy, with no saver running", err)
 	}
 	out := outBuf.String()
 	for _, line := range []string{
 		"✓ zmx dir: not created yet",
 		"✓ sessions: no sessions",
+		"✗ saver: _portal-saver not running — run portal open to start it",
+		"✗ daemon: not running (no _portal-saver)",
 		"✓ state dir: not created yet",
 		"✓ sessions.json: no sessions indexed yet",
+		"  pending resumes: 0 sessions waiting to resume",
+		"8 of 10 checks passed",
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("report missing %q:\n%s", line, out)
@@ -584,7 +600,7 @@ func TestDoctorExitCode(t *testing.T) {
 		if errBuf.Len() != 0 {
 			t.Errorf("stderr = %q; want it silent on an unhealthy exit", errBuf.String())
 		}
-		if !strings.HasSuffix(outBuf.String(), "\n  7 of 8 checks passed\n") {
+		if !strings.HasSuffix(outBuf.String(), "\n  9 of 10 checks passed\n") {
 			t.Errorf("report does not close with the partial summary:\n%s", outBuf.String())
 		}
 	})
@@ -702,7 +718,7 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 
 func TestDoctorCheckOrder(t *testing.T) {
 	results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}))
-	want := []string{"zmx", "zmx dir", "sessions", "state dir", "sessions.json", "stale hooks", "stale projects", "key config", "host terminal", "resume mode"}
+	want := []string{"zmx", "zmx dir", "sessions", "saver", "daemon", "state dir", "sessions.json", "stale hooks", "stale projects", "pending resumes", "key config", "host terminal", "resume mode"}
 	var got []string
 	for _, r := range results {
 		got = append(got, r.name)
@@ -811,10 +827,10 @@ func TestDoctorFix(t *testing.T) {
 			t.Errorf("projects.json after the prune = %s; want %s gone and %s kept", after, goneDir, liveDir)
 		}
 		out := outBuf.String()
-		if !strings.Contains(out, "\n  7 of 8 checks passed\nPruned stale project: proj1 ("+goneDir+")\nPortal doctor:\n") {
+		if !strings.Contains(out, "\n  9 of 10 checks passed\nPruned stale project: proj1 ("+goneDir+")\nPortal doctor:\n") {
 			t.Errorf("want the failing report, the prune, then the re-diagnosis:\n%s", out)
 		}
-		if !strings.HasSuffix(out, "✓ stale projects: no stale projects\n"+defaultKeyConfigLine+"\n    host terminal: unsupported (remote session)\n    resume mode: "+installResumeModeOf(nil).String()+"\n  8 checks passed\n") {
+		if !strings.HasSuffix(out, "✓ stale projects: no stale projects\n    pending resumes: 0 sessions waiting to resume\n"+defaultKeyConfigLine+"\n    host terminal: unsupported (remote session)\n    resume mode: "+installResumeModeOf(nil).String()+"\n  10 checks passed\n") {
 			t.Errorf("post-repair report not clean:\n%s", out)
 		}
 	})
@@ -848,7 +864,7 @@ func TestDoctorFix(t *testing.T) {
 		if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
 			t.Errorf("stale rotated log not swept (stat err = %v)", statErr)
 		}
-		if n := strings.Count(outBuf.String(), "\n  8 checks passed\n"); n != 2 {
+		if n := strings.Count(outBuf.String(), "\n  10 checks passed\n"); n != 2 {
 			t.Errorf("all-passed summary count = %d; want 2:\n%s", n, outBuf.String())
 		}
 	})

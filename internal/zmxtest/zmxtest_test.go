@@ -317,3 +317,46 @@ func TestSessionEnv(t *testing.T) {
 		}
 	})
 }
+
+// Signal 0 sends nothing, so a refusal that broke would only check a group
+// it may not reach, never signal it.
+func TestSignalGroupOwned_RefusesAGroupItCannotProve(t *testing.T) {
+	const dir = "/tmp/zx-1"
+	use := func(t *testing.T, tree *procTree, group func(int) (int, error)) {
+		oldProcesses, oldGroupOf := processes, groupOf
+		processes, groupOf = tree, group
+		t.Cleanup(func() { processes, groupOf = oldProcesses, oldGroupOf })
+	}
+	leads := func(pid int) (int, error) { return pid, nil }
+
+	for name, c := range map[string]struct {
+		pgid  int
+		tree  *procTree
+		group func(int) (int, error)
+		want  string
+	}{
+		"a leader of another directory": {
+			10, &procTree{dirs: map[int]string{10: "/tmp/zx-2"}}, leads, "is no process of",
+		},
+		"a process of the directory leading no group": {
+			10, &procTree{dirs: map[int]string{10: dir}}, func(int) (int, error) { return 11, nil }, "leads no process group",
+		},
+		"a process whose group can't be read": {
+			10, &procTree{dirs: map[int]string{10: dir}}, func(int) (int, error) { return 0, errors.New("no such process") }, "leads no process group",
+		},
+		"pid 1, which would be every process": {
+			1, &procTree{dirs: map[int]string{1: dir}}, leads, "is no process of",
+		},
+		"pid 0, which would be this process's own group": {
+			0, &procTree{dirs: map[int]string{0: dir}}, leads, "is no process of",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			use(t, c.tree, c.group)
+			err := signalGroupOwned(c.pgid, dir, 0)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("signalGroupOwned(%d) = %v, want a refusal saying %q", c.pgid, err, c.want)
+			}
+		})
+	}
+}

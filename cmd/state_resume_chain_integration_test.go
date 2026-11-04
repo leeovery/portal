@@ -3,10 +3,13 @@
 package cmd_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
@@ -109,6 +113,56 @@ func (w *waitingWorld) awaitScreen(t *testing.T, what string, shows func(screen 
 	}
 }
 
+// awaitDrawIn waits for the log, past the first mark bytes of it, to show a
+// draw of the session's panel that loaded the theme slug.
+func (w *waitingWorld) awaitDrawIn(t *testing.T, mark int, slug string) {
+	t.Helper()
+	var logged string
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		raw, _ := os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+		logged = string(raw[min(mark, len(raw)):])
+		draws := map[string]bool{}
+		for line := range strings.Lines(logged) {
+			pid := " pid=" + logField(line, "pid")
+			switch {
+			case strings.Contains(line, "process: start") && strings.Contains(line, "resume-draw"):
+				draws[pid] = true
+			case strings.Contains(line, "theme: loaded") && strings.Contains(line, " slug="+slug+" ") && draws[pid]:
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no draw of the panel in %s; the log since holds:\n%s", slug, logged)
+	}
+}
+
+// logField is the value of a key=value field of a log line.
+func logField(line, key string) string {
+	_, rest, _ := strings.Cut(line, " "+key+"=")
+	value, _, _ := strings.Cut(rest, " ")
+	return strings.TrimSpace(value)
+}
+
+func (w *waitingWorld) logSize() int {
+	raw, _ := os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+	return len(raw)
+}
+
+// setTheme pins the theme the world's processes read from prefs.json.
+func (w *waitingWorld) setTheme(t *testing.T, slug string) {
+	t.Helper()
+	for _, kv := range slices.Backward(w.env) {
+		if path, ok := strings.CutPrefix(kv, "PORTAL_PREFS_FILE="); ok {
+			if err := os.WriteFile(path, []byte(`{"theme":"`+slug+`"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatal("the world names no prefs.json")
+}
+
 func (w *waitingWorld) hookRan() bool {
 	_, err := os.Stat(filepath.Join(w.work, hookMark))
 	return err == nil
@@ -137,6 +191,21 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 		}
 		if w.hookRan() {
 			t.Error("Escape ran the resume command")
+		}
+	})
+
+	t.Run("opening a waiting session draws its panel in the theme in force", func(t *testing.T) {
+		w := newWaitingWorld(t, binary)
+		w.awaitPanel(t)
+		w.setTheme(t, "nord")
+
+		mark := w.logSize()
+		w.portal(t, "open", waitingSession)
+		w.awaitClients(t, waitingSession, 1)
+
+		w.awaitDrawIn(t, mark, "nord")
+		if !w.flagRaised(t) {
+			t.Error("the redraw lowered the session's flag; it still waits")
 		}
 	})
 
@@ -177,4 +246,38 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			t.Error("the session ended; Enter hands it its shell")
 		}
 	})
+}
+
+// No terminal attaches, so only the repaint can redraw the panel: zmx sends a
+// SIGWINCH of its own with every attach. The repaint reads the session's real
+// process; only its signal is the test's, sent once proved to the group of a
+// process of the test's zmx dir.
+func TestRepaintReachesAWaiterAgainstZmx(t *testing.T) {
+	binary := buildPortalBinary(t)
+	w := newWaitingWorld(t, binary)
+	w.awaitPanel(t)
+	// The size zmx starts a session at: the waiter, and its SIGWINCH watch, are up.
+	w.awaitWaiterAt(t, 120, 24)
+	w.setTheme(t, "nord")
+	t.Setenv("PORTAL_STATE_DIR", w.stateDir)
+	session, err := w.b.Session(t.Context(), waitingSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := logtest.Install(t)
+	var sent []string
+
+	mark := w.logSize()
+	cmd.RepaintWaiting(t, w.b, waitingSession, func(pid int, sig syscall.Signal) error {
+		sent = append(sent, fmt.Sprintf("%d %v", pid, sig))
+		if pid >= 0 {
+			return fmt.Errorf("the repaint signals a group, not pid %d", pid)
+		}
+		return zmxtest.SignalGroup(w.b, -pid, sig)
+	})
+
+	if want := []string{fmt.Sprintf("%d %v", -session.PID, syscall.SIGWINCH)}; !slices.Equal(sent, want) {
+		t.Fatalf("signals = %q, want %q; the repaint logged:\n%s", sent, want, sink.Body())
+	}
+	w.awaitDrawIn(t, mark, "nord")
 }
