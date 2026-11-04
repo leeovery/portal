@@ -50,8 +50,9 @@ func New(stateDir string) Registry {
 }
 
 // ReadOnly is r for a caller that must change nothing, as doctor: it reads
-// and asks as r does, but removes nothing it proves stale, and refuses to ask
-// a runner to detach.
+// and confirms a session as r does, but removes nothing it proves stale, and
+// refuses to ask a runner to switch or to detach, as either moves the user's
+// terminal.
 func (r Registry) ReadOnly() Registry {
 	r.readOnly = true
 	return r
@@ -80,12 +81,20 @@ type registered struct {
 	entry
 }
 
+// errReadOnly refuses a request that would change something, asked of a
+// read-only registry.
+var errReadOnly = errors.New("a read-only registry asks no runner to act")
+
 // Switch asks the runner registered under token, whose terminal leads the
 // session current, to switch to target, and returns once it has accepted.
 // Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal,
 // wrapping runnertoken.ErrRefused, or the failure to ask it, and the caller
-// switches as if there were no runner.
+// switches as if there were no runner. A read-only registry refuses, asking
+// no runner.
 func (r Registry) Switch(ctx context.Context, token, current, target string) error {
+	if r.readOnly {
+		return errReadOnly
+	}
 	attrs := []any{"session", current, "target", target}
 	rn, err := r.lookup(token)
 	if err == nil {
@@ -126,10 +135,6 @@ func (r Registry) askOn(ctx context.Context, rn registered, session string, req 
 	}
 	return r.ask(ctx, rn, req)
 }
-
-// errReadOnly refuses a request that would change something, asked of a
-// read-only registry.
-var errReadOnly = errors.New("a read-only registry asks no runner to act")
 
 // DetachToPicker asks every runner registered on session to detach to the
 // picker, all at once, and returns how many accepted. Each request has a
