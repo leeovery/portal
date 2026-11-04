@@ -68,6 +68,7 @@ type resumeWaitProbe struct {
 	// Escape on the panel sends the terminals showing the session back to the
 	// picker unless the probe is told to refuse.
 	backCalls int
+	backRoute backRoute
 	backErr   error
 }
 
@@ -135,10 +136,10 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.execsAtEchoOn = p.execCalls
 			return p.echoOnErr
 		},
-		BackToPicker: func() error {
+		BackToPicker: func() (backRoute, error) {
 			p.order = append(p.order, "back")
 			p.backCalls++
-			return p.backErr
+			return p.backRoute, p.backErr
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")
@@ -364,7 +365,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		for _, imp := range source.File.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
 			if slices.Contains(forbidden, path) {
-				t.Errorf("%s imports %s; the pane between screens carries the wait alone", source.Path, path)
+				t.Errorf("%s imports %s; the session between screens carries the wait alone", source.Path, path)
 			}
 		}
 
@@ -372,9 +373,9 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		// it with no import. Identifiers rather than calls, because the waiter
 		// wires its seams by reference.
 		samePackageRoute := []string{
-			"paneDrawTheme",
-			"paneDrawNomination",
-			"shippedPaneThemePair",
+			"sessionDrawTheme",
+			"sessionDrawNomination",
+			"shippedSessionThemePair",
 			"renderResumeScreen",
 			"runResumeDraw",
 			"resumeDrawRunFunc",
@@ -385,7 +386,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		}
 		ast.Inspect(source.File, func(n ast.Node) bool {
 			if id, ok := n.(*ast.Ident); ok && slices.Contains(samePackageRoute, id.Name) {
-				t.Errorf("%s: references %s; the pane between screens carries the wait alone", source.Position(id.Pos()), id.Name)
+				t.Errorf("%s: references %s; the session between screens carries the wait alone", source.Position(id.Pos()), id.Name)
 			}
 			return true
 		})

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -388,6 +389,21 @@ func TestStateResumeRecoverCommand_Flag(t *testing.T) {
 
 		assertRecovered(t, &probe, sink)
 		sink.Records().WithMessage("clear resume pending flag failed").Only(t, "the refused clear's record")
+	})
+
+	t.Run("it recovers a session whose state directory is gone, as the shell's gate does", func(t *testing.T) {
+		dir := resumeStateDir(t)
+		if err := os.Remove(dir); err != nil {
+			t.Fatal(err)
+		}
+		var probe resumeRecoverProbe
+		sink := logtest.Install(t)
+
+		if _, err := executeResumeRecover(t, args, &probe); err != nil {
+			t.Fatal(err)
+		}
+
+		assertRecovered(t, &probe, sink)
 	})
 }
 

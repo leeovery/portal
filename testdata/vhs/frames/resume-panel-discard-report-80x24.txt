@@ -12,7 +12,7 @@
            │                                                        │
            │  Removes this session's resume command permanently.    │
            │  The session and its scrollback are untouched.         │
-           │  can't unpause this session: permission denied         │
+           │  can't write hooks.json: permission denied             │
            ├────────────────────────────────────────────────────────┤
            │  y discard   esc cancel                                │
            ╰────────────────────────────────────────────────────────╯

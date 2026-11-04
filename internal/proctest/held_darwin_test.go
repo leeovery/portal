@@ -67,7 +67,7 @@ func TestHeld(t *testing.T) {
 		_ = stdin.Close()
 
 		awaitClosed(t, h.Exited(), "the held shell")
-		if got := h.Status(); !got.Exited() || got.ExitStatus() != 3 {
+		if got := h.Status(t); !got.Exited() || got.ExitStatus() != 3 {
 			t.Errorf("status = %v, want exit 3", got)
 		}
 		if cmd.ProcessState != nil {

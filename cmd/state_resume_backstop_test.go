@@ -32,6 +32,20 @@ resume-recover) exit "$RECOVER_STATUS" ;;
 esac
 `
 
+// termedOnceExe stands in for the portal binary under a parked chain whose
+// first draw a SIGTERM ends: each draw records itself in the transcript, the
+// first ending 143 and any later one 0.
+const termedOnceExe = `#!/bin/sh
+case "$2" in
+resume-draw)
+	echo draw >> "$PANE_TRANSCRIPT"
+	[ "$(grep -c draw "$PANE_TRANSCRIPT")" -eq 1 ] && exit 143
+	exit 0
+	;;
+resume-recover) exit 0 ;;
+esac
+`
+
 // answeredThenGoneExe stands in for the portal binary under a session answered
 // on its panel: its draw hands the session its shell, which exits, and by the
 // time the tail runs the binary has left the baked path — or, with
@@ -273,6 +287,28 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			}
 			if run.status != tc.wantStatus {
 				t.Errorf("parked chain status = %d, want %d", run.status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestParkedResumeChain_DrawLoop(t *testing.T) {
+	for _, w := range flagWorlds() {
+		want, verdict := "draw\n", "ends the loop"
+		if w.raised {
+			want, verdict = "draw\ndraw\n", "draws again"
+		}
+		t.Run("a draw a SIGTERM ended over a flag "+w.name+" "+verdict, func(t *testing.T) {
+			exe := stageExecutable(t, t.TempDir(), "portal", termedOnceExe)
+			flag := w.stage(t, samplePayload().Session)
+
+			run := runParkedChain(t, exe, flag)
+
+			if run.transcript != want {
+				t.Errorf("session transcript = %q, want %q", run.transcript, want)
+			}
+			if run.status != 0 {
+				t.Errorf("parked chain status = %d, want the tail's 0; stderr %q", run.status, run.stderr)
 			}
 		})
 	}

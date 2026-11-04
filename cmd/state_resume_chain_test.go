@@ -65,3 +65,15 @@ func TestResumeChainExe(t *testing.T) {
 		}
 	})
 }
+
+func TestResumeChainSteps_RequireTheSession(t *testing.T) {
+	for _, step := range []string{resumeDrawSubcommand, resumeWaitSubcommand} {
+		t.Run("state "+step+" refuses an argv naming no session", func(t *testing.T) {
+			_, _, err := runRootCmd(t, "state", step, "--command", "make deploy")
+
+			if err == nil || err.Error() != `required flag(s) "session" not set` {
+				t.Errorf("state %s with no --session = %v, want the required-flag refusal", step, err)
+			}
+		})
+	}
+}

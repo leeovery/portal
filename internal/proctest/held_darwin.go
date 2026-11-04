@@ -52,11 +52,11 @@ func Start(t testing.TB, cmd *exec.Cmd, marker string) *Held {
 		t.Fatalf("proctest: start %s: %v", cmd.Path, err)
 	}
 	pid := cmd.Process.Pid
-	exit, err := watchExit(pid)
+	exit, err := holdExit(pid)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		t.Fatalf("proctest: hold %s (pid %d): it exited before it could be watched: %v", cmd.Path, pid, err)
+		t.Fatalf("proctest: hold %s (pid %d): %v", cmd.Path, pid, err)
 	}
 	attr := cmd.SysProcAttr
 	h := &Held{
@@ -78,9 +78,14 @@ func (h *Held) PID() int { return h.cmd.Process.Pid }
 // Exited closes once the held process has exited, reaped or not.
 func (h *Held) Exited() <-chan struct{} { return h.exit.done }
 
-// Status is how the held process ended, once Exited has closed.
-func (h *Held) Status() syscall.WaitStatus {
+// Status is how the held process ended, once Exited has closed. A watch that
+// failed before the exit was reported fails t.
+func (h *Held) Status(t testing.TB) syscall.WaitStatus {
+	t.Helper()
 	<-h.exit.done
+	if h.exit.err != nil {
+		t.Fatalf("proctest: pid %d: %v", h.PID(), h.exit.err)
+	}
 	return h.exit.status
 }
 
@@ -187,16 +192,60 @@ func groupGoneWithin(pgid int, d time.Duration) bool {
 	return true
 }
 
-// exitWatch is one process's exit as the kernel reports it.
+// exitWatch is one process's exit as the kernel reports it. done closes on
+// every way the watch ends: with status once the exit is reported, and with
+// err when it ended without one.
 type exitWatch struct {
 	done   chan struct{}
 	status syscall.WaitStatus
+	err    error
 
 	stopOnce sync.Once
 	stopped  chan struct{}
 }
 
+func newExitWatch() *exitWatch {
+	return &exitWatch{done: make(chan struct{}), stopped: make(chan struct{})}
+}
+
 func (w *exitWatch) stop() { w.stopOnce.Do(func() { close(w.stopped) }) }
+
+func (w *exitWatch) exited(status syscall.WaitStatus) {
+	w.status = status
+	close(w.done)
+}
+
+func (w *exitWatch) failed(err error) {
+	w.err = err
+	close(w.done)
+}
+
+// errWatchStopped ends a watch the test's cleanup stopped before the exit.
+var errWatchStopped = errors.New("the watch was stopped before the process exited")
+
+// szomb is xnu's SZOMB, a process's state once it has exited and before it
+// is reaped.
+const szomb = 5
+
+// holdExit watches pid, a child of the test's not yet reaped, for its exit. A
+// child already exited is a zombie the kernel won't watch, and its status is
+// read from the process table, which reaps nothing either.
+func holdExit(pid int) (*exitWatch, error) {
+	w, err := watchExit(pid)
+	if !errors.Is(err, syscall.ESRCH) {
+		return w, err
+	}
+	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return nil, fmt.Errorf("read exited pid %d: %w", pid, err)
+	}
+	if p.Proc.P_stat != szomb {
+		return nil, fmt.Errorf("pid %d can't be watched and is no zombie (state %d)", pid, p.Proc.P_stat)
+	}
+	w = newExitWatch()
+	w.exited(syscall.WaitStatus(p.Proc.P_xstat))
+	return w, nil
+}
 
 // watchExit asks the kernel to report pid's exit and its status, with
 // EVFILT_PROC's NOTE_EXIT, which reaps nothing. A process already exited is
@@ -221,29 +270,34 @@ func watchExit(pid int) (*exitWatch, error) {
 		_ = unix.Close(kq)
 		return nil, fmt.Errorf("watch pid %d: %w", pid, errno)
 	}
-	w := &exitWatch{done: make(chan struct{}), stopped: make(chan struct{})}
-	go w.await(kq)
+	w := newExitWatch()
+	go w.await(kq, unix.Kevent)
 	return w, nil
 }
 
-// await waits for the exit, looking up between waits for a stop.
-func (w *exitWatch) await(kq int) {
+// keventFunc is unix.Kevent's shape, which await waits through.
+type keventFunc func(kq int, changes, events []unix.Kevent_t, timeout *unix.Timespec) (int, error)
+
+// await waits for the exit through kevent, looking up between waits for a
+// stop. done closes whichever way it ends.
+func (w *exitWatch) await(kq int, kevent keventFunc) {
 	defer func() { _ = unix.Close(kq) }()
 	events := make([]unix.Kevent_t, 1)
 	timeout := unix.NsecToTimespec(pollEvery.Nanoseconds())
 	for {
 		select {
 		case <-w.stopped:
+			w.failed(errWatchStopped)
 			return
 		default:
 		}
-		n, err := unix.Kevent(kq, nil, events, &timeout)
+		n, err := kevent(kq, nil, events, &timeout)
 		if err != nil && !errors.Is(err, syscall.EINTR) {
+			w.failed(fmt.Errorf("wait for the exit: %w", err))
 			return
 		}
 		if n == 1 {
-			w.status = syscall.WaitStatus(events[0].Data)
-			close(w.done)
+			w.exited(syscall.WaitStatus(events[0].Data))
 			return
 		}
 	}

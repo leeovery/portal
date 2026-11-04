@@ -20,7 +20,7 @@ func Start(t testing.TB, _ *exec.Cmd, _ string) *Held {
 
 func (*Held) PID() int                              { return 0 }
 func (*Held) Exited() <-chan struct{}               { return nil }
-func (*Held) Status() syscall.WaitStatus            { return 0 }
+func (*Held) Status(testing.TB) syscall.WaitStatus  { return 0 }
 func (*Held) Signal(int, syscall.Signal) error      { return nil }
 func (*Held) SignalGroup(syscall.Signal) error      { return nil }
 func (*Held) Watch(testing.TB, int) <-chan struct{} { return nil }

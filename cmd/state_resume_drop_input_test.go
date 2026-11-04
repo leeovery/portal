@@ -389,7 +389,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, err := paneDrawTheme(true, func() error {
+		_, err := sessionDrawTheme(true, func() error {
 			calls++
 			return refused
 		})
@@ -397,13 +397,13 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 			t.Errorf("the drop ran %d times, want exactly 1", calls)
 		}
 		if !errors.Is(err, refused) {
-			t.Errorf("paneDrawTheme() error = %v, want the drop's %v", err, refused)
+			t.Errorf("sessionDrawTheme() error = %v, want the drop's %v", err, refused)
 		}
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, err := paneDrawTheme(true, nil); err != nil {
-			t.Errorf("paneDrawTheme() error = %v, want nil", err)
+		if _, err := sessionDrawTheme(true, nil); err != nil {
+			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})
 }

@@ -172,7 +172,7 @@ func (p hookPane) assertStillUp(t *testing.T, settle time.Duration) {
 	t.Helper()
 	select {
 	case <-p.held.Exited():
-		t.Fatalf("the session's shell ended (%v), want it still up", p.held.Status())
+		t.Fatalf("the session's shell ended (%v), want it still up", p.held.Status(t))
 	case <-time.After(settle):
 	}
 }
@@ -183,7 +183,7 @@ func (p hookPane) endedOn(t *testing.T, sig syscall.Signal, what string) {
 	if !endsWithin(p.held.Exited(), hookShellWait) {
 		t.Fatalf("%s survived %v", what, sig)
 	}
-	if ws := p.held.Status(); !ws.Signaled() || ws.Signal() != sig {
+	if ws := p.held.Status(t); !ws.Signaled() || ws.Signal() != sig {
 		t.Errorf("%s ended %v, want killed by %v", what, ws, sig)
 	}
 }

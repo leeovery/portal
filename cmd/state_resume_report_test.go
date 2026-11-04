@@ -321,7 +321,7 @@ func TestResumeBackReport(t *testing.T) {
 		registerDetachHandler(t, r, "first1", session, &detachHandler{refuse: errors.New(notAttached)})
 		registerDetachHandler(t, r, "second", session, &detachHandler{refuse: errors.New(notAttached)})
 
-		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportBack+notAttached; got != want {
+		if got, want := backRow(session), resumeReportBack+notAttached; got != want {
 			t.Errorf("row = %q, want %q", got, want)
 		}
 	})
@@ -332,7 +332,7 @@ func TestResumeBackReport(t *testing.T) {
 		registerDetachHandler(t, r, "first1", session, &detachHandler{refuse: errors.New(notAttached)})
 		registerDetachHandler(t, r, "second", session, &detachHandler{refuse: errors.New(ending)})
 
-		got := resumeBackRefusal(backToPicker(session))
+		got := backRow(session)
 		reasons, found := strings.CutPrefix(got, resumeReportBack)
 		if !found {
 			t.Fatalf("row = %q, want it to open %q", got, resumeReportBack)
@@ -347,7 +347,7 @@ func TestResumeBackReport(t *testing.T) {
 		withBackendDeps(t, BackendDeps{Backend: b})
 		b.Fail(backendtest.OpDetach, backend.ErrTimeout)
 
-		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportDetach+backend.ErrTimeout.Error(); got != want {
+		if got, want := backRow(session), resumeReportDetach+backend.ErrTimeout.Error(); got != want {
 			t.Errorf("row = %q, want %q", got, want)
 		}
 	})
@@ -357,7 +357,7 @@ func TestResumeBackReport(t *testing.T) {
 		t.Setenv("XDG_CONFIG_HOME", "")
 		t.Setenv("HOME", "")
 
-		if got, want := resumeBackRefusal(backToPicker(session)), resumeReportBack+"$HOME is not defined"; got != want {
+		if got, want := backRow(session), resumeReportBack+"$HOME is not defined"; got != want {
 			t.Errorf("row = %q, want %q", got, want)
 		}
 	})
@@ -393,6 +393,8 @@ func TestResumeReportRows_FitTheCard(t *testing.T) {
 		{resumeReportUnpause, "$HOME is not defined"},
 		{resumeReportBack, "the runner is not attached"},
 		{resumeReportDetach, backend.ErrTimeout.Error()},
+		{resumeReportDetach, backTimeout{bound: resumeBackBound}.Error()},
+		{resumeReportBack, resumeReasonUnanswered},
 	} {
 		whole = append(whole, p.act+p.cause)
 	}

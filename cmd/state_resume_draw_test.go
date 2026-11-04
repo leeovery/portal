@@ -320,7 +320,7 @@ func TestPaneDrawNomination(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				got := paneDrawNomination(tc.open, tc.loader)
+				got := sessionDrawNomination(tc.open, tc.loader)
 				light, dark := shippedPair(t)
 				if got.Select(theme.MemberLight) != light || got.Select(theme.MemberDark) != dark {
 					t.Errorf("nomination did not degrade to the shipped light/dark pair")
@@ -340,7 +340,7 @@ func TestPaneDrawNomination(t *testing.T) {
 		var translations atomic.Int32
 		withFuncSeam(t, &persistTranslation, func(*prefs.Store, string) { translations.Add(1) })
 
-		paneDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
+		sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
 
 		if got := translations.Load(); got != 0 {
 			t.Errorf("the theme read dispatched %d appearance translations, want 0", got)

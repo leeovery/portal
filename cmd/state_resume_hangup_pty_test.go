@@ -64,7 +64,7 @@ func TestParkedResumeChain_PaneTerminalHangup(t *testing.T) {
 		case <-time.After(termPaneWait):
 			t.Fatalf("the parked chain outlived its terminal; %s", p.diagnostics())
 		}
-		if ws := p.held.Status(); !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
+		if ws := p.held.Status(t); !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
 			t.Errorf("the parked chain ended %v, want killed by SIGHUP; %s", ws, p.diagnostics())
 		}
 		if !endsWithin(waiterGone, termPaneWait) {

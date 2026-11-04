@@ -123,9 +123,10 @@ func backOut(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
 // and asserts it sent the session's terminals back to the picker once while
 // the session went on waiting: no hand-off, its flag and registration
 // untouched, and the loop still reading when the input ended.
-func escapeToPicker(t *testing.T, payload resumeChainPayload) *resumeWaitProbe {
+func escapeToPicker(t *testing.T, payload resumeChainPayload, route backRoute) *resumeWaitProbe {
 	t.Helper()
 	h := startArrivals(t, payload)
+	h.probe.backRoute = route
 	h.typed("\x1b")
 	_ = h.writer.Close()
 	if err := h.wait(); !errors.Is(err, io.EOF) {
@@ -181,7 +182,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 	})
 
 	t.Run("it sends the session's terminals back to the picker on Escape and keeps the panel waiting", func(t *testing.T) {
-		probe := escapeToPicker(t, reportedPayload(resumeScreenPanel))
+		probe := escapeToPicker(t, reportedPayload(resumeScreenPanel), backToRunners)
 
 		rec := probe.sink.Records().WithMessage("back to picker").AtExactLevel(slog.LevelInfo).Only(t, "the Escape's record")
 		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
@@ -189,6 +190,18 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		}
 		if got := probe.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(got) != 0 {
 			t.Errorf("WARN records = %v, want none", got)
+		}
+	})
+
+	t.Run("it records an Escape that detached the session's clients to their shells as that", func(t *testing.T) {
+		probe := escapeToPicker(t, reportedPayload(resumeScreenPanel), backToShells)
+
+		rec := probe.sink.Records().WithMessage("detached to shell").AtExactLevel(slog.LevelInfo).Only(t, "the Escape's record")
+		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
+			t.Errorf("detached to shell session = %q, want %q", got, samplePayload().Session)
+		}
+		if got := probe.sink.Records().WithMessage("back to picker"); len(got) != 0 {
+			t.Errorf("back to picker records = %v, want none: no terminal went to a picker", got)
 		}
 	})
 
@@ -314,7 +327,7 @@ func TestRunResumeWait_Screens(t *testing.T) {
 		probe := backOut(t, payload)
 		assertHandOff(t, probe, onScreen(payload, resumeScreenPanel))
 
-		escapeToPicker(t, reportedPayload(resumeScreenPanel))
+		escapeToPicker(t, reportedPayload(resumeScreenPanel), backToRunners)
 	})
 
 	t.Run("it resumes on the Enter typed after a chord on the waiting panel", func(t *testing.T) {

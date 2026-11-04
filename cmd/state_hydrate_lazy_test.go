@@ -679,3 +679,57 @@ func assertOneFlagRefusalWarn(t *testing.T, sink *logtest.Sink, session string) 
 		t.Errorf("refusal WARN carries no error: %q", warn)
 	}
 }
+
+func TestHydrateLazy_LowersAFlagASetLeftBehindWhenItFailed(t *testing.T) {
+	// makesThenFails raises the flag as Set would and then fails, as one whose
+	// close failed does.
+	makesThenFails := func(t *testing.T, after func(dir string)) func(dir, name string) error {
+		return func(dir, name string) error {
+			if err := state.ResumePending.Set(dir, name); err != nil {
+				t.Fatal(err)
+			}
+			after(dir)
+			return errors.New("set flag: close: input/output error")
+		}
+	}
+
+	t.Run("it lowers the flag again, with the refusal the only WARN", func(t *testing.T) {
+		exec := &stubExecShell{}
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+		opts.Logger = logger
+		opts.SetPending = makesThenFails(t, func(string) {})
+
+		lazyRun(t, lazyTails()[0], opts)
+
+		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, eagerHookArgs)
+		}
+		assertNoFlag(t)
+		assertOneFlagRefusalWarn(t, sink, lazySession)
+		if n := strings.Count(sink.Body(), "WARN"); n != 1 {
+			t.Errorf("got %d WARNs, want the refusal alone: %q", n, sink.Body())
+		}
+	})
+
+	t.Run("a lowering that fails too is logged beside the refusal", func(t *testing.T) {
+		exec := &stubExecShell{}
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+		opts.Logger = logger
+		opts.SetPending = makesThenFails(t, func(dir string) {
+			unsearchable(t, filepath.Join(dir, string(state.ResumePending)))
+		})
+
+		lazyRun(t, lazyTails()[0], opts)
+
+		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, eagerHookArgs)
+		}
+		assertOneFlagRefusalWarn(t, sink, lazySession)
+		warn := execLogLine(t, sink.Body(), "WARN", "clear resume pending flag failed")
+		if !strings.Contains(warn, "session="+lazySession) {
+			t.Errorf("lowering WARN does not name the session: %q", warn)
+		}
+	})
+}

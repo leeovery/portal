@@ -117,7 +117,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
 - **Opening.** Portal runs `zmx attach` itself and stays running while you're attached, watching for [its own keys](#keys-in-a-session); inside a session it switches the terminal you typed in, so sessions never nest. See [`x` (open)](#x-open).
 - **Saving.** A daemon in a hidden `_portal-saver` session re-reads tmux every second and writes what changed — structure, layout, zoom, working directories, and ANSI scrollback — under `state/` (see [Configuration](#configuration)).
 - **Restoring.** After a reboot, the first command that needs tmux starts the server and rebuilds every saved session that isn't already live. See [Automatic Server Bootstrap & Restoration](#automatic-server-bootstrap--restoration).
-- **Resuming.** A pane with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` goes back to the picker and leaves it waiting.
+- **Resuming.** A session with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` sends the terminal back to the picker and leaves it waiting.
 - **Two sessions you didn't make.** `_portal-saver` hosts the daemon and `_portal-bootstrap` keeps a freshly started server alive. Both show in a raw `tmux ls`; the picker and `xctl list` hide them.
 
 ## Shell Integration
@@ -512,58 +512,58 @@ tmux goes, and a session left with no surviving pane is then saved as closed.
 This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
 either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
 
-Pair restoration with [resume hooks](#xctl-hook) to bring pane commands such as dev
-servers and editors back after a reboot — on a panel you answer per pane, or fired
+Pair restoration with [resume hooks](#xctl-hook) to bring commands such as dev
+servers and editors back after a reboot — on a panel you answer per session, or fired
 outright for a registration pinned `eager`.
 
 ### Resume panel
 
-A restored pane whose resume hook resolves **lazy** — the shipped default — comes back
+A restored session whose resume hook resolves **lazy** — the shipped default — comes back
 with its scrollback replayed underneath and a panel over it: `Resume session` with a
 `● PAUSED` badge, the registered command under `ON RESUME`, and `⏎ resume` /
 `d discard` / `esc back`. Nothing runs until you answer, so a reboot no longer starts every
-registered command at once — a waiting pane holds a small Portal process in its place,
+registered command at once — a waiting session holds a small Portal process in its place,
 and the command's own process starts only for the work you go back to.
 
 | Key | On the panel | On the discard confirmation |
 |---|---|---|
-| `Enter` | Resume: the panel goes, the transcript is revealed, and the command runs in the pane | — |
+| `Enter` | Resume: the panel goes, the transcript is revealed, and the command runs in the session | — |
 | `d` | Open the `▲ Discard resume?` confirmation | — |
 | `y` | — | Discard the resume command |
-| `Esc` | Back to the session picker; the pane keeps waiting | Back to the panel |
+| `Esc` | Back to the session picker; the session keeps waiting | Back to the panel |
 
 - **Enter runs what is registered when you press it**, not what was registered when
-  the panel was drawn. A hook removed or rewritten while the pane waited is honoured;
-  one that has gone drops the pane to a plain shell.
-- **A discard is permanent.** It removes that pane's resume command from `hooks.json`,
-  so the panel never returns — not on this boot, not after the next reboot. The session,
-  the pane and its scrollback are untouched; the pane drops to a plain shell. Only the
+  the panel was drawn. A hook removed or rewritten while the session waited is honoured;
+  one that has gone drops the session to a plain shell.
+- **A discard is permanent.** It removes that session's resume command from `hooks.json`,
+  so the panel never returns — not on this boot, not after the next reboot. The session
+  and its scrollback are untouched; the session drops to a plain shell. Only the
   command the confirmation showed is removed: if the hook was re-registered with a
-  different command while the pane waited, that one is left in place. The removed
+  different command while the session waited, that one is left in place. The removed
   command is written to `portal.log` (`grep 'op=discard' portal.log`), so it can be
   copied back out.
-- **Esc backs out without answering.** The terminal showing the pane leaves tmux for
-  the session picker, and the pane keeps waiting — nothing about its resume changes,
-  and the panel is there the next time you open the session. If several terminals
-  show the pane, the one you pressed it in goes back.
+- **Esc backs out without answering.** Every terminal showing the session through Portal
+  goes back to the session picker; one attached with a plain `zmx attach` is detached to
+  its shell instead. The session keeps waiting — nothing about its resume changes, and
+  the panel is there the next time you open it.
 - **Every other key is swallowed**, including `Ctrl-C`, `Ctrl-\`, `Ctrl-Z` and
   `Ctrl-D`. A key counts only when it arrives on its own, so a stray paste can't answer
   the panel, and input already in flight when the confirmation opens can't confirm it.
 - **Ignoring it is fine.** Detaching, closing the window and rebooting are not answers:
   the panel stays until you press a key that means something, and a reboot draws it
-  again. The panes beside it stay fully live, and while it waits Portal holds that
-  pane's saved scrollback at what it was when the pane was restored.
+  again. Your other sessions stay fully live, and while it waits Portal holds the
+  session's saved scrollback at what it was when the session was restored.
 - **It repaints when you arrive.** Attaching to a session, or switching to it, redraws
   each of its waiting panels, so a panel drawn days ago at restore shows the theme —
   and the light or dark half of a pair — that is in force now.
 - **A failed answer says so.** If an answer can't be carried out — `hooks.json`
   unreadable or locked on a discard, say — the panel states the reason on its own row
-  and the pane keeps waiting, so the key can be pressed again.
-- A pane too small for the card still shows the title, command and key hints, stacked
+  and the session keeps waiting, so the key can be pressed again.
+- A terminal too small for the card still shows the title, command and key hints, stacked
   plainly; the keys act at every size.
 
-Waiting panes show as a pending dot on their session's row in the picker, and
-`xctl doctor` counts them. To go back to commands firing as their panes are restored,
+Waiting sessions show as a pending dot on their row in the picker, and
+`xctl doctor` counts them. To go back to commands firing as their sessions are restored,
 set `"resume_mode": "eager"` in `prefs.json` (there is no UI for this setting yet), or
 pin a single registration with [`xctl hook set --resume-mode`](#xctl-hook).
 

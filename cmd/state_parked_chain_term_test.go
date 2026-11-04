@@ -87,7 +87,7 @@ func TestParkedResumeChain_SIGTERM(t *testing.T) {
 		if !endsWithin(p.exited, termPaneWait) {
 			t.Fatalf("the parked shell survived SIGHUP; %s", p.diagnostics())
 		}
-		if status := p.held.Status(); !status.Signaled() || status.Signal() != syscall.SIGHUP {
+		if status := p.held.Status(t); !status.Signaled() || status.Signal() != syscall.SIGHUP {
 			t.Errorf("the parked shell ended %v, want killed by SIGHUP", status)
 		}
 	})

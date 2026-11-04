@@ -80,7 +80,7 @@ func TestParkedResumeChain_GroupSignal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if status := held.Status(); !status.Exited() || status.ExitStatus() != 0 {
+			if status := held.Status(t); !status.Exited() || status.ExitStatus() != 0 {
 				t.Fatalf("the parked shell ended %v, want a clean exit (output %q)", status, out)
 			}
 			if !strings.Contains(string(out), "RECOVER-RAN") {

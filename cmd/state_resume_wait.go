@@ -29,7 +29,7 @@ const (
 // deliberate resize redraws with no perceptible pause.
 const resumeResizeSettle = 150 * time.Millisecond
 
-// resumeInputQuiet is how long a pane's input must stay silent after a byte
+// resumeInputQuiet is how long a session's input must stay silent after a byte
 // before the bytes that arrived together are judged. A keystroke arrives alone;
 // a paste, an escape sequence and a burst each arrive as bytes far closer
 // together than this.
@@ -83,8 +83,8 @@ type resumeWaitConfig struct {
 	EnableEcho func() error
 
 	// BackToPicker sends the terminals showing the session to the session
-	// picker, as Escape on the panel asks.
-	BackToPicker func() error
+	// picker, as Escape on the panel asks, reporting where they went.
+	BackToPicker func() (backRoute, error)
 
 	// Set by runResumeWait from MakeRaw, so an answer hands the session on in
 	// a cooked tty. An answer reached without a wait restores nothing.
@@ -97,7 +97,7 @@ func (cfg resumeWaitConfig) restore() {
 	}
 }
 
-// runResumeWait holds the pane on whatever the draw painted until a key that
+// runResumeWait holds the session on whatever the draw painted until a key that
 // screen offers answers it. A key answers only when it arrives alone, so a
 // paste or a burst answers nothing whatever it carries, and every other byte is
 // swallowed — the three keys that would signal a foreground process among them,
@@ -108,7 +108,7 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 
 	// Spinning on a reader that is not a tty would burn a core for the life of
-	// the pane, and raw mode is what makes the kill keys arrive as bytes.
+	// the session, and raw mode is what makes the kill keys arrive as bytes.
 	if !cfg.IsTerminal() {
 		return errors.New("resume wait: stdin is not a terminal")
 	}
@@ -123,10 +123,10 @@ func runResumeWait(cfg resumeWaitConfig) error {
 }
 
 // resumeKey is what one key does on one screen. ended reports whether it ended
-// the wait by handing the pane on, err being the hand-off's.
+// the wait by handing the session on, err being the hand-off's.
 type resumeKey func(resumeWaitConfig) (ended bool, err error)
 
-// handsOn is a key every outcome of which hands the pane on — to another
+// handsOn is a key every outcome of which hands the session on — to another
 // screen, a hook or a shell — and so ends the wait.
 func handsOn(answer func(resumeWaitConfig) error) resumeKey {
 	return func(cfg resumeWaitConfig) (bool, error) { return true, answer(cfg) }
@@ -166,9 +166,9 @@ func (k resumeKeys) answer(cfg resumeWaitConfig, arrival *resumeArrival) (ended 
 	return act(cfg)
 }
 
-// resumeArrival is the input that has reached the pane since it was last quiet.
-// A key is only a byte that arrived alone, with nothing behind it before the
-// pane fell quiet.
+// resumeArrival is the input that has reached the session since it was last
+// quiet. A key is only a byte that arrived alone, with nothing behind it before
+// the session fell quiet.
 type resumeArrival struct {
 	key   byte
 	bytes int
@@ -258,7 +258,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 // resumeStartupSettle answers a size change delivered before the watch was
 // installed, which no SIGWINCH will announce, by opening the window one would
 // have. A size the waiter cannot read, or a panel drawn at none, arms nothing:
-// a read that keeps failing would otherwise bounce the pane between draws.
+// a read that keeps failing would otherwise bounce the session between draws.
 func resumeStartupSettle(cfg resumeWaitConfig) <-chan time.Time {
 	width, height, err := cfg.Size()
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
@@ -298,7 +298,7 @@ type resumeReader struct {
 }
 
 // startResumeReader reads one byte per request and never ahead, and a listen
-// that finds the pane quiet reads nothing, so an answer taken on that result
+// that finds the session quiet reads nothing, so an answer taken on that result
 // runs with no read outstanding and input typed then is inherited by the
 // process image the hand-off execs.
 func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error)) resumeReader {
@@ -354,11 +354,16 @@ func resumeCancelDiscardConfirm(cfg resumeWaitConfig) error {
 // panel is there again the next time the session is opened. One the runners
 // or the backend refused redraws the panel with the reason.
 func resumeBackToPicker(cfg resumeWaitConfig) (ended bool, err error) {
-	if backErr := cfg.BackToPicker(); backErr != nil {
+	route, backErr := cfg.BackToPicker()
+	if backErr != nil {
 		cfg.Logger.Warn("back to picker failed", cfg.logAttrs("error", backErr)...)
 		return true, resumeReport(cfg, resumeScreenPanel, resumeBackRefusal(backErr))
 	}
-	cfg.Logger.Info("back to picker", cfg.logAttrs()...)
+	if route == backToShells {
+		cfg.Logger.Info("detached to shell", cfg.logAttrs()...)
+	} else {
+		cfg.Logger.Info("back to picker", cfg.logAttrs()...)
+	}
 	return false, nil
 }
 
@@ -512,14 +517,14 @@ var stateResumeWaitCmd = &cobra.Command{
 			ExecSelf:            defaultExecShell,
 			Winch:               winchSignals(),
 			Settle:              time.After,
-			Size:                paneSizeFromStdin,
+			Size:                sessionSizeFromStdin,
 			AwaitInput:          awaitStdinInput,
 			ClearPending:        func() error { return clearResumePending(session) },
 			LookupResume:        lookupResumeRegistration,
 			DiscardRegistration: discardResumeRegistration,
 			EnableTTYSignals:    setStdinSignals,
 			EnableEcho:          setStdinEcho,
-			BackToPicker:        func() error { return backToPicker(session) },
+			BackToPicker:        func() (backRoute, error) { return backToPicker(session) },
 			CatchSIGTERM:        catchSIGTERM,
 		})
 	},
@@ -534,6 +539,7 @@ func init() {
 	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the session is showing: discard for the confirmation, else the panel")
 	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
+	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagSession)
 
 	stateCmd.AddCommand(stateResumeWaitCmd)
 }

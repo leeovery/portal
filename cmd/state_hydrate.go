@@ -55,6 +55,10 @@ type hydrateConfig struct {
 	LoadPrefsStore func() (*prefs.Store, error)
 	ResolveExe     func() (string, error)
 
+	// SetPending raises a session's resume-pending flag; unset, it is
+	// state.ResumePending's Set.
+	SetPending func(dir, name string) error
+
 	// DisableTTYSignals turns the pane's kill keys into bytes before a waiting
 	// pane's chain is parked; the chain hands them back on whatever path gives
 	// the pane to a hook or a shell.
@@ -298,18 +302,18 @@ func parkedChainBackstop(parked parkedChain) string {
 }
 
 // flagProvedLowered is a shell test that succeeds only when the flag at path
-// is proved lowered, as state.SessionFlag's Exists reads it: nothing stands
-// at path, and its directory could be searched for it, or, that directory
-// gone too, the state directory above it could. Anything the test can't see
-// through, an unsearchable directory among them, leaves the flag raised.
+// is proved lowered, as the chain's Go steps read it too (flagLowered):
+// nothing stands at path, and its directory could be searched for it, or,
+// that directory gone too, the state directory above it could. Anything the
+// test can't see through, an unsearchable directory among them, leaves the
+// flag raised.
 func flagProvedLowered(path string) string {
 	dir := filepath.Dir(path)
 	return `{ [ ! -e ` + shellquote.Single(path) + ` ] && { ` + searchable(dir) +
 		` || { [ ! -e ` + shellquote.Single(dir) + ` ] && ` + searchable(filepath.Dir(dir)) + `; }; }; }`
 }
 
-// flagStillRaised is flagProvedLowered's negation. The shell has no double
-// negation, so a gate wanting the flag lowered takes flagProvedLowered.
+// flagStillRaised negates flagProvedLowered. POSIX allows one ! per pipeline.
 func flagStillRaised(path string) string { return `! ` + flagProvedLowered(path) }
 
 // searchable is a shell test that succeeds for a directory whose entries can
@@ -403,7 +407,14 @@ func markResumePending(cfg hydrateConfig) (parkedChain, error) {
 	if err != nil {
 		return parkedChain{}, err
 	}
-	flag, err := raiseResumePending(cfg.HookKey)
+	setPending := cfg.SetPending
+	if setPending == nil {
+		setPending = state.ResumePending.Set
+	}
+	flag, lowerErr, err := raiseResumePending(cfg.HookKey, setPending)
+	if lowerErr != nil {
+		warnResumePendingClearFailed(cfg.Logger, cfg.HookKey, lowerErr)
+	}
 	if err != nil {
 		return parkedChain{}, err
 	}

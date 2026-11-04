@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"syscall"
@@ -30,6 +32,9 @@ const (
 
 // resumeReasonSeparator joins the reasons of several runners that refused.
 const resumeReasonSeparator = "; "
+
+// resumeReasonUnanswered is the reason of a runner that never answered.
+const resumeReasonUnanswered = "a runner did not answer"
 
 // hookStoreUnlocatedError marks a store whose path could not be resolved,
 // keeping the resolution's own message as its text.
@@ -98,15 +103,27 @@ func runnersWords(err error) string {
 	return strings.Join(words, resumeReasonSeparator)
 }
 
-// runnerWords is one runner's reason: its refusal in its own words, or else
-// the cause of the failure to ask it.
+// runnerWords is one runner's reason: its refusal in its own words, Portal's
+// for one that never answered, or else the cause of the failure to ask it.
 func runnerWords(err error) string {
+	if unanswered(err) {
+		return resumeReasonUnanswered
+	}
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if errors.Unwrap(e) == runnertoken.ErrRefused {
 			return strings.TrimPrefix(e.Error(), runnertoken.ErrRefused.Error()+": ")
 		}
 	}
 	return causeWords(err)
+}
+
+// unanswered reports whether err is a request cut by a deadline: the
+// runner's own, its connection's or Escape's bound.
+func unanswered(err error) bool {
+	if _, bound := errors.AsType[backTimeout](err); bound {
+		return true
+	}
+	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // joinedErrors is the errors joined in err's chain, nil when it joins none.
