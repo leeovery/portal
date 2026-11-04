@@ -89,8 +89,9 @@ var errReadOnly = errors.New("a read-only registry asks no runner to act")
 // session current, to switch to target, and returns once it has accepted.
 // Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal,
 // wrapping runnertoken.ErrRefused, or the failure to ask it, and the caller
-// switches as if there were no runner. A read-only registry refuses, asking
-// no runner.
+// switches as if there were no runner. The exception is a read-only
+// registry's refusal, which asks no runner and means do nothing: its caller
+// must change nothing, so it must not move the terminal itself either.
 func (r Registry) Switch(ctx context.Context, token, current, target string) error {
 	if r.readOnly {
 		return errReadOnly
@@ -373,9 +374,13 @@ func (r Registry) removeOrphan(token string) {
 	}
 }
 
-// running reports whether a process holds pid, which must be positive. It may
-// not be the runner that registered it.
-func running(pid int) bool {
+// running is processRunning, a variable so a test can end a runner between
+// the scan that finds it and the request that asks it.
+var running = processRunning
+
+// processRunning reports whether a process holds pid, which must be positive.
+// It may not be the runner that registered it.
+func processRunning(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
