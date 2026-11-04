@@ -34,8 +34,11 @@ func TestStartSaverDaemonAgainstZmx(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", developersHooks)
 		t.Setenv("PORTAL_TEST_DEVELOPERS_OWN", "leaked")
 		t.Setenv("SHELL", "/bin/zsh")
+		// The test's own logging, which the daemon must see.
+		t.Setenv("PORTAL_LOG_LEVEL", "debug")
 
 		d = portaltest.StartSaverDaemon(t, binary)
+		portaltest.AssertLogLevelResolved(t, state.PortalLog(d.StateDir), d.PID, "debug")
 
 		if got, err := state.IdentifyDaemon(d.PID); err != nil || got != state.IdentifyIsPortalDaemon {
 			t.Errorf("IdentifyDaemon(%d) = %v, %v; want the daemon at %s identified", d.PID, got, err, binary)

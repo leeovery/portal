@@ -431,6 +431,50 @@ func TestRunLoop_BoundsTheShutdownFromItsSignal(t *testing.T) {
 		sink.Records().Matching("capture", "flush complete").Only(t, "the flush summary")
 		assertShutdown(t, sink, "signal", "true")
 	})
+
+	t.Run("the flush's asking counts from the signal, not from a held poll's end", func(t *testing.T) {
+		const held = 300 * time.Millisecond
+		polling, cancelled := make(chan struct{}), make(chan time.Time, 1)
+		asking := make(chan time.Time, 1)
+		s := &fakeSaver{
+			onPoll: func(ctx context.Context) (saver.Result, error) {
+				close(polling)
+				<-ctx.Done()
+				cancelled <- time.Now()
+				time.Sleep(held)
+				return saver.Result{}, ctx.Err()
+			},
+			onFlush: func(ctx context.Context) (saver.Result, error) {
+				deadline, _ := ctx.Deadline()
+				asking <- deadline
+				return saver.Result{}, nil
+			},
+		}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound, deps.FlushNaming = time.Minute, 10*time.Second
+		ticks := make(chan time.Time, 1)
+		signals := make(chan os.Signal, 1)
+		deps.Ticks, deps.Signals = ticks, signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		ticks <- second(0)
+		<-polling
+		before := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, 5*time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		asks := deps.ShutdownBound - deps.FlushNaming
+		// The signal came between before and the poll's cancel; the flush began
+		// held after that cancel.
+		if deadline, at := <-asking, <-cancelled; deadline.Before(before.Add(asks)) || deadline.After(at.Add(asks)) {
+			t.Errorf("the flush asked until %s, want %s from the signal, between %s and %s",
+				deadline.Format(time.RFC3339Nano), asks, before.Add(asks).Format(time.RFC3339Nano), at.Add(asks).Format(time.RFC3339Nano))
+		}
+		assertShutdown(t, sink, "signal", "true")
+	})
 }
 
 func TestDaemonPoll_Logs(t *testing.T) {
