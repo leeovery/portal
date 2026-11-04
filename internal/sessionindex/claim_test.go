@@ -171,12 +171,16 @@ func TestClaim(t *testing.T) {
 			neighbour := sessionindex.Entry{Name: "b", Label: "Beta", CreatedAt: earlierThisBoot}
 			seedIndex(t, dir, tc.held, neighbour)
 
+			var changed bool
 			outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-				idx.Claim("a", "/a", tc.created, tc.pid, tc.rule)
+				changed = idx.Claim("a", "/a", tc.created, tc.pid, tc.rule)
 				return nil
 			})
 			if err != nil {
 				t.Fatalf("Update: %v", err)
+			}
+			if want := !sameEntry(tc.held, tc.want); changed != want {
+				t.Errorf("Claim = %v, want %v: it reports whether it changed the entry", changed, want)
 			}
 
 			idx, err := sessionindex.Read(dir)
@@ -211,13 +215,27 @@ func TestClaim(t *testing.T) {
 				pid = 4242
 			}
 
-			idx.Claim("a", "/a", tc.created, pid, judged)
+			if !idx.Claim("a", "/a", tc.created, pid, judged) {
+				t.Error("Claim = false, want true for the entry it made")
+			}
 
 			if got, ok := idx.Lookup("a"); !ok || !sameEntry(got, tc.want) || idx.Len() != 2 {
 				t.Errorf("sessions = %+v, want b and a as %+v", idx.Entries(), tc.want)
 			}
 		})
 	}
+
+	t.Run("a session whose entry this Update removed gets none, and the claim reports no change", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(liveCreation, 4242)})
+		idx.Remove("a")
+
+		if idx.Claim("a", "/a", liveCreation, 4242, judged) {
+			t.Error("Claim = true, want false for the entry it could not make")
+		}
+		if _, ok := idx.Lookup("a"); ok {
+			t.Errorf("sessions = %+v, want a's entry still removed", idx.Entries())
+		}
+	})
 }
 
 func TestLookupLive(t *testing.T) {

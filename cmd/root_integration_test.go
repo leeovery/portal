@@ -16,11 +16,7 @@ import (
 // test-staged binary carries the daemon-pgrep sandbox.
 func buildPortalBinary(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := portalbintest.BuildPortalBinary(dir); err != nil {
-		t.Fatalf("failed to build portal binary: %v", err)
-	}
-	return filepath.Join(dir, "portal")
+	return portalbintest.Build(t)
 }
 
 func TestPortalBinaryZmxMissing(t *testing.T) {

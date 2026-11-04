@@ -20,19 +20,23 @@ var confirmBudget = 500 * time.Millisecond
 // dir, since the saver knows none Portal minted a session in, and records
 // where the session works. A claimed entry records the listed creation, so
 // the directory recorded is its own; a session reporting none leaves the one
-// recorded.
-func (s *Saver) claim(ctx context.Context, idx *sessionindex.Index, l listing, rule sessionindex.Rule) {
+// recorded. It returns how many entries the claims changed.
+func (s *Saver) claim(ctx context.Context, idx *sessionindex.Index, l listing, rule sessionindex.Rule) int {
 	ctx, cancel := context.WithTimeoutCause(ctx, confirmBudget, fmt.Errorf("the poll's %s to confirm claims ran out: %w", confirmBudget, backend.ErrTimeout))
 	defer cancel()
+	claimed := 0
 	for _, live := range l.answered {
 		if !s.claimable(ctx, idx, live) {
 			continue
 		}
-		idx.Claim(live.Name, "", live.Created, live.PID, rule)
+		if idx.Claim(live.Name, "", live.Created, live.PID, rule) {
+			claimed++
+		}
 		if live.Dir != "" {
 			idx.RecordCwd(live.Name, live.Dir)
 		}
 	}
+	return claimed
 }
 
 // claimable reports whether the listed session's entry is claimed. An entry

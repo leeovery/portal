@@ -17,13 +17,23 @@ const configBaseVar = "XDG_CONFIG_HOME"
 // directory where this one does.
 func Variables() []string {
 	names := []string{configBaseVar}
-	for _, id := range []ConfigFileID{ProjectsFile, AliasesFile, HooksFile, PrefsFile, TerminalsFile} {
+	for _, id := range Files() {
 		names = append(names, id.EnvVar)
 	}
-	for _, id := range []ConfigDirID{StateDir, ThemesDir} {
+	for _, id := range Dirs() {
 		names = append(names, id.EnvVar)
 	}
 	return names
+}
+
+// Files is every Portal config file.
+func Files() []ConfigFileID {
+	return []ConfigFileID{ProjectsFile, AliasesFile, HooksFile, PrefsFile, TerminalsFile}
+}
+
+// Dirs is every Portal directory under the config base.
+func Dirs() []ConfigDirID {
+	return []ConfigDirID{StateDir, ThemesDir}
 }
 
 // OSEnv is the Lookup over the process's own environment — what production

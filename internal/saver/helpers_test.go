@@ -131,19 +131,31 @@ func (w *world) names() []string {
 	return names
 }
 
-// poll runs a poll that must succeed.
-func (w *world) poll() {
+// poll runs a poll that must succeed, and returns what it did.
+func (w *world) poll() saver.Result {
 	w.t.Helper()
-	if err := w.saver.Poll(w.t.Context()); err != nil {
+	result, err := w.saver.Poll(w.t.Context())
+	if err != nil {
 		w.t.Fatalf("Poll: %v", err)
 	}
+	return result
 }
 
 // after moves the saver's clock on by d, then polls.
-func (w *world) after(d time.Duration) {
+func (w *world) after(d time.Duration) saver.Result {
 	w.t.Helper()
 	w.clock.at = w.clock.at.Add(d)
-	w.poll()
+	return w.poll()
+}
+
+// flush runs a flush that must succeed, and returns what it did.
+func (w *world) flush(ctx context.Context) saver.Result {
+	w.t.Helper()
+	result, err := w.saver.Flush(ctx)
+	if err != nil {
+		w.t.Fatalf("Flush: %v", err)
+	}
+	return result
 }
 
 // update writes the index as another writer of it would, beside the saver.
@@ -176,11 +188,14 @@ func scrollbackFile(t *testing.T, s backend.Session) string {
 	return file
 }
 
+// path is the file at rel in the state directory.
+func (w *world) path(rel string) string { return filepath.Join(w.dir, filepath.FromSlash(rel)) }
+
 // read is the content of the file at rel in the state directory, and whether
 // there is one.
 func (w *world) read(rel string) (string, bool) {
 	w.t.Helper()
-	data, err := os.ReadFile(filepath.Join(w.dir, filepath.FromSlash(rel)))
+	data, err := os.ReadFile(w.path(rel))
 	if os.IsNotExist(err) {
 		return "", false
 	}
@@ -193,7 +208,7 @@ func (w *world) read(rel string) (string, bool) {
 // write puts content at rel in the state directory.
 func (w *world) write(rel, content string) {
 	w.t.Helper()
-	path := filepath.Join(w.dir, filepath.FromSlash(rel))
+	path := w.path(rel)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		w.t.Fatal(err)
 	}

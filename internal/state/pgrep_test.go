@@ -50,10 +50,19 @@ func TestPgrepPortalDaemons_OSLayerFailureWrapsWithStderr(t *testing.T) {
 	}
 }
 
+// The real pgrep runs with a pattern no process can match: with the daemon's
+// own it would enumerate the developer's live daemon, which no unit test may
+// reach.
 func TestPgrepPortalDaemons_RealNoMatchExitsCleanly(t *testing.T) {
+	withPgrepCommandFake(t, func() *exec.Cmd {
+		return exec.Command("pgrep", "-fx", `^portal-test-no-such-process-[0-9]{40} state daemon$`)
+	})
+
 	pids, err := PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("expected no error from real pgrep no-match, got: %v", err)
 	}
-	_ = pids
+	if pids != nil {
+		t.Errorf("expected nil pids from a pattern nothing matches, got %v", pids)
+	}
 }

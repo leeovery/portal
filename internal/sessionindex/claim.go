@@ -88,32 +88,35 @@ func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule)
 //     keeps the rest, taking the dir it records none of. That change is adopt.
 //   - Any other is replaced whole, a change of its own, replace, saying what it
 //     dropped, and Update reports the entry it read dropped.
-func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule) {
+//
+// It reports whether it changed the session's entry.
+func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule) bool {
 	i := idx.indexOf(name)
 	switch {
 	case i < 0:
 		if _, made := idx.add(Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}); !made {
-			return
+			return false
 		}
 	case created.IsZero():
-		return
+		return false
 	case idx.sessions[i].SameCreation(created, pid):
 		if !idx.sessions[i].fillIn(dir, pid) {
-			return
+			return false
 		}
 	default:
 		if why := rule.adoption(idx.sessions[i]); why != "" {
 			idx.adopt(i, created, pid, "adopt", why)
 			idx.sessions[i].fillIn(dir, 0)
-			return
+			return true
 		}
 		earlier := idx.sessions[i]
 		idx.sessions[i] = Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}
 		idx.markFresh(name)
 		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
-		return
+		return true
 	}
 	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
+	return true
 }
 
 // Restored records the creation restore just made for the session, created

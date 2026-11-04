@@ -79,6 +79,53 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestWithEnv(t *testing.T) {
+	t.Run("it passes its entries into the sessions, winning over New's own", func(t *testing.T) {
+		home := t.TempDir()
+		b := zmxtest.New(t, zmxtest.WithEnv("PORTAL_SECRET_PROBE=passed", "HOME="+home))
+
+		got := echoed(t, b, `echo "probe=${PORTAL_SECRET_PROBE-unset}"; echo "home=$HOME"`)
+
+		if !bytes.Contains(got, []byte("probe=passed\r\n")) {
+			t.Errorf("history = %q, want the variable passed", got)
+		}
+		if !bytes.Contains(got, []byte("home="+home+"\r\n")) {
+			t.Errorf("history = %q, want HOME as the option gave it", got)
+		}
+	})
+
+	t.Run("a ZMX_DIR among them moves no session out of the directory", func(t *testing.T) {
+		elsewhere := t.TempDir()
+		b := zmxtest.New(t, zmxtest.WithEnv("ZMX_DIR="+elsewhere))
+
+		got := echoed(t, b, `echo "dir=$ZMX_DIR"`)
+
+		if !bytes.Contains(got, []byte("dir="+b.Dir()+"\r\n")) {
+			t.Errorf("history = %q, want the session in %s, its processes proved by it", got, b.Dir())
+		}
+		if entries, err := os.ReadDir(elsewhere); err != nil || len(entries) != 0 {
+			t.Errorf("%s holds %v (%v), want no session made there", elsewhere, entries, err)
+		}
+	})
+}
+
+// echoed creates a session in b running script, and returns its history once
+// script has run.
+func echoed(t *testing.T, b *zmx.Backend, script string) []byte {
+	t.Helper()
+	if _, err := b.Create(t.Context(), "env", t.TempDir(), []string{"sh", "-c", script + "; echo ran; sleep 1000"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var got []byte
+	if !harnesstest.PollUntil(t, 5*time.Second, 20*time.Millisecond, func() bool {
+		got, _ = b.History(t.Context(), "env", 0)
+		return bytes.Contains(got, []byte("\r\nran"))
+	}) {
+		t.Fatalf("history = %q, want the script run", got)
+	}
+	return got
+}
+
 func TestNewIgnoresAnInheritedSession(t *testing.T) {
 	t.Run("it never hands zmx the caller's session or prefix, whatever TestMain left", func(t *testing.T) {
 		t.Setenv("ZMX_SESSION", "live-session")

@@ -43,13 +43,34 @@ const settle = 5 * time.Second
 // session reads the developer's shell config.
 var passedEnv = []string{"PATH", "TERM", "USER", "TMPDIR"}
 
+// Option configures New.
+type Option func(*options)
+
+type options struct {
+	env []string
+}
+
+// WithEnv passes env, NAME=value entries, into every zmx run the Backend
+// makes, and so into each session it creates, after the variables New passes
+// itself: an entry here wins, as the last of a name does. A fixture passes a
+// session what a test isolated, such as IsolateStateForTest's environment.
+// The Backend sets ZMX_DIR after env, so env can move no session out of the
+// directory, nor any process out of the reach of teardown's proof.
+func WithEnv(env ...string) Option {
+	return func(o *options) { o.env = append(o.env, env...) }
+}
+
 // New returns a Backend on the zmx build Binary finds, bound to a fresh
 // directory under /tmp. It fails the test, rather than skipping it, when the
 // build is missing or ZMX_DIR is not poisoned. At cleanup every session in the
 // directory is killed, any process still holding the directory in its
 // environment fails the test and is killed, and the directory is removed.
-func New(t *testing.T) *zmx.Backend {
+func New(t *testing.T, opts ...Option) *zmx.Backend {
 	t.Helper()
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if err := checkPoisoned(os.Getenv); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +82,7 @@ func New(t *testing.T) *zmx.Backend {
 	if err != nil {
 		t.Fatalf("make zmx dir: %v", err)
 	}
-	env := sessionEnv(os.Environ(), t.TempDir())
+	env := append(sessionEnv(os.Environ(), t.TempDir()), o.env...)
 	b, err := zmx.New(zmx.Config{
 		Binary:  binary,
 		Dir:     dir,

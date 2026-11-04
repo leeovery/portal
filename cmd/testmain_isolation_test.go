@@ -107,6 +107,11 @@ func TestMain(m *testing.M) {
 	// same on every machine, whenever it booted. state.ClaimRule's own suite
 	// pins the flags this rule leaves out.
 	claimRule = func(string) sessionindex.Rule { return sessionindex.NewRule(testBoot, nil) }
+	// A test reaching the exit seam unfaked would end the whole test binary, its
+	// cleanups unrun; it panics here instead.
+	osExit = func(code int) {
+		panic(fmt.Sprintf("cmd tests: osExit(%d) reached without withOsExitFake", code))
+	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed
 	// here, and from this process's ancestry, which leads to the developer's own

@@ -1,11 +1,16 @@
 package saver_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
@@ -274,4 +279,77 @@ func TestPoll_CreationChangedUnderTheLockLeavesTheCaptureUnnamed(t *testing.T) {
 	if got := w.names(); !slices.Equal(got, []string{"api"}) {
 		t.Errorf("entries = %v, want api alone", got)
 	}
+}
+
+// A shutdown cancels a poll's context, and the daemon ends a bounded time
+// later: a drop must never land without the forgetting that goes with it.
+func TestPoll_AShutdownNeverSplitsADropFromItsForgetting(t *testing.T) {
+	t.Run("a poll whose context ends while it waits for commit.lock writes nothing", func(t *testing.T) {
+		w := newWorld(t)
+		gone := stageGone(w)
+		w.poll()
+		index, err := os.ReadFile(sessionindex.Path(w.dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		held := commitlock.HoldForTest(t, w.dir)
+		listed := make(chan struct{})
+		w.race.afterList = func() { close(listed) }
+		ctx, cancel := context.WithCancel(t.Context())
+		w.clock.at = w.clock.at.Add(10 * time.Second)
+		polled := make(chan error, 1)
+		go func() {
+			_, err := w.saver.Poll(ctx)
+			polled <- err
+		}()
+
+		<-listed
+		// Listed, the poll reaches the lock in microseconds; the pause makes it
+		// all but certain the cancel finds it waiting there. One the cancel
+		// finds sooner stands down before the lock, writing nothing either.
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		_ = held.Close()
+
+		if err := <-polled; !errors.Is(err, context.Canceled) {
+			t.Errorf("Poll = %v, want it standing down for its context", err)
+		}
+		if got, _ := os.ReadFile(sessionindex.Path(w.dir)); !bytes.Equal(got, index) {
+			t.Errorf("sessions.json = %s, want it unwritten", got)
+		}
+		if _, ok := w.read(gone.ScrollbackFile); !ok {
+			t.Error("gone's scrollback is gone, want nothing forgotten")
+		}
+		if up, _ := state.ResumePending.Exists(w.dir, "gone"); !up {
+			t.Error("gone's resume-pending flag is lowered, want nothing forgotten")
+		}
+	})
+
+	t.Run("a poll holding commit.lock when its context ends writes, and forgets what its drop kept", func(t *testing.T) {
+		w := newWorld(t)
+		gone := stageGone(w)
+		w.poll()
+		// A session to claim, whose confirmation runs under the lock.
+		w.live("fresh", 3)
+		ctx, cancel := context.WithCancel(t.Context())
+		w.race.onSession = func(context.Context) { cancel() }
+		w.clock.at = w.clock.at.Add(10 * time.Second)
+
+		if _, err := w.saver.Poll(ctx); err != nil {
+			t.Fatalf("Poll = %v, want the commit it began finished", err)
+		}
+
+		if ctx.Err() == nil {
+			t.Fatal("the context never ended under the lock")
+		}
+		if got := w.names(); slices.Contains(got, "gone") {
+			t.Errorf("entries = %v, want gone dropped", got)
+		}
+		if _, ok := w.read(gone.ScrollbackFile); ok {
+			t.Error("gone's scrollback is kept, want it forgotten with the drop")
+		}
+		if up, _ := state.ResumePending.Exists(w.dir, "gone"); up {
+			t.Error("gone's resume-pending flag is raised still, want it forgotten with the drop")
+		}
+	})
 }
