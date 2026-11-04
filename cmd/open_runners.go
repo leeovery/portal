@@ -60,6 +60,14 @@ func (stateRunners) Switch(ctx context.Context, token, current, target string) e
 	return r.Switch(ctx, token, current, target)
 }
 
+func (stateRunners) DetachToPicker(ctx context.Context, session string) (int, error) {
+	r, err := inStateDir(runnerreg.New)
+	if err != nil {
+		return 0, err
+	}
+	return r.DetachToPicker(ctx, session)
+}
+
 // ConfirmSession is the pid of the runner registered under token once it
 // confirms it shows session: what spawn detection walks from to the
 // terminal.

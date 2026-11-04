@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/log"
@@ -49,7 +50,9 @@ func New(stateDir string) Registry {
 }
 
 // ReadOnly is r for a caller that must change nothing, as doctor: it reads
-// and asks as r does, but removes nothing it proves stale.
+// and confirms a session as r does, but removes nothing it proves stale, and
+// refuses to ask a runner to switch or to detach, as either moves the user's
+// terminal.
 func (r Registry) ReadOnly() Registry {
 	r.readOnly = true
 	return r
@@ -78,12 +81,21 @@ type registered struct {
 	entry
 }
 
+// errReadOnly refuses a request that would change something, asked of a
+// read-only registry.
+var errReadOnly = errors.New("a read-only registry asks no runner to act")
+
 // Switch asks the runner registered under token, whose terminal leads the
 // session current, to switch to target, and returns once it has accepted.
 // Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal,
 // wrapping runnertoken.ErrRefused, or the failure to ask it, and the caller
-// switches as if there were no runner.
+// switches as if there were no runner. The exception is a read-only
+// registry's refusal, which asks no runner and means do nothing: its caller
+// must change nothing, so it must not move the terminal itself either.
 func (r Registry) Switch(ctx context.Context, token, current, target string) error {
+	if r.readOnly {
+		return errReadOnly
+	}
 	attrs := []any{"session", current, "target", target}
 	rn, err := r.lookup(token)
 	if err == nil {
@@ -126,8 +138,17 @@ func (r Registry) askOn(ctx context.Context, rn registered, session string, req 
 }
 
 // DetachToPicker asks every runner registered on session to detach to the
-// picker, and returns how many accepted.
+// picker, all at once, and returns how many accepted. Each request has a
+// deadline of its own, timeout from when it is sent or sooner as ctx ends,
+// so a runner slow to answer, as one unsure of its session confirming
+// through the backend, costs the others nothing. With none accepting it
+// returns runnertoken.ErrNoRunner when no runner was there to ask, a runner
+// proved gone as it was asked included, and otherwise every refusal and
+// failure. A read-only registry refuses, asking no runner.
 func (r Registry) DetachToPicker(ctx context.Context, session string) (int, error) {
+	if r.readOnly {
+		return 0, errReadOnly
+	}
 	runners, err := r.on(session)
 	if err != nil {
 		return 0, err
@@ -135,15 +156,35 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 	if len(runners) == 0 {
 		report("detach to picker", runnertoken.ErrNoRunner, "session", session)
 	}
-	accepted := 0
-	for _, rn := range runners {
-		err := r.ask(ctx, rn, request{Request: reqDetachToPicker})
-		report("detach to picker", err, "session", session, "target_pid", rn.PID)
-		if err == nil {
+	accepted, reasons := 0, []error{}
+	for i, err := range r.askAll(ctx, runners, request{Request: reqDetachToPicker}) {
+		report("detach to picker", err, "session", session, "target_pid", runners[i].PID)
+		switch {
+		case err == nil:
 			accepted++
+		case !errors.Is(err, runnertoken.ErrNoRunner):
+			reasons = append(reasons, err)
 		}
 	}
-	return accepted, nil
+	switch {
+	case accepted > 0:
+		return accepted, nil
+	case len(reasons) > 0:
+		return 0, fmt.Errorf("no runner on %s detached to the picker: %w", session, errors.Join(reasons...))
+	}
+	return 0, fmt.Errorf("%w on %s", runnertoken.ErrNoRunner, session)
+}
+
+// askAll sends req to every runner at once, returning each one's result in
+// their order.
+func (r Registry) askAll(ctx context.Context, runners []registered, req request) []error {
+	errs := make([]error, len(runners))
+	var asked sync.WaitGroup
+	for i, rn := range runners {
+		asked.Go(func() { errs[i] = r.ask(ctx, rn, req) })
+	}
+	asked.Wait()
+	return errs
 }
 
 // report logs a request's result: accepted, refused, failed, or no runner to
@@ -333,9 +374,13 @@ func (r Registry) removeOrphan(token string) {
 	}
 }
 
-// running reports whether a process holds pid, which must be positive. It may
-// not be the runner that registered it.
-func running(pid int) bool {
+// running is processRunning, a variable so a test can end a runner between
+// the scan that finds it and the request that asks it.
+var running = processRunning
+
+// processRunning reports whether a process holds pid, which must be positive.
+// It may not be the runner that registered it.
+func processRunning(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }

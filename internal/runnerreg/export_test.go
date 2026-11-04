@@ -15,6 +15,15 @@ func SetTimeout(t testing.TB, d time.Duration) {
 	t.Cleanup(func() { timeout = old })
 }
 
+// SetRunning has the registry judge whether a pid is running by f for the
+// rest of t, f given the real judgement to defer to.
+func SetRunning(t testing.TB, f func(pid int, running func(int) bool) bool) {
+	t.Helper()
+	old := running
+	running = func(pid int) bool { return f(pid, processRunning) }
+	t.Cleanup(func() { running = old })
+}
+
 // Timeout and AnswerGrace are the bound of a request and how long past its
 // deadline a caller waits for the answer.
 func Timeout() time.Duration { return timeout }

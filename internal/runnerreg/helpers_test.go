@@ -60,6 +60,13 @@ func (h *handler) askedConfirms() []string {
 	return slices.Clone(h.confirms)
 }
 
+// askedDeadlines is the deadline of each request the handler took.
+func (h *handler) askedDeadlines() []time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.deadlines)
+}
+
 func (h *handler) take(ctx context.Context, record func()) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -158,6 +165,48 @@ func listen(t *testing.T, path string, handle func(net.Conn)) {
 func silentSocket(t *testing.T, path string) {
 	t.Helper()
 	listen(t, path, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
+}
+
+// barrier opens once n have arrived at it.
+type barrier struct {
+	mu      sync.Mutex
+	waiting int
+	open    chan struct{}
+}
+
+func newBarrier(n int) *barrier {
+	return &barrier{waiting: n, open: make(chan struct{})}
+}
+
+func (b *barrier) arrive() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.waiting--; b.waiting == 0 {
+		close(b.open)
+	}
+}
+
+// arrival is a request a socket read, and when it had read it whole.
+type arrival struct {
+	line string
+	at   time.Time
+}
+
+// gatedSocket listens on path, reads each request whole, sends it on
+// arrivals, and waits at b, accepting the request only once b opens.
+func gatedSocket(t *testing.T, path string, b *barrier, arrivals chan<- arrival) {
+	t.Helper()
+	listen(t, path, func(conn net.Conn) {
+		defer func() { _ = conn.Close() }()
+		line, _ := io.ReadAll(conn)
+		arrivals <- arrival{line: string(line), at: time.Now()}
+		b.arrive()
+		select {
+		case <-b.open:
+			_, _ = conn.Write([]byte(ourAnswer(`"ok":true`) + "\n"))
+		case <-t.Context().Done():
+		}
+	})
 }
 
 // answeringSocket listens on path, reads each request whole, and answers it
