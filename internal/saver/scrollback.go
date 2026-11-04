@@ -107,7 +107,8 @@ func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bo
 		}
 		memo := sb.creations[file]
 		if ctx.Err() == nil && ask(memo) && !state.Flagged(sb.dir, live.Name) {
-			if c, ok := sb.save(ctx, live, file, &memo, l.at); ok {
+			memo.asked = l.at
+			if c, ok := sb.save(ctx, live, file, memo); ok {
 				written = append(written, c)
 			}
 		}
@@ -118,18 +119,16 @@ func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bo
 }
 
 // save asks for the session's history and writes it to file, unless it is
-// the history the index last named the file with, reporting what it wrote.
-// The ask marks the creation asked at at, unless the session is on the
-// alternate screen: that history holds none of the main screen and its
-// scrollback, so it never replaces a saved transcript, and the creation
-// stays due, saved once the session is back on its main screen.
-func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo *creation, at time.Time) (capture, bool) {
+// the history the index last named the file with, reporting what it wrote. A
+// history of the alternate screen holds none of the main screen and its
+// scrollback, so it is never written over a saved transcript: like any other
+// ask it waits out captureEvery, and records no hash, so the main screen is
+// saved once the session is back on it.
+func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo creation) (capture, bool) {
 	vt, err := sb.backend.History(ctx, live.Name, 0)
 	if err == nil && alternateScreen(vt) {
-		skipped(live.Name, errAlternateScreen)
-		return capture{}, false
+		err = errAlternateScreen
 	}
-	memo.asked = at
 	if err != nil {
 		skipped(live.Name, err)
 		return capture{}, false
@@ -169,19 +168,20 @@ var alternateScreenModes = []string{"47", "1047", "1049"}
 
 // alternateScreen reports whether vt, a session's history, is that of a
 // session on the alternate screen. zmx leads a history with the modes that
-// differ from a terminal's defaults, each a DECSET or DECRST of its own
-// (ESC [ ? n h, or l), ahead of the screen's first cell; on the alternate
-// screen 47, 1047 or 1049 is set among them, and the history holds that
-// screen alone. Only the lead is read, so a mode sequence later in a
-// history is never taken for one.
+// differ from a terminal's defaults, each set or reset by a sequence of its
+// own, ahead of the screen's first cell: the ANSI modes (ESC [ n h, or l),
+// then the DEC private ones (ESC [ ? n h, or l). On the alternate screen the
+// private 47, 1047 or 1049 is set among them, and the history holds that
+// screen alone. Only the lead is read, so a mode sequence later in a history
+// is never taken for one.
 func alternateScreen(vt []byte) bool {
 	for {
-		params, set, rest, ok := leadingMode(vt)
+		mode, rest, ok := leadingMode(vt)
 		if !ok {
 			return false
 		}
-		if set && slices.ContainsFunc(strings.Split(params, ";"), func(mode string) bool {
-			return slices.Contains(alternateScreenModes, mode)
+		if mode.private && mode.set && slices.ContainsFunc(mode.params, func(param string) bool {
+			return slices.Contains(alternateScreenModes, param)
 		}) {
 			return true
 		}
@@ -189,18 +189,27 @@ func alternateScreen(vt []byte) bool {
 	}
 }
 
-// leadingMode is the DEC private mode sequence vt starts with: its
-// parameters, whether it sets them (h) or resets them (l), and what follows.
-func leadingMode(vt []byte) (params string, set bool, rest []byte, ok bool) {
-	body, ok := bytes.CutPrefix(vt, []byte("\x1b[?"))
+// modeSequence is a sequence setting or resetting modes: a DEC private one
+// (ESC [ ?) or an ANSI one (ESC [).
+type modeSequence struct {
+	params  []string
+	private bool
+	set     bool
+}
+
+// leadingMode is the mode sequence vt starts with, and what follows it.
+func leadingMode(vt []byte) (mode modeSequence, rest []byte, ok bool) {
+	body, ok := bytes.CutPrefix(vt, []byte("\x1b["))
 	if !ok {
-		return "", false, nil, false
+		return modeSequence{}, nil, false
 	}
+	body, mode.private = bytes.CutPrefix(body, []byte("?"))
 	end := bytes.IndexFunc(body, func(r rune) bool { return r != ';' && (r < '0' || r > '9') })
 	if end < 0 || body[end] != 'h' && body[end] != 'l' {
-		return "", false, nil, false
+		return modeSequence{}, nil, false
 	}
-	return string(body[:end]), body[end] == 'h', body[end+1:], true
+	mode.params, mode.set = strings.Split(string(body[:end]), ";"), body[end] == 'h'
+	return mode, body[end+1:], true
 }
 
 // write replaces the file target with vt, making the scrollback directory

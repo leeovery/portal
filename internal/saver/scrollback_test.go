@@ -253,17 +253,22 @@ func TestPoll_NeverSavesTheAlternateScreen(t *testing.T) {
 		}
 	})
 
-	t.Run("the creation stays due, so the next poll saves the main screen once the session is back on it", func(t *testing.T) {
+	t.Run("the skip waits a minute like any other ask, then the main screen is saved once the session is back on it", func(t *testing.T) {
 		w := newWorld(t)
 		api := stageCaptured(w, "the main screen")
 		w.fake.SetHistory("api", []byte(inVim))
 		w.after(time.Minute)
 		w.fake.SetHistory("api", []byte("back on the main screen"))
 
-		w.after(5 * time.Second)
+		mark := w.mark()
+		w.after(59 * time.Second)
+		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 0 {
+			t.Errorf("History asked %+v within a minute of the skip, want nothing", calls)
+		}
 
+		w.after(time.Second)
 		if text, _ := w.read(scrollbackFile(t, api)); text != "back on the main screen" {
-			t.Errorf("scrollback = %q, want the main screen saved at the next poll", text)
+			t.Errorf("scrollback a minute on = %q, want the main screen saved", text)
 		}
 	})
 
@@ -276,7 +281,7 @@ func TestPoll_NeverSavesTheAlternateScreen(t *testing.T) {
 		w.write(file, "marker")
 		w.fake.SetHistory("api", []byte("the main screen"))
 
-		w.after(5 * time.Second)
+		w.after(time.Minute)
 
 		if text, _ := w.read(file); text != "marker" {
 			t.Errorf("scrollback = %q, want the named transcript not written again", text)

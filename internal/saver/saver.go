@@ -164,12 +164,20 @@ func (s *Saver) list(ctx context.Context) (listing, error) {
 // restore can have landed since. What goes with an entry dropped, and the
 // files no entry names, are removed before the lock goes, against the index as
 // written.
+//
+// A commit whose ctx ended while it waited for the lock writes nothing: the
+// daemon's shutdown bound could otherwise end the process between a drop's
+// write and the forgetting that goes with it. One that held the lock first
+// finishes, within the bound.
 func (s *Saver) commit(ctx context.Context, l listing, captures []capture) (Result, error) {
 	rule := state.ClaimRule(s.dir)
 	var result Result
 	var written *sessionindex.Index
 	var named []capture
 	_, err := sessionindex.UpdateThen(s.dir, via, func(idx *sessionindex.Index) error {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
 		result.Claimed = s.claim(ctx, idx, l, rule)
 		drop(idx, s.drops.judge(idx, l, rule))
 		named = s.scrollback.name(idx, captures)

@@ -34,6 +34,22 @@ func TestAltScreenAgainstZmx(t *testing.T) {
 			want:    true,
 		},
 		{name: "mode 1049", program: fmt.Sprintf(enter, "1049"), ready: "ready", want: true},
+		// zmx writes the ANSI modes off their defaults ahead of the DEC ones.
+		{name: "1049 after IRM", program: `printf '\033[4h'; ` + fmt.Sprintf(enter, "1049"), ready: "ready", want: true},
+		{name: "1049 after LNM", program: `printf '\033[20h'; ` + fmt.Sprintf(enter, "1049"), ready: "ready", want: true},
+		{name: "1049 after KAM", program: `printf '\033[2h'; ` + fmt.Sprintf(enter, "1049"), ready: "ready", want: true},
+		{name: "1049 after SRM reset", program: `printf '\033[12l'; ` + fmt.Sprintf(enter, "1049"), ready: "ready", want: true},
+		{
+			name:    "1049 after IRM, LNM, KAM and SRM",
+			program: `printf '\033[4h\033[20h\033[2h\033[12l'; ` + fmt.Sprintf(enter, "1049"),
+			ready:   "ready",
+			want:    true,
+		},
+		{
+			name:    "the main screen led by IRM, LNM, KAM and SRM",
+			program: `printf '\033[4h\033[20h\033[2h\033[12l\033[?2004hmain line\nready'; exec sleep 600`,
+			ready:   "ready",
+		},
 		{name: "mode 1047", program: fmt.Sprintf(enter, "1047"), ready: "ready", want: true},
 		{name: "mode 47", program: fmt.Sprintf(enter, "47"), ready: "ready", want: true},
 		{
