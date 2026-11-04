@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
@@ -39,8 +39,9 @@ type Daemon struct {
 	// never runs whichever portal PATH finds.
 	Exe string
 	// Version is Exe's version, a dev build's naming the build. A live saver
-	// is kept only while its daemon records this version, and a daemon
-	// started is up only once it records it.
+	// is kept only while its daemon records this version, never on
+	// devversion.Unidentified, and a daemon started is up only once it
+	// records it.
 	Version string
 }
 
@@ -76,26 +77,23 @@ func (e *Ensurer) EnsureSaver(ctx context.Context) error {
 // counts once its daemon does the same. A saver that can't be read, can't be
 // stopped or doesn't come up is an error, never a wait past its bounds.
 func (h *Host) ensure(ctx context.Context, d Daemon) error {
-	if err := os.MkdirAll(h.stateDir, 0o700); err != nil {
-		return fmt.Errorf("create the state directory: %w", err)
-	}
-	release, err := h.lock(ctx)
+	release, err := h.lockCreating(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	pid, present, err := h.SaverPID(ctx)
+	r, err := h.settled(ctx)
 	if err != nil {
-		return fmt.Errorf("read the saver: %w", err)
+		return err
 	}
-	if present {
-		reason := h.replacing(pid, d.Version)
+	if r.present {
+		reason := r.replacing(d.Version)
 		if reason == "" {
-			logger.Info("daemon kept", "target_pid", pid)
+			logger.Info("daemon kept", "target_pid", r.session)
 			return nil
 		}
-		logger.Info("recycle", "target_pid", pid, "reason", reason)
-		if err := h.stop(ctx, pid); err != nil {
+		logger.Info("recycle", "target_pid", r.session, "reason", reason)
+		if err := h.stop(ctx, r.session); err != nil {
 			return fmt.Errorf("recycle the saver: %w", err)
 		}
 	}
@@ -105,20 +103,19 @@ func (h *Host) ensure(ctx context.Context, d Daemon) error {
 	return h.awaitReady(ctx, d.Version)
 }
 
-// replacing is why the live saver running pid is replaced, or "" when it is
-// kept: its daemon records version as the lock's holder.
-func (h *Host) replacing(pid int, version string) string {
-	holder, err := state.ReadPIDFile(h.stateDir)
-	if err != nil || holder != pid {
-		return reasonUnknown
-	}
-	switch recorded, err := state.ReadVersionFile(h.stateDir); {
+// settled reads the saver for its judgement, waiting up to ReadyWait while
+// its session runs a daemon still starting: daemon.pid not yet naming the
+// session's process, or daemon.version not yet written. Judged sooner, a
+// saver whose ensure gave up on it under load would be stopped on its way up.
+func (h *Host) settled(ctx context.Context) (readiness, error) {
+	r, _, err := h.watch(ctx, func(r readiness) bool { return r.sessionErr != nil || !r.present || r.recorded() })
+	switch {
 	case err != nil:
-		return reasonUnknown
-	case recorded != version:
-		return reasonVersion
+		return r, fmt.Errorf("wait for the saver's daemon: %w", err)
+	case r.sessionErr != nil:
+		return r, fmt.Errorf("read the saver: %w", r.sessionErr)
 	}
-	return ""
+	return r, nil
 }
 
 // create creates the saver session running `exe state daemon`. A name another
@@ -142,24 +139,37 @@ func (h *Host) create(ctx context.Context, exe string) error {
 // daemon refusing to run, fails at once.
 func (h *Host) awaitReady(ctx context.Context, version string) error {
 	start := time.Now()
+	r, done, err := h.watch(ctx, func(r readiness) bool { return r.ready(version) || r.ended() })
+	switch {
+	case err != nil:
+		return fmt.Errorf("wait for the saver's daemon: %w", err)
+	case !done:
+		return fmt.Errorf("%w within %s: %s", ErrNotReady, h.readyWait, r)
+	case r.ended():
+		return fmt.Errorf("%w: its session ended", ErrNotReady)
+	}
+	logger.Info("daemon ready", "target_pid", r.session, log.Took(start))
+	return nil
+}
+
+// watch reads the saver until until holds of a reading or ReadyWait has
+// passed, and returns the last reading and whether until held of it. It
+// fails only when ctx ends first.
+func (h *Host) watch(ctx context.Context, until func(readiness) bool) (readiness, bool, error) {
 	deadline := time.NewTimer(h.readyWait)
 	defer deadline.Stop()
 	tick := time.NewTicker(h.poll)
 	defer tick.Stop()
 	for {
 		r := h.readiness(ctx)
-		switch {
-		case r.ready(version):
-			logger.Info("daemon ready", "target_pid", r.session, log.Took(start))
-			return nil
-		case r.ended():
-			return fmt.Errorf("%w: its session ended", ErrNotReady)
+		if until(r) {
+			return r, true, nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("wait for the saver's daemon: %w", context.Cause(ctx))
+			return r, false, context.Cause(ctx)
 		case <-deadline.C:
-			return fmt.Errorf("%w within %s: %s", ErrNotReady, h.readyWait, r)
+			return r, false, nil
 		case <-tick.C:
 		}
 	}
@@ -186,11 +196,29 @@ func (h *Host) readiness(ctx context.Context) readiness {
 	return r
 }
 
-// ready reports whether the saver session's process holds the daemon's lock,
-// daemon.pid naming it, and daemon.version holds version.
+// recorded reports whether the saver session's process has recorded itself:
+// daemon.pid names it and daemon.version is written.
+func (r readiness) recorded() bool {
+	return r.present && r.holderErr == nil && r.holder == r.session && r.versionErr == nil
+}
+
+// ready reports whether the saver session's process has recorded itself at
+// version.
 func (r readiness) ready(version string) bool {
-	return r.present && r.holderErr == nil && r.holder == r.session &&
-		r.versionErr == nil && r.version == version
+	return r.recorded() && r.version == version
+}
+
+// replacing is why the saver read is replaced, or "" when it is kept: its
+// daemon has recorded version. An unidentified build's version names no one
+// build, so a saver recording it is never kept on the match.
+func (r readiness) replacing(version string) string {
+	switch {
+	case version == devversion.Unidentified || !r.recorded():
+		return reasonUnknown
+	case r.version != version:
+		return reasonVersion
+	}
+	return ""
 }
 
 func (r readiness) ended() bool {

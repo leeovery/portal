@@ -17,19 +17,43 @@ import (
 // first.
 const lockName = "saver.lock"
 
-// LockWait bounds the wait for saver.lock. It covers the longest run another
-// holder can make: a recycle's stop (TermWait, then the kill bound after its
-// SIGKILL) and the create that follows (ReadyWait), with 20 s over for the
-// backend calls between them, zmx bounding its create at 10 s, its kill at
-// 5 s and each read at 1 s. A holder still running past it is stuck, and the
-// wait gives up rather than queue behind it.
-const LockWait = TermWait + killWait + ReadyWait + 20*time.Second
+// The ceilings LockWait allows the backend's calls: a read of the saver
+// session, its creation, and its kill. zmx's own are pinned within them.
+const (
+	ReadCeiling   = time.Second
+	CreateCeiling = 10 * time.Second
+	KillCeiling   = 5 * time.Second
+)
+
+// holderRun is the longest a holder of saver.lock runs, each wait at its
+// bound and each backend call at its ceiling: the ensure's wait for a saver
+// still starting (ReadyWait, then the read in flight); the recycle's stop (a
+// read of the session, TermWait, the kill bound, then the session's kill: a
+// read, the kill, a read); then the create, and the wait for its daemon
+// (ReadyWait, then the read in flight).
+const holderRun = ReadyWait + ReadCeiling +
+	ReadCeiling + TermWait + killWait + ReadCeiling + KillCeiling + ReadCeiling +
+	CreateCeiling + ReadyWait + ReadCeiling
+
+// LockWait bounds the wait for saver.lock: a holder's longest run, with 15 s
+// over for what no bound covers, the proofs' ps calls and the reads of the
+// daemon's files. A holder still running past it is stuck, and the wait gives
+// up rather than queue behind it.
+const LockWait = holderRun + 15*time.Second
 
 // ErrLockHeld is a saver.lock another process held past the wait's bound.
 var ErrLockHeld = errors.New("the saver's lock is held by another process")
 
 // LockPath is saver.lock in the state directory dir.
 func LockPath(dir string) string { return filepath.Join(dir, lockName) }
+
+// lockCreating is lock, creating the state directory for it first.
+func (h *Host) lockCreating(ctx context.Context) (func(), error) {
+	if err := os.MkdirAll(h.stateDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create the state directory: %w", err)
+	}
+	return h.lock(ctx)
+}
 
 // lock takes saver.lock exclusively, waiting up to the Host's LockWait, and
 // returns its release. The kernel releases it too when the holder exits, so a

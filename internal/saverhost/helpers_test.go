@@ -210,6 +210,16 @@ func stillWaiting(t *testing.T, done chan error, what string) {
 	}
 }
 
+// openFDs is how many descriptors this process has open.
+func openFDs(t *testing.T) int {
+	t.Helper()
+	fds, err := os.ReadDir("/dev/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(fds)
+}
+
 // holdLock takes saver.lock in dir through an open file description of its
 // own, as another process would, until the returned release or the test's
 // end.

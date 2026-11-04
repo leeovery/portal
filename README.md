@@ -296,7 +296,7 @@ xctl theme export nord > ~/.config/portal/themes/mine.theme
 
 ### `portal uninstall`
 
-Stop Portal's save daemon **without touching your saved sessions or config**. It asks the daemon to stop with SIGTERM, so the daemon saves once more first, and waits up to 8 seconds; a daemon still running then gets SIGKILL. Once the daemon has exited, its `_portal-saver` session ends. Saved sessions and all config are left in place, and the next `x`/`portal open` brings the daemon back, so it means "stop Portal's machinery now," not "destroy my data." With no daemon running it says so and succeeds. If another Portal command is starting the daemon at that moment, it waits for that to finish, up to 40 seconds, then stops the daemon just started.
+Stop Portal's save daemon **without touching your saved sessions or config**. It asks the daemon to stop with SIGTERM, so the daemon saves once more first, and waits up to 8 seconds; a daemon still running then gets SIGKILL. Once the daemon has exited, its `_portal-saver` session ends. Saved sessions and all config are left in place, and the next `x`/`portal open` brings the daemon back, so it means "stop Portal's machinery now," not "destroy my data." With no daemon running it says so and succeeds. If another Portal command is starting the daemon at that moment, it waits for that to finish, then stops the daemon just started.
 
 Before each signal it checks that the process is Portal's save daemon. If that check fails before the SIGTERM, nothing is sent; if it fails before the SIGKILL, the daemon has had the SIGTERM but not the SIGKILL. Either way the session is left and `portal uninstall` exits non-zero, saying which. See [Uninstall](#uninstall).
 

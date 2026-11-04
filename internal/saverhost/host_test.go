@@ -305,7 +305,8 @@ func TestStop(t *testing.T) {
 		}
 	})
 
-	t.Run("a pid the saver session no longer runs is sent nothing", func(t *testing.T) {
+	t.Run("a pid the saver session no longer runs is sent nothing, and its refusal logged", func(t *testing.T) {
+		sink := logtest.Install(t)
 		fake := withSaver(daemonPID)
 		b := &changingSaver{Fake: fake, n: 2, change: func(f *backendtest.Fake) {
 			f.Add(backend.Session{Name: saver.SessionName, PID: daemonPID + 1})
@@ -318,9 +319,11 @@ func TestStop(t *testing.T) {
 		if len(p.events) != 0 || len(kills(fake)) != 0 {
 			t.Errorf("events = %q, kills = %q; want none", p.events, kills(fake))
 		}
+		assertRefused(t, sink, daemonPID, saverhost.ErrReplaced.Error())
 	})
 
-	t.Run("this process is sent nothing", func(t *testing.T) {
+	t.Run("this process is sent nothing, and its refusal logged", func(t *testing.T) {
+		sink := logtest.Install(t)
 		self := os.Getpid()
 		b := withSaver(self)
 		p := newProcs(map[int]*proc{self: daemon(exitsOn(syscall.SIGTERM))})
@@ -331,6 +334,7 @@ func TestStop(t *testing.T) {
 		if len(p.events) != 0 || len(kills(b)) != 0 {
 			t.Errorf("events = %q, kills = %q; want none", p.events, kills(b))
 		}
+		assertRefused(t, sink, self, "is this process")
 	})
 
 	t.Run("a saver session gone since its pid was read leaves the pid to its proof", func(t *testing.T) {
@@ -452,13 +456,18 @@ func TestStopHoldsSaverLock(t *testing.T) {
 		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
 		cfg := config(b, p, dir)
 		cfg.LockWait = 30 * time.Millisecond
+		h := hostOf(t, cfg)
+		before := openFDs(t)
 		start := time.Now()
 
-		if stopped, err := hostOf(t, cfg).Stop(t.Context()); stopped || !errors.Is(err, saverhost.ErrLockHeld) {
+		if stopped, err := h.Stop(t.Context()); stopped || !errors.Is(err, saverhost.ErrLockHeld) {
 			t.Errorf("Stop = %v, %v; want false and ErrLockHeld", stopped, err)
 		}
 		if took := time.Since(start); took < cfg.LockWait {
 			t.Errorf("Stop gave up after %s, want LockWait (%s)", took, cfg.LockWait)
+		}
+		if after := openFDs(t); after != before {
+			t.Errorf("open descriptors = %d after the stop, want %d: saver.lock's left open", after, before)
 		}
 		if len(b.Calls()) != 0 || len(p.events) != 0 {
 			t.Errorf("backend calls = %+v, events = %q; want none", b.Calls(), p.events)
@@ -518,24 +527,59 @@ func TestStopHoldsSaverLock(t *testing.T) {
 		}
 	})
 
-	t.Run("with no state directory but a saver it fails, sending nothing", func(t *testing.T) {
+	t.Run("with no state directory but a saver, it creates the directory for its lock and stops the saver", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "state")
 		b := withSaver(daemonPID)
 		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
 
-		if _, err := hostOf(t, config(b, p, filepath.Join(t.TempDir(), "state"))).Stop(t.Context()); err == nil {
-			t.Error("Stop = nil error, want a failure")
+		stop(t, hostOf(t, config(b, p, dir)))
+
+		if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+			t.Errorf("stat %s = %v, %v; want a directory, mode 0700", dir, info, err)
 		}
-		if len(p.events) != 0 || len(kills(b)) != 0 {
-			t.Errorf("events = %q, kills = %q; want none", p.events, kills(b))
+		if _, err := os.Stat(saverhost.LockPath(dir)); err != nil {
+			t.Errorf("stat saver.lock: %v, want it made", err)
+		}
+		if got := p.signals(); !slices.Equal(got, []string{"SIGTERM 4242"}) {
+			t.Errorf("signals = %q, want the daemon's SIGTERM", got)
+		}
+		if got := kills(b); !slices.Equal(got, []string{saver.SessionName}) {
+			t.Errorf("kills = %q, want the saver session's", got)
+		}
+	})
+
+	t.Run("a context that ends while saver.lock is held fails the stop, leaving no descriptor open", func(t *testing.T) {
+		dir := t.TempDir()
+		holdLock(t, dir)
+		b := withSaver(daemonPID)
+		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
+		h := hostOf(t, config(b, p, dir))
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		before := openFDs(t)
+
+		if _, err := h.Stop(ctx); !errors.Is(err, context.Canceled) {
+			t.Errorf("Stop = %v, want the context's cause", err)
+		}
+		if after := openFDs(t); after != before {
+			t.Errorf("open descriptors = %d after the stop, want %d: saver.lock's left open", after, before)
+		}
+		if len(b.Calls()) != 0 || len(p.events) != 0 {
+			t.Errorf("backend calls = %+v, events = %q; want none", b.Calls(), p.events)
 		}
 	})
 }
 
-// A waiter that gave up while another holder was still within its bounds
-// would fail a bootstrap or uninstall that only had to wait.
-func TestLockWaitOutlastsAHoldersRun(t *testing.T) {
-	if run := saverhost.TermWait + saverhost.ReadyWait; saverhost.LockWait <= run {
-		t.Errorf("saverhost.LockWait = %s, want longer than a recycle's stop and create, over %s", saverhost.LockWait, run)
+// assertRefused asserts the one WARN stop refused, for pid, its error saying
+// why.
+func assertRefused(t *testing.T, sink *logtest.Sink, pid int, why string) {
+	t.Helper()
+	refused := sink.Records().Matching("saver", "stop refused").AtExactLevel(slog.LevelWarn).Only(t, "the refusal")
+	if got := refused.IntAttr(t, "target_pid"); got != int64(pid) {
+		t.Errorf("stop refused target_pid = %d, want %d", got, pid)
+	}
+	if err := refused.ErrorAttr(t, "error"); !strings.Contains(err.Error(), why) {
+		t.Errorf("stop refused error = %v, want it saying %q", err, why)
 	}
 }
 

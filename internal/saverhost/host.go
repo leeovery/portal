@@ -145,13 +145,16 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// running reports whether pid has yet to finish exiting. A zombie has
-// finished: it holds no descriptor, daemon.lock's included. Where the
-// kernel's table can't be read, kill(pid, 0) answers, counting a zombie
-// running.
-func running(pid int) bool {
-	if exited, err := proctable.Exited(pid); err == nil {
-		return !exited
+// running reports whether pid has yet to finish exiting, as the kernel's
+// table says.
+func running(pid int) bool { return runningBy(proctable.Exited, pid) }
+
+// runningBy reports whether pid has yet to finish exiting, as exited says. A
+// zombie has finished: it holds no descriptor, daemon.lock's included. Where
+// exited can't answer, kill(pid, 0) does, counting a zombie running.
+func runningBy(exited func(pid int) (bool, error), pid int) bool {
+	if done, err := exited(pid); err == nil {
+		return !done
 	}
 	return state.IsProcessAlive(pid)
 }
@@ -186,12 +189,17 @@ func (h *Host) SaverPID(ctx context.Context) (pid int, present bool, err error) 
 
 // Stop stops the saver, holding saver.lock throughout, and reports whether
 // there was one: it reads the saver session's process under the lock and
-// stops it as stop does. With no state directory, so no lock to hold, only
-// the absence of a saver is an answer.
+// stops it as stop does. With no state directory there is nothing to stop
+// unless a saver runs without one, for which it creates the directory and
+// its lock; it creates nothing when there is no saver.
 func (h *Host) Stop(ctx context.Context) (bool, error) {
 	release, err := h.lock(ctx)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, h.absent(ctx, err)
+		var present bool
+		if present, err = h.Present(ctx); err != nil || !present {
+			return false, err
+		}
+		release, err = h.lockCreating(ctx)
 	}
 	if err != nil {
 		return false, err
@@ -202,18 +210,6 @@ func (h *Host) Stop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, h.stop(ctx, pid)
-}
-
-// absent is nil when there is no saver, and otherwise why the stop of one
-// can't be held under saver.lock.
-func (h *Host) absent(ctx context.Context, lockErr error) error {
-	switch present, err := h.Present(ctx); {
-	case err != nil:
-		return err
-	case present:
-		return fmt.Errorf("the saver is running, but its stop can't be held under saver.lock: %w", lockErr)
-	}
-	return nil
 }
 
 // stop stops the saver's daemon pid, read as the saver session's process, then
@@ -241,16 +237,22 @@ func (h *Host) stop(ctx context.Context, pid int) error {
 // runs another. A session gone since pid was read leaves pid to its proof.
 func (h *Host) stillSaver(ctx context.Context, pid int) error {
 	if pid == os.Getpid() {
-		return fmt.Errorf("pid %d is this process", pid)
+		return refused(pid, fmt.Errorf("pid %d is this process", pid))
 	}
 	running, present, err := h.SaverPID(ctx)
 	switch {
 	case err != nil:
 		return err
 	case present && running != pid:
-		return fmt.Errorf("%w: pid %d, not %d", ErrReplaced, running, pid)
+		return refused(pid, fmt.Errorf("%w: pid %d, not %d", ErrReplaced, running, pid))
 	}
 	return nil
+}
+
+// refused logs the stop's refusal of pid, and is err.
+func refused(pid int, err error) error {
+	logger.Warn("stop refused", "target_pid", pid, "error", err)
+	return err
 }
 
 // end ends the daemon pid: SIGTERM, then SIGKILL once TermWait has passed,
@@ -281,14 +283,13 @@ func (h *Host) end(ctx context.Context, pid int) error {
 
 // signalProved sends sig to pid once proved the saver's daemon, and reports
 // whether it sent it: a daemon found gone is sent nothing. A pid it can't
-// prove is sent nothing, and fails as refused says.
-func (h *Host) signalProved(pid int, sig syscall.Signal, refused string) (bool, error) {
+// prove is sent nothing, and fails as refusal says.
+func (h *Host) signalProved(pid int, sig syscall.Signal, refusal string) (bool, error) {
 	switch err := h.proof.prove(pid); {
 	case errors.Is(err, ErrGone):
 		return false, nil
 	case err != nil:
-		logger.Warn("stop refused", "target_pid", pid, "error", err)
-		return false, fmt.Errorf("%s: %w", refused, err)
+		return false, refused(pid, fmt.Errorf("%s: %w", refusal, err))
 	}
 	switch err := h.signal(pid, sig); {
 	case errors.Is(err, syscall.ESRCH):

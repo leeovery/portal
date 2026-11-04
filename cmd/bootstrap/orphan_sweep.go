@@ -104,6 +104,9 @@ func (c *OrphanSweepCore) spared(ctx context.Context) (map[int]bool, error) {
 	switch {
 	case err != nil:
 		return nil, err
+	// Host.SaverPID never answers this, but the sweep SIGKILLs every proved
+	// daemon it doesn't spare, the live saver's included, so a seam that did
+	// must kill nothing.
 	case present && pid <= 0:
 		return nil, errors.New("the saver session names no process")
 	case present:

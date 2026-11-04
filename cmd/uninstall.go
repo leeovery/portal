@@ -40,8 +40,9 @@ func uninstallStopper() (saverStopper, error) {
 
 // Uninstall stops the saver and nothing more: it keeps the bootstrapped
 // latch, touches no state or config file but saver.lock, which it holds for
-// the stop, and starts nothing. The next Portal command, finding no saver,
-// runs the full bootstrap, which brings it back.
+// the stop (making the state directory for it only when a saver runs
+// without one), and starts nothing. The next Portal command, finding no
+// saver, runs the full bootstrap, which brings it back.
 var uninstallCmd = &cobra.Command{
 	Use:           "uninstall",
 	Short:         "Stop Portal's save daemon; leaves saved sessions and config",
