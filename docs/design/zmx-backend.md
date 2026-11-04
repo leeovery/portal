@@ -87,7 +87,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 ## Restore and resume
 
 - **Restore** writes the hydrating flag, then creates each saved session that isn't live with `Create(name, dir, portal state hydrate --session N [--file S])`.
-- **The helper** replays the transcript straight away; there's no FIFO, because nothing else races it. It then removes the hydrating flag and runs the eager hook, the resume chain or the shell, exactly as today.
+- **The helper** refuses to fire anything when `$ZMX_SESSION` names another session. Otherwise it replays the transcript's rows straight away, without zmx's leading modes or closing state; there's no FIFO, because nothing else races it. A session that will wait raises `resume-pending`, and the helper claims the session's index entry while the hydrating flag is still raised. Then it lowers the flag and runs the eager hook, the resume chain or a login shell.
 - **The resume chain** keeps its draw, wait and recover steps, its keys and its discard. Its tmux calls become flag-file reads and writes. The alternate-screen pin goes. Esc asks the session's runners to detach to the picker; with no runner attached, it detaches through the backend.
 - **Repaint.** Before attaching, the attach runner sends SIGWINCH to a waiting session's process group, so the panel redraws in the current theme. This replaces the attach hook.
 
