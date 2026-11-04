@@ -176,7 +176,7 @@ func TestLockWait(t *testing.T) {
 	})
 
 	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
-		each := saverhost.CreateCeiling + 3*saverhost.ReadCeiling + commitlock.Bound()
+		each := saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling + commitlock.Bound()
 		if got := LockWait(20) - LockWait(0); got != 20*each {
 			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)
 		}

@@ -825,6 +825,24 @@ func TestBackendAgainstZmx(t *testing.T) {
 		mustCreate(t, b, "ended", t.TempDir(), "sleep", "1000")
 	})
 
+	// The saver's program, Portal's daemon, takes up to 6 s to shut down once
+	// hung up, past the end's 5 s wait. zmx's daemon never waits that out: it
+	// SIGKILLs its program half a second after the SIGHUP, so a program that
+	// ignores the hangup altogether still ends within the wait.
+	t.Run("it ends a session's daemon by a proved SIGTERM within the kill ceiling, though its program ignores the hangup", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "deaf", t.TempDir(), "sh", "-c", `trap '' HUP; echo trap set; sleep 1000 & wait`)
+		awaitHistory(t, b, "deaf", "trap set")
+
+		start := time.Now()
+		endDaemon(t, b, "deaf")
+		t.Logf("the end took %s", time.Since(start))
+
+		if got := listed(t, b); len(got) != 0 {
+			t.Errorf("List = %v, want nothing", got)
+		}
+	})
+
 	t.Run("it ends a session with zmx's own kill, its program hung up, and frees its name", func(t *testing.T) {
 		b := zmxtest.New(t)
 		hup := createHangingUp(t, b, "killed")

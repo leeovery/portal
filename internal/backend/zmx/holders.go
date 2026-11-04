@@ -37,13 +37,11 @@ func (b *Backend) unheld(entry string) error {
 		return fmt.Errorf("list the processes that may hold it: %w", err)
 	}
 	for _, p := range procs {
-		args, err := b.processes.args(p.PID)
+		args, read, err := b.candidateArgs(p)
 		switch {
-		case errors.Is(err, proctable.ErrGone):
-			continue
-		case err != nil && strings.Contains(p.Command, program):
-			return fmt.Errorf("read process %d, which may hold it: %w", p.PID, err)
 		case err != nil:
+			return fmt.Errorf("read process %d, which may hold it: %w", p.PID, err)
+		case !read:
 			continue
 		}
 		switch started, ok := startedName(args.Argv); {
@@ -55,6 +53,22 @@ func (b *Backend) unheld(entry string) error {
 		}
 	}
 	return nil
+}
+
+// candidateArgs reads the listed process p's arguments for a proof, through
+// args: read, once they are; unread, with no error, for a process gone
+// meanwhile, or for one still unreadable whose kernel name has no zmx in it,
+// which is skipped (decision 70); and the read's failure for one whose name
+// has, as a zmx renamed or wrapped may be.
+func (b *Backend) candidateArgs(p proctable.Process) (args proctable.Args, read bool, err error) {
+	args, err = b.processes.args(p.PID)
+	switch {
+	case err == nil:
+		return args, true, nil
+	case errors.Is(err, proctable.ErrGone) || !strings.Contains(p.Command, program):
+		return proctable.Args{}, false, nil
+	}
+	return proctable.Args{}, false, err
 }
 
 // mayHold reports whether a process exec'd with args, starting the session
@@ -125,12 +139,14 @@ const endPoll = 20 * time.Millisecond
 // speaks: SIGTERM, sent through signal to the one process the process table
 // proves that daemon, read again alone just before the signal, as a pid may
 // be reused between a proof and the signal. A zmx daemon answers SIGTERM by
-// unlinking its socket, then hanging up its program and exiting once the
-// program has gone, so EndDaemon waits, within the kill ceiling, for the
-// socket and the daemon both to go: once it returns, nothing the session ran
-// holds anything. A session whose socket has already gone is ended. It
-// signals nothing without the proof: no such process or more than one, or a
-// table it can't read, as off darwin.
+// unlinking its socket, then hanging up its program, SIGKILLing it half a
+// second later and exiting once it has reaped it, so the end never waits on
+// the program's own shutdown. EndDaemon waits, within the kill ceiling, for
+// the socket and the daemon both to go: once it returns, nothing the session
+// ran holds anything. A session whose socket has already gone is ended, and a
+// daemon gone or exiting by the second read, as another's SIGTERM leaves one,
+// is waited for as one signalled. It signals nothing without the proof: no
+// such process or more than one, or a table it can't read, as off darwin.
 func (b *Backend) EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error) error {
 	if err := b.endDaemon(ctx, name, signal); err != nil {
 		return fmt.Errorf("end the daemon of session %q: %w", name, err)
@@ -149,7 +165,10 @@ func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid in
 	if err != nil {
 		return err
 	}
-	if err := b.stillDaemon(d); err != nil {
+	switch err := b.stillDaemon(d); {
+	case errors.Is(err, proctable.ErrGone):
+		return b.awaitEnded(ctx, name, d.PID)
+	case err != nil:
 		return err
 	}
 	if err := signal(d.PID, syscall.SIGTERM); err != nil {
@@ -165,8 +184,11 @@ type daemon struct {
 }
 
 // sessionDaemon is the one process the process table proves the zmx daemon
-// of the session name in the Backend's directory, as isSessionDaemon proves
-// one.
+// of the session name in the Backend's directory: detached, and running it as
+// runsDaemonOf reads its arguments. A detached process it can't read is
+// judged as candidateArgs judges it: one whose kernel name contains zmx
+// proves nothing, and any other is skipped (decision 70), so the proof
+// signals only a process it read whole.
 func (b *Backend) sessionDaemon(name string) (daemon, error) {
 	procs, err := b.processes.list()
 	if err != nil {
@@ -174,11 +196,14 @@ func (b *Backend) sessionDaemon(name string) (daemon, error) {
 	}
 	var daemons []daemon
 	for _, p := range procs {
-		switch d, is, err := b.isSessionDaemon(p, name); {
+		if !detached(p) {
+			continue
+		}
+		switch args, read, err := b.candidateArgs(p); {
 		case err != nil:
-			return daemon{}, err
-		case is:
-			daemons = append(daemons, d)
+			return daemon{}, fmt.Errorf("read process %d: %w", p.PID, err)
+		case read && b.runsDaemonOf(args, name):
+			daemons = append(daemons, daemon{Process: p, args: args})
 		}
 	}
 	if len(daemons) != 1 {
@@ -189,7 +214,8 @@ func (b *Backend) sessionDaemon(name string) (daemon, error) {
 
 // stillDaemon reads the proved daemon d again, alone, and fails unless it
 // reads as it did when proved: its parent, its terminal, its argv and its
-// environment. A pid reused since reads otherwise, or has gone.
+// environment. A pid reused since reads otherwise. One gone or exiting fails
+// with proctable.ErrGone.
 func (b *Backend) stillDaemon(d daemon) error {
 	p, err := b.processes.read(d.PID)
 	if err != nil {
@@ -205,65 +231,66 @@ func (b *Backend) stillDaemon(d daemon) error {
 	return nil
 }
 
-// isSessionDaemon reads the listed process p, and reports whether it is
-// proved the zmx daemon of the session name in the Backend's directory: a
-// child of launchd on no terminal, as zmx's daemon is once it has forked away
-// from the command that started it, where a client of the session is neither,
-// exec'd as one of startingVerbs on name, after its environment's
-// ZMX_SESSION_PREFIX, with its directory the Backend's, compared canonically.
-// A process gone as it is read is none, as is one whose environment the
-// kernel doesn't show, which names no directory.
-func (b *Backend) isSessionDaemon(p proctable.Process, name string) (daemon, bool, error) {
-	if p.PPID != 1 || p.Terminal {
-		return daemon{}, false, nil
-	}
-	args, err := b.processes.args(p.PID)
-	switch {
-	case errors.Is(err, proctable.ErrGone):
-		return daemon{}, false, nil
-	case err != nil:
-		return daemon{}, false, fmt.Errorf("read process %d: %w", p.PID, err)
-	}
+// detached reports whether p may be a zmx daemon: a child of launchd on no
+// terminal, as zmx's daemon is once it has forked away from the command that
+// started it, where a client of the session is neither.
+func detached(p proctable.Process) bool { return p.PPID == 1 && !p.Terminal }
+
+// runsDaemonOf reports whether a detached process exec'd with args is proved
+// the zmx daemon of the session name in the Backend's directory: exec'd as
+// one of startingVerbs on name, after its environment's ZMX_SESSION_PREFIX,
+// with its directory the Backend's, compared canonically. One whose
+// environment the kernel doesn't show names no directory, so is none.
+func (b *Backend) runsDaemonOf(args proctable.Args, name string) bool {
 	started, ok := startedName(args.Argv)
-	is := ok && len(args.Env) > 0 && lookup(args.Env, envPrefix)+started == name && b.isDir(DirFor(args.Env))
-	return daemon{Process: p, args: args}, is, nil
+	return ok && len(args.Env) > 0 && lookup(args.Env, envPrefix)+started == name && b.isDir(DirFor(args.Env))
 }
 
 // awaitEnded waits, within the kill ceiling, for the session name's socket to
-// go and pid, its daemon, signalled, to exit.
+// go and pid, its daemon, to exit.
 func (b *Backend) awaitEnded(ctx context.Context, name string, pid int) error {
 	ctx, cancel := b.bound(ctx, b.limits.kill, "")
 	defer cancel()
 	for {
-		switch ended, err := b.ended(name, pid); {
+		left, err := b.left(name, pid)
+		switch {
 		case err != nil:
 			return fmt.Errorf("look for pid %d's end: %w", pid, err)
-		case ended:
+		case left == "":
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("pid %d outlived SIGTERM: %w", pid, context.Cause(ctx))
+			return fmt.Errorf("%s: %w", left, context.Cause(ctx))
 		case <-time.After(endPoll):
 		}
 	}
 }
 
-// ended reports whether the session name's socket has gone and pid, once its
-// daemon, has exited: the table shows no such process, or one no longer
-// proved the daemon, as a pid reused is not.
-func (b *Backend) ended(name string, pid int) (bool, error) {
+// left says what is left of the session name's daemon, pid: its socket while
+// it is held, then pid while the table shows it the daemon still; nothing
+// once the table shows no such process, or one no longer proved the daemon,
+// as a pid reused is not. Unlike the proof's scan, it fails on pid unreadable,
+// whatever the kernel names it: that one pid was the daemon.
+func (b *Backend) left(name string, pid int) (string, error) {
 	if _, held, err := b.held(name); err != nil || held {
-		return false, err
+		return "its socket is still there", err
 	}
 	procs, err := b.processes.list()
 	if err != nil {
-		return false, fmt.Errorf("list the processes: %w", err)
+		return "", fmt.Errorf("list the processes: %w", err)
 	}
 	i := slices.IndexFunc(procs, func(p proctable.Process) bool { return p.PID == pid })
-	if i < 0 {
-		return true, nil
+	if i < 0 || !detached(procs[i]) {
+		return "", nil
 	}
-	_, is, err := b.isSessionDaemon(procs[i], name)
-	return !is, err
+	switch args, err := b.processes.args(pid); {
+	case errors.Is(err, proctable.ErrGone):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("read process %d: %w", pid, err)
+	case b.runsDaemonOf(args, name):
+		return fmt.Sprintf("pid %d is still its daemon", pid), nil
+	}
+	return "", nil
 }

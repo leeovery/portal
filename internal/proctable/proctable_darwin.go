@@ -30,8 +30,9 @@ func List() ([]Process, error) {
 }
 
 // Read reads pid, from the kernel as it is called, as List lists this user's
-// processes. It fails with ErrGone for a process that has exited or is
-// exiting, a zombie among them.
+// processes. Unlike List, it filters by no uid: another user's pid reads too.
+// It fails with ErrGone for a process that has exited or is exiting, a zombie
+// among them.
 func Read(pid int) (Process, error) {
 	procs, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
 	switch {

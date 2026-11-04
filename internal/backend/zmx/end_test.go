@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -203,12 +204,15 @@ func TestEndDaemon_ReadsTheProvedDaemonAgainJustBeforeTheSignal(t *testing.T) {
 		name  string
 		again func(dir string) []zmx.Process
 	}{
-		{"gone", func(string) []zmx.Process { return nil }},
 		{"its pid reused by another program", again(func(p *zmx.Process) { p.Args.Argv = []string{"sleep", "60"} })},
 		{"its pid reused in another environment", again(func(p *zmx.Process) { p.Args.Env = append(p.Args.Env, "HOME=/h") })},
 		{"its pid reused by a child of another process", again(func(p *zmx.Process) { p.PPID = 50 })},
 		{"its pid reused on a terminal", again(func(p *zmx.Process) { p.Terminal = true })},
 		{"unreadable", again(func(p *zmx.Process) { p.Err = errors.New("operation not permitted") })},
+		{"unreadable, the kernel naming it another program", again(func(p *zmx.Process) {
+			p.Command = "helpd"
+			p.Err = errors.New("operation not permitted")
+		})},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newEndingWorld(t)
@@ -265,6 +269,23 @@ func TestEndDaemon_ReadsAgainAProcessWhoseReadsFailAWhile(t *testing.T) {
 		}
 	})
 
+	t.Run("the daemon at its second read", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(settling(daemonOf(100, w.dir, "work")))
+		w.provedThen(t)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+
 	t.Run("another process", func(t *testing.T) {
 		w := newEndingWorld(t)
 		other := settling(zmxProcess([]string{"node", "server.js"}))
@@ -300,18 +321,131 @@ func TestEndDaemon_FailsWhenTheDaemonOutlivesTheSignal(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		then func(w *endingWorld, t *testing.T)
+		left string
 	}{
-		{"its socket and it both stay", func(*endingWorld, *testing.T) {}},
-		{"its socket goes and it stays", func(w *endingWorld, t *testing.T) { w.unlink(t) }},
-		{"it goes and its socket stays", func(w *endingWorld, _ *testing.T) { w.table() }},
+		{"its socket and it both stay", func(*endingWorld, *testing.T) {}, "its socket is still there"},
+		{"its socket goes and it stays", func(w *endingWorld, t *testing.T) { w.unlink(t) }, "pid 100 is still its daemon"},
+		{"it goes and its socket stays", func(w *endingWorld, _ *testing.T) { w.table() }, "its socket is still there"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newEndingWorld(t)
 			w.table(daemonOf(100, w.dir, "work"))
 
 			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() { tt.then(w, t) }))
-			if !errors.Is(err, backend.ErrTimeout) {
-				t.Errorf("EndDaemon(work) = %v, want ErrTimeout past the kill ceiling", err)
+			if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(fmt.Sprint(err), tt.left) {
+				t.Errorf("EndDaemon(work) = %v, want ErrTimeout past the kill ceiling, saying %q", err, tt.left)
+			}
+		})
+	}
+}
+
+// The pid it waits on was the daemon, so it reads that one strictly: unread,
+// whatever the kernel names it, it may be the daemon still.
+func TestEndDaemon_FailsWhenTheDaemonItWaitsOnCantBeRead(t *testing.T) {
+	for _, command := range []string{"zmx", "helpd"} {
+		t.Run(command, func(t *testing.T) {
+			w := newEndingWorld(t)
+			w.table(daemonOf(100, w.dir, "work"))
+			end := w.signalled(func() {
+				w.unlink(t)
+				unreadable := daemonOf(100, w.dir, "work")
+				unreadable.Command = command
+				unreadable.Err = errors.New("operation not permitted")
+				w.table(unreadable)
+			})
+
+			if err := w.b.EndDaemon(t.Context(), "work", end); err == nil || errors.Is(err, backend.ErrTimeout) {
+				t.Errorf("EndDaemon(work) = %v, want the read's failure", err)
+			}
+		})
+	}
+}
+
+// A daemon gone or exiting by its second read, as a SIGTERM from another,
+// such as a concurrent uninstall's, leaves one, is ended, not an end that
+// failed: EndDaemon waits for its socket and it to go, as for one it
+// signalled, and signals nothing.
+func TestEndDaemon_WaitsForADaemonGoneByItsSecondRead(t *testing.T) {
+	exiting := func(dir string) []zmx.Process {
+		p := daemonOf(100, dir, "work")
+		p.Reads = zmx.FailReads(fmt.Errorf("read arguments of process 100: %w", proctable.ErrGone))
+		return []zmx.Process{p}
+	}
+	gone := func(string) []zmx.Process { return nil }
+
+	for _, tt := range []struct {
+		name    string
+		again   func(dir string) []zmx.Process
+		unlinks bool
+		ends    bool
+	}{
+		{"gone, its socket unlinked", gone, true, true},
+		{"exiting, its socket unlinked", exiting, true, true},
+		{"gone, its socket left behind", gone, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			proved, again := daemonOf(100, w.dir, "work"), tt.again(w.dir)
+			listings := 0
+			zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
+				switch listings++; listings {
+				case 1:
+					return []zmx.Process{proved}, nil
+				case 2:
+					if tt.unlinks {
+						w.unlink(t)
+					}
+					return again, nil
+				}
+				return nil, nil
+			})
+
+			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}))
+			switch {
+			case tt.ends && err != nil:
+				t.Errorf("EndDaemon(work) = %v, want nil: another's signal ended it", err)
+			case !tt.ends && (!errors.Is(err, backend.ErrTimeout) || !strings.Contains(fmt.Sprint(err), "its socket is still there")):
+				t.Errorf("EndDaemon(work) = %v, want ErrTimeout past the kill ceiling, its socket still there", err)
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+}
+
+// Under load the proof's scan catches processes unreadable, such as helpd, as
+// it does the holder proof's: an unreadable child of launchd on no terminal
+// keeps the signal back only when the kernel names it zmx (decision 70).
+func TestEndDaemon_IsKeptFromTheSignalByAnUnreadableProcessOnlyWhenTheKernelNamesItZmx(t *testing.T) {
+	for _, tt := range []struct {
+		command string
+		keeps   bool
+	}{
+		{"helpd", false},
+		{"node", false},
+		{"zmx", true},
+		{"zmx-foo", true},
+		{".zmx-wrapped", true},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			w := newEndingWorld(t)
+			unreadable := zmxProcess(nil)
+			unreadable.PID, unreadable.Command = 300, tt.command
+			unreadable.Err = errors.New("operation not permitted")
+			w.table(daemonOf(100, w.dir, "work"), unreadable)
+			end := w.signalled(func() {
+				w.unlink(t)
+				w.table()
+			})
+
+			err := w.b.EndDaemon(t.Context(), "work", end)
+			got := w.signals()
+			switch {
+			case tt.keeps && (err == nil || len(got) != 0):
+				t.Errorf("EndDaemon(work) = %v, signals %v; want the read's failure, and none sent", err, got)
+			case !tt.keeps && (err != nil || len(got) != 1 || got[0] != syscall.SIGTERM):
+				t.Errorf("EndDaemon(work) = %v, signals %v; want nil, and one SIGTERM", err, got)
 			}
 		})
 	}

@@ -12,9 +12,10 @@ import (
 // within its bounds.
 func TestCeilingsWithinWhatTheSaverLockAllows(t *testing.T) {
 	for call, c := range map[string]struct{ ceiling, allowed time.Duration }{
-		"a read":   {defaultCeilings.probe, saverhost.ReadCeiling},
-		"a create": {defaultCeilings.create, saverhost.CreateCeiling},
-		"a kill":   {defaultCeilings.kill, saverhost.KillCeiling},
+		"a read":        {defaultCeilings.probe, saverhost.ReadCeiling},
+		"a create":      {defaultCeilings.create, saverhost.CreateCeiling},
+		"a kill":        {defaultCeilings.kill, saverhost.KillCeiling},
+		"a run's grace": {pipeGrace, saverhost.RunGrace},
 	} {
 		if c.ceiling > c.allowed {
 			t.Errorf("%s's ceiling = %s, want within the %s saver.lock allows it", call, c.ceiling, c.allowed)

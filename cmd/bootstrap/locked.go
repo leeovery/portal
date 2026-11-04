@@ -17,8 +17,9 @@ import (
 // bound and each backend call at its ceiling. zmx's own ceilings are pinned
 // within saverhost's.
 const (
-	// checkRun is zmx version, a run of the binary bounded as Create is.
-	checkRun = saverhost.CreateCeiling
+	// checkRun is zmx version, a run of the binary bounded as Create is, with
+	// its grace.
+	checkRun = saverhost.CreateCeiling + saverhost.RunGrace
 	// sweepRun is the sweep's reads of the saver session and of the listing
 	// the flags are judged by.
 	sweepRun = 2 * saverhost.ReadCeiling
@@ -30,10 +31,10 @@ const (
 	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
 	// restoreRun is restore's listing, before its first session.
 	restoreRun = saverhost.ReadCeiling
-	// restoreSessionRun is a session restore makes: its Create; when that
-	// fails, a read, a probe ceiling's wait and a read again. Its record
-	// waits on commit.lock besides.
-	restoreSessionRun = saverhost.CreateCeiling + 3*saverhost.ReadCeiling
+	// restoreSessionRun is a session restore makes: its Create, a run of the
+	// binary, with its grace; when that fails, a read, a probe ceiling's wait
+	// and a read again. Its record waits on commit.lock besides.
+	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling
 	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
 	// and the flag, latch and index files.
 	lockSlack = 15 * time.Second
