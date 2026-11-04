@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/log"
@@ -49,7 +50,8 @@ func New(stateDir string) Registry {
 }
 
 // ReadOnly is r for a caller that must change nothing, as doctor: it reads
-// and asks as r does, but removes nothing it proves stale.
+// and asks as r does, but removes nothing it proves stale, and refuses to ask
+// a runner to detach.
 func (r Registry) ReadOnly() Registry {
 	r.readOnly = true
 	return r
@@ -125,9 +127,22 @@ func (r Registry) askOn(ctx context.Context, rn registered, session string, req 
 	return r.ask(ctx, rn, req)
 }
 
+// errReadOnly refuses a request that would change something, asked of a
+// read-only registry.
+var errReadOnly = errors.New("a read-only registry asks no runner to act")
+
 // DetachToPicker asks every runner registered on session to detach to the
-// picker, and returns how many accepted.
+// picker, all at once, and returns how many accepted. Each request has a
+// deadline of its own, timeout from when it is sent or sooner as ctx ends,
+// so a runner slow to answer, as one unsure of its session confirming
+// through the backend, costs the others nothing. With none accepting it
+// returns runnertoken.ErrNoRunner when no runner was there to ask, a runner
+// proved gone as it was asked included, and otherwise every refusal and
+// failure. A read-only registry refuses, asking no runner.
 func (r Registry) DetachToPicker(ctx context.Context, session string) (int, error) {
+	if r.readOnly {
+		return 0, errReadOnly
+	}
 	runners, err := r.on(session)
 	if err != nil {
 		return 0, err
@@ -135,15 +150,35 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 	if len(runners) == 0 {
 		report("detach to picker", runnertoken.ErrNoRunner, "session", session)
 	}
-	accepted := 0
-	for _, rn := range runners {
-		err := r.ask(ctx, rn, request{Request: reqDetachToPicker})
-		report("detach to picker", err, "session", session, "target_pid", rn.PID)
-		if err == nil {
+	accepted, reasons := 0, []error{}
+	for i, err := range r.askAll(ctx, runners, request{Request: reqDetachToPicker}) {
+		report("detach to picker", err, "session", session, "target_pid", runners[i].PID)
+		switch {
+		case err == nil:
 			accepted++
+		case !errors.Is(err, runnertoken.ErrNoRunner):
+			reasons = append(reasons, err)
 		}
 	}
-	return accepted, nil
+	switch {
+	case accepted > 0:
+		return accepted, nil
+	case len(reasons) > 0:
+		return 0, fmt.Errorf("no runner on %s detached to the picker: %w", session, errors.Join(reasons...))
+	}
+	return 0, fmt.Errorf("%w on %s", runnertoken.ErrNoRunner, session)
+}
+
+// askAll sends req to every runner at once, returning each one's result in
+// their order.
+func (r Registry) askAll(ctx context.Context, runners []registered, req request) []error {
+	errs := make([]error, len(runners))
+	var asked sync.WaitGroup
+	for i, rn := range runners {
+		asked.Go(func() { errs[i] = r.ask(ctx, rn, req) })
+	}
+	asked.Wait()
+	return errs
 }
 
 // report logs a request's result: accepted, refused, failed, or no runner to

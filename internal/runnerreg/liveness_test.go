@@ -24,8 +24,8 @@ var askedBy = map[string]func(t *testing.T, r runnerreg.Registry, token string){
 		}
 	},
 	"detach to picker": func(t *testing.T, r runnerreg.Registry, _ string) {
-		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
-			t.Errorf("DetachToPicker = %d, %v; want none accepted", accepted, err)
+		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err == nil || accepted != 0 {
+			t.Errorf("DetachToPicker = %d, %v; want none accepted, and why", accepted, err)
 		}
 	},
 }
@@ -173,8 +173,8 @@ func TestLiveness_LeavesWhatItCannotRead(t *testing.T) {
 			if err := r.Switch(t.Context(), "odd001", "api-x7Kd9a", "blog-c3d4"); err == nil || errors.Is(err, runnertoken.ErrNoRunner) {
 				t.Errorf("Switch = %v, want a failure, and not ErrNoRunner", err)
 			}
-			if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
-				t.Errorf("DetachToPicker = %d, %v; want none asked", accepted, err)
+			if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) || accepted != 0 {
+				t.Errorf("DetachToPicker = %d, %v; want none asked, ErrNoRunner", accepted, err)
 			}
 			if !exists(t, r.EntryPath("odd001")) || !exists(t, r.SocketPath("odd001")) {
 				t.Error("an entry the registry could not read was removed")
@@ -199,8 +199,8 @@ func TestLiveness_ReadingTheDirectorySweepsEverySession(t *testing.T) {
 	writeEntry(t, r, "kept01", entryFor(otherPID(t), "blog-c3d4"))
 	refusingSocket(t, r.SocketPath("kept01"))
 
-	if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil {
-		t.Fatalf("DetachToPicker: %v", err)
+	if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) {
+		t.Fatalf("DetachToPicker = %v, want ErrNoRunner, with no runner on the session", err)
 	}
 
 	if got, want := files(t, r.Dir()), []string{"kept01.json", "kept01.sock"}; !slices.Equal(got, want) {
@@ -221,8 +221,8 @@ func TestLiveness_AnOrphanSocketThatRefusesGoesWhenTheDirectoryIsRead(t *testing
 	refusingSocket(t, r.SocketPath("orphan"))
 	silentSocket(t, r.SocketPath("listen")) // a runner yet to write its entry
 
-	if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil {
-		t.Fatalf("DetachToPicker: %v", err)
+	if _, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) {
+		t.Fatalf("DetachToPicker = %v, want ErrNoRunner, with no runner on the session", err)
 	}
 
 	if exists(t, r.SocketPath("orphan")) {
@@ -241,13 +241,37 @@ func TestLiveness_AReadOnlyRegistryRemovesNothing(t *testing.T) {
 	r := runnerreg.New(stateDir(t))
 	writeEntry(t, r, "gone01", entryFor(deadPID(t), "api-x7Kd9a"))
 	refusingSocket(t, r.SocketPath("gone01"))
-	refusingSocket(t, r.SocketPath("orphan"))
 
-	if _, err := r.ReadOnly().DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil {
-		t.Fatalf("DetachToPicker: %v", err)
+	if _, err := r.ReadOnly().ConfirmSession(t.Context(), "gone01", "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) {
+		t.Fatalf("ConfirmSession = %v, want ErrNoRunner from the dead runner", err)
 	}
 
-	if got, want := files(t, r.Dir()), []string{"gone01.json", "gone01.sock", "orphan.sock"}; !slices.Equal(got, want) {
-		t.Errorf("the registry holds %q, want everything left, %q", got, want)
+	if got, want := files(t, r.Dir()), []string{"gone01.json", "gone01.sock"}; !slices.Equal(got, want) {
+		t.Errorf("the registry holds %q, want the dead runner's entry and socket left, %q", got, want)
+	}
+}
+
+func TestLiveness_AReadOnlyRegistryAsksNoRunnerToDetach(t *testing.T) {
+	sink := logtest.Install(t)
+	r := runnerreg.New(stateDir(t))
+	h := &handler{}
+	register(t, r, "live01", "api-x7Kd9a", h)
+	writeEntry(t, r, "gone01", entryFor(deadPID(t), "api-x7Kd9a"))
+	refusingSocket(t, r.SocketPath("orphan"))
+	staged := files(t, r.Dir())
+
+	accepted, err := r.ReadOnly().DetachToPicker(t.Context(), "api-x7Kd9a")
+
+	if err == nil || errors.Is(err, runnertoken.ErrNoRunner) || accepted != 0 {
+		t.Errorf("DetachToPicker = %d, %v; want the read-only registry's refusal, and not ErrNoRunner", accepted, err)
+	}
+	if _, detaches := h.asked(); detaches != 0 {
+		t.Errorf("the runner on the session detached %d times, want never asked", detaches)
+	}
+	if got := files(t, r.Dir()); !slices.Equal(got, staged) {
+		t.Errorf("the registry holds %q, want what was staged, %q", got, staged)
+	}
+	if recs := sink.Records().Matching("attach", "detach to picker"); len(recs) > 0 {
+		t.Errorf("logged a detach to the picker: %+v", recs)
 	}
 }

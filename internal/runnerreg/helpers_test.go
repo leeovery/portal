@@ -60,6 +60,13 @@ func (h *handler) askedConfirms() []string {
 	return slices.Clone(h.confirms)
 }
 
+// askedDeadlines is the deadline of each request the handler took.
+func (h *handler) askedDeadlines() []time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.deadlines)
+}
+
 func (h *handler) take(ctx context.Context, record func()) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -158,6 +165,17 @@ func listen(t *testing.T, path string, handle func(net.Conn)) {
 func silentSocket(t *testing.T, path string) {
 	t.Helper()
 	listen(t, path, func(conn net.Conn) { _, _ = io.Copy(io.Discard, conn) })
+}
+
+// stallingSocket listens on path, reads each request whole, sends it on
+// requests, and never answers.
+func stallingSocket(t *testing.T, path string, requests chan<- string) {
+	t.Helper()
+	listen(t, path, func(conn net.Conn) {
+		line, _ := io.ReadAll(conn)
+		requests <- string(line)
+		<-t.Context().Done()
+	})
 }
 
 // answeringSocket listens on path, reads each request whole, and answers it

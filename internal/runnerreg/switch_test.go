@@ -2,10 +2,12 @@ package runnerreg_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,18 @@ import (
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/runnertoken"
 )
+
+// deadlineOf is the deadline a request line carries.
+func deadlineOf(t *testing.T, line string) time.Time {
+	t.Helper()
+	var q struct {
+		Deadline time.Time `json:"deadline"`
+	}
+	if err := json.Unmarshal([]byte(line), &q); err != nil {
+		t.Fatalf("read the request %q: %v", line, err)
+	}
+	return q.Deadline
+}
 
 // contextWithin is a context of the test's that ends after d.
 func contextWithin(t *testing.T, d time.Duration) (context.Context, context.CancelFunc) {
@@ -130,18 +144,91 @@ func TestDetachToPicker(t *testing.T) {
 	t.Run("it counts only acceptances", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		register(t, r, "first1", "api-x7Kd9a", &handler{})
-		register(t, r, "second", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
+		register(t, r, "second", "api-x7Kd9a", &handler{})
+		register(t, r, "third1", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
 
-		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 1 {
-			t.Errorf("DetachToPicker = %d, %v; want the one acceptance", accepted, err)
+		if accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 2 {
+			t.Errorf("DetachToPicker = %d, %v; want the two acceptances", accepted, err)
 		}
 	})
 
-	t.Run("no runner on the session accepts none, and says so", func(t *testing.T) {
+	t.Run("none accepting is every runner's refusal or failure, and not ErrNoRunner", func(t *testing.T) {
+		runnerreg.SetTimeout(t, 100*time.Millisecond)
+		r := runnerreg.New(stateDir(t))
+		register(t, r, "first1", "api-x7Kd9a", &handler{refuse: errors.New("the runner is not attached")})
+		register(t, r, "second", "api-x7Kd9a", &handler{refuse: errors.New("the attach is ending")})
+		writeEntry(t, r, "silent", entryFor(os.Getpid(), "api-x7Kd9a"))
+		silentSocket(t, r.SocketPath("silent"))
+
+		accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a")
+
+		if accepted != 0 || !errors.Is(err, runnertoken.ErrRefused) || errors.Is(err, runnertoken.ErrNoRunner) {
+			t.Fatalf("DetachToPicker = %d, %v; want none accepted, refused, and not ErrNoRunner", accepted, err)
+		}
+		for _, why := range []string{"the runner is not attached", "the attach is ending"} {
+			if !strings.Contains(err.Error(), why) {
+				t.Errorf("DetachToPicker = %q, want it to say %q", err, why)
+			}
+		}
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Errorf("DetachToPicker = %q, want the silent runner's timeout among the reasons", err)
+		}
+	})
+
+	t.Run("a runner that never answers costs the others nothing: each request is sent at once, under its own deadline", func(t *testing.T) {
+		runnerreg.SetTimeout(t, 300*time.Millisecond)
+		r := runnerreg.New(stateDir(t))
+		accepting := &handler{}
+		register(t, r, "accept", "api-x7Kd9a", accepting)
+		requests := make(chan string, 3)
+		for _, token := range []string{"stall1", "stall2", "stall3"} {
+			writeEntry(t, r, token, entryFor(os.Getpid(), "api-x7Kd9a"))
+			stallingSocket(t, r.SocketPath(token), requests)
+		}
+		start := time.Now()
+
+		accepted, err := r.DetachToPicker(t.Context(), "api-x7Kd9a")
+
+		if err != nil || accepted != 1 {
+			t.Errorf("DetachToPicker = %d, %v; want the answering runner's acceptance", accepted, err)
+		}
+		deadlines := accepting.askedDeadlines()
+		for range 3 {
+			deadlines = append(deadlines, deadlineOf(t, <-requests))
+		}
+		// Asked in turn, a request sent after a stalled one would carry a
+		// deadline past the stalled one's wait for its answer.
+		for _, d := range deadlines {
+			if !d.Before(start.Add(runnerreg.Timeout() + runnerreg.AnswerGrace)) {
+				t.Errorf("a request's deadline is %v after the asking began, want each within its own %v", d.Sub(start), runnerreg.Timeout())
+			}
+		}
+	})
+
+	t.Run("the caller's deadline caps every runner's", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		first, second := &handler{}, &handler{}
+		register(t, r, "first1", "api-x7Kd9a", first)
+		register(t, r, "second", "api-x7Kd9a", second)
+		ctx, cancel := contextWithin(t, runnerreg.Timeout()/2+runnerreg.AnswerGrace)
+		defer cancel()
+		end, _ := ctx.Deadline()
+
+		if accepted, err := r.DetachToPicker(ctx, "api-x7Kd9a"); err != nil || accepted != 2 {
+			t.Fatalf("DetachToPicker = %d, %v; want both runners' acceptances", accepted, err)
+		}
+		for name, h := range map[string]*handler{"first": first, "second": second} {
+			if got, want := h.askedDeadlines(), end.Add(-runnerreg.AnswerGrace); len(got) != 1 || !got[0].Equal(want) {
+				t.Errorf("the %s runner was given deadlines %v, want %v, the caller's less the answer's grace", name, got, want)
+			}
+		}
+	})
+
+	t.Run("no runner on the session is ErrNoRunner, and says so", func(t *testing.T) {
 		sink := logtest.Install(t)
 
-		if accepted, err := runnerreg.New(stateDir(t)).DetachToPicker(t.Context(), "api-x7Kd9a"); err != nil || accepted != 0 {
-			t.Errorf("DetachToPicker = %d, %v; want none, from a registry never made", accepted, err)
+		if accepted, err := runnerreg.New(stateDir(t)).DetachToPicker(t.Context(), "api-x7Kd9a"); !errors.Is(err, runnertoken.ErrNoRunner) || accepted != 0 {
+			t.Errorf("DetachToPicker = %d, %v; want none, ErrNoRunner, from a registry never made", accepted, err)
 		}
 		rec := sink.Records().Matching("attach", "detach to picker").Only(t, "detach to picker record")
 		if got := rec.AttrString(t, "result"); got != "no runner" {
