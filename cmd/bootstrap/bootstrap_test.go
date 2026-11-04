@@ -3,765 +3,356 @@ package bootstrap
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/restore"
 )
 
+// stepRecorder is every seam of an Orchestrator, recording each call in
+// order and answering as its fields say. Its zero value's saver is absent and
+// speaks protocol 0; newRecorder's is present and speaks the Orchestrator's.
 type stepRecorder struct {
 	calls []string
 
-	SetErr                error
-	SweepOrphanDaemonsErr error
-	EnsureSaverErr        error
-	RestoreCorrupt        bool
-	RestoreErr            error
-	ClearErr              error
+	ZmxErr, RaiseErr, OrphansErr, FlagsErr, LowerErr, LatchErr error
+	SaverUp                                                    bool
+	PresentErr, EnsureErr, ProtocolErr                         error
+	Speaks                                                     int
+	Result                                                     restore.Result
+	// Sessions is how many sessions Restore reports taking up, through the
+	// progress SetProgress installed.
+	Sessions int
+
+	noSaver  []bool
+	progress func(n, m int)
 }
 
-func (r *stepRecorder) Set() error {
-	r.calls = append(r.calls, "Set")
-	return r.SetErr
-}
+func newRecorder() *stepRecorder { return &stepRecorder{SaverUp: true, Speaks: portalProtocol} }
 
-func (r *stepRecorder) Clear() error {
-	r.calls = append(r.calls, "Clear")
-	return r.ClearErr
-}
+// portalProtocol is the protocol the tests' Orchestrator speaks.
+const portalProtocol = 1
+
+func (r *stepRecorder) record(call string) { r.calls = append(r.calls, call) }
+
+func (r *stepRecorder) CheckZmx(context.Context) error { r.record("CheckZmx"); return r.ZmxErr }
+func (r *stepRecorder) Raise() error                   { r.record("Raise"); return r.RaiseErr }
+func (r *stepRecorder) Lower() error                   { r.record("Lower"); return r.LowerErr }
+func (r *stepRecorder) WriteLatch() error              { r.record("WriteLatch"); return r.LatchErr }
 
 func (r *stepRecorder) SweepOrphanDaemons(context.Context) error {
-	r.calls = append(r.calls, "SweepOrphanDaemons")
-	return r.SweepOrphanDaemonsErr
+	r.record("SweepOrphanDaemons")
+	return r.OrphansErr
+}
+
+func (r *stepRecorder) SweepStaleFlags(context.Context) error {
+	r.record("SweepStaleFlags")
+	return r.FlagsErr
+}
+
+func (r *stepRecorder) Present(context.Context) (bool, error) {
+	r.record("Present")
+	return r.SaverUp, r.PresentErr
 }
 
 func (r *stepRecorder) EnsureSaver(context.Context) error {
-	r.calls = append(r.calls, "EnsureSaver")
-	return r.EnsureSaverErr
+	r.record("EnsureSaver")
+	return r.EnsureErr
 }
 
-func (r *stepRecorder) Restore() (bool, error) {
-	r.calls = append(r.calls, "Restore")
-	return r.RestoreCorrupt, r.RestoreErr
+func (r *stepRecorder) Protocol(context.Context) (int, error) {
+	r.record("Protocol")
+	return r.Speaks, r.ProtocolErr
+}
+
+func (r *stepRecorder) SetProgress(fn func(n, m int)) { r.progress = fn }
+
+func (r *stepRecorder) Restore(_ context.Context, noSaver bool) restore.Result {
+	r.record("Restore")
+	r.noSaver = append(r.noSaver, noSaver)
+	if r.progress != nil {
+		for n := 1; n <= r.Sessions; n++ {
+			r.progress(n, r.Sessions)
+		}
+	}
+	return r.Result
 }
 
 func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 	return &Orchestrator{
+		Zmx:           r,
 		Restoring:     r,
 		OrphanSweeper: r,
+		FlagSweeper:   r,
 		Saver:         r,
+		Protocol:      portalProtocol,
 		Restore:       r,
+		Latch:         r,
 		Logger:        logger,
 	}
 }
 
-// wantAllCalls is every step's recorder call, in the order Run makes them.
-var wantAllCalls = []string{"Set", "SweepOrphanDaemons", "EnsureSaver", "Restore", "Clear"}
-
-// errCorruptIndex stands in for a Restorer's corrupt-index cause.
-var errCorruptIndex = errors.New("sessions.json corrupt")
-
-func equalCalls(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
+// wantAllCalls is every seam call a bootstrap makes, in the order Run makes
+// them.
+var wantAllCalls = []string{
+	"CheckZmx", "Raise", "SweepOrphanDaemons", "SweepStaleFlags",
+	"Present", "EnsureSaver", "Protocol", "Restore", "Lower", "WriteLatch",
 }
 
-func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
-	r := &stepRecorder{}
-	o := newOrchestrator(r, nil)
+// stepNames is the seven steps, in order.
+var stepNames = []string{"CheckZmx", "RaiseRestoring", "Sweep", "EnsureSaver", "Restore", "LowerRestoring", "WriteLatch"}
 
-	_, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-
-	want := wantAllCalls
-	if !equalCalls(r.calls, want) {
-		t.Errorf("call order = %v, want %v", r.calls, want)
-	}
-}
-
-func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testing.T) {
-	sentinel := errors.New("set marker boom")
-	r := &stepRecorder{SetErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel, got %v", err)
-	}
-	var fatal *FatalError
-	if !errors.As(err, &fatal) {
-		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
-	}
-	wantPrefix := "Portal failed to set @portal-restoring marker: "
-	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
-		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
-	}
-	if !strings.Contains(fatal.UserMessage, "set marker boom") {
-		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "set marker boom")
-	}
-	if sink.Records().AtExactLevel(slog.LevelError) == nil {
-		t.Error("expected an ERROR record before the fatal return")
-	}
-	for _, c := range r.calls {
-		if c == "EnsureSaver" {
-			t.Errorf("EnsureSaver must not run when Set fails; calls = %v", r.calls)
-		}
-		if c == "Restore" {
-			t.Errorf("Restore must not run when Set fails; calls = %v", r.calls)
-		}
-	}
-	found := slices.Contains(r.calls, "Set")
-	if !found {
-		t.Errorf("expected Set in calls, got %v", r.calls)
-	}
-}
-
-func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *testing.T) {
-	sentinel := errors.New("saver boom")
-	r := &stepRecorder{EnsureSaverErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must not return saver failures; got %v", err)
-	}
-	wantWarning := SaverDownWarning()
-	if len(warnings) != 1 {
-		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
-	}
-	if len(warnings[0].Lines) != len(wantWarning.Lines) {
-		t.Fatalf("warning Lines len = %d, want %d", len(warnings[0].Lines), len(wantWarning.Lines))
-	}
-	for i := range wantWarning.Lines {
-		if warnings[0].Lines[i] != wantWarning.Lines[i] {
-			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], wantWarning.Lines[i])
-		}
-	}
-	want := wantAllCalls
-	if !equalCalls(r.calls, want) {
-		t.Errorf("calls = %v, want %v", r.calls, want)
-	}
-	if sink.Records().AtExactLevel(slog.LevelWarn) == nil {
-		t.Error("expected at least one WARN record")
-	}
-}
-
-func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
-	corruptErr := fmt.Errorf("restore: %w", errCorruptIndex)
-	r := &stepRecorder{RestoreCorrupt: true, RestoreErr: corruptErr}
-	o := newOrchestrator(r, nil)
-
-	_, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must treat corrupt-index restore as soft; got %v", err)
-	}
-
-	restoreIdx, clearIdx := -1, -1
-	for i, c := range r.calls {
-		if c == "Restore" {
-			restoreIdx = i
-		}
-		if c == "Clear" {
-			clearIdx = i
-		}
-	}
-	if restoreIdx == -1 {
-		t.Fatalf("Restore not called; calls = %v", r.calls)
-	}
-	if clearIdx == -1 {
-		t.Fatalf("Clear not called; calls = %v", r.calls)
-	}
-	if clearIdx < restoreIdx {
-		t.Errorf("Clear must run after Restore; calls = %v", r.calls)
-	}
-}
-
-func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
-	sentinel := errors.New("clear boom")
-	r := &stepRecorder{ClearErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel, got %v", err)
-	}
-	var fatal *FatalError
-	if !errors.As(err, &fatal) {
-		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
-	}
-	wantPrefix := "Portal failed to clear @portal-restoring marker: "
-	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
-		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
-	}
-	if !strings.Contains(fatal.UserMessage, "clear boom") {
-		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "clear boom")
-	}
-	if sink.Records().AtExactLevel(slog.LevelError) == nil {
-		t.Error("expected an ERROR record before the fatal return")
-	}
-}
-
-func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
-	r1 := &stepRecorder{}
-	o := newOrchestrator(r1, nil)
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("first Run errored: %v", err)
-	}
-	want := wantAllCalls
-	if !equalCalls(r1.calls, want) {
-		t.Errorf("first calls = %v, want %v", r1.calls, want)
-	}
-
-	r2 := &stepRecorder{}
-	o.Restoring = r2
-	o.OrphanSweeper = r2
-	o.Saver = r2
-	o.Restore = r2
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("second Run errored: %v", err)
-	}
-	if !equalCalls(r2.calls, want) {
-		t.Errorf("second calls = %v, want %v", r2.calls, want)
-	}
-}
-
-func TestOrchestratorRun_reportsNoServerStarted(t *testing.T) {
-	o := newOrchestrator(&stepRecorder{}, nil)
-
-	started, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-	if started {
-		t.Error("serverStarted = true; Run starts no server")
-	}
-}
-
-func TestOrchestratorRun_doesNotCallEnsureSaverWhenSetFails(t *testing.T) {
-	r := &stepRecorder{SetErr: errors.New("set boom")}
-	o := newOrchestrator(r, nil)
-
-	_, _, _ = o.Run(context.Background())
-
-	for _, c := range r.calls {
-		if c == "EnsureSaver" {
-			t.Fatalf("EnsureSaver must not run when Set fails; calls = %v", r.calls)
-		}
-	}
-}
-
-func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T) {
-	sentinel := errors.New("saver boom")
-	r := &stepRecorder{EnsureSaverErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must not surface saver failures; got %v", err)
-	}
-
-	if _, ok := errors.AsType[*FatalError](err); ok {
-		t.Errorf("Run unexpectedly returned *FatalError on soft saver failure: %v", err)
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
-	}
-	if warnings[0].Lines[0] != SaverDownWarning().Lines[0] {
-		t.Errorf("warnings[0] = %q, want SaverDownWarning", warnings[0].Lines[0])
-	}
-	if errs := sink.Records().AtExactLevel(slog.LevelError); errs != nil {
-		t.Errorf("no ERROR record may be emitted for a soft saver failure; got %+v", errs)
-	}
-	if sink.Records().AtExactLevel(slog.LevelWarn) == nil {
-		t.Error("expected a WARN record for the soft saver failure")
-	}
-}
-
-func TestOrchestratorRun_appendsSaverDownWarningOnEnsureSaverFailure(t *testing.T) {
-	r := &stepRecorder{EnsureSaverErr: errors.New("saver boom")}
-	o := newOrchestrator(r, nil)
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must not return saver failures; got %v", err)
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
-	}
-	want := SaverDownWarning()
-	if len(warnings[0].Lines) != len(want.Lines) {
-		t.Fatalf("warning Lines len = %d, want %d", len(warnings[0].Lines), len(want.Lines))
-	}
-	for i := range want.Lines {
-		if warnings[0].Lines[i] != want.Lines[i] {
-			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], want.Lines[i])
-		}
-	}
-}
-
-func TestOrchestratorRun_appendsCorruptSessionsJSONWarningOnRestoreErrCorruptIndex(t *testing.T) {
-	corruptErr := fmt.Errorf("restore: %w", errCorruptIndex)
-	r := &stepRecorder{RestoreCorrupt: true, RestoreErr: corruptErr}
-	o := newOrchestrator(r, nil)
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must treat ErrCorruptIndex as soft; got err=%v", err)
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
-	}
-	want := CorruptSessionsJSONWarning()
-	for i := range want.Lines {
-		if warnings[0].Lines[i] != want.Lines[i] {
-			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], want.Lines[i])
-		}
-	}
-}
-
-func TestOrchestratorRun_accumulatesMultipleSoftWarnings(t *testing.T) {
-	r := &stepRecorder{
-		EnsureSaverErr: errors.New("saver boom"),
-		RestoreCorrupt: true,
-		RestoreErr:     fmt.Errorf("restore: %w", errCorruptIndex),
-	}
-	o := newOrchestrator(r, nil)
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must treat both as soft; got err=%v", err)
-	}
-	if len(warnings) != 2 {
-		t.Fatalf("warnings len = %d, want 2; got %#v", len(warnings), warnings)
-	}
-	if warnings[0].Lines[0] != SaverDownWarning().Lines[0] {
-		t.Errorf("warnings[0] = %q, want SaverDownWarning first", warnings[0].Lines[0])
-	}
-	if warnings[1].Lines[0] != CorruptSessionsJSONWarning().Lines[0] {
-		t.Errorf("warnings[1] = %q, want CorruptSessionsJSONWarning second", warnings[1].Lines[0])
-	}
-}
-
-func TestOrchestratorRun_doesNotReturnFatalErrorForCorruptIndex(t *testing.T) {
-	r := &stepRecorder{
-		RestoreCorrupt: true,
-		RestoreErr:     fmt.Errorf("restore: %w", errCorruptIndex),
-	}
-	o := newOrchestrator(r, nil)
-
-	_, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("expected nil err for soft corrupt-index path; got %v", err)
-	}
-}
-
-func TestOrchestratorRun_doesNotEscalateNonCorruptRestoreError(t *testing.T) {
-	sentinel := errors.New("restore boom")
-	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must NOT escalate a non-corrupt soft restore error; got %v", err)
-	}
-	if sink.Records().AtExactLevel(slog.LevelWarn) == nil {
-		t.Error("expected a WARN record for the contract-violating soft failure")
-	}
-	if errs := sink.Records().AtExactLevel(slog.LevelError); errs != nil {
-		t.Errorf("no ERROR record may be emitted for a soft restore failure; got %+v", errs)
-	}
-}
-
-func TestOrchestratorRun_doesNotEmitCorruptWarningWhenCorruptFalse(t *testing.T) {
-	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: errors.New("soft boom")}
-	o := newOrchestrator(r, nil)
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-	for _, w := range warnings {
-		if len(w.Lines) > 0 && w.Lines[0] == CorruptSessionsJSONWarning().Lines[0] {
-			t.Errorf("must not emit CorruptSessionsJSONWarning when corrupt=false; got %#v", warnings)
-		}
-	}
-}
-
-func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
-	r := &stepRecorder{}
-	o := newOrchestrator(r, nil)
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Errorf("expected zero warnings on happy path; got %#v", warnings)
-	}
-}
+var errBoom = errors.New("boom")
 
 var _ Runner = (*Orchestrator)(nil)
 
-func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
+func TestOrchestratorRun_RunsTheSevenStepsInOrder(t *testing.T) {
+	r := newRecorder()
 
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
+	warnings, err := newOrchestrator(r, nil).Run(context.Background())
+
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Run = %v, %v; want a clean run", warnings, err)
 	}
+	if !slices.Equal(r.calls, wantAllCalls) {
+		t.Errorf("calls = %v, want %v", r.calls, wantAllCalls)
+	}
+}
 
-	steps := wantAllCalls
-	debugs := sink.Records().AtExactLevel(slog.LevelDebug)
-	for _, step := range steps {
-		matches := 0
-		for _, rec := range debugs {
-			if strings.Contains(rec.AttrOrEmpty("step"), step) {
-				matches++
+func TestOrchestratorRun_FatalSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		stage   func(*stepRecorder)
+		step    int
+		message string
+		// calls is every call made, the failing one last.
+		calls []string
+	}{
+		{
+			name: "checking zmx",
+			stage: func(r *stepRecorder) {
+				r.ZmxErr = errors.New("zmx not found on PATH; install it with: brew install neurosnap/tap/zmx")
+			},
+			step:    indexCheckZmx,
+			message: "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx",
+			calls:   wantAllCalls[:1],
+		},
+		{
+			name:    "raising the restoring flag",
+			stage:   func(r *stepRecorder) { r.RaiseErr = errBoom },
+			step:    indexRaiseRestoring,
+			message: "Portal failed to raise the restoring flag: boom",
+			calls:   wantAllCalls[:2],
+		},
+		{
+			name:    "a saver speaking another protocol, before restore creates anything",
+			stage:   func(r *stepRecorder) { r.Speaks = 2 },
+			step:    indexEnsureSaver,
+			message: "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports.",
+			calls:   wantAllCalls[:7],
+		},
+		{
+			name:    "lowering the restoring flag",
+			stage:   func(r *stepRecorder) { r.LowerErr = errBoom },
+			step:    indexLowerRestoring,
+			message: "Portal failed to lower the restoring flag: boom",
+			calls:   wantAllCalls[:9],
+		},
+	} {
+		t.Run(tc.name+" is fatal, and nothing runs after it, the latch least of all", func(t *testing.T) {
+			r := newRecorder()
+			tc.stage(r)
+			sink := &logtest.Sink{}
+
+			_, err := newOrchestrator(r, slog.New(sink)).Run(context.Background())
+
+			fatal, ok := errors.AsType[*FatalError](err)
+			if !ok {
+				t.Fatalf("Run = %v, want a *FatalError", err)
+			}
+			if fatal.UserMessage != tc.message || fatal.Step != tc.step {
+				t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, tc.message, tc.step)
+			}
+			if !slices.Equal(r.calls, tc.calls) {
+				t.Errorf("calls = %v, want %v", r.calls, tc.calls)
+			}
+			rec := sink.Records().WithMessage("step failed").AtExactLevel(slog.LevelError).Only(t, "the fatal")
+			if got := rec.AttrString(t, "step"); got != stepNames[tc.step-1] {
+				t.Errorf("fatal logged for step %q, want %q", got, stepNames[tc.step-1])
+			}
+			if got := sink.Records().WithMessage("orchestration complete"); len(got) != 0 {
+				t.Errorf("a fatal run logged %+v, want no summary", got)
+			}
+		})
+	}
+}
+
+func TestOrchestratorRun_SoftFailuresRunEveryStep(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		stage    func(*stepRecorder)
+		warnings []Warning
+	}{
+		{"the orphan sweep failing", func(r *stepRecorder) { r.OrphansErr = errBoom }, nil},
+		{"the flag sweep failing", func(r *stepRecorder) { r.FlagsErr = errBoom }, nil},
+		{"the saver's presence unread", func(r *stepRecorder) { r.PresentErr = errBoom }, nil},
+		{"the saver failing to start", func(r *stepRecorder) { r.EnsureErr = errBoom }, []Warning{SaverDownWarning()}},
+		{"the saver's protocol unread", func(r *stepRecorder) { r.ProtocolErr = errBoom }, nil},
+		{"the latch unwritten", func(r *stepRecorder) { r.LatchErr = errBoom }, nil},
+	} {
+		t.Run(tc.name+" logs a WARN, and every step runs", func(t *testing.T) {
+			r := newRecorder()
+			tc.stage(r)
+			sink := &logtest.Sink{}
+
+			warnings, err := newOrchestrator(r, slog.New(sink)).Run(context.Background())
+
+			if err != nil {
+				t.Fatalf("Run = %v, want no fatal", err)
+			}
+			if !slices.Equal(r.calls, wantAllCalls) {
+				t.Errorf("calls = %v, want %v", r.calls, wantAllCalls)
+			}
+			if !equalWarnings(warnings, tc.warnings) {
+				t.Errorf("warnings = %v, want %v", warnings, tc.warnings)
+			}
+			if !errors.Is(sink.Records().WithMessage("step failed").AtExactLevel(slog.LevelWarn).Only(t, "the failure").ErrorAttr(t, "error"), errBoom) {
+				t.Error("the WARN does not carry the failure")
+			}
+		})
+	}
+}
+
+func TestOrchestratorRun_RestoreWarnings(t *testing.T) {
+	r := newRecorder()
+	r.EnsureErr = errBoom
+	r.Result = restore.Result{IndexErr: errBoom, ListErr: errBoom, Restored: 1, Failed: 2}
+
+	warnings, err := newOrchestrator(r, nil).Run(context.Background())
+
+	if err != nil {
+		t.Fatalf("Run = %v, want no fatal", err)
+	}
+	want := []Warning{SaverDownWarning(), CorruptSessionsJSONWarning(), SessionsUnlistedWarning(), UnrestoredWarning(2)}
+	if !equalWarnings(warnings, want) {
+		t.Errorf("warnings = %v, want each step's in step order, %v", warnings, want)
+	}
+}
+
+func TestOrchestratorRun_NoSaverRan(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(*stepRecorder)
+		want  bool
+	}{
+		{"a saver found running", func(*stepRecorder) {}, false},
+		{"no saver found", func(r *stepRecorder) { r.SaverUp = false }, true},
+		{"a saver that couldn't be told, which may have watched sessions end", func(r *stepRecorder) { r.PresentErr = errBoom }, false},
+		{"a saver found running that then failed to start again", func(r *stepRecorder) { r.EnsureErr = errBoom }, false},
+	} {
+		t.Run("restore is told no saver ran exactly when step 4 found none: "+tc.name, func(t *testing.T) {
+			r := newRecorder()
+			tc.stage(r)
+
+			if _, err := newOrchestrator(r, nil).Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			if !slices.Equal(r.noSaver, []bool{tc.want}) {
+				t.Errorf("Restore's noSaver = %v, want [%v]", r.noSaver, tc.want)
+			}
+		})
+	}
+}
+
+func TestOrchestratorRun_Logs(t *testing.T) {
+	t.Run("it logs each step entering and complete, in order, then one summary", func(t *testing.T) {
+		r := newRecorder()
+		r.EnsureErr = errBoom
+		sink := &logtest.Sink{}
+
+		if _, err := newOrchestrator(r, slog.New(sink)).Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		for msg, level := range map[string]slog.Level{"step entering": slog.LevelDebug, "step complete": slog.LevelInfo} {
+			var got []string
+			for _, rec := range sink.Records().WithMessage(msg).AtExactLevel(level) {
+				got = append(got, rec.AttrString(t, "step"))
+			}
+			if !slices.Equal(got, stepNames) {
+				t.Errorf("%q steps = %v, want %v", msg, got, stepNames)
 			}
 		}
-		if matches < 1 {
-			t.Errorf("step %q: expected ≥1 DEBUG record referencing it; got debugs=%+v", step, debugs)
+		summary := sink.Records().WithMessage("orchestration complete").AtExactLevel(slog.LevelInfo).Only(t, "the summary")
+		if got := summary.IntAttr(t, "steps"); got != int64(len(stepNames)) {
+			t.Errorf("steps = %d, want %d", got, len(stepNames))
 		}
-	}
-}
-
-func TestOrchestratorRun_stepEntryLinesEmitUnderBootstrapComponent(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink).With("component", "bootstrap"))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	entries := sink.Records().WithMessage("step entering").AtExactLevel(slog.LevelDebug)
-	for i, rec := range entries {
-		if comp := rec.AttrString(t, "component"); comp != "bootstrap" {
-			t.Errorf("step-entry DEBUG[%d] component = %q, want %q (record=%+v)", i, comp, "bootstrap", rec)
+		if got := summary.IntAttr(t, "warnings"); got != 1 {
+			t.Errorf("warnings = %d, want 1", got)
 		}
-	}
-	if len(entries) == 0 {
-		t.Errorf("expected ≥1 'step entering' DEBUG record; got debugs=%+v", sink.Records().AtExactLevel(slog.LevelDebug))
-	}
+		summary.RequireDuration(t, "took")
+	})
 }
 
-var closedStepNames = []string{
-	"SetRestoring",
-	"SweepOrphanDaemons",
-	"EnsureSaver",
-	"Restore",
-	"ClearRestoring",
-}
+func TestOrchestratorRun_Progress(t *testing.T) {
+	t.Run("it emits each step as it completes, the restore's sessions between, numbered from 1", func(t *testing.T) {
+		r := newRecorder()
+		r.Sessions = 2
+		var got []StepEvent
+		ctx := WithProgressEmitter(context.Background(), func(ev StepEvent) { got = append(got, ev) })
 
-// stepCompleteNames returns the step named by each "step complete" INFO, in
-// emission order.
-func stepCompleteNames(t *testing.T, sink *logtest.Sink) []string {
-	t.Helper()
-	var out []string
-	for _, rec := range stepCompleteRecords(sink) {
-		out = append(out, rec.AttrString(t, "step"))
-	}
-	return out
-}
-
-func stepCompleteRecords(sink *logtest.Sink) logtest.Records {
-	return sink.Records().WithMessage("step complete").AtExactLevel(slog.LevelInfo)
-}
-
-func orchestrationCompleteRecords(sink *logtest.Sink) logtest.Records {
-	return sink.Records().WithMessage("orchestration complete").AtExactLevel(slog.LevelInfo)
-}
-
-func TestOrchestratorRun_emitsStepCompletePerStepInOrder(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	got := stepCompleteNames(t, sink)
-	if !equalCalls(got, closedStepNames) {
-		t.Errorf("step complete names = %v, want %v", got, closedStepNames)
-	}
-}
-
-func TestOrchestratorRun_emitsStepCompleteUnderBootstrapComponent(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink).With("component", "bootstrap"))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	completes := stepCompleteRecords(sink)
-	for i, rec := range completes {
-		if comp := rec.AttrString(t, "component"); comp != "bootstrap" {
-			t.Errorf("step-complete INFO[%d] component = %q, want %q (record=%+v)", i, comp, "bootstrap", rec)
+		if _, err := newOrchestrator(r, nil).Run(ctx); err != nil {
+			t.Fatalf("Run: %v", err)
 		}
-	}
-	if len(completes) != len(closedStepNames) {
-		t.Errorf("step complete INFO count = %d, want %d; got %+v", len(completes), len(closedStepNames), completes)
-	}
-}
 
-func TestOrchestratorRun_emitsOrchestrationCompleteOnCleanBootstrap(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	rec := orchestrationCompleteRecords(sink).Only(t, "orchestration complete INFO")
-	if got := rec.IntAttr(t, "steps"); got != int64(len(closedStepNames)) {
-		t.Errorf("orchestration complete steps = %d, want %d", got, len(closedStepNames))
-	}
-	if got := rec.IntAttr(t, "warnings"); got != 0 {
-		t.Errorf("orchestration complete warnings = %d, want 0", got)
-	}
-	rec.RequireDuration(t, "took")
-}
-
-func TestOrchestratorRun_orchestrationCompleteReportsAccumulatedWarnings(t *testing.T) {
-	r := &stepRecorder{
-		EnsureSaverErr: errors.New("saver boom"),
-		RestoreCorrupt: true,
-		RestoreErr:     fmt.Errorf("restore: %w", errCorruptIndex),
-	}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must treat both as soft; got %v", err)
-	}
-	if len(warnings) != 2 {
-		t.Fatalf("warnings len = %d, want 2; got %#v", len(warnings), warnings)
-	}
-
-	rec := orchestrationCompleteRecords(sink).Only(t, "orchestration complete INFO")
-	if got := rec.IntAttr(t, "warnings"); got != 2 {
-		t.Errorf("orchestration complete warnings = %d, want 2", got)
-	}
-	if got := rec.IntAttr(t, "steps"); got != int64(len(closedStepNames)) {
-		t.Errorf("orchestration complete steps = %d, want %d", got, len(closedStepNames))
-	}
-}
-
-func TestOrchestratorRun_fatalFirstStepShortCircuitsBeforeSummaries(t *testing.T) {
-	r := &stepRecorder{SetErr: errors.New("set boom")}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected fatal error, got nil")
-	}
-
-	if completes := stepCompleteRecords(sink); completes != nil {
-		t.Errorf("no step complete must fire on a fatal first-step abort; got %+v", completes)
-	}
-	if summaries := orchestrationCompleteRecords(sink); summaries != nil {
-		t.Errorf("orchestration summary must not fire on a fatal first-step abort; got %+v", summaries)
-	}
-	if sink.Records().AtExactLevel(slog.LevelError) == nil {
-		t.Error("expected the fatal ERROR line as the terminal record")
-	}
-}
-
-func TestOrchestratorRun_fatalClearRestoringShortCircuitsBeforeSummary(t *testing.T) {
-	r := &stepRecorder{ClearErr: errors.New("clear boom")}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected fatal error, got nil")
-	}
-
-	if summaries := orchestrationCompleteRecords(sink); summaries != nil {
-		t.Errorf("orchestration summary must not fire on a fatal ClearRestoring abort; got %+v", summaries)
-	}
-
-	got := stepCompleteNames(t, sink)
-	for _, name := range got {
-		if name == "ClearRestoring" {
-			t.Errorf("no step complete must fire for the aborting ClearRestoring step; got %v", got)
+		want := []StepEvent{
+			{Index: 1, Name: "CheckZmx"},
+			{Index: 2, Name: "RaiseRestoring"},
+			{Index: 3, Name: "Sweep"},
+			{Index: 4, Name: "EnsureSaver"},
+			{Index: 5, Name: "Restore", RestoreN: 1, RestoreM: 2},
+			{Index: 5, Name: "Restore", RestoreN: 2, RestoreM: 2},
+			{Index: 5, Name: "Restore"},
+			{Index: 6, Name: "LowerRestoring"},
+			{Index: 7, Name: "WriteLatch"},
 		}
-	}
-	wantBefore := closedStepNames[:len(closedStepNames)-1]
-	if !equalCalls(got, wantBefore) {
-		t.Errorf("step complete names before the ClearRestoring abort = %v, want %v", got, wantBefore)
-	}
-	if sink.Records().AtExactLevel(slog.LevelError) == nil {
-		t.Error("expected the fatal ERROR line as the terminal record")
-	}
-}
-
-func TestOrchestratorRun_retainsEnteringDebugWithNormalizedNames(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	var enteringNames []string
-	for _, rec := range sink.Records().WithMessage("step entering").AtExactLevel(slog.LevelDebug) {
-		enteringNames = append(enteringNames, rec.AttrString(t, "step"))
-	}
-	if !equalCalls(enteringNames, closedStepNames) {
-		t.Errorf("entering DEBUG step names = %v, want %v", enteringNames, closedStepNames)
-	}
-	for _, name := range enteringNames {
-		if strings.Contains(name, "@portal-restoring") {
-			t.Errorf("entering DEBUG must use normalized names, not legacy %q", name)
+		if !slices.Equal(got, want) {
+			t.Errorf("events = %+v\nwant %+v", got, want)
 		}
-	}
-}
+	})
 
-func countCalls(calls []string, name string) int {
-	n := 0
-	for _, c := range calls {
-		if c == name {
-			n++
+	t.Run("a fatal step emits nothing for itself or after it", func(t *testing.T) {
+		r := newRecorder()
+		r.RaiseErr = errBoom
+		var got []StepEvent
+		ctx := WithProgressEmitter(context.Background(), func(ev StepEvent) { got = append(got, ev) })
+
+		if _, err := newOrchestrator(r, nil).Run(ctx); err == nil {
+			t.Fatal("Run = nil, want the fatal")
 		}
-	}
-	return n
-}
 
-func indexOf(calls []string, name string) int {
-	for i, c := range calls {
-		if c == name {
-			return i
+		if want := []StepEvent{{Index: 1, Name: "CheckZmx"}}; !slices.Equal(got, want) {
+			t.Errorf("events = %+v, want %+v", got, want)
 		}
-	}
-	return -1
-}
+	})
 
-func TestOrchestratorRun_invokesSweepOrphanDaemonsExactlyOnce(t *testing.T) {
-	r := &stepRecorder{}
-	o := newOrchestrator(r, nil)
+	t.Run("with no emitter, restore reports no progress", func(t *testing.T) {
+		r := newRecorder()
 
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	if got := countCalls(r.calls, "SweepOrphanDaemons"); got != 1 {
-		t.Errorf("SweepOrphanDaemons call count = %d, want 1; calls=%v", got, r.calls)
-	}
-}
-
-func TestOrchestratorRun_runsSweepOrphanDaemonsBetweenSetAndEnsureSaver(t *testing.T) {
-	r := &stepRecorder{}
-	o := newOrchestrator(r, nil)
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	setIdx := indexOf(r.calls, "Set")
-	sweepIdx := indexOf(r.calls, "SweepOrphanDaemons")
-	saverIdx := indexOf(r.calls, "EnsureSaver")
-	if setIdx == -1 || sweepIdx == -1 || saverIdx == -1 {
-		t.Fatalf("expected Set, SweepOrphanDaemons, EnsureSaver in calls; got %v", r.calls)
-	}
-	if setIdx >= sweepIdx || sweepIdx >= saverIdx {
-		t.Errorf("expected ordering Set < SweepOrphanDaemons < EnsureSaver; got Set=%d SweepOrphanDaemons=%d EnsureSaver=%d (%v)",
-			setIdx, sweepIdx, saverIdx, r.calls)
-	}
-}
-
-func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
-	sentinel := errors.New("orphan-sweep boom")
-	r := &stepRecorder{SweepOrphanDaemonsErr: sentinel}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, _, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("SweepOrphanDaemons failure must not propagate; got %v", err)
-	}
-
-	if _, ok := errors.AsType[*FatalError](err); ok {
-		t.Errorf("Run unexpectedly returned *FatalError on soft SweepOrphanDaemons failure: %v", err)
-	}
-	warn := sink.Records().WithMessage("step failed").AtExactLevel(slog.LevelWarn).Only(t, "step-failure WARN")
-	if step := warn.AttrString(t, "step"); step != stepSweepOrphanDaemons {
-		t.Errorf("step-failure WARN step = %q, want %q", step, stepSweepOrphanDaemons)
-	}
-	if got := warn.ErrorAttr(t, "error"); !errors.Is(got, sentinel) {
-		t.Errorf("step-failure WARN error = %v, want %v", got, sentinel)
-	}
-
-	want := wantAllCalls
-	if !equalCalls(r.calls, want) {
-		t.Errorf("calls = %v, want %v", r.calls, want)
-	}
-}
-
-func TestOrchestratorRun_sweepOrphanDaemonsHappyPathEmitsNoWarn(t *testing.T) {
-	r := &stepRecorder{}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run errored: %v", err)
-	}
-
-	for _, rec := range sink.Records().AtExactLevel(slog.LevelWarn) {
-		if rec.AttrOrEmpty("step") == stepSweepOrphanDaemons {
-			t.Errorf("nil-returning SweepOrphanDaemons must not emit a Warn entry; got %+v", rec)
+		if _, err := newOrchestrator(r, nil).Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
 		}
-	}
+
+		if r.progress != nil {
+			t.Error("SetProgress was called on the synchronous route")
+		}
+	})
 }
 
-func TestOrchestratorRun_surfacesASaverThatNeverCameUpAsAWarningAndAbortsNoStep(t *testing.T) {
-	r := &stepRecorder{EnsureSaverErr: fmt.Errorf("%w: last=identify-dead pid=4321", tmux.ErrSaverDaemonNotReady)}
-	sink := &logtest.Sink{}
-	o := newOrchestrator(r, slog.New(sink))
-
-	_, warnings, err := o.Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run must not turn a saver that never came up into a fatal; got %v", err)
-	}
-	if len(warnings) != 1 || warnings[0].Lines[0] != SaverDownWarning().Lines[0] {
-		t.Fatalf("warnings = %#v; want exactly one SaverDownWarning", warnings)
-	}
-	want := wantAllCalls
-	if !slices.Equal(r.calls, want) {
-		t.Errorf("calls = %v, want every step to run: %v", r.calls, want)
-	}
+func equalWarnings(got, want []Warning) bool {
+	return slices.EqualFunc(got, want, func(a, b Warning) bool { return strings.Join(a.Lines, "\n") == strings.Join(b.Lines, "\n") })
 }

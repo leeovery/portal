@@ -356,7 +356,7 @@ func TestOpenTUI_FatalBeforeModelConstruction(t *testing.T) {
 	bootstrapWarnings.Add(staged)
 	t.Cleanup(func() { bootstrapWarnings.Drain() })
 
-	err := openTUI(contextCommand(), pickerLanding{}, nil, false)
+	err := openTUI(contextCommand(), pickerLanding{}, nil)
 
 	if err == nil {
 		t.Fatal("openTUI returned nil; want the broken-built-in fatal")

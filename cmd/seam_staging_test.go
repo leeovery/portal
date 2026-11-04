@@ -63,7 +63,7 @@ func TestWithFuncSeam(t *testing.T) {
 		production := funcPointer(openTUIFunc)
 
 		t.Run("installs a replacement", func(t *testing.T) {
-			withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error { return nil })
+			withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error { return nil })
 			if funcPointer(openTUIFunc) == production {
 				t.Fatal("openTUIFunc is still the production default inside the test that installed a replacement")
 			}

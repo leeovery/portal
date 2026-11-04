@@ -8,27 +8,30 @@ import (
 
 func TestNewFatal_carriesUserMessage(t *testing.T) {
 	cause := errors.New("underlying boom")
-	fatal := NewFatal("Portal failed to start tmux server: underlying boom", cause)
+	fatal := NewFatal("Portal failed to raise the restoring flag: underlying boom", cause)
 
 	if fatal == nil {
 		t.Fatal("NewFatal returned nil")
 	}
-	if fatal.UserMessage != "Portal failed to start tmux server: underlying boom" {
-		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, "Portal failed to start tmux server: underlying boom")
+	if fatal.UserMessage != "Portal failed to raise the restoring flag: underlying boom" {
+		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, "Portal failed to raise the restoring flag: underlying boom")
 	}
 	if fatal.Cause != cause {
 		t.Errorf("Cause = %v, want %v", fatal.Cause, cause)
+	}
+	if fatal.Step != 0 {
+		t.Errorf("Step = %d, want 0 until a step claims it", fatal.Step)
 	}
 }
 
 func TestFatalError_ErrorReturnsUserMessage(t *testing.T) {
 	fatal := &FatalError{
-		UserMessage: "Portal failed to register tmux hooks: x",
+		UserMessage: "Portal failed to lower the restoring flag: x",
 		Cause:       errors.New("x"),
 	}
 
-	if got := fatal.Error(); got != "Portal failed to register tmux hooks: x" {
-		t.Errorf("Error() = %q, want %q", got, "Portal failed to register tmux hooks: x")
+	if got := fatal.Error(); got != "Portal failed to lower the restoring flag: x" {
+		t.Errorf("Error() = %q, want %q", got, "Portal failed to lower the restoring flag: x")
 	}
 }
 
@@ -97,6 +100,32 @@ func TestSaverDownWarning_returnsExactSpecCopy(t *testing.T) {
 		}
 	}
 	assertRepointedToDoctor(t, got)
+}
+
+func TestSessionsUnlistedWarning_returnsExactCopy(t *testing.T) {
+	assertLines(t, SessionsUnlistedWarning(), []string{
+		"Portal couldn't list zmx's sessions — restoration skipped.",
+		"Run `portal doctor` for details.",
+	})
+}
+
+func TestUnrestoredWarning_countsTheSessions(t *testing.T) {
+	assertLines(t, UnrestoredWarning(1), []string{
+		"Portal couldn't restore 1 saved session — kept for the next restore.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+	})
+	assertLines(t, UnrestoredWarning(3), []string{
+		"Portal couldn't restore 3 saved sessions — kept for the next restore.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+	})
+}
+
+func assertLines(t *testing.T, w Warning, want []string) {
+	t.Helper()
+	if strings.Join(w.Lines, "\n") != strings.Join(want, "\n") {
+		t.Errorf("Lines = %q, want %q", w.Lines, want)
+	}
+	assertRepointedToDoctor(t, w)
 }
 
 func assertRepointedToDoctor(t *testing.T, w Warning) {

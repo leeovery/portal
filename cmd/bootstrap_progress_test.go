@@ -13,12 +13,11 @@ import (
 
 type emittingRunner struct {
 	steps    int
-	started  bool
 	warnings []bootstrap.Warning
 	err      error
 }
 
-func (r *emittingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
+func (r *emittingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
 	if r.err == nil {
 		for i := 1; i <= r.steps; i++ {
@@ -27,7 +26,7 @@ func (r *emittingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, er
 			}
 		}
 	}
-	return r.started, r.warnings, r.err
+	return r.warnings, r.err
 }
 
 func drainPipe(t *testing.T, receiver tea.Cmd) []tea.Msg {
@@ -50,7 +49,7 @@ func drainPipe(t *testing.T, receiver tea.Cmd) []tea.Msg {
 }
 
 func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -68,8 +67,8 @@ func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) 
 			sawClosed = true
 		}
 	}
-	if progressCount != 11 {
-		t.Errorf("progress msgs = %d, want 11 (one per real step)", progressCount)
+	if progressCount != 7 {
+		t.Errorf("progress msgs = %d, want 7 (one per real step)", progressCount)
 	}
 	if !sawComplete {
 		t.Error("never received terminal BootstrapCompleteMsg")
@@ -80,7 +79,7 @@ func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) 
 }
 
 func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -92,8 +91,8 @@ func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
 			order = append(order, pm.Index)
 		}
 	}
-	if len(order) != 11 {
-		t.Fatalf("got %d progress indices, want 11: %v", len(order), order)
+	if len(order) != 7 {
+		t.Fatalf("got %d progress indices, want 7: %v", len(order), order)
 	}
 	for i, idx := range order {
 		if idx != i+1 {
@@ -102,20 +101,8 @@ func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
 	}
 }
 
-func TestBootstrapProgressPipe_CarriesServerStartedOnTerminalEvent(t *testing.T) {
-	runner := &emittingRunner{steps: 1, started: true}
-	pipe := newBootstrapProgressPipe()
-	pipe.start(context.Background(), runner)
-
-	_ = drainPipe(t, pipe.receiver())
-
-	if !pipe.ServerStarted() {
-		t.Error("pipe.ServerStarted() = false after a cold (started=true) run; serverStarted not carried over the channel")
-	}
-}
-
 func TestBootstrapProgressPipe_FastColdBoot_ZeroRestoreItems(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -131,14 +118,14 @@ func TestBootstrapProgressPipe_FastColdBoot_ZeroRestoreItems(t *testing.T) {
 			sawComplete = true
 		}
 	}
-	if progressCount != 11 || !sawComplete {
-		t.Errorf("fast cold boot: progress=%d complete=%v, want 11 + terminal", progressCount, sawComplete)
+	if progressCount != 7 || !sawComplete {
+		t.Errorf("fast cold boot: progress=%d complete=%v, want 7 + terminal", progressCount, sawComplete)
 	}
 }
 
 func TestBootstrapProgressPipe_ClosesChannelOnFatal(t *testing.T) {
 	boom := errors.New("ensure-server boom")
-	runner := &emittingRunner{steps: 0, started: true, err: boom}
+	runner := &emittingRunner{steps: 0, err: boom}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -163,7 +150,7 @@ func TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent(t *testing.T) {
 		{Lines: []string{"saver is down", "restart to recover"}},
 		{Lines: []string{"sessions.json corrupt"}},
 	}
-	runner := &emittingRunner{steps: 1, started: true, warnings: warnings}
+	runner := &emittingRunner{steps: 1, warnings: warnings}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -190,7 +177,7 @@ func TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent(t *testing.T) {
 }
 
 func TestBootstrapProgressPipe_ReceiverStopsReIssuingOnClose(t *testing.T) {
-	runner := &emittingRunner{steps: 3, started: true}
+	runner := &emittingRunner{steps: 3}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 	receiver := pipe.receiver()

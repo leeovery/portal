@@ -94,12 +94,13 @@ func joinEntries() []sessionindex.Entry {
 	}
 }
 
-// stageJoin stages the join's world as the backend, with its index, and
-// returns the Fake.
+// stageJoin stages the join's world as the backend, with its index and no
+// bootstrap owed, and returns the Fake.
 func stageJoin(t *testing.T) *backendtest.Fake {
 	t.Helper()
 	fake := backendtest.New(joinOwn, joinRecreated, joinUnindexed, joinUnprintable, joinSilent)
 	fake.StopAnswering(joinSilent.Name)
+	withBootstrapDeps(t, BootstrapDeps{})
 	withBackendDeps(t, BackendDeps{Backend: fake})
 	seedIndex(t, joinEntries()...)
 	return fake

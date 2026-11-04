@@ -18,14 +18,12 @@ type bootstrapProgress struct {
 	RestoreN int
 	RestoreM int
 
-	Done          bool
-	ServerStarted bool
-	Warnings      []bootstrap.Warning
-	Fatal         error
+	Done     bool
+	Warnings []bootstrap.Warning
+	Fatal    error
 
-	// FailedStep is the last emitted step index + 1: a fatal step emits no
-	// step-complete event for itself and nothing after, so the next un-emitted
-	// index is the one that failed. Zero on a successful run.
+	// FailedStep is the index of the step a fatal names, zero on a successful
+	// run and for a fatal before any step, such as bootstrap.lock's.
 	FailedStep int
 }
 
@@ -39,9 +37,8 @@ type bootstrapProgressPipe struct {
 	// Written by the goroutine before it closes the channel and read only after
 	// the program exits, so the close the receiver observed is the ordering edge
 	// and no further synchronisation is needed.
-	serverStarted bool
-	warnings      []bootstrap.Warning
-	err           error
+	warnings []bootstrap.Warning
+	err      error
 }
 
 func newBootstrapProgressPipe() *bootstrapProgressPipe {
@@ -53,13 +50,7 @@ func newBootstrapProgressPipe() *bootstrapProgressPipe {
 // start closes the channel on success and fatal alike, so the receiver always
 // observes a close and never leaks a blocked receive.
 func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runner) {
-	// Written and read only on the orchestrator goroutine — the emitter runs
-	// synchronously inside Run — so it needs no synchronisation.
-	lastStep := 0
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
-		if ev.Index > lastStep {
-			lastStep = ev.Index
-		}
 		p.send(ctx, bootstrapProgress{
 			Step:     ev,
 			RestoreN: ev.RestoreN,
@@ -69,22 +60,24 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 
 	go func() {
 		defer close(p.ch)
-		started, warnings, err := runner.Run(emitCtx)
-		p.serverStarted = started
+		warnings, err := runner.Run(emitCtx)
 		p.warnings = warnings
 		p.err = err
-		failedStep := 0
-		if err != nil {
-			failedStep = lastStep + 1
-		}
 		p.send(ctx, bootstrapProgress{
-			Done:          true,
-			ServerStarted: started,
-			Warnings:      warnings,
-			Fatal:         err,
-			FailedStep:    failedStep,
+			Done:       true,
+			Warnings:   warnings,
+			Fatal:      err,
+			FailedStep: failedStep(err),
 		})
 	}()
+}
+
+// failedStep is the step err, a bootstrap's fatal, names, zero for any other.
+func failedStep(err error) int {
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
+		return fatal.Step
+	}
+	return 0
 }
 
 // send abandons the event if ctx is cancelled. Without the guard, a restore
@@ -138,8 +131,6 @@ func fatalMsgFromEvent(ev bootstrapProgress) tui.BootstrapFatalMsg {
 		Err:        ev.Fatal,
 	}
 }
-
-func (p *bootstrapProgressPipe) ServerStarted() bool { return p.serverStarted }
 
 func (p *bootstrapProgressPipe) Warnings() []bootstrap.Warning { return p.warnings }
 

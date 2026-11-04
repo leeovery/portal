@@ -561,7 +561,7 @@ func TestOpenTUI_APickWhoseSessionCantBeAttachedReopensThePicker(t *testing.T) {
 			}
 		}
 
-		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); err != nil {
+		if err := openTUI(contextCommand(), pickerLanding{}, nil); err != nil {
 			t.Fatalf("openTUI = %v, want the picker", err)
 		}
 		if len(pickers.opened) != 2 || !strings.Contains(pickers.opened[1], "No session found: api-x7Kd9a") {
@@ -576,7 +576,7 @@ func TestOpenTUI_APickWhoseSessionCantBeAttachedReopensThePicker(t *testing.T) {
 		rec.answer(runResult{err: boom})
 		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)})
 
-		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); !errors.Is(err, boom) {
+		if err := openTUI(contextCommand(), pickerLanding{}, nil); !errors.Is(err, boom) {
 			t.Errorf("openTUI = %v, want the attach's %v", err, boom)
 		}
 		if len(pickers.opened) != 1 {
@@ -637,8 +637,8 @@ func TestReopenPicker(t *testing.T) {
 		if opened.CommandPending() {
 			t.Error("a command is pending")
 		}
-		if opened.ServerStarted() || opened.ActivePage() != tui.PageSessions {
-			t.Errorf("server started %v, page %v; want the sessions page with no bootstrap behind it", opened.ServerStarted(), opened.ActivePage())
+		if opened.Bootstrapping() || opened.ActivePage() != tui.PageSessions {
+			t.Errorf("bootstrapping %v, page %v; want the sessions page with no bootstrap behind it", opened.Bootstrapping(), opened.ActivePage())
 		}
 	})
 

@@ -1,6 +1,10 @@
 package bootstrap
 
-import "github.com/leeovery/portal/internal/warning"
+import (
+	"strconv"
+
+	"github.com/leeovery/portal/internal/warning"
+)
 
 // FatalError is the typed sentinel for unrecoverable bootstrap conditions.
 // UserMessage is printed to stderr verbatim by the top-level error path. Soft
@@ -8,6 +12,9 @@ import "github.com/leeovery/portal/internal/warning"
 type FatalError struct {
 	UserMessage string
 	Cause       error
+	// Step is the index of the step that failed, as the loading page numbers
+	// it, or 0 for a failure before any step ran.
+	Step int
 }
 
 func (e *FatalError) Error() string { return e.UserMessage }
@@ -27,6 +34,28 @@ type Warning = warning.Warning
 func CorruptSessionsJSONWarning() Warning {
 	return Warning{Lines: []string{
 		"Portal state file unusable — restoration skipped.",
+		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
+	}}
+}
+
+// SessionsUnlistedWarning is a restore that couldn't list zmx's sessions, so
+// made none.
+func SessionsUnlistedWarning() Warning {
+	return Warning{Lines: []string{
+		"Portal couldn't list zmx's sessions — restoration skipped.",
+		"Run `portal doctor` for details.",
+	}}
+}
+
+// UnrestoredWarning counts the saved sessions a restore couldn't make again,
+// whose entries it keeps for the next to retry.
+func UnrestoredWarning(n int) Warning {
+	sessions := "sessions"
+	if n == 1 {
+		sessions = "session"
+	}
+	return Warning{Lines: []string{
+		"Portal couldn't restore " + strconv.Itoa(n) + " saved " + sessions + " — kept for the next restore.",
 		"Check `portal doctor` or ~/.config/portal/state/portal.log.",
 	}}
 }

@@ -72,7 +72,9 @@ type Deps struct {
 
 	InitialFilter string
 	Command       []string
-	ServerStarted bool
+	// Bootstrapping opens the picker on its loading page, which a bootstrap
+	// running behind it dismisses.
+	Bootstrapping bool
 	// CurrentSession is the session the picker runs inside, empty outside one.
 	CurrentSession string
 	// ProgressReceiver non-nil selects the concurrent cold-boot path.
@@ -127,8 +129,8 @@ func Build(deps Deps) Model {
 	if deps.Home != "" {
 		opts = append(opts, WithHome(deps.Home))
 	}
-	if deps.ServerStarted {
-		opts = append(opts, WithServerStarted(true))
+	if deps.Bootstrapping {
+		opts = append(opts, WithBootstrapping(true))
 	}
 	if deps.ProgressReceiver != nil {
 		opts = append(opts, WithProgressReceiver(deps.ProgressReceiver))

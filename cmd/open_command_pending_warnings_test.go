@@ -21,7 +21,7 @@ func coldCommandPendingModel(t *testing.T, terminal tea.Msg) tui.Model {
 	var model tea.Model = tui.Build(tui.Deps{
 		Lister:           fakePickerLister(backend.Session{Name: "portal-a1b2"}),
 		Command:          []string{"npm", "run", "dev"},
-		ServerStarted:    true,
+		Bootstrapping:    true,
 		ProgressReceiver: receiver,
 	})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

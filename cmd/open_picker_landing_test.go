@@ -63,7 +63,7 @@ func TestBuildTUIModel_PickerLanding(t *testing.T) {
 		}}
 
 		cfg := defaultTestTUIConfig()
-		cfg.serverStarted = true
+		cfg.bootstrapping = true
 		cfg.progressReceiver = func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} }
 
 		var model tea.Model = buildTUIModel(cfg, landing, nil)

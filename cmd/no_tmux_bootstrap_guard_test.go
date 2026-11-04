@@ -3,16 +3,10 @@ package cmd
 // No command runs the tmux bootstrap: its kill-barrier would take down the
 // installed Portal's _portal-saver, its hook registration would rewrite that
 // Portal's global hooks, and unregistering them would strip them, as the old
-// uninstall did in tests; its orphan sweep would SIGKILL that Portal's
-// daemon. That rests on the binary holding no path to them, which this guard
-// pins over the binary's production dependency closure rather than leaving
-// to absence.
-//
-// cmd/bootstrap stays in the closure: the bootstrap runner seam, its warnings,
-// its fatal error and the progress pipe live there, dormant until the zmx
-// bootstrap plugs in. So the guard pins that nothing in the closure can build
-// its orchestrator or orphan sweep, nor reach tmux's saver and hook entry
-// points or the daemon enumeration the sweep needs.
+// uninstall did in tests. That rests on the binary holding no path to them,
+// which this guard pins over the binary's production dependency closure
+// rather than leaving to absence. The zmx bootstrap's orphan sweep is the
+// binary's own, and kills only a daemon it proves of this backend.
 
 import (
 	"go/ast"
@@ -28,18 +22,13 @@ import (
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
-const (
-	portalModule     = "github.com/leeovery/portal"
-	bootstrapPkgPath = portalModule + "/cmd/bootstrap"
-)
+const portalModule = "github.com/leeovery/portal"
 
 // tmuxBootstrapEntries names, by package, what no production source of the
 // binary may reference. A package names its own declarations unqualified, so
 // only another package's reference matches.
 var tmuxBootstrapEntries = map[string][]string{
-	portalModule + "/internal/tmux":  {"EnsurePortalSaverVersion", "BootstrapPortalSaver", "RegisterPortalHooks", "UnregisterPortalHooks"},
-	portalModule + "/internal/state": {"PgrepPortalDaemons"},
-	bootstrapPkgPath:                 {"Orchestrator", "NewWithDefaults", "OrphanSweepCore"},
+	portalModule + "/internal/tmux": {"EnsurePortalSaverVersion", "BootstrapPortalSaver", "RegisterPortalHooks", "UnregisterPortalHooks"},
 }
 
 func TestBinaryHoldsNoPathToTheTmuxBootstrap(t *testing.T) {
@@ -150,16 +139,17 @@ var ensure = tm.EnsurePortalSaverVersion
 		}
 	})
 
-	t.Run("it reports each kind of entry point", func(t *testing.T) {
+	t.Run("it reports each tmux entry point and not the zmx bootstrap's own", func(t *testing.T) {
 		rec := &harnesstest.Recorder{}
 		runTmuxBootstrapGuard(rec, parse(t, importsAll+`
 func f() {
 	_ = &bootstrap.OrphanSweepCore{Pgrep: state.PgrepPortalDaemons}
 	_ = tm.RegisterPortalHooks(nil, nil)
+	_ = tm.UnregisterPortalHooks(nil)
 }
 `), inNoModule)
-		if len(rec.Errors) != 3 {
-			t.Errorf("errors = %q, want three", rec.Errors)
+		if len(rec.Errors) != 2 {
+			t.Errorf("errors = %q, want two, the tmux entry points alone", rec.Errors)
 		}
 	})
 

@@ -98,15 +98,20 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 
 ## Bootstrap
 
-1. Check `zmx` is present and its version is supported. Fatal otherwise.
-2. Write the `restoring` file.
-3. Sweep orphaned daemons and stale flags.
-4. Ensure `_portal-saver`.
-5. Restore.
-6. Remove `restoring`.
-7. Write the `bootstrapped` latch.
+1. Check `zmx` is on PATH and runs. Fatal otherwise.
+2. Write the `restoring` file. Fatal if it can't be written.
+3. Sweep orphaned daemons and stale flags: the flags of a session that isn't live, and a hydrating flag on a live session that isn't running restore's helper.
+4. Ensure `_portal-saver`, noting first whether one was running. Then read the protocol its daemon speaks: one Portal doesn't speak is fatal, before restore creates anything.
+5. Restore, bringing back every entry that isn't live when step 4 found no saver.
+6. Remove `restoring`. Fatal if it can't be removed.
+7. Write the `bootstrapped` latch, last and never after a fatal.
 
-The concurrent cold-path picker and its progress page stay, with the shorter step list. The tmux server anchor, hook registration, eager FIFO signalling and stale-marker sweeps go.
+The other steps warn and carry on.
+
+- **When.** A command runs the bootstrap when the latch isn't this boot's and this binary's, or `_portal-saver` is absent: a logout or a crash ends the saver with the sessions, and the bootstrap brings them back. A warm command reads the latch and checks the saver is there, and does nothing else.
+- **One at a time.** The bootstrap holds `bootstrap.lock` in the state dir, taken before `saver.lock`. A second bootstrap waits, then checks again and skips if nothing is owed. The wait is bounded by the longest run the holder can make, which grows with the entries `sessions.json` holds; past it the command fails.
+
+The concurrent cold-path picker and its progress page stay, with three labels: Checking zmx, Starting the saver, Restoring sessions `n/m`. A picker reopened after a detach never runs the bootstrap. The tmux server anchor, hook registration, eager FIFO signalling and stale-marker sweeps go.
 
 ## Attach runner
 

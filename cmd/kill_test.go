@@ -15,9 +15,11 @@ import (
 )
 
 // stageKill stages fake as the backend in a state directory of the test's own
-// whose index labels every session fake holds, and returns the directory.
+// whose index labels every session fake holds, owing no bootstrap, and returns
+// the directory.
 func stageKill(t *testing.T, fake *backendtest.Fake, names ...string) string {
 	t.Helper()
+	withBootstrapDeps(t, BootstrapDeps{})
 	withBackendDeps(t, BackendDeps{Backend: fake})
 	dir := isolateStateDir(t)
 	for _, name := range names {
@@ -119,6 +121,7 @@ func TestKillCommand(t *testing.T) {
 	})
 
 	t.Run("it reports a missing session whose index entry could not be removed", func(t *testing.T) {
+		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 		blockStateDir(t)
 
@@ -171,6 +174,7 @@ func TestKillCommand(t *testing.T) {
 
 	t.Run("it reports a killed session whose index entry could not be removed", func(t *testing.T) {
 		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: fake})
 		blockStateDir(t)
 

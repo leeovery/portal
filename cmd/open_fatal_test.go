@@ -14,7 +14,7 @@ func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 
 	lister := fakePickerLister()
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 3, Message: fatal.UserMessage, Err: fatal})

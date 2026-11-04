@@ -230,7 +230,7 @@ type Model struct {
 	command           []string
 	commandPending    bool
 
-	serverStarted     bool
+	bootstrapping     bool
 	minElapsed        bool
 	bootstrapComplete bool
 
@@ -482,8 +482,8 @@ func (m Model) ActivePage() page {
 	return m.activePage
 }
 
-func (m Model) ServerStarted() bool {
-	return m.serverStarted
+func (m Model) Bootstrapping() bool {
+	return m.bootstrapping
 }
 
 func (m Model) MinElapsed() bool {
@@ -702,10 +702,12 @@ func WithAliasEditor(a AliasEditor) Option {
 	}
 }
 
-func WithServerStarted(started bool) Option {
+// WithBootstrapping opens the picker on its loading page while a bootstrap
+// runs behind it.
+func WithBootstrapping(bootstrapping bool) Option {
 	return func(m *Model) {
-		m.serverStarted = started
-		if started {
+		m.bootstrapping = bootstrapping
+		if bootstrapping {
 			m.activePage = PageLoading
 		}
 	}
@@ -1708,7 +1710,10 @@ func (m Model) refetchSessionsAfterRestore() tea.Cmd {
 
 // On the cold concurrent route it deliberately leaves sessionsLoaded false:
 // deciding the landing page here would latch defaultPageEvaluated against the
-// stale pre-restore list, and the post-restore refetch could never re-decide.
+// stale pre-restore list, and the post-restore refetch could never re-decide;
+// that refetch's landing opens a pending kill prompt. With no refetch to come,
+// the listing the loading page took in opens it here, or the first one, still
+// to land, does: left pending, the prompt drops every key but Ctrl+C.
 func (m *Model) transitionFromLoading() {
 	m.activePage = PageSessions
 	if m.progressReceiver != nil {
@@ -1716,6 +1721,9 @@ func (m *Model) transitionFromLoading() {
 	}
 	m.sessionsLoaded = true
 	m.evaluateDefaultPage()
+	if m.listed {
+		m.applyKillAsk()
+	}
 }
 
 // Both loading gates dismiss through here, so the sequence holds whichever of

@@ -855,6 +855,55 @@ func TestRestore_HelperArgv(t *testing.T) {
 	})
 }
 
+func TestRunsHelper(t *testing.T) {
+	t.Run("it counts each session restore made, with a transcript or without", func(t *testing.T) {
+		w := newWorld(t)
+		withFile, _ := w.saveTranscript(t, entry(t, "work"))
+		w.save(t, withFile, entry(t, "notes"))
+
+		w.r.Restore(t.Context())
+
+		for _, name := range []string{"work", "notes"} {
+			s, ok := w.fake.Held(name)
+			if !ok {
+				t.Fatalf("%s was not restored", name)
+			}
+			if !w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = false, want restore's own session counted", s)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		command []string
+	}{
+		{"the helper for another name", []string{exe, "state", "hydrate", "--session", "work-2"}},
+		{"another portal's helper", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
+		{"another of portal's commands", []string{exe, "state", "resume-wait", "--session", "work"}},
+		{"another program", []string{"vim", "notes.md"}},
+		{"the user's shell", nil},
+	} {
+		t.Run("it counts no session running "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = true, want false", s)
+			}
+		})
+	}
+
+	t.Run("it counts no session that didn't answer, known by its name alone", func(t *testing.T) {
+		if newWorld(t).r.RunsHelper(backend.Session{Name: "work"}) {
+			t.Error("RunsHelper = true for a session that told nothing of its command")
+		}
+	})
+}
+
 func TestRestore_RecordsTheCreation(t *testing.T) {
 	t.Run("its entry takes the creation Create returned, keeping the rest", func(t *testing.T) {
 		w := newWorld(t)

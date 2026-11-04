@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/portaltest"
@@ -58,9 +60,11 @@ func newPortalWorld(t *testing.T, binary string) *portalWorld {
 	env, _ := portaltest.IsolateStateForTest(t)
 	// The runner registry's sockets live in the state directory, and one under
 	// macOS's $TMPDIR is too long for a socket's address. Made before the zmx
-	// directory, so it is removed after the sessions are killed.
+	// directory, so it is removed after the sessions are killed, the saver the
+	// bootstrap starts among them.
 	stateDir := shortTempDir(t)
 	portaltest.OwnStateDir(t, stateDir)
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t)
 	env = append(env,
 		"PORTAL_STATE_DIR="+stateDir,
@@ -200,13 +204,15 @@ func (p *portalTerm) typeIn(t *testing.T, input string) {
 	}
 }
 
+// awaitOneSession waits for the world to hold one session of the user's, the
+// saver its first command's bootstrap started aside, and returns its name.
 func (w *portalWorld) awaitOneSession(t *testing.T) string {
 	t.Helper()
 	var names []string
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
 		sessions, err := w.b.List(t.Context())
 		names = names[:0]
-		for _, s := range sessions {
+		for _, s := range slices.DeleteFunc(sessions, backend.Session.PortalOwned) {
 			names = append(names, s.Name)
 		}
 		return err == nil && len(names) == 1

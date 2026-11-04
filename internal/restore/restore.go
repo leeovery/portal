@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -226,7 +227,7 @@ func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
 	dir, argv := startDir(e), r.command(e)
 	s, err := r.backend.Create(ctx, e.Name, dir, argv)
 	if err != nil {
-		if s, err = r.madeAnyway(ctx, e.Name, argv, raisedBefore, err); err != nil {
+		if s, err = r.madeAnyway(ctx, e.Name, raisedBefore, err); err != nil {
 			r.failed(e.Name, err)
 			return
 		}
@@ -236,16 +237,16 @@ func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
 
 // madeAnyway looks up the session a Create that failed may have made all the
 // same, as one that timed out waiting for it to answer has. A session running
-// restore's helper is restored, its flag the helper's to lower. Any other
-// session holding the name is not restore's, so its flag comes down whoever
-// raised it: left up, it would keep the saver off that session for good. With
-// no session under the name, only a flag this run raised comes down, as one
-// raised before is another restore's. A session that can't be looked up may be
-// the helper's, so its flag stays.
-func (r *run) madeAnyway(ctx context.Context, name string, argv []string, raisedBefore bool, createErr error) (backend.Session, error) {
+// restore's helper for the name is restored, its flag the helper's to lower.
+// Any other session holding the name is not restore's, so its flag comes down
+// whoever raised it: left up, it would keep the saver off that session for
+// good. With no session under the name, only a flag this run raised comes
+// down, as one raised before is another restore's. A session that can't be
+// looked up may be the helper's, so its flag stays.
+func (r *run) madeAnyway(ctx context.Context, name string, raisedBefore bool, createErr error) (backend.Session, error) {
 	live, err := r.holder(context.WithoutCancel(ctx), name)
 	switch {
-	case err == nil && live.Command == r.backend.DisplayCommand(argv):
+	case err == nil && r.RunsHelper(live):
 		return live, nil
 	case err == nil:
 		r.lowerHydrating(name)
@@ -317,11 +318,27 @@ func (r *run) warn(msg, name string, attrs ...any) {
 // command is the hydrate helper's argv for the entry's session, naming its
 // transcript only when it has one to replay.
 func (r *run) command(e sessionindex.Entry) []string {
-	argv := []string{r.exe, "state", "hydrate", "--session", e.Name}
+	argv := r.helper(e.Name)
 	if file, ok := r.transcript(e); ok {
 		argv = append(argv, "--file", file)
 	}
 	return argv
+}
+
+// helper is the hydrate helper's argv for the named session, before the
+// transcript it may name.
+func (r *Restorer) helper(name string) []string {
+	return []string{r.exe, "state", "hydrate", "--session", name}
+}
+
+// RunsHelper reports whether s was made running the hydrate helper restore
+// gives every session it restores, for s's own name, with a transcript or
+// without: such a session's hydrating flag is its helper's to lower, never
+// restore's or a sweep's. zmx reports a session's command as it was made, so
+// a helper that has handed the session to its shell still counts.
+func (r *Restorer) RunsHelper(s backend.Session) bool {
+	rest, ok := strings.CutPrefix(s.Command, r.backend.DisplayCommand(r.helper(s.Name)))
+	return ok && (rest == "" || strings.HasPrefix(rest, " "))
 }
 
 // transcript is the file holding the entry's saved transcript, and whether

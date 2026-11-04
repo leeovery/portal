@@ -5,50 +5,38 @@ import (
 	"errors"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 type fatalAfterRunner struct {
 	emitSteps int
-	started   bool
 	err       error
 }
 
-func (r *fatalAfterRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
+func (r *fatalAfterRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
 	for i := 1; i <= r.emitSteps; i++ {
 		if emit != nil {
 			emit(bootstrap.StepEvent{Index: i, Name: "step"})
 		}
 	}
-	return r.started, nil, r.err
+	return nil, r.err
 }
 
 func TestBootstrapProgressPipe_FatalMapsToFatalMsg(t *testing.T) {
 	cause := errors.New("permission denied")
-	fatal := bootstrap.NewFatal("Portal failed to set @portal-restoring marker: permission denied", cause)
-	runner := &fatalAfterRunner{emitSteps: 2, started: true, err: fatal}
+	fatal := bootstrap.NewFatal("Portal failed to raise the restoring flag: permission denied", cause)
+	fatal.Step = 2
+	runner := &fatalAfterRunner{emitSteps: 1, err: fatal}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
-	msgs := drainPipe(t, pipe.receiver())
+	fatalMsg := fatalMsgFrom(t, drainPipe(t, pipe.receiver()))
 
-	var fatalMsg *tui.BootstrapFatalMsg
-	for _, m := range msgs {
-		if _, ok := m.(tui.BootstrapCompleteMsg); ok {
-			t.Error("fatal run produced a BootstrapCompleteMsg; want a BootstrapFatalMsg")
-		}
-		if fm, ok := m.(tui.BootstrapFatalMsg); ok {
-			fmCopy := fm
-			fatalMsg = &fmCopy
-		}
-	}
-	if fatalMsg == nil {
-		t.Fatal("fatal run never produced a tui.BootstrapFatalMsg")
-	}
-	if fatalMsg.FailedStep != 3 {
-		t.Errorf("BootstrapFatalMsg.FailedStep = %d, want 3 (the aborting step)", fatalMsg.FailedStep)
+	if fatalMsg.FailedStep != 2 {
+		t.Errorf("BootstrapFatalMsg.FailedStep = %d, want 2 (the step the fatal names)", fatalMsg.FailedStep)
 	}
 	if fatalMsg.Message != fatal.UserMessage {
 		t.Errorf("BootstrapFatalMsg.Message = %q, want %q (FatalError.UserMessage)", fatalMsg.Message, fatal.UserMessage)
@@ -61,31 +49,20 @@ func TestBootstrapProgressPipe_FatalMapsToFatalMsg(t *testing.T) {
 	}
 }
 
-func TestBootstrapProgressPipe_FatalAtStep1(t *testing.T) {
-	fatal := bootstrap.NewFatal("Portal failed to start tmux server: boom", errors.New("boom"))
-	runner := &fatalAfterRunner{emitSteps: 0, started: false, err: fatal}
+// bootstrap.lock's fatal comes before any step, so it fails none of them.
+func TestBootstrapProgressPipe_FatalNamingNoStepFailsNone(t *testing.T) {
+	fatal := bootstrap.NewFatal("Portal gave up waiting for another Portal to finish starting: boom", errors.New("boom"))
+	runner := &fatalAfterRunner{emitSteps: 0, err: fatal}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
-	msgs := drainPipe(t, pipe.receiver())
-
-	var fatalMsg *tui.BootstrapFatalMsg
-	for _, m := range msgs {
-		if fm, ok := m.(tui.BootstrapFatalMsg); ok {
-			fmCopy := fm
-			fatalMsg = &fmCopy
-		}
-	}
-	if fatalMsg == nil {
-		t.Fatal("fatal-at-step-1 run never produced a tui.BootstrapFatalMsg")
-	}
-	if fatalMsg.FailedStep != 1 {
-		t.Errorf("BootstrapFatalMsg.FailedStep = %d, want 1 (EnsureServer)", fatalMsg.FailedStep)
+	if got := fatalMsgFrom(t, drainPipe(t, pipe.receiver())).FailedStep; got != 0 {
+		t.Errorf("BootstrapFatalMsg.FailedStep = %d, want 0 (no step failed)", got)
 	}
 }
 
 func TestBootstrapProgressPipe_NonFatalStillCompletes(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -106,4 +83,22 @@ func TestBootstrapProgressPipe_NonFatalStillCompletes(t *testing.T) {
 	if sawFatal {
 		t.Error("successful run produced a BootstrapFatalMsg; the fatal path leaked")
 	}
+}
+
+// fatalMsgFrom is the fatal msgs carry, failing the test on a completion.
+func fatalMsgFrom(t *testing.T, msgs []tea.Msg) tui.BootstrapFatalMsg {
+	t.Helper()
+	var fatalMsg *tui.BootstrapFatalMsg
+	for _, m := range msgs {
+		if _, ok := m.(tui.BootstrapCompleteMsg); ok {
+			t.Error("fatal run produced a BootstrapCompleteMsg; want a BootstrapFatalMsg")
+		}
+		if fm, ok := m.(tui.BootstrapFatalMsg); ok {
+			fatalMsg = &fm
+		}
+	}
+	if fatalMsg == nil {
+		t.Fatal("fatal run never produced a tui.BootstrapFatalMsg")
+	}
+	return *fatalMsg
 }

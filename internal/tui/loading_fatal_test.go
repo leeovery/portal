@@ -16,7 +16,7 @@ func fatalModelOnLoading(t *testing.T) tea.Model {
 	t.Helper()
 	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model
@@ -26,10 +26,9 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	model := fatalModelOnLoading(t)
 
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
-		FailedStep: 3,
-		Message:    "Portal failed to set @portal-restoring marker: permission denied",
+		FailedStep: 2,
+		Message:    "Portal failed to raise the restoring flag: permission denied",
 		Err:        errFatalSentinel,
 	})
 
@@ -39,11 +38,11 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("error state missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to set @portal-restoring marker") {
+	if !strings.Contains(visible, "Portal failed to raise the restoring flag") {
 		t.Errorf("error state missing the one-line fatal message:\n%s", visible)
 	}
-	if !strings.Contains(visible, tui.LabelRegisteredHooks) {
-		t.Errorf("error state missing the failed step label %q:\n%s", tui.LabelRegisteredHooks, visible)
+	if !strings.Contains(visible, tui.LabelStartingTheSaver) {
+		t.Errorf("error state missing the failed step label %q:\n%s", tui.LabelStartingTheSaver, visible)
 	}
 	if !strings.Contains(visible, "quit") {
 		t.Errorf("error state missing a quit hint:\n%s", visible)

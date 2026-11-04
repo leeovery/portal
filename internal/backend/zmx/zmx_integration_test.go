@@ -263,6 +263,12 @@ func TestHistoryFixture(t *testing.T) {
 }
 
 func TestBackendAgainstZmx(t *testing.T) {
+	t.Run("its binary runs", func(t *testing.T) {
+		if err := zmxtest.New(t).Runs(t.Context()); err != nil {
+			t.Errorf("Runs = %v, want the pinned zmx to run", err)
+		}
+	})
+
 	t.Run("it creates a detached session that lists with its details", func(t *testing.T) {
 		b := zmxtest.New(t)
 		dir := t.TempDir()

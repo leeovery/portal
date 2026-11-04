@@ -233,7 +233,7 @@ func TestProjectsFlash_ColdBootWarningsLandOnASizedProjectsFrame(t *testing.T) {
 	const warningLine = "the session saver is not running"
 
 	var model tea.Model = New(postloadStubLister{},
-		WithServerStarted(true),
+		WithBootstrapping(true),
 		WithProgressReceiver(func() tea.Msg { return nil }),
 		WithProjectStore(stubProjectStore{}),
 	)

@@ -17,6 +17,7 @@ import (
 
 func TestPortalKillAgainstZmx(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t)
 	binary := buildPortalBinary(t)
 

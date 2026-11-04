@@ -66,7 +66,7 @@ type Fixture struct {
 	command             []string
 	history             string
 	historyFile         string
-	serverStarted       bool
+	bootstrapping       bool
 	loadingEvents       []tui.BootstrapProgressMsg
 	fatalEvent          tui.BootstrapFatalMsg
 	// Tapes are scaffolding and do not live in the repository, so the post-load
@@ -106,7 +106,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		Command:       f.command,
 		CWD:           fixtureHome,
 		Home:          fixtureHome,
-		ServerStarted: f.serverStarted,
+		Bootstrapping: f.bootstrapping,
 		NoColor:       f.noColor,
 		Capture: tui.CaptureSeeds{
 			ThemeCursor:  f.initialThemeCursor,
@@ -957,17 +957,16 @@ func loadingScreenFixture() *Fixture {
 		{Index: 2},
 		{Index: 3},
 		{Index: 4},
-		{Index: 5},
 		// Sets the active "Restoring sessions" 8/12 counter without completing
 		// restore, so the page sits mid-restore.
-		{Index: 6, RestoreN: 8, RestoreM: 12},
+		{Index: 5, RestoreN: 8, RestoreM: 12},
 	}
 	return &Fixture{
 		name:          "loading-screen",
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		serverStarted: true,
+		bootstrapping: true,
 		loadingEvents: events,
 	}
 }
@@ -975,18 +974,17 @@ func loadingScreenFixture() *Fixture {
 func loadingErrorFixture() *Fixture {
 	events := []tui.BootstrapProgressMsg{
 		{Index: 1},
-		{Index: 2},
 	}
 	return &Fixture{
 		name:          "loading-error",
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		serverStarted: true,
+		bootstrapping: true,
 		loadingEvents: events,
 		fatalEvent: tui.BootstrapFatalMsg{
-			FailedStep: 3,
-			Message:    "Portal failed to set @portal-restoring marker: permission denied",
+			FailedStep: 2,
+			Message:    "Portal failed to raise the restoring flag: permission denied",
 			Err:        errFixtureFatal,
 		},
 	}

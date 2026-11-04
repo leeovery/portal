@@ -7,10 +7,8 @@ import (
 
 type contextKey string
 
-const serverStartedKey contextKey = "serverStarted"
-
 // Set only on the picker path with a bootstrap to run, where PersistentPreRunE
-// defers the orchestrator to openTUI's goroutine instead of running it
+// defers the bootstrap to openTUI's goroutine instead of running it
 // synchronously.
 const deferredBootstrapKey contextKey = "deferredBootstrap"
 
@@ -25,16 +23,4 @@ func deferredBootstrapFromContext(cmd *cobra.Command) *deferredBootstrap {
 	}
 	d, _ := ctx.Value(deferredBootstrapKey).(*deferredBootstrap)
 	return d
-}
-
-func serverWasStarted(cmd *cobra.Command) bool {
-	ctx := cmd.Context()
-	if ctx == nil {
-		return false
-	}
-	val, ok := ctx.Value(serverStartedKey).(bool)
-	if !ok {
-		return false
-	}
-	return val
 }

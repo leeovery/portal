@@ -9,6 +9,7 @@
 
 
 
+
                                          █████ █████ █████ █████ █████ █       █
                                          █   █ █   █ █   █   █   █   █ █       █
                                          █████ █   █ █████   █   █████ █       █
@@ -19,14 +20,13 @@
                                          ███████████████████████████████████████
 
 
-                                               ✓   Started tmux server
-                                               ✗   Registered hooks
-                                               ·   Restoring sessions
-                                               ·   Replaying scrollback
-                                               ·   Running resume commands
+                                                 ✓   Checking zmx
+                                                 ✗   Starting the saver
+                                                 ·   Restoring sessions
 
-                            Portal failed to set @portal-restoring marker: permission denied
+                              Portal failed to raise the restoring flag: permission denied
                                                     q quit · esc quit
+
 
 
 

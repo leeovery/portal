@@ -50,7 +50,7 @@ func coldSettleModel(lister SessionLister, pending PendingResumeReader, markers 
 		PendingReader:      pending,
 		SkeletonMarkers:    markers,
 		PendingSettleBound: bound,
-		ServerStarted:      true,
+		Bootstrapping:      true,
 		ProgressReceiver:   func() tea.Msg { return nil },
 	})
 }

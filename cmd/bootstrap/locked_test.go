@@ -1,0 +1,145 @@
+package bootstrap
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/commitlock"
+	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/state"
+)
+
+// countingRunner counts its runs and answers each with warnings.
+type countingRunner struct {
+	runs     atomic.Int32
+	warnings []Warning
+}
+
+func (r *countingRunner) Run(context.Context) ([]Warning, error) {
+	r.runs.Add(1)
+	return r.warnings, nil
+}
+
+// lockIn is a Locked's Lock on bootstrap.lock in dir, waiting up to wait.
+func lockIn(dir string, wait time.Duration) func(context.Context) (func(), error) {
+	return func(ctx context.Context) (func(), error) { return state.AcquireBootstrapLock(ctx, dir, wait) }
+}
+
+// holdLock takes bootstrap.lock in dir as another process would, through an
+// open file description of the test's own, until the release it returns runs
+// or the test ends.
+func holdLock(t *testing.T, dir string) func() {
+	t.Helper()
+	release, err := state.AcquireBootstrapLock(t.Context(), dir, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+	return release
+}
+
+func TestLocked(t *testing.T) {
+	t.Run("it runs the bootstrap owed once it holds the lock, then releases it", func(t *testing.T) {
+		dir := t.TempDir()
+		boot := &countingRunner{warnings: []Warning{SaverDownWarning()}}
+
+		warnings, err := Locked{Lock: lockIn(dir, time.Second), Owed: func(context.Context) bool { return true }, Bootstrap: boot}.Run(t.Context())
+
+		if err != nil || boot.runs.Load() != 1 || !equalWarnings(warnings, boot.warnings) {
+			t.Errorf("Run = %v, %v after %d runs; want the bootstrap's warnings from one run", warnings, err, boot.runs.Load())
+		}
+		if _, err := state.AcquireBootstrapLock(t.Context(), dir, 0); err != nil {
+			t.Errorf("the lock after the run: %v, want it released", err)
+		}
+	})
+
+	t.Run("a second bootstrap waits for the first, then skips once none is owed", func(t *testing.T) {
+		dir := t.TempDir()
+		release := holdLock(t, dir)
+		var owed atomic.Bool
+		owed.Store(true)
+		boot := &countingRunner{}
+		sink := &logtest.Sink{}
+		done := make(chan error, 1)
+		go func() {
+			_, err := Locked{Lock: lockIn(dir, 10*time.Second), Owed: func(context.Context) bool { return owed.Load() }, Bootstrap: boot, Logger: slog.New(sink)}.Run(t.Context())
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			t.Fatalf("Run returned %v while the first bootstrap held the lock", err)
+		case <-time.After(200 * time.Millisecond):
+		}
+		owed.Store(false)
+		release()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Run = %v, want the skip", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the second bootstrap never took the released lock")
+		}
+		if n := boot.runs.Load(); n != 0 {
+			t.Errorf("the second bootstrap ran %d times, want it skipped", n)
+		}
+		sink.Records().WithMessage("bootstrap skipped").AtExactLevel(slog.LevelInfo).Only(t, "the skip")
+	})
+
+	t.Run("a lock held past its bound is a fatal saying so, and nothing runs", func(t *testing.T) {
+		dir := t.TempDir()
+		holdLock(t, dir)
+		boot := &countingRunner{}
+
+		_, err := Locked{Lock: lockIn(dir, 150*time.Millisecond), Owed: func(context.Context) bool { return true }, Bootstrap: boot}.Run(t.Context())
+
+		fatal, ok := errors.AsType[*FatalError](err)
+		if !ok || !errors.Is(err, state.ErrBootstrapLockHeld) {
+			t.Fatalf("Run = %v, want a fatal wrapping the held lock", err)
+		}
+		want := "Portal gave up waiting for another Portal to finish starting: bootstrap.lock is held by another process for 150ms: " + state.BootstrapLock(dir)
+		if fatal.UserMessage != want || fatal.Step != 0 {
+			t.Errorf("fatal = %q at step %d, want %q at no step", fatal.UserMessage, fatal.Step, want)
+		}
+		if n := boot.runs.Load(); n != 0 {
+			t.Errorf("the bootstrap ran %d times, want none", n)
+		}
+	})
+
+	t.Run("a lock that can't be taken at all is a fatal too", func(t *testing.T) {
+		boot := &countingRunner{}
+		failing := func(context.Context) (func(), error) { return nil, errBoom }
+
+		_, err := Locked{Lock: failing, Owed: func(context.Context) bool { return true }, Bootstrap: boot}.Run(t.Context())
+
+		if fatal, ok := errors.AsType[*FatalError](err); !ok || !strings.HasPrefix(fatal.UserMessage, "Portal failed to take bootstrap.lock: ") {
+			t.Errorf("Run = %v, want a fatal naming the lock", err)
+		}
+		if n := boot.runs.Load(); n != 0 {
+			t.Errorf("the bootstrap ran %d times, want none", n)
+		}
+	})
+}
+
+func TestLockWait(t *testing.T) {
+	t.Run("it outlasts the saver step's own wait and run", func(t *testing.T) {
+		if bound, saver := LockWait(0), 2*saverhost.LockWait; bound <= saver {
+			t.Errorf("LockWait(0) = %s, want past the saver step's %s", bound, saver)
+		}
+	})
+
+	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
+		each := saverhost.CreateCeiling + 3*saverhost.ReadCeiling + commitlock.Bound()
+		if got := LockWait(20) - LockWait(0); got != 20*each {
+			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)
+		}
+	})
+}

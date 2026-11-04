@@ -171,7 +171,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 			return model, nil
 		})
 
-		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); err != nil {
+		if err := openTUI(contextCommand(), pickerLanding{}, nil); err != nil {
 			t.Fatalf("openTUI: %v", err)
 		}
 		if want := []switchCall{{"lead01", "api-x7Kd9a", "blog-c3d4"}}; !slices.Equal(rec.runners.switches, want) {

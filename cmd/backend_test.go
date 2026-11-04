@@ -174,7 +174,7 @@ func TestOpen_ZmxMissingIsFatal(t *testing.T) {
 func stubPicker(t *testing.T) *bool {
 	t.Helper()
 	reached := new(bool)
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		*reached = true
 		return nil
 	})

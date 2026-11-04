@@ -193,7 +193,7 @@ func searchDecision(ctx context.Context, b backend.Backend, term string) func() 
 // it hands the count to the picker, which takes it once that bootstrap completes.
 func runSearchForm(cmd *cobra.Command, term string) error {
 	if term == "" {
-		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil, serverWasStarted(cmd))
+		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil)
 	}
 
 	b, err := attachingBackend()
@@ -205,7 +205,7 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 
 	if deferredBootstrapFromContext(cmd) != nil {
 		landing.search.Decide = decide
-		return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+		return openTUIFunc(cmd, landing, nil)
 	}
 
 	name, err := decide()
@@ -222,5 +222,5 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return openSessionFunc(cmd, name)
 	}
-	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+	return openTUIFunc(cmd, landing, nil)
 }
