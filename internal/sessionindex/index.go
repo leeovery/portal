@@ -2,10 +2,9 @@ package sessionindex
 
 import (
 	"errors"
-	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -16,12 +15,19 @@ import (
 // footers that print it. Its text is the refusal every surface shows.
 var ErrLabelUnprintable = errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
 
+// ErrRemoved refuses a label for a session whose entry the same Update
+// removed: an entry made again there would be a replace no claim judged.
+var ErrRemoved = errors.New("the session's entry was removed in this update")
+
 type change struct {
 	op      string
 	session string
 	value   string
-	// detail says what the change dropped, empty when it dropped nothing.
+	// detail says what the change dropped or displaced, empty when nothing.
 	detail string
+	// level is the change's log level once written: INFO, its zero value,
+	// unless the change is one the saver makes on most polls.
+	level slog.Level
 }
 
 // Lookup returns a copy of the entry named name as stored, whatever creation
@@ -32,25 +38,7 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 	if i < 0 {
 		return Entry{}, false
 	}
-	return idx.Sessions[i], true
-}
-
-// LookupLive returns a copy of the live session's entry: the session named
-// name that its backend created at created, zero when it reports no time. An
-// entry counts only when it records that same creation; any other belonged to
-// an earlier session under the name, so the live one has none, and shows its
-// name and no dir. A label only a hand-edited file can hold, one SetLabel
-// would refuse or clear, unprintable or blank, is dropped too, so no surface
-// prints it.
-func (idx *Index) LookupLive(name string, created time.Time) (Entry, bool) {
-	e, ok := idx.Lookup(name)
-	if !ok || !sameCreation(e.CreatedAt, created) {
-		return Entry{}, false
-	}
-	if !printable(e.Label) || strings.TrimSpace(e.Label) == "" {
-		e.Label = ""
-	}
-	return e, true
+	return idx.sessions[i], true
 }
 
 // SetLabel sets the session's label, trimmed of surrounding whitespace. An
@@ -72,13 +60,15 @@ func (idx *Index) SetLabel(name, label string) error {
 		if label == "" {
 			return nil
 		}
-		idx.Sessions = append(idx.Sessions, Entry{Name: name})
-		i = len(idx.Sessions) - 1
+		var made bool
+		if i, made = idx.add(Entry{Name: name}); !made {
+			return ErrRemoved
+		}
 	}
-	if idx.Sessions[i].Label == label {
+	if idx.sessions[i].Label == label {
 		return nil
 	}
-	idx.Sessions[i].Label = label
+	idx.sessions[i].Label = label
 	if label == "" {
 		idx.changes = append(idx.changes, change{op: "clear-label", session: name})
 	} else {
@@ -94,69 +84,70 @@ func printable(label string) bool {
 	})
 }
 
-// Claim makes the session's entry the live session's: the one its backend
-// created at created, zero when it reports no time. A session recreated under
-// a name is a new session, told apart only by that time. So an entry from the
-// same creation keeps its label and scrollback, taking dir only when it
-// records none; an entry from another creation, or with no time, belonged to
-// an earlier session and is replaced whole; a session with no entry gets one.
-// A replacement is its own change, replace, saying what it dropped, so the log
-// shows a label being discarded.
-func (idx *Index) Claim(name, dir string, created time.Time) {
-	fresh := Entry{Name: name, Dir: dir, CreatedAt: created}
+// SetScrollback names the file, relative to the state directory, holding the
+// session's saved scrollback. It changes only an entry the session has.
+func (idx *Index) SetScrollback(name, file string) {
+	idx.setField(name, "set-scrollback", file, slog.LevelInfo, func(e *Entry) *string { return &e.ScrollbackFile })
+}
+
+// RecordCwd records the session's working directory. It changes only an
+// entry the session has, and logs at DEBUG: the saver records it on most
+// polls.
+func (idx *Index) RecordCwd(name, cwd string) {
+	idx.setField(name, "record-cwd", cwd, slog.LevelDebug, func(e *Entry) *string { return &e.Cwd })
+}
+
+// setField sets the field of name's entry to value, recording op when that
+// changes it.
+func (idx *Index) setField(name, op, value string, level slog.Level, field func(*Entry) *string) {
 	i := idx.indexOf(name)
-	switch {
-	case i < 0:
-		idx.Sessions = append(idx.Sessions, fresh)
-	case sameCreation(idx.Sessions[i].CreatedAt, created):
-		if idx.Sessions[i].Dir != "" || dir == "" {
-			return
-		}
-		idx.Sessions[i].Dir = dir
-	case idx.Sessions[i] == fresh:
-		return
-	default:
-		earlier := idx.Sessions[i]
-		idx.Sessions[i] = fresh
-		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
+	if i < 0 {
 		return
 	}
-	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
+	if f := field(&idx.sessions[i]); *f != value {
+		*f = value
+		idx.changes = append(idx.changes, change{op: op, session: name, value: value, level: level})
+	}
 }
 
-// dropped says what replacing an earlier creation's entry discards.
-func dropped(earlier Entry) string {
-	what := "an earlier creation's entry"
-	if !earlier.CreatedAt.IsZero() {
-		what += " (created " + earlier.CreatedAt.UTC().Format(time.RFC3339) + ")"
-	}
-	label, scrollback := earlier.Label, earlier.ScrollbackFile
-	if label == "" {
-		label = "none"
-	}
-	if scrollback == "" {
-		scrollback = "none"
-	}
-	return fmt.Sprintf("dropped %s, its label %q and its scrollback %q", what, label, scrollback)
-}
-
-// sameCreation reports whether an entry created at recorded is the session
-// created at live. An entry with no time can't be told from an earlier one.
-func sameCreation(recorded, live time.Time) bool {
-	return !recorded.IsZero() && recorded.Equal(live)
-}
-
-// Remove drops the session's entry, reporting whether there was one.
+// Remove drops the session's entry, reporting whether there was one. No
+// method makes an entry under the name again in the same Update. Its callers
+// are kill and the saver's drop of a session that ended, which a guard holds
+// to.
 func (idx *Index) Remove(name string) bool {
 	i := idx.indexOf(name)
 	if i < 0 {
 		return false
 	}
-	idx.Sessions = slices.Delete(idx.Sessions, i, i+1)
+	idx.sessions = slices.Delete(idx.sessions, i, i+1)
+	if idx.removed == nil {
+		idx.removed = map[string]bool{}
+	}
+	idx.removed[name] = true
 	idx.changes = append(idx.changes, change{op: "rm", session: name})
 	return true
 }
 
+// add appends e, an entry made afresh rather than read, and returns its
+// position, or reports it made none for a name removed in this Update.
+func (idx *Index) add(e Entry) (int, bool) {
+	if idx.removed[e.Name] {
+		return -1, false
+	}
+	idx.markFresh(e.Name)
+	idx.sessions = append(idx.sessions, e)
+	return len(idx.sessions) - 1, true
+}
+
+// markFresh records that name's entry was made afresh rather than read, so
+// Update reports an entry it read under that name as dropped.
+func (idx *Index) markFresh(name string) {
+	if idx.fresh == nil {
+		idx.fresh = map[string]bool{}
+	}
+	idx.fresh[name] = true
+}
+
 func (idx *Index) indexOf(name string) int {
-	return slices.IndexFunc(idx.Sessions, func(e Entry) bool { return e.Name == name })
+	return slices.IndexFunc(idx.sessions, func(e Entry) bool { return e.Name == name })
 }

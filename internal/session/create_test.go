@@ -310,7 +310,7 @@ func TestSessionCreator_Create(t *testing.T) {
 		}
 	})
 
-	t.Run("it returns the created time the backend reports for the session", func(t *testing.T) {
+	t.Run("it returns the created time and pid the backend reports for the session", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "portal")
 		fake := backendtest.New()
 		at := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
@@ -323,6 +323,9 @@ func TestSessionCreator_Create(t *testing.T) {
 		}
 		if !got.At.Equal(at) {
 			t.Errorf("At = %v, want %v", got.At, at)
+		}
+		if held, _ := fake.Held(got.Name); got.PID == 0 || got.PID != held.PID {
+			t.Errorf("PID = %d, want the pid the backend holds the session at, %d", got.PID, held.PID)
 		}
 		if n := len(fake.CallsTo(backendtest.OpList)); n != 0 {
 			t.Errorf("List was called %d times; the created time comes from Create", n)

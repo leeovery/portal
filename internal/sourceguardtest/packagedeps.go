@@ -85,6 +85,23 @@ func newDepsConfig(opts []DepsOption) depsConfig {
 	return cfg
 }
 
+// buildFlags are the go command's flags for cfg's build tags.
+func buildFlags(cfg depsConfig) []string {
+	if len(cfg.tags) == 0 {
+		return nil
+	}
+	return []string{"-tags", strings.Join(cfg.tags, ",")}
+}
+
+// buildEnv is the go command's environment for cfg's platform, nil to inherit
+// the test's own.
+func buildEnv(cfg depsConfig) []string {
+	if cfg.goos == "" {
+		return nil
+	}
+	return append(os.Environ(), "GOOS="+cfg.goos, "CGO_ENABLED=0")
+}
+
 // dep is one row of a transitive dependency listing. Module is the path of the
 // module providing the package, and is empty for the standard library — which
 // is how a dependency's origin is told apart without any hardcoded prefix. Dir
@@ -101,15 +118,10 @@ const depFormat = "{{.ImportPath}}\t{{with .Module}}{{.Path}}{{end}}\t{{.Dir}}"
 // produce on demand — an empty set among them — are reachable only by
 // swapping it.
 var listDeps = func(cfg depsConfig, pkg string) ([]dep, error) {
-	args := []string{"list", "-deps", "-f", depFormat}
-	if len(cfg.tags) > 0 {
-		args = append(args, "-tags", strings.Join(cfg.tags, ","))
-	}
+	args := append([]string{"list", "-deps", "-f", depFormat}, buildFlags(cfg)...)
 	cmd := exec.Command("go", append(args, pkg)...)
 	cmd.Dir = cfg.dir
-	if cfg.goos != "" {
-		cmd.Env = append(os.Environ(), "GOOS="+cfg.goos, "CGO_ENABLED=0")
-	}
+	cmd.Env = buildEnv(cfg)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, &listError{output: string(out), err: err}

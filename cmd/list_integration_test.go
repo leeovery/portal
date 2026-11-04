@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -40,8 +41,8 @@ func TestPortalListAgainstZmx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read web-Qm3pLz: %v", err)
 	}
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(web.Name, web.Dir, web.Created)
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(web.Name, web.Dir, web.Created, web.PID, state.ClaimRule(stateDir))
 		return idx.SetLabel(web.Name, "web · checkout")
 	}); err != nil {
 		t.Fatalf("label web-Qm3pLz: %v", err)

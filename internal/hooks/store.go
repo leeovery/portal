@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -127,34 +128,47 @@ func (s *Store) save(h Snapshot) error {
 		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 
-	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")), fileutil.ReportUnsynced(warnUnsynced))
 }
 
-// acquireMutationLockFor takes the mutation hold for a per-key mutation and,
-// when it cannot, writes that mutation's WARN under op. The record carries no
-// error_class — nothing reached the write phases it classifies — and no value,
-// which names what a write carried.
-func (s *Store) acquireMutationLockFor(op, key string, via Via) (*os.File, error) {
+// warnUnsynced logs a write that landed though the directory sync after its
+// rename failed: the mutation stands, and logs as written.
+func warnUnsynced(err error) {
+	logger.Warn("unsynced", "op", "unsynced", "error", err, "error_class", fileutil.ClassifyWriteError(err))
+}
+
+// acquireMutationLockFor takes the mutation hold for a mutation of keys and,
+// when it cannot, writes that mutation's WARN under op for each key. The record
+// carries no error_class — nothing reached the write phases it classifies — and
+// no value, which names what a write carried.
+func (s *Store) acquireMutationLockFor(op string, via Via, keys ...string) (*os.File, error) {
 	lock, err := s.acquireMutationLock()
 	if err != nil {
-		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
+		warnEach(op, via, keys, "error", err)
 		return nil, err
 	}
 	return lock, nil
 }
 
-// loadForMutation is a per-key mutation's load from inside its hold. A load it
-// cannot complete — an unreadable file or one that does not parse — is
-// reported as ErrStoreRead and written as the mutation's WARN under op, with no
-// error_class and no value for the same reasons as a refused acquire.
-func (s *Store) loadForMutation(op, key string, via Via) (Snapshot, error) {
+// loadForMutation is a mutation's load from inside its hold. A load it cannot
+// complete — an unreadable file or one that does not parse — is reported as
+// ErrStoreRead and written as the mutation's WARN under op for each of keys,
+// with no error_class and no value for the same reasons as a refused acquire.
+func (s *Store) loadForMutation(op string, via Via, keys ...string) (Snapshot, error) {
 	h, err := s.load()
 	if err != nil {
 		err = fmt.Errorf("%w: %w", ErrStoreRead, err)
-		logger.Warn(op, "op", op, "hook_key", key, "via", via.String(), "error", err)
+		warnEach(op, via, keys, "error", err)
 		return nil, err
 	}
 	return h, nil
+}
+
+// warnEach writes op's WARN for each of keys, carrying attrs.
+func warnEach(op string, via Via, keys []string, attrs ...any) {
+	for _, key := range keys {
+		logger.Warn(op, append([]any{"op", op, "hook_key", key, "via", via.String()}, attrs...)...)
+	}
 }
 
 // Set adds or overwrites the hook for key and event with the whole of
@@ -165,13 +179,13 @@ func (s *Store) loadForMutation(op, key string, via Via) (Snapshot, error) {
 func (s *Store) Set(key string, event Event, registration Registration, via Via) error {
 	// Under the method's own op, not classifySet's verdict: that verdict reads
 	// the loaded file, and a refused acquire or load is what prevented reading it.
-	lock, err := s.acquireMutationLockFor("set", key, via)
+	lock, err := s.acquireMutationLockFor("set", via, key)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lock.Close() }()
 
-	h, err := s.loadForMutation("set", key, via)
+	h, err := s.loadForMutation("set", via, key)
 	if err != nil {
 		return err
 	}
@@ -221,21 +235,35 @@ func classifySet(h Snapshot, key string, event Event, registration Registration)
 // The answer comes from the map this call loaded and mutated, never from a
 // separate read.
 func (s *Store) Remove(key string, event Event, via Via) (bool, error) {
-	return s.removeEntry(key, event, via, removal{op: "rm"})
+	removed, err := s.removeEntries([]string{key}, event, via, removal{op: "rm"})
+	return len(removed) == 1, err
 }
 
-// Discard is the resume panel's removal route. It removes the entry for key and
-// event only when its command is exactly shown, the command the panel put in
-// front of the user; an entry holding any other command, whatever its resume
-// mode, is nothing to remove and answers as an absent one does. Otherwise it
+// Discard is the removal route for a caller that judged a command before
+// removing it: the resume panel, and forgetting a dropped session. It removes
+// the entry for key and event only when its command is exactly shown, the
+// command the panel put in front of the user or the forget read; an entry
+// holding any other command, whatever its resume mode, is nothing to remove
+// and answers as an absent one does. Otherwise it
 // keeps Remove's contract, but its breadcrumb is filed under op=discard and
 // carries the removed command as value, so the destroyed registration can be
 // copied back out of the log.
 func (s *Store) Discard(key string, event Event, shown string, via Via) (bool, error) {
-	return s.removeEntry(key, event, via, removal{
+	removed, err := s.DiscardEach(event, map[string]string{key: shown}, via)
+	return len(removed) == 1, err
+}
+
+// DiscardEach is Discard for every key of shown, each removed only while its
+// command is exactly the one shown names for it, under one hold of the lock:
+// a caller holding another lock as it removes them waits on this one once,
+// however many there are. It reports the keys it removed, in order. A refused
+// acquire, a load or a save that fails removes none, and writes each key's
+// WARN.
+func (s *Store) DiscardEach(event Event, shown map[string]string, via Via) ([]string, error) {
+	return s.removeEntries(slices.Sorted(maps.Keys(shown)), event, via, removal{
 		op:         "discard",
 		carryValue: true,
-		matches:    func(r Registration) bool { return r.Command == shown },
+		matches:    func(key string, r Registration) bool { return r.Command == shown[key] },
 	})
 }
 
@@ -245,54 +273,63 @@ func (s *Store) Discard(key string, event Event, shown string, via Via) (bool, e
 type removal struct {
 	op         string
 	carryValue bool
-	matches    func(Registration) bool
+	matches    func(key string, r Registration) bool
 }
 
-func (s *Store) removeEntry(key string, event Event, via Via, r removal) (bool, error) {
-	if key == "" {
-		return false, nil
+// removeEntries removes the entry for event of each of keys that r allows,
+// under one hold, and reports the keys it removed.
+func (s *Store) removeEntries(keys []string, event Event, via Via, r removal) ([]string, error) {
+	keys = slices.DeleteFunc(slices.Clone(keys), func(key string) bool { return key == "" })
+	if len(keys) == 0 {
+		return nil, nil
 	}
 
 	// A refused acquire or load is a failed operation, not the silent no-removal
 	// below: that one changed nothing because there was nothing to change, and
 	// this one could not look.
-	lock, err := s.acquireMutationLockFor(r.op, key, via)
+	lock, err := s.acquireMutationLockFor(r.op, via, keys...)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer func() { _ = lock.Close() }()
 
-	h, err := s.loadForMutation(r.op, key, via)
+	h, err := s.loadForMutation(r.op, via, keys...)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	events, ok := h[key]
-	if !ok {
-		return false, nil
+	var removed []string
+	commands := map[string]string{}
+	for _, key := range keys {
+		events := h[key]
+		registration, ok := events[event.String()]
+		if !ok || (r.matches != nil && !r.matches(key, registration)) {
+			continue
+		}
+		delete(events, event.String())
+		if len(events) == 0 {
+			delete(h, key)
+		}
+		removed = append(removed, key)
+		commands[key] = registration.Command
 	}
-	removed, ok := events[event.String()]
-	if !ok || (r.matches != nil && !r.matches(removed)) {
-		return false, nil
-	}
-
-	delete(events, event.String())
-	if len(events) == 0 {
-		delete(h, key)
+	if len(removed) == 0 {
+		return nil, nil
 	}
 
 	if err := s.save(h); err != nil {
-		logger.Warn(r.op, "op", r.op, "hook_key", key, "via", via.String(),
-			"error", err, "error_class", fileutil.ClassifyWriteError(err))
-		return false, err
+		warnEach(r.op, via, removed, "error", err, "error_class", fileutil.ClassifyWriteError(err))
+		return nil, err
 	}
 
-	attrs := []any{"op", r.op, "hook_key", key, "via", via.String()}
-	if r.carryValue {
-		attrs = append(attrs, "value", removed.Command)
+	for _, key := range removed {
+		attrs := []any{"op", r.op, "hook_key", key, "via", via.String()}
+		if r.carryValue {
+			attrs = append(attrs, "value", commands[key])
+		}
+		logger.Info(r.op, attrs...)
 	}
-	logger.Info(r.op, attrs...)
-	return true, nil
+	return removed, nil
 }
 
 // List returns the hooks sorted by key then event.

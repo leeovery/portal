@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -34,27 +35,38 @@ func unwritableStateDir(t *testing.T) string {
 func TestUpdate_Logging(t *testing.T) {
 	t.Run("each landed change logs at INFO under its own op with via", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old"},{"name":"b"}]}`)
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old"},{"name":"b"},{"name":"e","created_at":"2026-11-02T08:00:00Z"},{"name":"f","label":"F"}]}`)
 		sink := logtest.Install(t)
 
-		err := sessionindex.Update(dir, "tui", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "tui", func(idx *sessionindex.Index) error {
 			_ = idx.SetLabel("c", "Gamma")
 			_ = idx.SetLabel("a", "")
 			idx.Remove("b")
-			idx.Claim("d", "/d", time.Time{})
+			idx.Claim("d", "/d", time.Time{}, 0, ruleRestoring())
+			idx.Claim("f", "/f", liveCreation, 4242, ruleRestoring())
+			idx.Restored("e", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
+			idx.SetScrollback("e", "scrollback/e.bin")
+			idx.RecordCwd("e", "/work/e")
 			return nil
 		})
 		if err != nil {
 			t.Fatalf("Update: %v", err)
 		}
-		for _, want := range []struct{ op, session, value string }{
-			{"set-label", "c", "Gamma"},
-			{"clear-label", "a", ""},
-			{"rm", "b", ""},
-			{"claim", "d", "/d"},
+		for _, want := range []struct {
+			op, session, value string
+			level              slog.Level
+		}{
+			{"set-label", "c", "Gamma", slog.LevelInfo},
+			{"clear-label", "a", "", slog.LevelInfo},
+			{"rm", "b", "", slog.LevelInfo},
+			{"claim", "d", "/d", slog.LevelInfo},
+			{"adopt", "f", "2026-11-04T10:00:00Z", slog.LevelInfo},
+			{"restored", "e", "2026-11-04T09:00:00Z", slog.LevelInfo},
+			{"set-scrollback", "e", "scrollback/e.bin", slog.LevelInfo},
+			{"record-cwd", "e", "/work/e", slog.LevelDebug},
 		} {
 			rec := sink.Records().Matching("sessions", want.op).Only(t, want.op)
-			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: want.op, Component: "sessions", Op: want.op, Via: "tui"})
+			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: want.level, Msg: want.op, Component: "sessions", Op: want.op, Via: "tui"})
 			if got := rec.AttrString(t, "session"); got != want.session {
 				t.Errorf("%s session = %q, want %q", want.op, got, want.session)
 			}
@@ -64,12 +76,58 @@ func TestUpdate_Logging(t *testing.T) {
 		}
 	})
 
+	t.Run("a restore names the pid and the creation it took the place of", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Alpha","created_at":"2026-11-02T08:00:00Z","pid":1717}]}`)
+		sink := logtest.Install(t)
+
+		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
+			idx.Restored("a", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
+			return nil
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		detail := sink.Records().Matching("sessions", "restored").Only(t, "restored record").AttrString(t, "detail")
+		for _, want := range []string{"pid 4242", "2026-11-02T08:00:00Z"} {
+			if !strings.Contains(detail, want) {
+				t.Errorf("detail = %q, want it to name %s", detail, want)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name, held string
+		want       []string
+	}{
+		{"saved before this boot", `"created_at":"2026-11-03T06:00:00Z","pid":1717`, []string{"it was saved before this boot", "pid 4242", "the creation of 2026-11-03T06:00:00Z"}},
+		{"whose creation was never recorded", `"label":"Alpha"`, []string{"its creation was never recorded", "pid 4242", "no recorded creation"}},
+	} {
+		t.Run("an adopt of an entry "+tc.name+" says why, naming the pid and the creation it took the place of", func(t *testing.T) {
+			dir := t.TempDir()
+			writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a",`+tc.held+`}]}`)
+			sink := logtest.Install(t)
+
+			if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+				idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring())
+				return nil
+			}); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			detail := sink.Records().Matching("sessions", "adopt").Only(t, "adopt record").AttrString(t, "detail")
+			for _, want := range tc.want {
+				if !strings.Contains(detail, want) {
+					t.Errorf("detail = %q, want it to name %s", detail, want)
+				}
+			}
+		})
+	}
+
 	t.Run("a change-free update logs one DEBUG noop", func(t *testing.T) {
 		dir := t.TempDir()
 		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Alpha"}]}`)
 		sink := logtest.Install(t)
 
-		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		rec := sink.Records().Only(t, "noop record")
@@ -90,14 +148,18 @@ func TestUpdate_Logging(t *testing.T) {
 			name: "no creation time, and nothing to drop",
 			body: `{"version":2,"sessions":[{"name":"a","dir":"/a"}]}`,
 		},
+		{
+			name: "no creation time over an entry of this boot",
+			body: `{"version":2,"sessions":[{"name":"a","label":"Alpha","created_at":"2026-11-04T09:00:00Z","pid":1717}]}`,
+		},
 	} {
 		t.Run("a claim of "+tc.name+" changes nothing and logs one DEBUG noop", func(t *testing.T) {
 			dir := t.TempDir()
 			writeIndex(t, dir, tc.body)
 			sink := logtest.Install(t)
 
-			if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-				idx.Claim("a", "/a", tc.created)
+			if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+				idx.Claim("a", "/a", tc.created, 0, ruleRestoring())
 				return nil
 			}); err != nil {
 				t.Fatalf("Update: %v", err)
@@ -112,11 +174,11 @@ func TestUpdate_Logging(t *testing.T) {
 
 	t.Run("a claim replacing an earlier creation's entry logs replace, naming the label and scrollback it dropped", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old work","dir":"/old","created_at":"2026-11-02T08:00:00Z","scrollback_file":"scrollback/a.bin"}]}`)
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","label":"Old work","dir":"/old","created_at":"2026-11-04T09:00:00Z","scrollback_file":"scrollback/a.bin"}]}`)
 		sink := logtest.Install(t)
 
-		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "/a", time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Claim("a", "/a", liveCreation, 0, ruleRestoring())
 			return nil
 		}); err != nil {
 			t.Fatalf("Update: %v", err)
@@ -124,7 +186,7 @@ func TestUpdate_Logging(t *testing.T) {
 		rec := sink.Records().Matching("sessions", "replace").Only(t, "replace record")
 		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "replace", Component: "sessions", Op: "replace", Via: "cli"})
 		detail := rec.AttrString(t, "detail")
-		for _, want := range []string{"earlier creation", "2026-11-02T08:00:00Z", `"Old work"`, `"scrollback/a.bin"`} {
+		for _, want := range []string{"earlier creation", "2026-11-04T09:00:00Z", `"Old work"`, `"scrollback/a.bin"`} {
 			if !strings.Contains(detail, want) {
 				t.Errorf("detail = %q, want it to name %s", detail, want)
 			}
@@ -138,7 +200,7 @@ func TestUpdate_Logging(t *testing.T) {
 		dir := t.TempDir()
 		sink := logtest.Install(t)
 
-		_ = sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, _ = sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			_ = idx.SetLabel("a", "Alpha")
 			return errors.New("boom")
 		})
@@ -147,11 +209,39 @@ func TestUpdate_Logging(t *testing.T) {
 		}
 	})
 
+	t.Run("a write whose directory sync fails has landed: its changes log as written, then one WARN unsynced", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, sessionindex.Entry{Name: "gone"})
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+		sink := logtest.Install(t)
+
+		outcome, err := sessionindex.Update(dir, "tui", func(idx *sessionindex.Index) error {
+			idx.Remove("gone")
+			return idx.SetLabel("a", "Alpha")
+		})
+		if err != nil {
+			t.Fatalf("Update = %v, want the landed write to succeed", err)
+		}
+
+		if !sameEntries(outcome.Removed, []sessionindex.Entry{{Name: "gone"}}) {
+			t.Errorf("removed = %+v, want gone, as a landed write reports", outcome.Removed)
+		}
+		for _, op := range []string{"rm", "set-label"} {
+			sink.Records().Matching("sessions", op).AtExactLevel(slog.LevelInfo).Only(t, op+" as written")
+		}
+		rec := sink.Records().Matching("sessions", "unsynced").Only(t, "the unsynced warning")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelWarn, Msg: "unsynced", Component: "sessions", Op: "unsynced", Via: "tui"})
+		logtest.AssertWriteFailure(t, rec, "write-failed-fsync", fileutil.ErrWriteFsync)
+		if idx, _ := sessionindex.Read(dir); idx.Len() != 1 {
+			t.Errorf("sessions = %+v, want a alone", idx.Entries())
+		}
+	})
+
 	t.Run("a failed write logs each pending change at WARN with the error", func(t *testing.T) {
 		dir := unwritableStateDir(t)
 		sink := logtest.Install(t)
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("absent")
 			if err := idx.SetLabel("a", "Alpha"); err != nil {
 				return err

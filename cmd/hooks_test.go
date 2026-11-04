@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/hookstest"
 )
 
@@ -20,14 +21,17 @@ const (
 	hookSessionB = "web-Qm3pLz"
 )
 
-// inSession stages a backend holding a session named name and running this
-// process inside it, in a state directory of the test's own; an empty name
-// stages one running outside any session.
+// hookSessionCreated is when inSession's session was created, in this boot.
+var hookSessionCreated = testBoot.Add(time.Hour)
+
+// inSession stages a backend holding a session named name, created at
+// hookSessionCreated, and running this process inside it, in a state directory
+// of the test's own; an empty name stages one running outside any session.
 func inSession(t *testing.T, name string, others ...backend.Session) *backendtest.Fake {
 	t.Helper()
 	fake := backendtest.New(others...)
 	if name != "" {
-		fake.Add(backend.Session{Name: name})
+		fake.Add(backend.Session{Name: name, Created: hookSessionCreated})
 	}
 	fake.SetCurrent(name)
 	withBackendDeps(t, BackendDeps{Backend: fake})
@@ -311,22 +315,23 @@ func TestHooksSetCommand(t *testing.T) {
 		if len(data) != 1 || len(data[hookSessionA]) != 1 || data[hookSessionA]["on-resume"].Command != "claude --resume abc123" {
 			t.Errorf("hooks.json = %v, want one on-resume entry under %s", data, hookSessionA)
 		}
-		if calls := fake.Calls(); len(calls) != 0 {
-			t.Errorf("backend calls = %+v, want none: the key is the current session's name", calls)
+		if calls := fake.Calls(); len(calls) != 1 || calls[0].Op != backendtest.OpSession || calls[0].Name != hookSessionA {
+			t.Errorf("backend calls = %+v, want one read of %s, to claim it", calls, hookSessionA)
 		}
 	})
 
-	t.Run("it keys by ZMX_SESSION under the production backend", func(t *testing.T) {
+	t.Run("under the production backend it reads the session ZMX_SESSION names, and sets no hook it can't claim", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, nil)
 		isolateStateDir(t)
 		t.Setenv("ZMX_SESSION", hookSessionB)
 
-		if _, err := runHookSet(t, "make dev"); err != nil {
-			t.Fatalf("hook set: %v", err)
-		}
+		_, err := runHookSet(t, "make dev")
 
-		if got := readHooksJSON(t, hooksFile)[hookSessionB]["on-resume"].Command; got != "make dev" {
-			t.Errorf("entry under %s = %q, want %q", hookSessionB, got, "make dev")
+		if err == nil || !strings.Contains(err.Error(), hookSessionB) {
+			t.Errorf("hook set = %v, want the read of %s, refused under the poisoned ZMX_DIR", err, hookSessionB)
+		}
+		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat hooks.json = %v, want nothing set", err)
 		}
 	})
 
@@ -369,18 +374,63 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it creates no state directory", func(t *testing.T) {
+	t.Run("it claims the session's entry for its live creation first", func(t *testing.T) {
 		hooksFileInTempDir(t, nil)
-		inSession(t, hookSessionA)
-		stateDir := filepath.Join(t.TempDir(), "state")
-		t.Setenv("PORTAL_STATE_DIR", stateDir)
+		live := backend.Session{Name: hookSessionA, Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}
+		inSession(t, "", live).SetCurrent(hookSessionA)
 
 		if _, err := runHookSet(t, "npm start"); err != nil {
 			t.Fatalf("hook set: %v", err)
 		}
 
-		if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("stat %s = %v, want it never created", stateDir, err)
+		e := entryOf(t, os.Getenv("PORTAL_STATE_DIR"), hookSessionA)
+		if !e.CreatedAt.Equal(live.Created) || e.PID != live.PID {
+			t.Errorf("entry = %+v, want it to record the live creation", e)
+		}
+	})
+
+	t.Run("a claim that fails sets no hook", func(t *testing.T) {
+		_, hooksFile := hooksFileInTempDir(t, nil)
+		inSession(t, hookSessionA)
+		commitlock.HoldForTest(t, os.Getenv("PORTAL_STATE_DIR"))
+		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
+
+		if _, err := runHookSet(t, "npm start"); !errors.Is(err, commitlock.ErrHeld) {
+			t.Errorf("hook set = %v, want the claim's ErrHeld", err)
+		}
+		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat hooks.json = %v, want nothing set", err)
+		}
+	})
+
+	t.Run("a session that does not answer is refused, setting no hook", func(t *testing.T) {
+		_, hooksFile := hooksFileInTempDir(t, nil)
+		inSession(t, hookSessionA).StopAnswering(hookSessionA)
+
+		_, err := runHookSet(t, "npm start")
+
+		if want := "session " + hookSessionA + " is not answering; no hook is set"; err == nil || err.Error() != want {
+			t.Errorf("hook set = %v, want %q", err, want)
+		}
+		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat hooks.json = %v, want nothing set", err)
+		}
+	})
+
+	t.Run("a session that answers with no creation is refused, claiming and setting nothing", func(t *testing.T) {
+		_, hooksFile := hooksFileInTempDir(t, nil)
+		inSession(t, "", backend.Session{Name: hookSessionA, PID: 4242}).SetCurrent(hookSessionA)
+
+		_, err := runHookSet(t, "npm start")
+
+		if want := "session " + hookSessionA + " did not report when it was created; no hook is set"; err == nil || err.Error() != want {
+			t.Errorf("hook set = %v, want %q", err, want)
+		}
+		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat hooks.json = %v, want nothing set", err)
+		}
+		if entries := dirListing(t, os.Getenv("PORTAL_STATE_DIR")); len(entries) != 0 {
+			t.Errorf("state directory = %v, want no claim written", entries)
 		}
 	})
 }

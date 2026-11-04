@@ -54,10 +54,12 @@ func protocolOne(context.Context, string) (int, error) { return 1, nil }
 
 func seedValidSessionsJSON(t *testing.T, dir string, sessions int) {
 	t.Helper()
-	idx := sessionindex.Index{SavedAt: time.Now()}
+	entries := make([]sessionindex.Entry, 0, sessions)
 	for i := range sessions {
-		idx.Sessions = append(idx.Sessions, sessionindex.Entry{Name: "s" + strconv.Itoa(i), Dir: "/tmp"})
+		entries = append(entries, sessionindex.Entry{Name: "s" + strconv.Itoa(i), Dir: "/tmp"})
 	}
+	idx := entryIndexOf(t, entries...)
+	idx.SavedAt = time.Now()
 	data, err := sessionindex.Encode(idx)
 	if err != nil {
 		t.Fatalf("Encode: %v", err)

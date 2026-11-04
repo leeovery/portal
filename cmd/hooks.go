@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/xdg"
@@ -90,18 +91,41 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		hookKey, err := currentSession()
+		b, err := sessionBackend()
 		if err != nil {
 			return err
 		}
+		hookKey, err := currentSessionIn(b)
+		if err != nil {
+			return err
+		}
+		return setResumeHook(cmd.Context(), b, hookKey, hooks.Registration{Command: command, Resume: mode})
+	},
+}
 
+// registerHook is (*hooks.Store).Set; tests pause it to hold the commit lock
+// open.
+var registerHook = (*hooks.Store).Set
+
+// setResumeHook claims the session's entry, then registers its resume hook, as
+// rename claims before a label: a hook beside an entry left by an earlier
+// creation would go with it when a later claim replaced that entry. The hook
+// is written under the claim's commit lock, so a kill can't remove the entry
+// before it lands and leave it on a dead name, and only once the claim's write
+// has landed and what it dropped is forgotten: set any sooner, the forgetting
+// of an earlier creation's entry would take it, being keyed by the same name.
+func setResumeHook(ctx context.Context, b backend.Backend, name string, registration hooks.Registration) error {
+	live, err := liveSession(ctx, b, name, "no hook is set")
+	if err != nil {
+		return err
+	}
+	return claimSession("cli", live, nil, func() error {
 		store, err := loadHookStore()
 		if err != nil {
 			return err
 		}
-
-		return store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command, Resume: mode}, hooks.ViaCLI)
-	},
+		return registerHook(store, name, hooks.EventOnResume, registration, hooks.ViaCLI)
+	})
 }
 
 // resumeModeFlag reads the registration's resume-mode pin: an unpassed flag

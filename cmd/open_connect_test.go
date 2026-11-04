@@ -401,7 +401,8 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 			t.Fatalf("read index: %v", err)
 		}
 		entry, ok := idx.Lookup(name)
-		if want := (sessionindex.Entry{Name: name, Dir: dir, CreatedAt: at}); !ok || entry.Name != want.Name || entry.Dir != want.Dir || !entry.CreatedAt.Equal(at) {
+		held, _ := fake.Held(name)
+		if want := (sessionindex.Entry{Name: name, Dir: dir, CreatedAt: at, PID: held.PID}); !ok || entry.Name != want.Name || entry.Dir != want.Dir || !entry.CreatedAt.Equal(at) || entry.PID == 0 || entry.PID != want.PID {
 			t.Errorf("index entry = %+v, %v; want %+v", entry, ok, want)
 		}
 	})
@@ -481,8 +482,8 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 			t.Fatal("openPath = nil, want the create failure")
 		}
 		rec.assertNone(t)
-		if idx, _ := sessionindex.Read(stateDir); len(idx.Sessions) != 0 {
-			t.Errorf("index = %+v, want empty", idx.Sessions)
+		if idx, _ := sessionindex.Read(stateDir); idx.Len() != 0 {
+			t.Errorf("index = %+v, want empty", idx.Entries())
 		}
 	})
 }

@@ -114,7 +114,7 @@ Call sites then use `logger.{Debug,Info,Warn,Error}` directly with `slog.Attr` a
 
 **The rule is bind-once *per package, per component* — not one package per component**, and the taxonomy is deliberately not partitioned by package:
 
-- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`, and `attach` in `cmd`, `internal/runner` and `internal/runnerreg`; `bootstrap`, `hooks`, `clean`, `spawn` and `sessions` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
+- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`, `attach` in `cmd`, `internal/runner` and `internal/runnerreg`, `sessions` in `cmd`, `internal/sessionindex` and `internal/state`, and `bootstrap` in `cmd`, `internal/tmux` and `internal/state`; `hooks`, `clean` and `spawn` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
 - **A package may bind several components.** `cmd` holds package-level bindings for `daemon`, `hydrate`, `notify`, `bootstrap`, `signal`, `capture`, `spawn`, `resolve`, `theme`, `attach` and `sessions`, and binds `process` and the config stores' components (`hooks`, `projects`, `aliases`, for a file's one-shot move) at their call sites.
 - **A package handed an already-bound logger through a seam binds nothing.** `internal/theme` emits the whole `theme` component through an injected logger and never calls `log.For` at all; the single `log.For("theme")` binding lives in `cmd` (see *The `theme` component event catalog*). `internal/spawn`'s shared emission helpers take an injected logger the same way — `cmd` passes its own binding in for the CLI burst and injects that same binding into `internal/tui` for the picker burst, so the TUI binds nothing either — alongside that package's own binding, which covers its detection path and its `terminals.json` load.
 
@@ -164,7 +164,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | Component | Owns |
 |---|---|
 | `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
-| `bootstrap` | The ten-step bootstrap orchestrator |
+| `bootstrap` | The ten-step bootstrap orchestrator. Bound again in `internal/state` for the `bootstrapped` latch: a WARN `latch unsynced` (`error`, `error_class` `write-failed-fsync`) when the directory sync after the latch's rename fails, the latch landed all the same |
 | `restore` | Two-phase restore engine (skeleton + geometry + scrollback) |
 | `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
 | `notify` | Notification helpers |
@@ -177,7 +177,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | `clean` | The sweep paths — bootstrap's orphan-daemon and stale-marker sweeps and `internal/state`'s orphan-FIFO sweep. Named for the `portal clean` command it was introduced for; that command is retired, and its user-invoked repairs live on `portal doctor --fix` |
 | `aliases` | `aliases` store mutations |
 | `projects` | `projects.json` store mutations |
-| `sessions` | The session index, `sessions.json` version 2, in `internal/sessionindex`: one INFO per change a committed `Update` makes, its `op` the message (`set-label`, `clear-label`, `claim`, `replace`, `rm`; `session`, `value` the label or directory set, `detail` what a `replace` dropped, `via`), each a WARN carrying `error` and `error_class` instead when the write fails, and a DEBUG `update-noop` (`op`, `via`) for an `Update` that changed nothing. Bound again in `cmd` (`open_mint.go`): a WARN `unrecorded` (`op`, `session`, `via`, `error`) when a session minted through the backend can't be claimed in the index for want of the lock or a readable index, the session made all the same |
+| `sessions` | The session index, `sessions.json` version 2, in `internal/sessionindex`: one record per change a committed `Update` makes, its `op` the message (`set-label`, `clear-label`, `claim`, `adopt`, `replace`, `rm`, `restored`, `set-scrollback`, `record-cwd`; `session`, `value` the label, directory, scrollback file or working directory set, or the creation time an `adopt` or `restored` recorded, `detail` what a `replace` dropped, or for an `adopt` or `restored` why the entry was taken over, then the pid and the creation it took the place of, `via`), at INFO but for `record-cwd`, which the saver makes on most polls, at DEBUG; each a WARN carrying `error` and `error_class` instead when the write fails, and a DEBUG `update-noop` (`op`, `via`) for an `Update` that changed nothing; and a WARN `unsynced` (`op`, `error`, `error_class` `write-failed-fsync`, `via`) when the directory sync after the write's rename fails, the write landed all the same and its changes logged as written. Bound again in `internal/state`, where `Forget` removes, under the commit lock the `Update` held, what Portal keeps beside each entry a committed `Update` removed or replaced (its `hydrating` and `resume-pending` flags, the scrollback file the entry names and its hook, the hook only while it holds the command read, every hook of a batch removed under one hold of the hooks lock, each removal the `hooks` component's `discard` with the caller's `via`): one INFO `forget` (`op`, `session`, `detail` naming what went, `via`) when it removed anything, and a WARN `forget` (`op`, `session`, `detail` naming what it kept, `path` for a file, `error`, `via`) per removal that failed or file it refused, the rest going all the same; and, from `ClaimRule`, a WARN `claim-rule` (`op`, `detail`, `error`), once a process, when the boot time can't be read, so every claim adopts. Bound again in `cmd`: the same WARN `forget` per session when `hooks.json` can't be found, so its hook is kept; and (`open_mint.go`) a WARN `unrecorded` (`op`, `session`, `via`, `error`) when a session minted through the backend can't be claimed in the index for want of the lock or a readable index, the session made all the same |
 | `process` | Portal-binary lifecycle markers (`start` / `exit` / `exec` / `panic` / `log-level resolved`) only, regardless of subcommand |
 | `spawn` | The multi-window spawn service — host-terminal detection, adapter resolution, per-window ack outcomes, and the burst's batch summary. Bound in `internal/spawn` and again in `cmd`; both burst surfaces (the picker's multi-select burst and `portal open`'s multi-target burst) emit through `internal/spawn`'s single-sourced renderers, so the two paths cannot drift. Detection emits exactly one line: INFO `detection resolved host terminal` (`terminal`, `bundle_id`, `detail` the route), INFO `detection resolved no host-local terminal` (`detail` the route), INFO `detection could not tell the host terminal` (`detail` the route, then why it can't tell which terminal leads the session), or WARN `detection transient failure` (`detail` the error). The ack channel, `state/spawn-acks/`: a WARN `spawn ack write failed` (`batch`, `error`) when a spawned window can't write its receipt, which then attaches all the same while its burst counts it failed; a WARN `spawn ack clean failed` (`batch`, `error`) when a burst can't clean its acks, which go once stale; and a DEBUG `stale spawn ack removed` (`path`) per ack an hour old a burst's clean removes. `error` and `path` are cross-listed from the Contextual group |
 | `resolve` | `portal open`'s resolution decision — one INFO per bare positional resolved through the guessing chain (glob and domain-pinned targets are deterministic and emit nothing). Bound and emitted **only** in `cmd/open.go`; `internal/resolver` stays a pure, log-free library |
@@ -196,7 +196,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 |---|---|
 | `pane_key` | Structural pane key (canonical persisted form, e.g. `session__window.pane`) |
 | `tmux_pane` | `$TMUX_PANE` env var (live tmux pane id, e.g. `%42`) |
-| `session` | tmux session name |
+| `session` | session name: a tmux session's, or a zmx session's as the `sessions` component records it |
 | `project` | project name from `projects.json` |
 | `path` | filesystem path |
 | `took` | duration (`time.Duration` rendered) |
@@ -205,7 +205,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | `hook_key` | hooks subsystem — the structural hook key |
 | `op` | state-mutation breadcrumbs — `set` / `modify` / `rm` / `clean-stale` / `migrate` / `set-noop` |
 | `alias` | aliases-store key |
-| `value` | state-mutation — verbatim new value for `set` / `modify` |
+| `value` | state-mutation — verbatim new value for `set` / `modify`, or for a `sessions` change the label, directory, scrollback file or working directory it set, or the creation time an `adopt` or `restored` recorded; a `discard` carries the command it removed |
 | `via` | state-mutation origin — `cli` / `tui` / `internal` / `migrate` |
 | `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
@@ -228,7 +228,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | `ack` | One window's token-ack outcome — `confirmed` / `timeout` / `failed` |
 | `opened` | Batch summary — sessions actually surfaced, the trigger's self-attach counted only on full success |
 | `total` | Batch summary — N, the whole target set including the trigger's own surface |
-| `detail` | The opaque lower-layer string: the driver's OS-specific text (osascript output, AppleEvent code), the detection route (`inside-session runner walk`, `inside-session raw client walk`, `outside-session env/self walk`, or `inside-session` before a leader is known) with why when detection refuses, or a rejected `terminals.json` entry's reason. Carried verbatim and **never parsed** by the logging layer |
+| `detail` | The opaque lower-layer string: the driver's OS-specific text (osascript output, AppleEvent code), the detection route (`inside-session runner walk`, `inside-session raw client walk`, `outside-session env/self walk`, or `inside-session` before a leader is known) with why when detection refuses, or a rejected `terminals.json` entry's reason. The `sessions` component carries it too, for what a change dropped, displaced or kept (see its row). Carried verbatim and **never parsed** by the logging layer |
 
 The per-window records also carry `session` — **defined in the Contextual group and cross-listed here** (not a separate key; the 64-key total counts it once).
 
@@ -747,6 +747,7 @@ The line's component (prefix) is the store's owning component: `hooks` / `aliase
 | `clean-stale` | Internal cleanup of an entry (always batched) |
 | `migrate` | One-shot migration from old config path |
 | `set-noop` | `set` where the entry already exists and the value matches (DEBUG only) |
+| `unsynced` | The write landed, but the directory sync after its rename failed (WARN only; `error`, `error_class` `write-failed-fsync`). It names no entry, being the file's: the mutation's own line, written as for any landed write, names that |
 
 **Closed `error_class` value space for AtomicWrite failures (per phase):**
 

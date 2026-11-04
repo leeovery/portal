@@ -482,7 +482,7 @@ func checkSessionsJSON(dir string, dirErr error) checkResult {
 	if err != nil {
 		return checkResult{name: name, status: checkFail, detail: unusableIndexDetail(err)}
 	}
-	return checkResult{name: name, status: checkPass, detail: pluralCount(len(idx.Sessions), "session indexed", "sessions indexed")}
+	return checkResult{name: name, status: checkPass, detail: pluralCount(idx.Len(), "session indexed", "sessions indexed")}
 }
 
 func unusableIndexDetail(err error) string {

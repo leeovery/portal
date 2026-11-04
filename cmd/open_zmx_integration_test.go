@@ -62,7 +62,7 @@ func TestPortalOpenPathAgainstZmx(t *testing.T) {
 		}
 		entry, ok := idx.Lookup(made.Name)
 		if !ok {
-			t.Fatalf("index = %+v, want an entry for %s", idx.Sessions, made.Name)
+			t.Fatalf("index = %+v, want an entry for %s", idx.Entries(), made.Name)
 		}
 		if entry.Dir != workDir || !entry.CreatedAt.Equal(made.Created) || entry.CreatedAt.IsZero() {
 			t.Errorf("entry = %+v, want dir %s and created %v", entry, workDir, made.Created)

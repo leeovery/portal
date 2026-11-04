@@ -45,7 +45,7 @@ func TestRead(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		if idx.Version != sessionindex.SchemaVersion || idx.Sessions == nil || len(idx.Sessions) != 0 {
+		if idx.Version != sessionindex.SchemaVersion || idx.Entries() == nil || idx.Len() != 0 {
 			t.Errorf("index = %+v, want empty version 2", idx)
 		}
 	})
@@ -77,7 +77,7 @@ func TestUpdate(t *testing.T) {
 		at := time.Date(2026, 11, 2, 9, 30, 0, 0, time.FixedZone("x", 3600))
 		sessionindex.SetClockForTest(t, at)
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel("a", "Alpha")
 		})
 		if err != nil {
@@ -99,7 +99,7 @@ func TestUpdate(t *testing.T) {
 		dir := t.TempDir()
 		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","dir":"/a"},{"name":"b"}]}`)
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("b")
 			return nil
 		})
@@ -110,8 +110,8 @@ func TestUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		if want := []sessionindex.Entry{{Name: "a", Dir: "/a"}}; !slices.Equal(idx.Sessions, want) {
-			t.Errorf("sessions = %+v, want %+v", idx.Sessions, want)
+		if want := []sessionindex.Entry{{Name: "a", Dir: "/a"}}; !slices.Equal(idx.Entries(), want) {
+			t.Errorf("sessions = %+v, want %+v", idx.Entries(), want)
 		}
 	})
 
@@ -121,7 +121,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		boom := errors.New("boom")
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			_ = idx.SetLabel("a", "Alpha")
 			return boom
 		})
@@ -135,7 +135,7 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("nothing is written for a missing file when fn errors", func(t *testing.T) {
 		dir := t.TempDir()
-		_ = sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return errors.New("boom") })
+		_, _ = sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return errors.New("boom") })
 		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
@@ -147,12 +147,30 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		ran := false
 
-		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
+		_, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, sessionindex.ErrLegacyIndex) {
 			t.Errorf("Update = %v, want ErrLegacyIndex", err)
 		}
 		if ran {
 			t.Errorf("fn ran over an unreadable index")
+		}
+		if got := readFile(t, dir); string(got) != seed {
+			t.Errorf("sessions.json = %s, want untouched %s", got, seed)
+		}
+	})
+
+	t.Run("an index giving a known key twice is corrupt: fn never runs and the file is kept, both spellings and all", func(t *testing.T) {
+		dir := t.TempDir()
+		seed := `{"version":2,"sessions":[{"name":"a","label":"A"}],"SESSIONS":[{"name":"b","label":"B"}]}`
+		writeIndex(t, dir, seed)
+		ran := false
+
+		_, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
+		if err == nil || errors.Is(err, sessionindex.ErrLegacyIndex) {
+			t.Errorf("Update = %v, want the index refused as corrupt", err)
+		}
+		if ran {
+			t.Errorf("fn ran over a corrupt index")
 		}
 		if got := readFile(t, dir); string(got) != seed {
 			t.Errorf("sessions.json = %s, want untouched %s", got, seed)
@@ -167,7 +185,7 @@ func TestUpdate(t *testing.T) {
 			t.Fatalf("stat: %v", err)
 		}
 
-		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		after, err := os.Stat(sessionindex.Path(dir))
@@ -200,12 +218,13 @@ func TestUpdate(t *testing.T) {
 		errs := make(chan error, callers)
 		for i := range callers {
 			wg.Go(func() {
-				errs <- sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+				_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 					// The pause widens the read-modify-write window an
 					// unserialised store would lose updates in.
 					time.Sleep(2 * time.Millisecond)
 					return idx.SetLabel(fmt.Sprintf("s%d", i), "label")
 				})
+				errs <- err
 			})
 		}
 		wg.Wait()
@@ -219,8 +238,8 @@ func TestUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		if len(idx.Sessions) != callers {
-			t.Errorf("sessions = %d, want %d", len(idx.Sessions), callers)
+		if idx.Len() != callers {
+			t.Errorf("sessions = %d, want %d", idx.Len(), callers)
 		}
 	})
 
@@ -232,7 +251,7 @@ func TestUpdate(t *testing.T) {
 		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 		ran := false
 
-		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
+		_, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, commitlock.ErrHeld) {
 			t.Errorf("Update = %v, want ErrHeld", err)
 		}
@@ -251,7 +270,7 @@ func TestUpdate(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			_ = held.Close()
 		}()
-		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Errorf("Update = %v, want it to wait for the release", err)
 		}
 	})
@@ -262,7 +281,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		sessionindex.SetClockForTest(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			if err := idx.SetLabel("a", "Alpha"); err != nil {
 				return err
 			}
@@ -282,13 +301,113 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("a fn that changes nothing creates no file", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
 	})
+}
+
+func TestUpdateThen(t *testing.T) {
+	// landedUnderLock records each outcome landed is given, and whether the
+	// commit lock was still held when it ran.
+	landedUnderLock := func(t *testing.T, dir string, ran *[]sessionindex.Outcome, held *bool) func(sessionindex.Outcome) error {
+		return func(o sessionindex.Outcome) error {
+			*ran = append(*ran, o)
+			commitlock.SetTimeoutForTest(t, 20*time.Millisecond)
+			lock, err := commitlock.Acquire(dir)
+			*held = errors.Is(err, commitlock.ErrHeld)
+			if err == nil {
+				_ = lock.Close()
+			}
+			return nil
+		}
+	}
+
+	t.Run("landed runs once the write lands, with what it dropped, before the lock is released", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, sessionindex.Entry{Name: "gone"})
+		var ran []sessionindex.Outcome
+		var held bool
+
+		outcome, err := sessionindex.UpdateThen(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Remove("gone")
+			return nil
+		}, landedUnderLock(t, dir, &ran, &held))
+		if err != nil {
+			t.Fatalf("UpdateThen: %v", err)
+		}
+
+		if len(ran) != 1 || !sameEntries(ran[0].Removed, outcome.Removed) || len(outcome.Removed) != 1 {
+			t.Errorf("landed ran with %+v, want once, with the outcome returned, %+v", ran, outcome)
+		}
+		if !held {
+			t.Error("landed ran with the commit lock released, want it held")
+		}
+	})
+
+	t.Run("landed runs, with an empty outcome, for an update that changed nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		var ran []sessionindex.Outcome
+		var held bool
+
+		if _, err := sessionindex.UpdateThen(dir, "cli", func(*sessionindex.Index) error { return nil }, landedUnderLock(t, dir, &ran, &held)); err != nil {
+			t.Fatalf("UpdateThen: %v", err)
+		}
+
+		if len(ran) != 1 || len(ran[0].Dropped()) != 0 {
+			t.Errorf("landed ran with %+v, want once, with nothing dropped", ran)
+		}
+		if !held {
+			t.Error("landed ran with the commit lock released, want it held")
+		}
+	})
+
+	t.Run("an error landed returns is UpdateThen's, the write landed all the same", func(t *testing.T) {
+		dir := t.TempDir()
+		boom := errors.New("boom")
+
+		outcome, err := sessionindex.UpdateThen(dir, "cli", func(idx *sessionindex.Index) error {
+			return idx.SetLabel("a", "Alpha")
+		}, func(sessionindex.Outcome) error { return boom })
+
+		if !errors.Is(err, boom) {
+			t.Errorf("UpdateThen = %v, %v; want landed's error", outcome, err)
+		}
+		if idx, _ := sessionindex.Read(dir); idx.Len() != 1 {
+			t.Errorf("sessions = %+v, want the write landed", idx.Entries())
+		}
+	})
+
+	for name, stage := range map[string]func(t *testing.T) (string, func(*sessionindex.Index) error){
+		"fn errors": func(t *testing.T) (string, func(*sessionindex.Index) error) {
+			return t.TempDir(), func(idx *sessionindex.Index) error { idx.Remove("a"); return errors.New("boom") }
+		},
+		"the write fails": func(t *testing.T) (string, func(*sessionindex.Index) error) {
+			return unwritableStateDir(t), func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }
+		},
+		"the lock is not granted": func(t *testing.T) (string, func(*sessionindex.Index) error) {
+			dir := t.TempDir()
+			commitlock.HoldForTest(t, dir)
+			commitlock.SetTimeoutForTest(t, 20*time.Millisecond)
+			return dir, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }
+		},
+	} {
+		t.Run("landed does not run when "+name, func(t *testing.T) {
+			dir, fn := stage(t)
+			ran := false
+
+			if _, err := sessionindex.UpdateThen(dir, "cli", fn, func(sessionindex.Outcome) error { ran = true; return nil }); err == nil {
+				t.Fatal("UpdateThen = nil, want the failure")
+			}
+
+			if ran {
+				t.Error("landed ran for an update that failed")
+			}
+		})
+	}
 }
 
 // sessionindex is the store internal/state will read labels from, so it may

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -22,19 +23,20 @@ func fakePickerLister(sessions ...backend.Session) tui.SessionLister {
 // labelSession labels s in the index as Portal does, for s's own creation.
 func labelSession(t *testing.T, stateDir string, s backend.Session, label string) {
 	t.Helper()
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(s.Name, "", s.Created)
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(s.Name, "", s.Created, s.PID, claimRule(stateDir))
 		return idx.SetLabel(s.Name, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", s.Name, label, err)
 	}
 }
 
-// storedLabel writes a label onto an entry recording no creation, which no
-// surface shows: for tests of what the index stores, not what a session shows.
+// storedLabel writes a label onto an entry recording no creation, for tests
+// of what the index stores rather than what a session shows: such an entry is
+// any live creation's to take over, so every surface shows it.
 func storedLabel(t *testing.T, stateDir, name, label string) {
 	t.Helper()
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
 		return idx.SetLabel(name, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", name, label, err)
@@ -45,11 +47,26 @@ func storedLabel(t *testing.T, stateDir, name, label string) {
 // labels included, in a state directory of the test's own.
 func seedIndex(t *testing.T, entries ...sessionindex.Entry) string {
 	t.Helper()
-	body, err := sessionindex.Encode(sessionindex.Index{Sessions: entries})
+	return seedSessionsJSON(t, string(indexJSON(t, entries)))
+}
+
+// entryIndexOf is the index a sessions.json holding entries reads as.
+func entryIndexOf(t *testing.T, entries ...sessionindex.Entry) sessionindex.Index {
+	t.Helper()
+	idx, err := sessionindex.Decode(indexJSON(t, entries))
+	if err != nil {
+		t.Fatalf("decode sessions.json: %v", err)
+	}
+	return idx
+}
+
+func indexJSON(t *testing.T, entries []sessionindex.Entry) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"version": sessionindex.SchemaVersion, "sessions": append([]sessionindex.Entry{}, entries...)})
 	if err != nil {
 		t.Fatalf("encode sessions.json: %v", err)
 	}
-	return seedSessionsJSON(t, string(body))
+	return body
 }
 
 var joinCreated = time.Date(2026, 10, 30, 9, 15, 0, 0, time.UTC)
@@ -98,7 +115,7 @@ var wantJoined = []tui.Session{
 }
 
 func TestShownSession(t *testing.T) {
-	idx := sessionindex.Index{Sessions: joinEntries()}
+	shown := shownIndex{idx: entryIndexOf(t, joinEntries()...), rule: claimRule("")}
 	silent := backend.Session{Name: joinSilent.Name}
 	for _, tc := range []struct {
 		name string
@@ -106,14 +123,47 @@ func TestShownSession(t *testing.T) {
 		want tui.Session
 	}{
 		{"its own creation's entry gives its label and dir, beside its cwd", withAnswered(joinOwn), wantJoined[0]},
-		{"an earlier creation's entry gives nothing", withAnswered(joinRecreated), wantJoined[4]},
+		{"an earlier creation's entry of this boot gives nothing", withAnswered(joinRecreated), wantJoined[4]},
 		{"no entry gives nothing", withAnswered(joinUnindexed), wantJoined[1]},
 		{"an unprintable label shows the name", withAnswered(joinUnprintable), wantJoined[2]},
 		{"a session that did not answer shows its name", silent, wantJoined[3]},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shownSession(tc.live, &idx); got != tc.want {
-				t.Errorf("shownSession = %+v, want %+v", got, tc.want)
+			if got := shown.show(tc.live); got != tc.want {
+				t.Errorf("show = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("an entry from the same second with another pid is an earlier creation, and gives nothing", func(t *testing.T) {
+		live := withAnswered(joinOwn)
+		live.PID = 4243
+		recorded := shownIndex{
+			idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: joinCreated, PID: 4242}),
+			rule: claimRule(""),
+		}
+
+		if got := recorded.show(live); got.Label != "" || got.Dir != "" {
+			t.Errorf("show = %+v, want no label or dir", got)
+		}
+		live.PID = 4242
+		if got := recorded.show(live); got.Label != "api work" {
+			t.Errorf("show of the recorded pid = %+v, want its label", got)
+		}
+	})
+
+	for name, created := range map[string]time.Time{
+		"saved before this boot":            testBoot.Add(-time.Hour),
+		"whose creation was never recorded": {},
+	} {
+		t.Run("an entry "+name+" gives its label and dir, as a claim would take it over", func(t *testing.T) {
+			recorded := shownIndex{
+				idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: created, PID: 1717}),
+				rule: claimRule(""),
+			}
+
+			if got := recorded.show(withAnswered(joinOwn)); got != wantJoined[0] {
+				t.Errorf("show = %+v, want %+v", got, wantJoined[0])
 			}
 		})
 	}

@@ -31,7 +31,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 
 - **Session name:** the zmx session's name, such as `dotfiles-PpaTER`. Portal sets it once, at creation, and it never changes, since zmx has no rename. Portal-made names carry a nanoid, so they're unique. It keys everything Portal stores about the session: the index, `hooks.json` and the scrollback file. Restore recreates a session under the same name. zmx itself and rootshell's own zmx picker show it.
 - **Session label:** what Portal shows: the picker, the preview and `portal current`, which footers and Claude's `--name` read. It defaults to the session name and takes any text. `r` in the picker sets it, and so does `portal rename <text>` from inside the session. It lives in Portal's index.
-- **Telling a recreated session apart.** A session that ends and is recreated under the same name outside Portal is a new session. Portal tells it apart by zmx's created time, which the index records and nothing can clear. A session whose created time differs from its entry, and that Portal didn't create or restore, starts clean, without the old session's label, hook or scrollback.
+- **Telling a recreated session apart.** A session that ends and is recreated under the same name outside Portal is a new session. Portal tells it apart by zmx's created time, which the index records and nothing can clear. A session whose created time differs from its entry, and that Portal didn't create or restore, starts clean, without the old session's label, hook or scrollback. Every claim of an entry (a mint, a rename, `hook set`, the saver) judges by one rule, `state.ClaimRule`: an entry is replaced, and what it kept forgotten, only when both creations are known, both are from this boot, and they differ. An entry recording no creation, one saved before this boot (with a few seconds' leeway, as the boot time is read against the wall clock), and one whose session has its hydrating or resume-pending flag raised is taken over, keeping its label, dirs, scrollback and hook. A claimer that knows no creation leaves the entry as it is, and a rename or `hook set` refuses a session that reports none. What a replaced or removed entry kept is forgotten under the commit lock its write held, so no claim lands between the write and the forgetting. `hook set` writes its hook under its claim's lock as well, once that forgetting is done, so no kill lands between the claim and the hook, and the forgetting of an earlier creation's entry never takes the hook just set.
 
 ## Backend interface
 
@@ -52,11 +52,12 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 
 - The zmx version owns `<config>/portal/state/`. `portal migrate` moves the tmux version's `state/` to `state-tmux/` before anything writes to `state/`.
 - While `state/` still holds a version 1 `sessions.json`, every command except `migrate` and `version` stops with one line pointing at `portal migrate`. The hidden `state` helpers a restored session runs (hydrate and the resume chain) are exempt too: a refused helper exits, and the session it runs in ends with it. `doctor` is exempt as well, so it can report a version 1, corrupt or newer `sessions.json` itself.
-- `sessions.json` version 2: `{version, saved_at, sessions: [{name, label, dir, created_at, scrollback_file}]}`. `label` is omitted while it's the default. Rename writes through the same locked commit as the saver.
-- `scrollback/<name>.bin`. All positional re-filing goes.
-- Per-session flags, as files named after the session:
-  - `hydrating/<name>`: written before restore creates the session, removed when the scrollback replay finishes.
-  - `resume-pending/<name>`: present while the resume panel waits.
+- `sessions.json` version 2: `{version, saved_at, sessions: [{name, label, dir, cwd, created_at, pid, scrollback_file}]}`. `label` is omitted while it's the default. Members a version doesn't model, on the root or an entry, are kept through every rewrite. Rename writes through the same locked commit as the saver.
+- A session's files are named by its stem, `<name>-<hash>`, the hash the first 12 hex digits of the SHA-256 of the exact name, so names a filesystem folds together (`Foo`, `foo`) never share a file.
+- `scrollback/<stem>-<creation>.bin`, the creation its UTC created time and pid, so each creation of a name writes its own and forgetting one removes no other's. The entry names its file; forgetting an entry removes only that one. All positional re-filing goes.
+- Per-session flags, as files named by the session's stem:
+  - `hydrating/<stem>`: written before restore creates the session, removed when the scrollback replay finishes.
+  - `resume-pending/<stem>`: present while the resume panel waits.
 
   A session's flags are removed when it's dropped from the index, and bootstrap removes any for sessions that aren't live.
 - Flags that were tmux server options become files:
@@ -65,6 +66,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
   - `spawn-acks/`: one empty file, `<batch>-<token>`, per window a burst opened, written by that window once its attach has begun. The burst removes its own, and any an hour old, as a burst that died leaves them. The directory is 0700 and each file 0600.
   - `runners/` (see Attach runner)
 - `hooks.json` stays where it is, keyed by session name. `prefs.json`, projects and aliases are unchanged.
+- Every file Portal replaces is replaced in order: the temp file is synced before its rename and the directory after it, so after a power loss each file is its old version or its new one, never empty, and no later write persists ahead of a rename. On darwin both syncs are `F_BARRIERFSYNC`, which orders without flushing the drive's cache (fsync where a filesystem has no barriers); on linux, fsync. That costs about 0.5 ms a write on an M1 Max's internal SSD, where `F_FULLFSYNC` cost 10 ms. A filesystem that makes no such sync is written to without it. A write has landed once its rename has: a directory sync that fails after it is a warning, never an error, so no caller undoes or repeats a change already in place.
 - Before switch-over, a dev build runs beside the installed tmux Portal with `PORTAL_STATE_DIR` and `PORTAL_HOOKS_FILE` pointed at scratch paths.
 
 ## Saver

@@ -3,6 +3,7 @@ package sourceguardtest_test
 import (
 	"go/ast"
 	"go/types"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -20,6 +21,36 @@ func TestTypeChecker_ChecksThePackagesOwnSources(t *testing.T) {
 			t.Errorf("%s is package %s, want only the package's own non-test sources", source.Path, source.File.Name.Name)
 		}
 	}
+}
+
+func TestTypeChecker_ChecksTheBuildItIsGiven(t *testing.T) {
+	root := sourceguardtest.ProjectRoot(t)
+	sourceNames := func(pkg sourceguardtest.TypedPackage) []string {
+		var names []string
+		for _, source := range pkg.Sources {
+			names = append(names, filepath.Base(source.Path))
+		}
+		return names
+	}
+
+	t.Run("ForGOOS checks that platform's files", func(t *testing.T) {
+		names := sourceNames(sourceguardtest.NewTypeChecker(t, filepath.Join(root, "internal", "bootid"), sourceguardtest.ForGOOS("linux")).Package(t))
+
+		if !slices.Contains(names, "bootid_linux.go") || slices.Contains(names, "bootid_darwin.go") {
+			t.Errorf("sources = %v, want linux's file and not darwin's", names)
+		}
+	})
+
+	t.Run("WithBuildTags checks the files behind the tag", func(t *testing.T) {
+		dir := filepath.Join(root, "internal", "state")
+		tagged := sourceNames(sourceguardtest.NewTypeChecker(t, dir, sourceguardtest.WithBuildTags(sourceguardtest.IntegrationTag)).Package(t))
+		untagged := sourceNames(sourceguardtest.NewTypeChecker(t, dir).Package(t))
+
+		if !slices.Contains(tagged, "pgrep_sandbox.go") || slices.Contains(untagged, "pgrep_sandbox.go") {
+			t.Errorf("pgrep_sandbox.go checked with the tag = %v, without = %v; want only with it",
+				slices.Contains(tagged, "pgrep_sandbox.go"), slices.Contains(untagged, "pgrep_sandbox.go"))
+		}
+	})
 }
 
 func TestTypeChecker_ResolvesIdentifiersToTheirObjects(t *testing.T) {

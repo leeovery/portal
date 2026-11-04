@@ -36,18 +36,21 @@ type TypeChecker struct {
 	exports map[string]string
 }
 
-// NewTypeChecker resolves the package in dir under the current build: the
-// non-test files that build selects, and the export data of each package it
-// imports, directly or not. A package go list cannot resolve or compile is
-// fatal.
-func NewTypeChecker(t harnesstest.TestingT, dir string) *TypeChecker {
+// NewTypeChecker resolves the package in dir under the current build, or the
+// one WithBuildTags and ForGOOS name: the non-test files that build selects,
+// and the export data of each package it imports, directly or not. A package
+// go list cannot resolve or compile is fatal.
+func NewTypeChecker(t harnesstest.TestingT, dir string, opts ...DepsOption) *TypeChecker {
 	t.Helper()
 
-	cmd := exec.Command("go", "list", "-export", "-deps", "-json=ImportPath,Dir,GoFiles,Export,DepOnly", ".")
+	cfg := newDepsConfig(opts)
+	args := append([]string{"list", "-export", "-deps", "-json=ImportPath,Dir,GoFiles,Export,DepOnly"}, buildFlags(cfg)...)
+	cmd := exec.Command("go", append(args, ".")...)
 	cmd.Dir = dir
+	cmd.Env = buildEnv(cfg)
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("go list -export -deps in %s: %v", dir, listFailure(err))
+		t.Fatalf("go list -export -deps in %s%s: %v", dir, cfg.lane(), listFailure(err))
 		return nil
 	}
 	tc := &TypeChecker{exports: map[string]string{}}

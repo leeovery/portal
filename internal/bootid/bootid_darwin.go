@@ -1,10 +1,12 @@
-package zmx
+package bootid
 
 import (
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+func read() (string, error) { return unix.Sysctl("kern.bootsessionuuid") }
 
 func bootTime() (time.Time, error) {
 	tv, err := unix.SysctlTimeval("kern.boottime")

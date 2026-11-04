@@ -5,22 +5,46 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tui"
 )
 
-// shownSession joins a live session with the index: what every surface that
-// names a session shows of it. The entry counts only for the session's own
-// creation, so one recreated under the name, or one that did not answer and
-// so reports no creation, shows its name and no recorded dir.
-func shownSession(s backend.Session, idx *sessionindex.Index) tui.Session {
-	entry, _ := idx.LookupLive(s.Name, s.Created)
+// shownIndex is the index as the surfaces that name a session read it, with
+// the rule a claim judges each entry by, so a surface shows what a claim of
+// the session would keep.
+type shownIndex struct {
+	idx  sessionindex.Index
+	rule sessionindex.Rule
+}
+
+// readShownIndex reads the state directory's index for showing. Any error
+// returns the empty shownIndex, which shows every session by its name.
+func readShownIndex() (shownIndex, error) {
+	dir, err := state.Dir()
+	if err != nil {
+		return shownIndex{}, err
+	}
+	idx, err := readSessionIndexIn(dir)
+	if err != nil {
+		return shownIndex{}, err
+	}
+	return shownIndex{idx: idx, rule: claimRule(dir)}, nil
+}
+
+// show joins a live session with the index: what every surface that names a
+// session shows of it. The entry counts for the session's own creation, and
+// for one a claim would take over; a session recreated under the name, or one
+// that did not answer and so reports no creation, shows its name and no
+// recorded dir.
+func (s shownIndex) show(live backend.Session) tui.Session {
+	entry, _ := s.idx.LookupLive(live.Name, live.Created, live.PID, s.rule)
 	return tui.Session{
-		Name:         s.Name,
+		Name:         live.Name,
 		Label:        entry.Label,
 		Dir:          entry.Dir,
-		Cwd:          s.Dir,
-		Attached:     s.Attached(),
-		NotAnswering: !s.Answered,
+		Cwd:          live.Dir,
+		Attached:     live.Attached(),
+		NotAnswering: !live.Answered,
 	}
 }
 
@@ -31,10 +55,10 @@ func listShownSessions(ctx context.Context, b backend.Backend) ([]tui.Session, e
 	if err != nil {
 		return nil, err
 	}
-	idx, _ := readSessionIndex()
+	shown, _ := readShownIndex()
 	out := make([]tui.Session, 0, len(sessions))
 	for _, s := range sessions {
-		out = append(out, shownSession(s, &idx))
+		out = append(out, shown.show(s))
 	}
 	return out, nil
 }

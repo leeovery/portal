@@ -64,8 +64,8 @@ func currentShown(ctx context.Context, b backend.Backend, name string) string {
 	if err != nil {
 		return name
 	}
-	idx, _ := readSessionIndex()
-	return shownSession(live, &idx).DisplayName()
+	shown, _ := readShownIndex()
+	return shown.show(live).DisplayName()
 }
 
 func init() {

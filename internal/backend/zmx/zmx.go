@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/bootid"
 )
 
 const (
@@ -98,7 +99,7 @@ func New(cfg Config) (*Backend, error) {
 		b.hostname = os.Hostname
 	}
 	if b.booted == nil {
-		b.booted = bootTime
+		b.booted = bootid.BootTime
 	}
 	return b, nil
 }
