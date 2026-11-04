@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Write-phase sentinels let a caller errors.Is which step of AtomicWrite failed.
@@ -50,6 +51,26 @@ func IsWriteFailure(err error) bool {
 		}
 	}
 	return false
+}
+
+// AtomicWrite names each temp file it makes tempPrefix, a random string of
+// decimal digits, then tempSuffix: os.CreateTemp's random part for a pattern
+// with one "*".
+const (
+	tempPrefix = ".atomic-"
+	tempSuffix = ".tmp"
+)
+
+// IsAtomicTemp reports whether name is the base name of a temp file
+// AtomicWrite makes. A write cut short before its rename, by a crash or a kill,
+// leaves its temp file beside the target.
+func IsAtomicTemp(name string) bool {
+	random, ok := strings.CutPrefix(name, tempPrefix)
+	if !ok {
+		return false
+	}
+	random, ok = strings.CutSuffix(random, tempSuffix)
+	return ok && random != "" && strings.Trim(random, "0123456789") == ""
 }
 
 // AtomicWrite0600 writes data to path and chmods the result to 0600. The temp
@@ -112,7 +133,7 @@ func AtomicWrite(path string, data []byte, opts ...WriteOption) error {
 		return fmt.Errorf("%w: failed to create directory: %w", ErrWriteTempCreate, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
+	tmp, err := os.CreateTemp(dir, tempPrefix+"*"+tempSuffix)
 	if err != nil {
 		return fmt.Errorf("%w: failed to create temp file: %w", ErrWriteTempCreate, err)
 	}

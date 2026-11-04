@@ -96,6 +96,21 @@ func ScrollbackPath(dir string, e sessionindex.Entry) (string, error) {
 	return filepath.Join(dir, scrollbackSubdir, base), nil
 }
 
+// IsSessionScrollbackFile reports whether base, a file name in the scrollback
+// directory, is one SessionScrollbackFile names for some creation of some
+// session. A legacy <name>.bin is not one, nor is anything else.
+func IsSessionScrollbackFile(base string) bool {
+	for i := range len(base) {
+		if base[i] != '-' {
+			continue
+		}
+		if _, ok := nameOfStem(base[:i]); ok && namesCreation(base, base[:i]) {
+			return true
+		}
+	}
+	return false
+}
+
 // namesCreation reports whether base is the scrollback file name
 // SessionScrollbackFile gives some creation of the session whose stem is stem.
 func namesCreation(base, stem string) bool {

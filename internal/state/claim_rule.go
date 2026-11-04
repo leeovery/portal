@@ -42,10 +42,14 @@ func ClaimRule(dir string) sessionindex.Rule {
 		}
 		return sessionindex.Rule{}
 	}
-	return sessionindex.NewRule(booted.Add(bootTolerance), func(name string) bool { return restoring(dir, name) })
+	return sessionindex.NewRule(booted.Add(bootTolerance), func(name string) bool { return Flagged(dir, name) })
 }
 
-func restoring(dir, name string) bool {
+// Flagged reports whether the session's hydrating or resume-pending flag is
+// raised in the state directory dir, a flag that can't be looked for counting
+// as raised: Portal is restoring the session, and what its screen shows is a
+// replay or the resume panel, not the session's own.
+func Flagged(dir, name string) bool {
 	for _, raised := range []func(dir, name string) (bool, error){Hydrating.Exists, ResumePending.Exists} {
 		if up, err := raised(dir, name); up || err != nil {
 			return true

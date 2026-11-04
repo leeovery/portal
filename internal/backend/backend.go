@@ -107,7 +107,11 @@ func (s Session) Attached() bool { return s.Clients > 0 }
 
 // PortalOwned reports whether the session is one of Portal's own. Listings
 // shown to the user hide these.
-func (s Session) PortalOwned() bool { return strings.HasPrefix(s.Name, portalPrefix) }
+func (s Session) PortalOwned() bool { return IsPortalOwned(s.Name) }
+
+// IsPortalOwned reports whether name is one of Portal's own sessions' names,
+// for a caller holding a name and no Session, such as an index entry's.
+func IsPortalOwned(name string) bool { return strings.HasPrefix(name, portalPrefix) }
 
 // Command is a process to run: its argv, with Argv[0] the program's path, its
 // complete environment, and its working directory, empty to inherit the

@@ -5,14 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/leeovery/portal/internal/xdg"
 )
 
 const (
-	sessionsJSONName  = "sessions.json"
-	saveRequestedName = "save.requested"
 	daemonPIDName     = "daemon.pid"
 	daemonVersionName = "daemon.version"
 	daemonLockName    = "daemon.lock"
@@ -46,27 +43,6 @@ func EnsureDir() (string, error) {
 	}
 
 	return dir, nil
-}
-
-func SessionsJSON(dir string) string { return filepath.Join(dir, sessionsJSONName) }
-
-// SaveRequested is the dirty-flag file `portal state notify` touches.
-func SaveRequested(dir string) string { return filepath.Join(dir, saveRequestedName) }
-
-// TouchSaveRequested's mtime bump is best-effort and its error swallowed: the
-// daemon's tick only checks the file's presence.
-func TouchSaveRequested(dir string) error {
-	path := SaveRequested(dir)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("touch save.requested: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("touch save.requested: %w", err)
-	}
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
-	return nil
 }
 
 func DaemonPID(dir string) string { return filepath.Join(dir, daemonPIDName) }

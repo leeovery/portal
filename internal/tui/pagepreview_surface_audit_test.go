@@ -177,6 +177,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"runner":          {},
 		"runnerreg":       {},
 		"runnertoken":     {},
+		"saver":           {},
 		"session":         {},
 		"sessionindex":    {},
 		"shellquote":      {},

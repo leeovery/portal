@@ -156,3 +156,40 @@ func TestClaimRule(t *testing.T) {
 		}
 	})
 }
+
+func TestFlagged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T) string
+		want  bool
+	}{
+		{"a session with neither flag is not", func(t *testing.T) string { return t.TempDir() }, false},
+		{"a session whose hydrating flag is raised is", raisedFor(state.Hydrating, forgotten), true},
+		{"a session whose resume-pending flag is raised is", raisedFor(state.ResumePending, forgotten), true},
+		{"a session whose neighbour's flag alone is raised is not", raisedFor(state.Hydrating, neighbour), false},
+		{"a session whose flags can't be looked for is", func(t *testing.T) string {
+			blocker := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return blocker
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := state.Flagged(tc.stage(t), forgotten); got != tc.want {
+				t.Errorf("Flagged = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// raisedFor stages a state directory with flag raised for name.
+func raisedFor(flag state.SessionFlag, name string) func(t *testing.T) string {
+	return func(t *testing.T) string {
+		dir := t.TempDir()
+		if err := flag.Set(dir, name); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+}

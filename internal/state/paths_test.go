@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
@@ -177,8 +176,6 @@ func TestAccessors(t *testing.T) {
 			got  string
 			want string
 		}{
-			{"sessions.json", state.SessionsJSON(dir), filepath.Join(dir, "sessions.json")},
-			{"save.requested", state.SaveRequested(dir), filepath.Join(dir, "save.requested")},
 			{"daemon.pid", state.DaemonPID(dir), filepath.Join(dir, "daemon.pid")},
 			{"daemon.version", state.DaemonVersion(dir), filepath.Join(dir, "daemon.version")},
 			{"daemon.lock", state.DaemonLock(dir), filepath.Join(dir, "daemon.lock")},
@@ -247,77 +244,6 @@ func TestPaneKeyFromFIFOPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestTouchSaveRequested(t *testing.T) {
-	t.Run("creates save.requested with mtime near now", func(t *testing.T) {
-		dir := t.TempDir()
-
-		before := time.Now()
-		if err := state.TouchSaveRequested(dir); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		after := time.Now()
-
-		path := state.SaveRequested(dir)
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat save.requested: %v", err)
-		}
-		if info.Size() != 0 {
-			t.Errorf("save.requested size = %d; want 0", info.Size())
-		}
-		mtime := info.ModTime()
-		// The 2s slack absorbs filesystem mtime resolution.
-		if mtime.Before(before.Add(-2*time.Second)) || mtime.After(after.Add(2*time.Second)) {
-			t.Errorf("mtime = %v; want within [%v, %v] (±2s)", mtime, before, after)
-		}
-	})
-
-	t.Run("bumps mtime on an already-present save.requested", func(t *testing.T) {
-		dir := t.TempDir()
-		path := state.SaveRequested(dir)
-
-		if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
-			t.Fatalf("seed save.requested: %v", err)
-		}
-		old := time.Now().Add(-1 * time.Hour)
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatalf("set old mtime: %v", err)
-		}
-
-		before := time.Now()
-		if err := state.TouchSaveRequested(dir); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat: %v", err)
-		}
-		if info.Size() != 0 {
-			t.Errorf("save.requested truncated size = %d; want 0", info.Size())
-		}
-		if !info.ModTime().After(old) {
-			t.Errorf("mtime not bumped: got %v; want after %v", info.ModTime(), old)
-		}
-		if info.ModTime().Before(before.Add(-2 * time.Second)) {
-			t.Errorf("mtime = %v; expected near %v", info.ModTime(), before)
-		}
-	})
-
-	t.Run("returns wrapped error when parent directory does not exist", func(t *testing.T) {
-		root := t.TempDir()
-		missing := filepath.Join(root, "does-not-exist")
-
-		err := state.TouchSaveRequested(missing)
-		if err == nil {
-			t.Fatal("expected error when parent dir is missing, got nil")
-		}
-		if _, statErr := os.Stat(state.SaveRequested(missing)); !os.IsNotExist(statErr) {
-			t.Errorf("save.requested should not exist; stat err = %v", statErr)
-		}
-	})
 }
 
 func assertDirMode(t *testing.T, path string, want os.FileMode) {

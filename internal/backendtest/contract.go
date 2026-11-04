@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/harnesstest"
 )
 
 // Subject is one backend under Contract, with the means to put sessions in
@@ -30,6 +31,10 @@ type Subject interface {
 	// with variable=value lead the held session, answering, and returns once
 	// it does.
 	Lead(t *testing.T, session, variable, value string)
+	// Program names the program the process pid runs, read without the
+	// backend, "" for no such process. Contract asks it only of a subject
+	// that can show Creating, for the pid of a session Create made.
+	Program(t *testing.T, pid int) string
 	// Lacks says why the backend cannot show a behaviour, "" when it can, so
 	// Contract skips that case by name instead of leaving it out.
 	Lacks(b Behaviour) string
@@ -378,7 +383,61 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			t.Errorf("Exists = %v, %v; want true", exists, err)
 		}
 	})
+
+	t.Run("its PID is its command's own, kept as the command is exec'd", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(Creating); why != "" {
+			t.Skip(why)
+		}
+		b := s.Backend()
+
+		// By path: a session's PATH can find sleep as a link to another
+		// program, such as GNU coreutils' gsleep.
+		made, err := b.Create(t.Context(), "made", t.TempDir(), []string{"/bin/sleep", "1000"})
+		if err != nil {
+			t.Fatalf("Create = %v", err)
+		}
+
+		pid := listed(t, b, "made").PID
+		if pid <= 0 || made.PID != pid {
+			t.Fatalf("Create reported PID %d and List %d, want one positive pid", made.PID, pid)
+		}
+		var program string
+		if !harnesstest.PollUntil(t, commandStart, 10*time.Millisecond, func() bool {
+			program = s.Program(t, pid)
+			return program == "sleep"
+		}) {
+			t.Errorf("process %d runs %q, want the command's program, sleep", pid, program)
+		}
+		if again := listed(t, b, "made").PID; again != pid {
+			t.Errorf("List's PID went from %d to %d as the command started, want it kept", pid, again)
+		}
+	})
+
+	t.Run("its creation is recorded to the whole second", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(Creating); why != "" {
+			t.Skip(why)
+		}
+		b := s.Backend()
+
+		before := time.Now()
+		made, err := b.Create(t.Context(), "made", t.TempDir(), []string{"sleep", "1000"})
+		after := time.Now()
+		if err != nil {
+			t.Fatalf("Create = %v", err)
+		}
+
+		for what, at := range map[string]time.Time{"Create": made.Created, "List": listed(t, b, "made").Created} {
+			if at.IsZero() || !at.Equal(at.Truncate(time.Second)) || at.Before(before.Truncate(time.Second)) || at.After(after) {
+				t.Errorf("%s reports the creation as %v, want a whole second from %v to %v", what, at, before, after)
+			}
+		}
+	})
 }
+
+// commandStart bounds the wait for a session's command to be exec'd.
+const commandStart = 5 * time.Second
 
 func endedContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	ended := func(t *testing.T) (context.Context, error) {

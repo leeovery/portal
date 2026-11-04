@@ -30,6 +30,24 @@ func NewRule(booted time.Time, restoring func(name string) bool) Rule {
 // adoption says why the live session takes over e, an entry from another
 // creation, rather than replacing it, and is empty when it replaces it.
 func (r Rule) adoption(e Entry) string {
+	if why := r.predating(e); why != "" {
+		return why
+	}
+	if r.restoring != nil && r.restoring(e.Name) {
+		return "its session is restoring"
+	}
+	return ""
+}
+
+// MayPredateBoot reports whether e may be an entry saved before this boot,
+// which a restore can yet bring back: one recording no creation, one recording
+// a creation before the boot, and any entry under the zero Rule, which knows
+// no boot.
+func (r Rule) MayPredateBoot(e Entry) bool { return r.predating(e) != "" }
+
+// predating says why e may be an entry saved before this boot, and is empty
+// when it can't be.
+func (r Rule) predating(e Entry) string {
 	switch {
 	case e.CreatedAt.IsZero():
 		return "its creation was never recorded"
@@ -37,8 +55,6 @@ func (r Rule) adoption(e Entry) string {
 		return "no rule to judge it by"
 	case e.CreatedAt.Before(r.booted):
 		return "it was saved before this boot"
-	case r.restoring != nil && r.restoring(e.Name):
-		return "its session is restoring"
 	}
 	return ""
 }
@@ -52,7 +68,7 @@ func (r Rule) adoption(e Entry) string {
 // unprintable or blank, is dropped too, so no surface prints it.
 func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule) (Entry, bool) {
 	e, ok := idx.Lookup(name)
-	if !ok || created.IsZero() || !e.sameCreation(created, pid) && rule.adoption(e) == "" {
+	if !ok || created.IsZero() || !e.SameCreation(created, pid) && rule.adoption(e) == "" {
 		return Entry{}, false
 	}
 	if !printable(e.Label) || strings.TrimSpace(e.Label) == "" {
@@ -81,7 +97,7 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 		}
 	case created.IsZero():
 		return
-	case idx.sessions[i].sameCreation(created, pid):
+	case idx.sessions[i].SameCreation(created, pid):
 		if !idx.sessions[i].fillIn(dir, pid) {
 			return
 		}
@@ -163,10 +179,10 @@ func dropped(earlier Entry) string {
 	return fmt.Sprintf("dropped %s, its label %q and its scrollback %q", what, label, scrollback)
 }
 
-// sameCreation reports whether the entry records the session created at
+// SameCreation reports whether the entry records the session created at
 // created, running pid. zmx keeps created times to the second, so the pid
 // tells two creations in one second apart wherever both sides know it. An
 // entry with no time can't be told from an earlier one.
-func (e Entry) sameCreation(created time.Time, pid int) bool {
+func (e Entry) SameCreation(created time.Time, pid int) bool {
 	return !e.CreatedAt.IsZero() && e.CreatedAt.Equal(created) && (e.PID == 0 || pid == 0 || e.PID == pid)
 }
