@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -62,8 +63,9 @@ func IdentifyDaemon(pid int) (IdentifyResult, error) {
 	trimmed := strings.TrimSpace(stdout)
 
 	if execErr != nil {
-		// Non-zero exit with no output is the canonical pid-not-found shape.
-		if trimmed == "" {
+		// A ps that ran and exited non-zero with no output is the canonical
+		// pid-not-found shape; one that never ran says nothing of the pid.
+		if _, exited := errors.AsType[*exec.ExitError](execErr); exited && trimmed == "" {
 			return IdentifyDead, nil
 		}
 		return 0, fmt.Errorf("identify pid %d: ps failed with stdout %q: %w", pid, trimmed, execErr)
