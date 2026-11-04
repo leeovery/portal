@@ -326,11 +326,8 @@ func TestResumeDropInput_Draw(t *testing.T) {
 		if rec.Msg != "clear pending input failed" {
 			t.Errorf("WARN = %q, want the refused drop's record", rec.Msg)
 		}
-		if got := rec.AttrOrEmpty("hook_key"); got != samplePayload().HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, samplePayload().HookKey)
-		}
-		if got := rec.AttrOrEmpty("pane_key"); got != samplePayload().PaneKey {
-			t.Errorf("WARN pane_key = %q, want %q", got, samplePayload().PaneKey)
+		if got := rec.AttrOrEmpty("session"); got != samplePayload().Session {
+			t.Errorf("WARN session = %q, want %q", got, samplePayload().Session)
 		}
 		if got := rec.ErrorAttr(t, "error"); got.Error() != dropErr.Error() {
 			t.Errorf("WARN error = %v, want %v", got, dropErr)
@@ -392,7 +389,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, err := paneDrawTheme(true, func() error {
+		_, err := sessionDrawTheme(true, func() error {
 			calls++
 			return refused
 		})
@@ -400,13 +397,13 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 			t.Errorf("the drop ran %d times, want exactly 1", calls)
 		}
 		if !errors.Is(err, refused) {
-			t.Errorf("paneDrawTheme() error = %v, want the drop's %v", err, refused)
+			t.Errorf("sessionDrawTheme() error = %v, want the drop's %v", err, refused)
 		}
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, err := paneDrawTheme(true, nil); err != nil {
-			t.Errorf("paneDrawTheme() error = %v, want nil", err)
+		if _, err := sessionDrawTheme(true, nil); err != nil {
+			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})
 }

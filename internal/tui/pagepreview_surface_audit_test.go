@@ -170,6 +170,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"portaltest":      {},
 		"prefs":           {},
 		"proctable":       {},
+		"proctest":        {},
 		"project":         {},
 		"resolver":        {},
 		"resumekeys":      {},

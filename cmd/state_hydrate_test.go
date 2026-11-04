@@ -1006,6 +1006,7 @@ type hydrateCfgOpts struct {
 	ExecShell         func(prog string, args []string)
 	LoadPrefsStore    func() (*prefs.Store, error)
 	ResolveExe        func() (string, error)
+	SetPending        func(dir, name string) error
 	DisableTTYSignals func() error
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
@@ -1053,6 +1054,7 @@ func hydrateCfg(t *testing.T, opts hydrateCfgOpts) hydrateConfig {
 		ExecShell:         opts.ExecShell,
 		LoadPrefsStore:    opts.LoadPrefsStore,
 		ResolveExe:        opts.ResolveExe,
+		SetPending:        opts.SetPending,
 		DisableTTYSignals: opts.DisableTTYSignals,
 		OpenFIFO:          opts.OpenFIFO,
 		HandleFileMissing: fileMissing,

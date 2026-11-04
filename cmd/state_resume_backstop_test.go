@@ -8,49 +8,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/tmux"
-
 	"github.com/leeovery/portal/internal/state"
 )
 
-// The user's shell, stty and tmux are replaced by stubs appending one line each
-// to the pane's transcript, so the transcript orders the bytes the chain wrote
-// among the programs it ran. A tmux stub answers the pending-marker read with
-// $RESUME_PENDING, reading as set when that is unset and as clear when it is
-// set empty.
+// The user's shell and stty are replaced by stubs appending one line each to
+// the session's transcript, so the transcript orders the bytes the chain wrote
+// among the programs it ran.
 const (
 	backstopShell = `#!/bin/sh
 echo shell >> "$PANE_TRANSCRIPT"
 `
 	backstopStty = `#!/bin/sh
 echo "stty $*" >> "$PANE_TRANSCRIPT"
-`
-	backstopTmux = `#!/bin/sh
-echo "tmux $*" >> "$PANE_TRANSCRIPT"
-case "$*" in
-display-message*@portal-resume-pending*) echo "${RESUME_PENDING-1}" ;;
-display-message*) echo "${ALTERNATE_ON:-0}" ;;
-esac
-`
-	// flippingTmux reports the pane on the alternate screen for its first two
-	// #{alternate_on} reads, as a leave tmux has not yet processed would.
-	flippingTmux = `#!/bin/sh
-echo "tmux $*" >> "$PANE_TRANSCRIPT"
-case "$*" in
-display-message*@portal-resume-pending*) echo "${RESUME_PENDING-1}" ;;
-display-message*)
-	n=0
-	while IFS= read -r line; do
-		case $line in *alternate_on*) n=$((n+1)) ;; esac
-	done < "$PANE_TRANSCRIPT"
-	if [ "$n" -ge 3 ]; then echo 0; else echo 1; fi
-	;;
-esac
-`
-	failingTmux = `#!/bin/sh
-echo "tmux $*" >> "$PANE_TRANSCRIPT"
-echo "no server running on /tmp/tmux-501/default" >&2
-exit 1
 `
 )
 
@@ -63,10 +32,24 @@ resume-recover) exit "$RECOVER_STATUS" ;;
 esac
 `
 
-// answeredThenGoneExe stands in for the portal binary under a pane answered on
-// its panel: its draw hands the pane its shell, which exits, and by the time
-// the tail runs the binary has left the baked path — or, with $KEEP_UNEXECUTABLE
-// set, stays there with its execute bit gone.
+// termedOnceExe stands in for the portal binary under a parked chain whose
+// first draw a SIGTERM ends: each draw records itself in the transcript, the
+// first ending 143 and any later one 0.
+const termedOnceExe = `#!/bin/sh
+case "$2" in
+resume-draw)
+	echo draw >> "$PANE_TRANSCRIPT"
+	[ "$(grep -c draw "$PANE_TRANSCRIPT")" -eq 1 ] && exit 143
+	exit 0
+	;;
+resume-recover) exit 0 ;;
+esac
+`
+
+// answeredThenGoneExe stands in for the portal binary under a session answered
+// on its panel: its draw hands the session its shell, which exits, and by the
+// time the tail runs the binary has left the baked path — or, with
+// $KEEP_UNEXECUTABLE set, stays there with its execute bit gone.
 const answeredThenGoneExe = `#!/bin/sh
 case "$2" in
 resume-draw)
@@ -87,13 +70,9 @@ type parkedRun struct {
 	backstopStderr string
 }
 
-type parkedStubs struct {
-	tmux string // empty stages no tmux at all
-}
-
-// runParkedChain runs the chain a waiting pane parks under /bin/sh with the
-// stubs alone on PATH, so no tmux but a stub is ever reached.
-func runParkedChain(t *testing.T, exe string, stubs parkedStubs, env ...string) parkedRun {
+// runParkedChain runs the chain a waiting session parks under /bin/sh, its
+// flag at flag, with the stubs ahead of the system's own tools on PATH.
+func runParkedChain(t *testing.T, exe, flag string, env ...string) parkedRun {
 	t.Helper()
 	dir := t.TempDir()
 	shell := stageExecutable(t, dir, "user-shell", backstopShell)
@@ -102,20 +81,17 @@ func runParkedChain(t *testing.T, exe string, stubs parkedStubs, env ...string) 
 		t.Fatalf("stage the stub bin dir: %v", err)
 	}
 	stageExecutable(t, bin, "stty", backstopStty)
-	if stubs.tmux != "" {
-		stageExecutable(t, bin, "tmux", stubs.tmux)
-	}
 	transcriptPath := filepath.Join(dir, "transcript")
 	transcript, err := os.OpenFile(transcriptPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		t.Fatalf("open the pane transcript: %v", err)
+		t.Fatalf("open the session transcript: %v", err)
 	}
 	t.Cleanup(func() { _ = transcript.Close() })
 
-	parked := exec.Command("/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
+	parked := exec.Command("/bin/sh", "-c", parkedResumeChain(parkedChain{Exe: exe, Flag: flag}, samplePayload()))
 	parked.Env = append(os.Environ(),
 		"SHELL="+shell,
-		"PATH="+bin,
+		"PATH="+bin+":/bin:/usr/bin",
 		"PANE_TRANSCRIPT="+transcriptPath,
 	)
 	parked.Env = append(parked.Env, env...)
@@ -139,7 +115,7 @@ func runParkedChain(t *testing.T, exe string, stubs parkedStubs, env ...string) 
 	}
 	logged, err := os.ReadFile(transcriptPath)
 	if err != nil {
-		t.Fatalf("read the pane transcript: %v", err)
+		t.Fatalf("read the session transcript: %v", err)
 	}
 	run.transcript = string(logged)
 	return run
@@ -152,6 +128,22 @@ func stageExecutable(t *testing.T, dir, name, body string) string {
 		t.Fatalf("stage %s: %v", name, err)
 	}
 	return path
+}
+
+// backstopFlag is where the sample session's flag lives in a state directory
+// of the test's own; raise raises it there first.
+func backstopFlag(t *testing.T, raise bool) (stateDir, flag string) {
+	t.Helper()
+	stateDir = t.TempDir()
+	session := samplePayload().Session
+	if raise {
+		return stateDir, raiseFlag(t, stateDir, session)
+	}
+	flag, err := state.ResumePending.Path(stateDir, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stateDir, flag
 }
 
 func TestParkedResumeChain_Backstop(t *testing.T) {
@@ -170,89 +162,77 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 			return path
 		}},
 	}
-	target := string(tmux.PaneIDTarget(samplePayload().Pane))
-	markerLine := "tmux display-message -p -t " + target + " -F #{" + state.ResumePendingOption + "}\n"
-	clearLine := "tmux set-option -pu -t " + target + " " + state.ResumePendingOption + "\n"
-	readLine := "tmux display-message -p -t " + target + " -F #{" + alternateOnFormat + "}\n"
-	unpinLine := "tmux set-option -pu -t " + target + " " + altScreenOption + "\n"
-	recovered := markerLine + hydrateResetPreamble + clearLine + readLine + unpinLine + "stty sane\n" + "shell\n"
+	recovered := hydrateResetPreamble + "stty sane\n" + "shell\n"
 	for _, tc := range unstartable {
-		t.Run("a tail "+tc.name+" resets the pane, clears its marker, lifts its pin and restores the terminal before the user's shell", func(t *testing.T) {
-			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux})
+		t.Run("a tail "+tc.name+" resets the session, lowers its flag and restores the terminal before the user's shell", func(t *testing.T) {
+			stateDir, flag := backstopFlag(t, true)
+
+			run := runParkedChain(t, tc.stage(t), flag)
 
 			if run.transcript != recovered {
-				t.Errorf("pane transcript = %q, want %q", run.transcript, recovered)
+				t.Errorf("session transcript = %q, want %q", run.transcript, recovered)
 			}
-			if run.status != 0 {
-				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
-			}
-		})
-
-		t.Run("a tail "+tc.name+" polls until the pane is off the alternate screen before it lifts the pin", func(t *testing.T) {
-			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: flippingTmux})
-
-			want := markerLine + hydrateResetPreamble + clearLine + strings.Repeat(readLine, 3) + unpinLine + "stty sane\nshell\n"
-			if run.transcript != want {
-				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
-			}
-		})
-
-		t.Run("a tail "+tc.name+" keeps the pin when the leave is never confirmed", func(t *testing.T) {
-			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux}, "ALTERNATE_ON=1")
-
-			want := markerLine + hydrateResetPreamble + clearLine + strings.Repeat(readLine, altScreenLeaveAttempts) + "stty sane\nshell\n"
-			if run.transcript != want {
-				t.Errorf("pane transcript = %q, want %q", run.transcript, want)
+			if flagRaised(t, stateDir, samplePayload().Session) {
+				t.Error("the backstop left the session's flag raised")
 			}
 			if run.backstopStderr != "" {
-				t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
+				t.Errorf("the backstop wrote %q to the session's stderr, want nothing", run.backstopStderr)
 			}
 			if run.status != 0 {
 				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
 			}
 		})
 
-		t.Run("a tail "+tc.name+" treats any value in the pending marker as still pending", func(t *testing.T) {
-			run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: backstopTmux}, "RESUME_PENDING=anything")
+		t.Run("a tail "+tc.name+" counts a flag it can't look for as raised, and reaches the shell though it can't lower it", func(t *testing.T) {
+			_, flag := backstopFlag(t, true)
+			unsearchable(t, filepath.Dir(flag))
+
+			run := runParkedChain(t, tc.stage(t), flag)
 
 			if run.transcript != recovered {
-				t.Errorf("pane transcript = %q, want %q", run.transcript, recovered)
+				t.Errorf("session transcript = %q, want %q", run.transcript, recovered)
+			}
+			if run.backstopStderr != "" {
+				t.Errorf("the failed removal reached the session: stderr %q", run.backstopStderr)
 			}
 			if run.status != 0 {
 				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
 			}
 		})
 
-		clearFailures := []struct {
-			name, tmux, tmuxCalls, leak string
-		}{
-			{name: "tmux refusing the marker read and the clear", tmux: failingTmux, tmuxCalls: markerLine, leak: "no server running"},
-			{name: "no tmux on PATH", tmux: "", leak: "tmux:"},
-		}
-		for _, cf := range clearFailures {
-			t.Run("a tail "+tc.name+" still reaches the user's shell with "+cf.name, func(t *testing.T) {
-				run := runParkedChain(t, tc.stage(t), parkedStubs{tmux: cf.tmux})
+		t.Run("a tail "+tc.name+" counts a flag whose state directory is gone as raised", func(t *testing.T) {
+			stateDir, flag := backstopFlag(t, false)
+			if err := os.Remove(stateDir); err != nil {
+				t.Fatal(err)
+			}
 
-				steps := ""
-				if cf.tmux != "" {
-					steps = clearLine + strings.Repeat(readLine, altScreenLeaveAttempts)
-				}
-				if want := cf.tmuxCalls + hydrateResetPreamble + steps + "stty sane\nshell\n"; run.transcript != want {
-					t.Errorf("pane transcript = %q, want %q", run.transcript, want)
-				}
-				if strings.Contains(run.stderr, cf.leak) {
-					t.Errorf("the failed clear reached the pane: stderr %q", run.stderr)
-				}
-				if run.backstopStderr != "" {
-					t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
-				}
-				if run.status != 0 {
-					t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
-				}
-			})
-		}
+			run := runParkedChain(t, tc.stage(t), flag)
+
+			if run.transcript != recovered {
+				t.Errorf("session transcript = %q, want %q", run.transcript, recovered)
+			}
+			if run.status != 0 {
+				t.Errorf("parked chain status = %d, want the user's shell's 0", run.status)
+			}
+		})
 	}
 
+	lowered := []struct {
+		name  string
+		stage func(t *testing.T) string
+	}{
+		{name: "a lowered flag", stage: func(t *testing.T) string {
+			stateDir, flag := backstopFlag(t, true)
+			if _, err := state.ResumePending.Clear(stateDir, samplePayload().Session); err != nil {
+				t.Fatal(err)
+			}
+			return flag
+		}},
+		{name: "no flag ever raised", stage: func(t *testing.T) string {
+			_, flag := backstopFlag(t, false)
+			return flag
+		}},
+	}
 	answered := []struct {
 		name       string
 		env        []string
@@ -261,22 +241,24 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		{name: "gone from the baked path", wantStatus: 127},
 		{name: "no longer executable at the baked path", env: []string{"KEEP_UNEXECUTABLE=1"}, wantStatus: 126},
 	}
-	for _, tc := range answered {
-		t.Run("a pane answered on the panel, its binary "+tc.name+" by its shell's exit, closes on that first exit", func(t *testing.T) {
-			exe := stageExecutable(t, t.TempDir(), "portal", answeredThenGoneExe)
+	for _, flag := range lowered {
+		for _, tc := range answered {
+			t.Run("a session answered on the panel, "+flag.name+", its binary "+tc.name+" by its shell's exit, closes on that first exit", func(t *testing.T) {
+				exe := stageExecutable(t, t.TempDir(), "portal", answeredThenGoneExe)
 
-			run := runParkedChain(t, exe, parkedStubs{tmux: backstopTmux}, append([]string{"RESUME_PENDING="}, tc.env...)...)
+				run := runParkedChain(t, exe, flag.stage(t), tc.env...)
 
-			if run.transcript != markerLine {
-				t.Errorf("pane transcript = %q, want the marker read alone, %q", run.transcript, markerLine)
-			}
-			if run.backstopStderr != "" {
-				t.Errorf("the backstop wrote %q to the pane's stderr, want nothing", run.backstopStderr)
-			}
-			if run.status != tc.wantStatus {
-				t.Errorf("parked chain status = %d, want the could-not-run %d", run.status, tc.wantStatus)
-			}
-		})
+				if run.transcript != "" {
+					t.Errorf("session transcript = %q, want nothing from the backstop", run.transcript)
+				}
+				if run.backstopStderr != "" {
+					t.Errorf("the backstop wrote %q to the session's stderr, want nothing", run.backstopStderr)
+				}
+				if run.status != tc.wantStatus {
+					t.Errorf("parked chain status = %d, want the could-not-run %d", run.status, tc.wantStatus)
+				}
+			})
+		}
 	}
 
 	started := []struct {
@@ -285,22 +267,48 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		recover    string
 		wantStatus int
 	}{
-		{name: "a pane answered on the panel", draw: "1", recover: "0", wantStatus: 0},
-		{name: "a pane the tail recovered", draw: "0", recover: "1", wantStatus: 1},
-		{name: "a pane the tail recovered, its shell exiting after a command not found", draw: "0", recover: "127", wantStatus: 127},
-		{name: "a pane the tail recovered, its shell exiting after a command it could not run", draw: "0", recover: "126", wantStatus: 126},
+		{name: "a session answered on the panel", draw: "1", recover: "0", wantStatus: 0},
+		{name: "a session the tail recovered", draw: "0", recover: "1", wantStatus: 1},
+		{name: "a session the tail recovered, its shell exiting after a command not found", draw: "0", recover: "127", wantStatus: 127},
+		{name: "a session the tail recovered, its shell exiting after a command it could not run", draw: "0", recover: "126", wantStatus: 126},
 	}
 	for _, tc := range started {
 		t.Run(tc.name+" closes on the first exit of its shell", func(t *testing.T) {
 			exe := stageExecutable(t, t.TempDir(), "portal", statusChainExe)
+			stateDir, flag := backstopFlag(t, true)
 
-			run := runParkedChain(t, exe, parkedStubs{tmux: backstopTmux}, "DRAW_STATUS="+tc.draw, "RECOVER_STATUS="+tc.recover)
+			run := runParkedChain(t, exe, flag, "DRAW_STATUS="+tc.draw, "RECOVER_STATUS="+tc.recover)
 
 			if run.transcript != "" {
-				t.Errorf("the backstop acted on a pane whose tail started; transcript %q", run.transcript)
+				t.Errorf("the backstop acted on a session whose tail started; transcript %q", run.transcript)
+			}
+			if !flagRaised(t, stateDir, samplePayload().Session) {
+				t.Error("the backstop lowered the flag of a session whose tail started")
 			}
 			if run.status != tc.wantStatus {
 				t.Errorf("parked chain status = %d, want %d", run.status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestParkedResumeChain_DrawLoop(t *testing.T) {
+	for _, w := range flagWorlds() {
+		want, verdict := "draw\n", "ends the loop"
+		if w.raised {
+			want, verdict = "draw\ndraw\n", "draws again"
+		}
+		t.Run("a draw a SIGTERM ended over a flag "+w.name+" "+verdict, func(t *testing.T) {
+			exe := stageExecutable(t, t.TempDir(), "portal", termedOnceExe)
+			flag := w.stage(t, samplePayload().Session)
+
+			run := runParkedChain(t, exe, flag)
+
+			if run.transcript != want {
+				t.Errorf("session transcript = %q, want %q", run.transcript, want)
+			}
+			if run.status != 0 {
+				t.Errorf("parked chain status = %d, want the tail's 0; stderr %q", run.status, run.stderr)
 			}
 		})
 	}

@@ -24,8 +24,13 @@ const (
 // what makes the card's wrap visible rather than theoretical.
 const resumeSurfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
 
-// The report a freeze that will not lift leaves on the card.
-const resumeSurfaceReport = "the pane is frozen and will not lift"
+// The reports each screen's answer leaves on its card when it is refused: a
+// resume-pending flag that will not lower on the panel, and a hooks.json that
+// will not take the discard on its confirmation.
+const (
+	resumeSurfaceReport        = "can't unpause this session: permission denied"
+	resumeDiscardSurfaceReport = "can't write hooks.json: permission denied"
+)
 
 // The size a pane holds the card at, and one below it: the degraded form is
 // reachable by name rather than by dragging a window to find the fallback
@@ -112,7 +117,7 @@ func surfaceRegistry() []Surface {
 		newSurface(resumeWaitingReportSurface, waiting, resumeSurfaceReport, resumeSurfaceRoomyWidth, resumeSurfaceRoomyHeight),
 		newSurface(resumeWaitingDegradedSurface, waiting, "", resumeSurfaceDegradedWidth, resumeSurfaceDegradedHeight),
 		newSurface(resumeDiscardSurface, discard, "", resumeSurfaceRoomyWidth, resumeSurfaceRoomyHeight),
-		newSurface(resumeDiscardReportSurface, discard, resumeSurfaceReport, resumeSurfaceRoomyWidth, resumeSurfaceRoomyHeight),
+		newSurface(resumeDiscardReportSurface, discard, resumeDiscardSurfaceReport, resumeSurfaceRoomyWidth, resumeSurfaceRoomyHeight),
 		newSurface(resumeDiscardDegradedSurface, discard, "", resumeSurfaceDegradedWidth, resumeSurfaceDegradedHeight),
 	}
 }

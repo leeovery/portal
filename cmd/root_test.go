@@ -521,7 +521,7 @@ func TestResetRootCmdClearsStateChildFlags(t *testing.T) {
 	t.Run("it refuses a resume-wait naming no command after a sibling set one", func(t *testing.T) {
 		withFuncSeam(t, &resumeWaitRunFunc, func(resumeWaitConfig) error { return nil })
 
-		payload := resumeChainPayload{Command: "make deploy", HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}
+		payload := resumeChainPayload{Command: "make deploy", Session: "proj-a1b2"}
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		errBuf := new(bytes.Buffer)
@@ -534,7 +534,7 @@ func TestResetRootCmdClearsStateChildFlags(t *testing.T) {
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})
+		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--session", "proj-a1b2"})
 		if err := rootCmd.Execute(); err == nil {
 			t.Error("executing resume-wait with no --command succeeded; the sibling's --command outlived the reset")
 		}

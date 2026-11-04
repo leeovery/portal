@@ -7,8 +7,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/leeovery/portal/internal/harnesstest"
 )
 
 // drainPTY reads whatever the pane writes, as tmux does, so no write to the
@@ -54,6 +52,7 @@ func TestParkedResumeChain_PaneTerminalHangup(t *testing.T) {
 		p := startTermPane(t, termPaneOpts{tty: slave})
 		_ = slave.Close()
 		waiter := p.awaitEvent(t, termEventWait, 1)
+		waiterGone := p.held.Watch(t, waiter)
 
 		stopDrain()
 		if err := master.Close(); err != nil {
@@ -65,18 +64,17 @@ func TestParkedResumeChain_PaneTerminalHangup(t *testing.T) {
 		case <-time.After(termPaneWait):
 			t.Fatalf("the parked chain outlived its terminal; %s", p.diagnostics())
 		}
-		ws, ok := p.ended.state.Sys().(syscall.WaitStatus)
-		if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
-			t.Errorf("the parked chain ended %v, want killed by SIGHUP; %s", p.ended.state, p.diagnostics())
+		if ws := p.held.Status(t); !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
+			t.Errorf("the parked chain ended %v, want killed by SIGHUP; %s", ws, p.diagnostics())
 		}
-		if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(waiter) }) {
+		if !endsWithin(waiterGone, termPaneWait) {
 			t.Errorf("the waiter (pid %d) outlived its terminal; %s", waiter, p.diagnostics())
 		}
 		if p.recorded(termEventRecovered) {
 			t.Errorf("the recovery tail ran; %s", p.diagnostics())
 		}
-		if p.recorded(termEventCleared) {
-			t.Errorf("a pending-marker clear was attempted; %s", p.diagnostics())
+		if p.flagLowered(t) {
+			t.Errorf("the session's flag was lowered; %s", p.diagnostics())
 		}
 	})
 }

@@ -16,8 +16,9 @@ import (
 // Restated rather than read off the surface, so a seed that drifts is a failure
 // here rather than an expectation that drifts with it.
 const (
-	surfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
-	surfaceReport  = "the pane is frozen and will not lift"
+	surfaceCommand       = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+	surfaceReport        = "can't unpause this session: permission denied"
+	discardSurfaceReport = "can't write hooks.json: permission denied"
 )
 
 type surfaceWant struct {
@@ -33,7 +34,7 @@ func surfaceWants() []surfaceWant {
 		{name: "resume-panel-waiting-report", render: tui.RenderResumePanel, report: surfaceReport, w: 80, h: 24},
 		{name: "resume-panel-waiting-degraded", render: tui.RenderResumePanel, w: 40, h: 10},
 		{name: "resume-panel-discard", render: tui.RenderResumeDiscardConfirm, w: 80, h: 24},
-		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: surfaceReport, w: 80, h: 24},
+		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: discardSurfaceReport, w: 80, h: 24},
 		{name: "resume-panel-discard-degraded", render: tui.RenderResumeDiscardConfirm, w: 40, h: 10},
 	}
 }

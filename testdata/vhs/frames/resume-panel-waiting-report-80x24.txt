@@ -11,7 +11,7 @@
            │  ON RESUME                                             │
            │  cd ~/code/portal/internal/capture && ./scripts/watch  │
            │  --session 45604077-a9d0-41bd-9692-b97f63f237fc        │
-           │  the pane is frozen and will not lift                  │
+           │  can't unpause this session: permission denied         │
            ├────────────────────────────────────────────────────────┤
            │  ⏎ resume   d discard   esc back                       │
            ╰────────────────────────────────────────────────────────╯

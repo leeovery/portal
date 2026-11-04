@@ -276,7 +276,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 	})
 
 	t.Run("it redraws when a signal settles at the drawn size", func(t *testing.T) {
-		// The repaint signal-hydrate asks for on attach: a SIGWINCH at a size
+		// A repaint asked for on attach: a SIGWINCH at a size
 		// that has not changed, owed a redraw all the same so the panel takes
 		// up the theme as it is now.
 		payload := drawnPayload()
