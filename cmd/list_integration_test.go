@@ -40,8 +40,8 @@ func TestPortalListAgainstZmx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read web-Qm3pLz: %v", err)
 	}
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(web.Name, web.Dir, web.Created)
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(web.Name, web.Dir, web.Created, web.PID)
 		return idx.SetLabel(web.Name, "web · checkout")
 	}); err != nil {
 		t.Fatalf("label web-Qm3pLz: %v", err)

@@ -60,8 +60,10 @@ type Created struct {
 	// Dir is the directory the session was made in: the git root of the one
 	// asked for.
 	Dir string
-	// At is when the backend made it, zero when the new session did not say.
-	At time.Time
+	// At is when the backend made it, and PID the process it runs, each zero
+	// when the new session did not say.
+	At  time.Time
+	PID int
 }
 
 type SessionCreator struct {
@@ -98,7 +100,7 @@ func (sc *SessionCreator) Create(ctx context.Context, dir string, command []stri
 	if err != nil {
 		return Created{}, err
 	}
-	return Created{Name: made.Name, Dir: root, At: made.Created}, nil
+	return Created{Name: made.Name, Dir: root, At: made.Created, PID: made.PID}, nil
 }
 
 // mint creates the session under a fresh name, drawing another nanoid for a

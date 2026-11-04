@@ -83,6 +83,42 @@ func TestCodec(t *testing.T) {
 		}
 	})
 
+	t.Run("an entry's cwd and pid encode under their own keys and round-trip", func(t *testing.T) {
+		in := sessionindex.Entry{Name: "a", Dir: "/d", Cwd: "/d/src", CreatedAt: time.Unix(1793000000, 0).UTC(), PID: 4242}
+		data, err := sessionindex.Encode(sessionindex.Index{Sessions: []sessionindex.Entry{in}})
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var raw struct {
+			Sessions []map[string]any `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if raw.Sessions[0]["cwd"] != "/d/src" || raw.Sessions[0]["pid"] != float64(4242) {
+			t.Errorf("entry = %v, want cwd and pid keys", raw.Sessions[0])
+		}
+		out, err := sessionindex.Decode(data)
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if !reflect.DeepEqual(out.Sessions, []sessionindex.Entry{in}) {
+			t.Errorf("round trip = %+v, want %+v", out.Sessions, in)
+		}
+	})
+
+	t.Run("an entry written before cwd and pid decodes with neither", func(t *testing.T) {
+		idx, err := sessionindex.Decode([]byte(`{"version":2,"sessions":[` +
+			`{"name":"a","label":"A","dir":"/d","created_at":"2026-10-26T07:33:20Z","scrollback_file":"scrollback/a.bin"}]}`))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		want := sessionindex.Entry{Name: "a", Label: "A", Dir: "/d", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/a.bin"}
+		if !reflect.DeepEqual(idx.Sessions, []sessionindex.Entry{want}) {
+			t.Errorf("sessions = %+v, want %+v", idx.Sessions, want)
+		}
+	})
+
 	t.Run("unknown fields are ignored", func(t *testing.T) {
 		idx, err := sessionindex.Decode([]byte(`{"version":2,"future":1,"sessions":[{"name":"a","extra":true}]}`))
 		if err != nil {

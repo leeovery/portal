@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
 	"syscall"
@@ -77,7 +78,7 @@ func TestUpdate(t *testing.T) {
 		at := time.Date(2026, 11, 2, 9, 30, 0, 0, time.FixedZone("x", 3600))
 		sessionindex.SetClockForTest(t, at)
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel("a", "Alpha")
 		})
 		if err != nil {
@@ -99,7 +100,7 @@ func TestUpdate(t *testing.T) {
 		dir := t.TempDir()
 		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","dir":"/a"},{"name":"b"}]}`)
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("b")
 			return nil
 		})
@@ -121,7 +122,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		boom := errors.New("boom")
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			_ = idx.SetLabel("a", "Alpha")
 			return boom
 		})
@@ -135,7 +136,7 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("nothing is written for a missing file when fn errors", func(t *testing.T) {
 		dir := t.TempDir()
-		_ = sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return errors.New("boom") })
+		_, _ = sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return errors.New("boom") })
 		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
@@ -147,7 +148,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		ran := false
 
-		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
+		_, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, sessionindex.ErrLegacyIndex) {
 			t.Errorf("Update = %v, want ErrLegacyIndex", err)
 		}
@@ -167,7 +168,7 @@ func TestUpdate(t *testing.T) {
 			t.Fatalf("stat: %v", err)
 		}
 
-		if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "A") }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		after, err := os.Stat(sessionindex.Path(dir))
@@ -200,12 +201,13 @@ func TestUpdate(t *testing.T) {
 		errs := make(chan error, callers)
 		for i := range callers {
 			wg.Go(func() {
-				errs <- sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+				_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 					// The pause widens the read-modify-write window an
 					// unserialised store would lose updates in.
 					time.Sleep(2 * time.Millisecond)
 					return idx.SetLabel(fmt.Sprintf("s%d", i), "label")
 				})
+				errs <- err
 			})
 		}
 		wg.Wait()
@@ -232,7 +234,7 @@ func TestUpdate(t *testing.T) {
 		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 		ran := false
 
-		err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
+		_, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { ran = true; return nil })
 		if !errors.Is(err, commitlock.ErrHeld) {
 			t.Errorf("Update = %v, want ErrHeld", err)
 		}
@@ -251,7 +253,7 @@ func TestUpdate(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			_ = held.Close()
 		}()
-		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Errorf("Update = %v, want it to wait for the release", err)
 		}
 	})
@@ -262,7 +264,7 @@ func TestUpdate(t *testing.T) {
 		writeIndex(t, dir, seed)
 		sessionindex.SetClockForTest(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 
-		err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			if err := idx.SetLabel("a", "Alpha"); err != nil {
 				return err
 			}
@@ -282,13 +284,90 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("a fn that changes nothing creates no file", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
+		if _, err := sessionindex.Update(dir, "cli", func(*sessionindex.Index) error { return nil }); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 		if _, err := os.Stat(sessionindex.Path(dir)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat sessions.json = %v, want absent", err)
 		}
 	})
+}
+
+func TestUpdate_Outcome(t *testing.T) {
+	const seed = `{"version":2,"sessions":[` +
+		`{"name":"gone","label":"Gone"},` +
+		`{"name":"recreated","label":"Old","created_at":"2026-11-02T08:00:00Z"},` +
+		`{"name":"same","label":"Same","created_at":"2026-11-03T09:30:00Z"},` +
+		`{"name":"kept","label":"Kept"}]}`
+	created := time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC)
+
+	t.Run("it reports the names it removed and those it replaced with another creation's", func(t *testing.T) {
+		dir := t.TempDir()
+		writeIndex(t, dir, seed)
+
+		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Remove("gone")
+			idx.Claim("recreated", "/new", created, 0)
+			idx.Claim("same", "/same", created, 0)
+			idx.Claim("fresh", "/fresh", created, 0)
+			idx.Restored("kept", created, 7)
+			return idx.SetLabel("kept", "Still kept")
+		})
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		if want := (sessionindex.Outcome{Removed: []string{"gone"}, Replaced: []string{"recreated"}}); !reflect.DeepEqual(outcome, want) {
+			t.Errorf("outcome = %+v, want %+v", outcome, want)
+		}
+	})
+
+	t.Run("it reports nothing when nothing was written", func(t *testing.T) {
+		for name, fn := range map[string]func(*sessionindex.Index) error{
+			"fn errors":                              func(idx *sessionindex.Index) error { idx.Remove("gone"); return errors.New("boom") },
+			"fn changes nothing":                     func(idx *sessionindex.Index) error { idx.Remove("absent"); return nil },
+			"fn claims an entry of its own creation": func(idx *sessionindex.Index) error { idx.Claim("same", "", created, 0); return nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				writeIndex(t, dir, seed)
+
+				outcome, _ := sessionindex.Update(dir, "cli", fn)
+
+				if !reflect.DeepEqual(outcome, sessionindex.Outcome{}) {
+					t.Errorf("outcome = %+v, want empty", outcome)
+				}
+			})
+		}
+	})
+
+	t.Run("it reports nothing when the write fails", func(t *testing.T) {
+		dir := unwritableStateDir(t)
+
+		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Claim("a", "/a", created, 0)
+			idx.Remove("a")
+			return nil
+		})
+
+		if err == nil {
+			t.Fatal("Update = nil, want the write failure")
+		}
+		if !reflect.DeepEqual(outcome, sessionindex.Outcome{}) {
+			t.Errorf("outcome = %+v, want empty", outcome)
+		}
+	})
+}
+
+func TestOutcome_Dropped(t *testing.T) {
+	outcome := sessionindex.Outcome{Removed: []string{"a", "b"}, Replaced: []string{"c", "a"}}
+
+	if got, want := outcome.Dropped(), []string{"a", "b", "c"}; !slices.Equal(got, want) {
+		t.Errorf("Dropped = %v, want %v, each name once", got, want)
+	}
+	if got := (sessionindex.Outcome{}).Dropped(); len(got) != 0 {
+		t.Errorf("Dropped of an empty outcome = %v, want none", got)
+	}
 }
 
 // sessionindex is the store internal/state will read labels from, so it may

@@ -25,7 +25,7 @@ func TestPortalKillAgainstZmx(t *testing.T) {
 		if _, err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(%s): %v", name, err)
 		}
-		if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel(name, name+" · work")
 		}); err != nil {
 			t.Fatalf("label %s: %v", name, err)

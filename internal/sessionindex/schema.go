@@ -44,13 +44,17 @@ type Index struct {
 	changes []change
 }
 
-// Entry is one session. Label is empty while the session shows its name.
-// ScrollbackFile is relative to the state directory.
+// Entry is one session. Label is empty while the session shows its name. Dir
+// is where Portal minted the session; Cwd is where the saver last saw it. A
+// creation is CreatedAt, with PID, the process the session runs, zero where
+// none was recorded. ScrollbackFile is relative to the state directory.
 type Entry struct {
 	Name           string    `json:"name"`
 	Label          string    `json:"label,omitempty"`
 	Dir            string    `json:"dir,omitempty"`
+	Cwd            string    `json:"cwd,omitempty"`
 	CreatedAt      time.Time `json:"created_at,omitzero"`
+	PID            int       `json:"pid,omitempty"`
 	ScrollbackFile string    `json:"scrollback_file,omitempty"`
 }
 

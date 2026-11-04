@@ -401,7 +401,8 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 			t.Fatalf("read index: %v", err)
 		}
 		entry, ok := idx.Lookup(name)
-		if want := (sessionindex.Entry{Name: name, Dir: dir, CreatedAt: at}); !ok || entry.Name != want.Name || entry.Dir != want.Dir || !entry.CreatedAt.Equal(at) {
+		held, _ := fake.Held(name)
+		if want := (sessionindex.Entry{Name: name, Dir: dir, CreatedAt: at, PID: held.PID}); !ok || entry.Name != want.Name || entry.Dir != want.Dir || !entry.CreatedAt.Equal(at) || entry.PID == 0 || entry.PID != want.PID {
 			t.Errorf("index entry = %+v, %v; want %+v", entry, ok, want)
 		}
 	})

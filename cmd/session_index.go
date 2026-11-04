@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
+
+var indexLogger = log.For("sessions")
 
 // legacyIndexError is a version 1 sessions.json, which belongs to the tmux
 // version of Portal until portal migrate moves it aside.
@@ -44,17 +47,35 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 
 // updateSessionIndex runs fn on the state directory's index under the commit
 // lock, writing it back when fn changed something, and makes the directory
-// first: the lock lives in it. via is cli, tui or internal.
+// first: the lock lives in it. Once the write has landed and the lock is
+// released, it forgets each session whose entry the write removed or replaced.
+// via is cli, tui or internal.
 func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
-	err = sessionindex.Update(dir, via, fn)
+	outcome, err := sessionindex.Update(dir, via, fn)
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
 		return legacyIndexError{path: sessionindex.Path(dir)}
 	}
+	forgetDropped(dir, outcome.Dropped(), via)
 	return err
+}
+
+// forgetDropped forgets each of names, sessions whose entries are gone from
+// the index in dir.
+func forgetDropped(dir string, names []string, via string) {
+	if len(names) == 0 {
+		return
+	}
+	store, err := loadHookStore()
+	for _, name := range names {
+		if err != nil {
+			indexLogger.Warn("forget", "op", "forget", "session", name, "detail", "kept its resume hook", "error", err, "via", via)
+		}
+		state.Forget(dir, store, name, via)
+	}
 }
 
 // refuseUnusableState stops a command while the state directory holds an

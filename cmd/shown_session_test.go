@@ -22,8 +22,8 @@ func fakePickerLister(sessions ...backend.Session) tui.SessionLister {
 // labelSession labels s in the index as Portal does, for s's own creation.
 func labelSession(t *testing.T, stateDir string, s backend.Session, label string) {
 	t.Helper()
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(s.Name, "", s.Created)
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(s.Name, "", s.Created, s.PID)
 		return idx.SetLabel(s.Name, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", s.Name, label, err)
@@ -34,7 +34,7 @@ func labelSession(t *testing.T, stateDir string, s backend.Session, label string
 // surface shows: for tests of what the index stores, not what a session shows.
 func storedLabel(t *testing.T, stateDir, name, label string) {
 	t.Helper()
-	if err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
+	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
 		return idx.SetLabel(name, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", name, label, err)
@@ -117,6 +117,20 @@ func TestShownSession(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("an entry from the same second with another pid is an earlier creation, and gives nothing", func(t *testing.T) {
+		live := withAnswered(joinOwn)
+		live.PID = 4243
+		recorded := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: joinCreated, PID: 4242}}}
+
+		if got := shownSession(live, &recorded); got.Label != "" || got.Dir != "" {
+			t.Errorf("shownSession = %+v, want no label or dir", got)
+		}
+		live.PID = 4242
+		if got := shownSession(live, &recorded); got.Label != "api work" {
+			t.Errorf("shownSession of the recorded pid = %+v, want its label", got)
+		}
+	})
 }
 
 func withAnswered(s backend.Session) backend.Session {

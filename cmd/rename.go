@@ -41,7 +41,7 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 	// cwd frozen in its place would regroup the session by an exact key it
 	// does not match.
 	return updateSessionIndex(via, func(idx *sessionindex.Index) error {
-		idx.Claim(name, "", live.Created)
+		idx.Claim(name, "", live.Created, live.PID)
 		return idx.SetLabel(name, label)
 	})
 }

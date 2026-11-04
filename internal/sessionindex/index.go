@@ -3,6 +3,7 @@ package sessionindex
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -16,12 +17,21 @@ import (
 // footers that print it. Its text is the refusal every surface shows.
 var ErrLabelUnprintable = errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
 
+// The two ops that drop an entry, which Update's outcome reports.
+const (
+	opRemove  = "rm"
+	opReplace = "replace"
+)
+
 type change struct {
 	op      string
 	session string
 	value   string
-	// detail says what the change dropped, empty when it dropped nothing.
+	// detail says what the change dropped or displaced, empty when nothing.
 	detail string
+	// level is the change's log level once written: INFO, its zero value,
+	// unless the change is one the saver makes on most polls.
+	level slog.Level
 }
 
 // Lookup returns a copy of the entry named name as stored, whatever creation
@@ -36,15 +46,15 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 }
 
 // LookupLive returns a copy of the live session's entry: the session named
-// name that its backend created at created, zero when it reports no time. An
-// entry counts only when it records that same creation; any other belonged to
-// an earlier session under the name, so the live one has none, and shows its
-// name and no dir. A label only a hand-edited file can hold, one SetLabel
-// would refuse or clear, unprintable or blank, is dropped too, so no surface
-// prints it.
-func (idx *Index) LookupLive(name string, created time.Time) (Entry, bool) {
+// name that its backend created at created, running pid, each zero when it
+// reports none. An entry counts only when it records that same creation; any
+// other belonged to an earlier session under the name, so the live one has
+// none, and shows its name and no dir. A label only a hand-edited file can
+// hold, one SetLabel would refuse or clear, unprintable or blank, is dropped
+// too, so no surface prints it.
+func (idx *Index) LookupLive(name string, created time.Time, pid int) (Entry, bool) {
 	e, ok := idx.Lookup(name)
-	if !ok || !sameCreation(e.CreatedAt, created) {
+	if !ok || !e.sameCreation(created, pid) {
 		return Entry{}, false
 	}
 	if !printable(e.Label) || strings.TrimSpace(e.Label) == "" {
@@ -95,33 +105,45 @@ func printable(label string) bool {
 }
 
 // Claim makes the session's entry the live session's: the one its backend
-// created at created, zero when it reports no time. A session recreated under
-// a name is a new session, told apart only by that time. So an entry from the
-// same creation keeps its label and scrollback, taking dir only when it
-// records none; an entry from another creation, or with no time, belonged to
-// an earlier session and is replaced whole; a session with no entry gets one.
-// A replacement is its own change, replace, saying what it dropped, so the log
-// shows a label being discarded.
-func (idx *Index) Claim(name, dir string, created time.Time) {
-	fresh := Entry{Name: name, Dir: dir, CreatedAt: created}
+// created at created, running pid, each zero when it reports none. A session
+// recreated under a name is a new session, told apart only by its creation.
+// So an entry from the same creation keeps its label and scrollback, taking
+// dir and pid only where it records none; an entry from another creation, or
+// with no time, belonged to an earlier session and is replaced whole; a
+// session with no entry gets one. A replacement is its own change, replace,
+// saying what it dropped, so the log shows a label being discarded.
+func (idx *Index) Claim(name, dir string, created time.Time, pid int) {
+	fresh := Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}
 	i := idx.indexOf(name)
 	switch {
 	case i < 0:
 		idx.Sessions = append(idx.Sessions, fresh)
-	case sameCreation(idx.Sessions[i].CreatedAt, created):
-		if idx.Sessions[i].Dir != "" || dir == "" {
+	case idx.Sessions[i].sameCreation(created, pid):
+		if !idx.Sessions[i].fillIn(dir, pid) {
 			return
 		}
-		idx.Sessions[i].Dir = dir
 	case idx.Sessions[i] == fresh:
 		return
 	default:
 		earlier := idx.Sessions[i]
 		idx.Sessions[i] = fresh
-		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
+		idx.changes = append(idx.changes, change{op: opReplace, session: name, value: dir, detail: dropped(earlier)})
 		return
 	}
 	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
+}
+
+// fillIn takes the dir and pid the entry records none of yet, reporting
+// whether it took either.
+func (e *Entry) fillIn(dir string, pid int) bool {
+	took := false
+	if e.Dir == "" && dir != "" {
+		e.Dir, took = dir, true
+	}
+	if e.PID == 0 && pid != 0 {
+		e.PID, took = pid, true
+	}
+	return took
 }
 
 // dropped says what replacing an earlier creation's entry discards.
@@ -140,10 +162,65 @@ func dropped(earlier Entry) string {
 	return fmt.Sprintf("dropped %s, its label %q and its scrollback %q", what, label, scrollback)
 }
 
-// sameCreation reports whether an entry created at recorded is the session
-// created at live. An entry with no time can't be told from an earlier one.
-func sameCreation(recorded, live time.Time) bool {
-	return !recorded.IsZero() && recorded.Equal(live)
+// sameCreation reports whether the entry records the session created at
+// created, running pid. zmx keeps created times to the second, so the pid
+// tells two creations in one second apart wherever both sides know it. An
+// entry with no time can't be told from an earlier one.
+func (e Entry) sameCreation(created time.Time, pid int) bool {
+	return !e.CreatedAt.IsZero() && e.CreatedAt.Equal(created) && (e.PID == 0 || pid == 0 || e.PID == pid)
+}
+
+// Restored records the creation restore just made for the session, created
+// and pid, as its entry's own, keeping the label, dirs and scrollback the
+// entry was saved with. A zero created records nothing, leaving the entry's
+// earlier creation in place. It reports whether the session had an entry; one
+// with none gets none.
+func (idx *Index) Restored(name string, created time.Time, pid int) bool {
+	i := idx.indexOf(name)
+	if i < 0 {
+		return false
+	}
+	e := &idx.Sessions[i]
+	if created.IsZero() || e.CreatedAt.Equal(created) && e.PID == pid {
+		return true
+	}
+	detail := fmt.Sprintf("pid %d, in place of %s", pid, creationOf(*e))
+	e.CreatedAt, e.PID = created, pid
+	idx.changes = append(idx.changes, change{op: "restored", session: name, value: created.UTC().Format(time.RFC3339), detail: detail})
+	return true
+}
+
+func creationOf(e Entry) string {
+	if e.CreatedAt.IsZero() {
+		return "no recorded creation"
+	}
+	return "the creation of " + e.CreatedAt.UTC().Format(time.RFC3339)
+}
+
+// SetScrollback names the file, relative to the state directory, holding the
+// session's saved scrollback. It changes only an entry the session has.
+func (idx *Index) SetScrollback(name, file string) {
+	idx.setField(name, "set-scrollback", file, slog.LevelInfo, func(e *Entry) *string { return &e.ScrollbackFile })
+}
+
+// RecordCwd records the session's working directory. It changes only an
+// entry the session has, and logs at DEBUG: the saver records it on most
+// polls.
+func (idx *Index) RecordCwd(name, cwd string) {
+	idx.setField(name, "record-cwd", cwd, slog.LevelDebug, func(e *Entry) *string { return &e.Cwd })
+}
+
+// setField sets the field of name's entry to value, recording op when that
+// changes it.
+func (idx *Index) setField(name, op, value string, level slog.Level, field func(*Entry) *string) {
+	i := idx.indexOf(name)
+	if i < 0 {
+		return
+	}
+	if f := field(&idx.Sessions[i]); *f != value {
+		*f = value
+		idx.changes = append(idx.changes, change{op: op, session: name, value: value, level: level})
+	}
 }
 
 // Remove drops the session's entry, reporting whether there was one.
@@ -153,7 +230,7 @@ func (idx *Index) Remove(name string) bool {
 		return false
 	}
 	idx.Sessions = slices.Delete(idx.Sessions, i, i+1)
-	idx.changes = append(idx.changes, change{op: "rm", session: name})
+	idx.changes = append(idx.changes, change{op: opRemove, session: name})
 	return true
 }
 

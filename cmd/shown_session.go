@@ -13,7 +13,7 @@ import (
 // creation, so one recreated under the name, or one that did not answer and
 // so reports no creation, shows its name and no recorded dir.
 func shownSession(s backend.Session, idx *sessionindex.Index) tui.Session {
-	entry, _ := idx.LookupLive(s.Name, s.Created)
+	entry, _ := idx.LookupLive(s.Name, s.Created, s.PID)
 	return tui.Session{
 		Name:         s.Name,
 		Label:        entry.Label,

@@ -1,10 +1,12 @@
 package sessionindex
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/leeovery/portal/internal/commitlock"
@@ -37,48 +39,82 @@ func Read(dir string) (Index, error) {
 	return Decode(data)
 }
 
+// Outcome is what a written Update dropped: the sessions whose entries it
+// removed, and those whose entries it replaced with another creation's, each
+// in the order fn made the changes. What Portal keeps beside an entry goes
+// with it, so a caller forgets these names once Update returns.
+type Outcome struct {
+	Removed  []string
+	Replaced []string
+}
+
+// Dropped is every name the outcome lists, once each.
+func (o Outcome) Dropped() []string {
+	var names []string
+	for _, name := range slices.Concat(o.Removed, o.Replaced) {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func outcomeOf(changes []change) Outcome {
+	var o Outcome
+	for _, c := range changes {
+		switch c.op {
+		case opRemove:
+			o.Removed = append(o.Removed, c.session)
+		case opReplace:
+			o.Replaced = append(o.Replaced, c.session)
+		}
+	}
+	return o
+}
+
 // Update reads the index in dir under the exclusive commit lock, the one the
 // state saver's commit cycle holds, and runs fn on it. When fn returns nil
 // having changed something through Index's methods, it stamps saved_at and
-// replaces sessions.json atomically; when fn changes nothing or errors,
-// nothing is written, and fn's error is returned as fn gave it. A lock not
-// granted within the bound returns an error wrapping commitlock.ErrHeld with
-// nothing read or written, and an index that cannot be read or decoded is
-// returned as an error with fn never run. via records the calling surface:
-// cli, tui or internal.
-func Update(dir, via string, fn func(*Index) error) error {
+// replaces sessions.json atomically, returning what that write dropped; when
+// fn changes nothing or errors, nothing is written, and fn's error is
+// returned as fn gave it. A lock not granted within the bound returns an error
+// wrapping commitlock.ErrHeld with nothing read or written, and an index that
+// cannot be read or decoded is returned as an error with fn never run. The
+// outcome is empty whenever nothing was written. via records the calling
+// surface: cli, tui or internal.
+func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
 	lock, err := commitlock.Acquire(dir)
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 	defer func() { _ = lock.Close() }()
 
 	idx, err := Read(dir)
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 	if err := fn(&idx); err != nil {
-		return err
+		return Outcome{}, err
 	}
 	if len(idx.changes) == 0 {
 		logger.Debug("update-noop", "op", "update-noop", "via", via)
-		return nil
+		return Outcome{}, nil
 	}
 	idx.SavedAt = now().UTC()
 	data, err := Encode(idx)
 	if err != nil {
-		return fmt.Errorf("encode sessions.json: %w", err)
+		return Outcome{}, fmt.Errorf("encode sessions.json: %w", err)
 	}
 	if err := fileutil.AtomicWrite0600(Path(dir), data); err != nil {
 		for _, c := range idx.changes {
 			logger.Warn(c.op, append(c.attrs(via), "error", err, "error_class", fileutil.ClassifyWriteError(err))...)
 		}
-		return fmt.Errorf("write sessions.json: %w", err)
+		return Outcome{}, fmt.Errorf("write sessions.json: %w", err)
 	}
 	for _, c := range idx.changes {
-		logger.Info(c.op, c.attrs(via)...)
+		logger.Log(context.Background(), c.level, c.op, c.attrs(via)...)
 	}
-	return nil
+	return outcomeOf(idx.changes), nil
 }
 
 func (c change) attrs(via string) []any {

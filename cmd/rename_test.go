@@ -21,6 +21,7 @@ import (
 var (
 	renameCreated = time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
 	renameDir     = "/work/dotfiles"
+	renamePID     = 4242
 )
 
 // stageRename stages a backend running this process inside the session
@@ -28,7 +29,7 @@ var (
 // directory of the test's own, and returns the directory.
 func stageRename(t *testing.T) (*backendtest.Fake, string) {
 	t.Helper()
-	fake := inSession(t, "", backend.Session{Name: currentSessionName, Dir: renameDir, Created: renameCreated})
+	fake := inSession(t, "", backend.Session{Name: currentSessionName, Dir: renameDir, Created: renameCreated, PID: renamePID})
 	fake.SetCurrent(currentSessionName)
 	return fake, os.Getenv("PORTAL_STATE_DIR")
 }
@@ -37,8 +38,8 @@ func stageRename(t *testing.T) (*backendtest.Fake, string) {
 // would have.
 func labelLive(t *testing.T, dir, label string) {
 	t.Helper()
-	if err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(currentSessionName, renameDir, renameCreated)
+	if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+		idx.Claim(currentSessionName, renameDir, renameCreated, renamePID)
 		return idx.SetLabel(currentSessionName, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", currentSessionName, label, err)
@@ -79,7 +80,7 @@ func TestRenameCommand(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated, PID: renamePID}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -123,7 +124,7 @@ func TestRenameCommand(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "new", Dir: renameDir, CreatedAt: renameCreated, ScrollbackFile: "scrollback/" + currentSessionName + ".bin"}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "new", Dir: renameDir, CreatedAt: renameCreated, PID: renamePID, ScrollbackFile: "scrollback/" + currentSessionName + ".bin"}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -138,7 +139,7 @@ func TestRenameCommand(t *testing.T) {
 			t.Fatalf("rename: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "new", CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "new", CreatedAt: renameCreated, PID: renamePID}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
@@ -308,7 +309,7 @@ func TestPickerLabeller(t *testing.T) {
 			t.Fatalf("SetLabel: %v", err)
 		}
 
-		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated}
+		want := sessionindex.Entry{Name: currentSessionName, Label: "api work", CreatedAt: renameCreated, PID: renamePID}
 		if e := entryOf(t, dir, currentSessionName); e != want {
 			t.Errorf("entry = %+v, want %+v", e, want)
 		}
