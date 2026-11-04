@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/bootid"
 	"github.com/leeovery/portal/internal/runnerreg"
 )
 
@@ -110,9 +111,24 @@ func writeEntry(t *testing.T, r runnerreg.Registry, token, body string) {
 	}
 }
 
-// entryFor is an entry naming pid on session.
+// thisBoot is the current boot's id, which the registry reads unless a test
+// stands in another; empty where it can't be read, and the registry then
+// judges by pid alone.
+var thisBoot, _ = bootid.Read()
+
+// entryFor is an entry naming pid on session, written in this boot.
 func entryFor(pid int, session string) string {
-	return `{"pid":` + strconv.Itoa(pid) + `,"session":"` + session + `"}`
+	return entryIn(pid, session, thisBoot)
+}
+
+// entryIn is an entry naming pid on session, written in boot, or naming no
+// boot when it is empty.
+func entryIn(pid int, session, boot string) string {
+	body := `{"pid":` + strconv.Itoa(pid) + `,"session":"` + session + `"`
+	if boot != "" {
+		body += `,"boot_id":"` + boot + `"`
+	}
+	return body + "}"
 }
 
 // refusingSocket leaves a socket file nothing listens on, as a runner that

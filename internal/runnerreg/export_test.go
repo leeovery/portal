@@ -24,6 +24,15 @@ func SetRunning(t testing.TB, f func(pid int, running func(int) bool) bool) {
 	t.Cleanup(func() { running = old })
 }
 
+// SetBootID has the registry read the current boot's id through read for the
+// rest of t.
+func SetBootID(t testing.TB, read func() (string, error)) {
+	t.Helper()
+	old := bootID
+	bootID = read
+	t.Cleanup(func() { bootID = old })
+}
+
 // Timeout and AnswerGrace are the bound of a request and how long past its
 // deadline a caller waits for the answer.
 func Timeout() time.Duration { return timeout }

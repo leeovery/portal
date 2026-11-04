@@ -72,7 +72,7 @@ type Registration struct {
 
 // Register lists this process under token as a runner attached to session,
 // serving the requests sent to its socket through h until Close, once it has
-// swept the registry of runners whose pids aren't running. The registry's
+// swept the registry of runners scan proves stale. The registry's
 // directory is made 0700 and the socket 0600. A token that could not have
 // been minted for a runner is refused, and a socket path too long for a unix
 // socket's address with ErrSocketPathTooLong, making nothing.
@@ -165,12 +165,17 @@ func (g *Registration) listen() error {
 	return nil
 }
 
+// write writes the entry naming this process on session, in the current
+// boot. A write lands once its rename does.
 func (g *Registration) write(session string) error {
-	data, err := json.Marshal(entry{PID: os.Getpid(), Session: session})
+	data, err := json.Marshal(entry{PID: os.Getpid(), Session: session, BootID: currentBoot()})
 	if err != nil {
 		return err
 	}
-	return fileutil.AtomicWrite0600(g.registry.entryPath(g.token), data)
+	path := g.registry.entryPath(g.token)
+	return fileutil.AtomicWrite0600(path, data, fileutil.ReportUnsynced(func(err error) {
+		logger.Warn("unsynced", "op", "unsynced", "path", path, "error", err, "error_class", fileutil.ClassifyWriteError(err))
+	}))
 }
 
 // serve answers each connection to the socket until Close. A connection the

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/leeovery/portal/internal/bootid"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/runnertoken"
@@ -73,6 +74,9 @@ func (r Registry) socketPath(token string) string {
 type entry struct {
 	PID     int    `json:"pid"`
 	Session string `json:"session"`
+	// BootID is the boot the runner registered in, empty when it couldn't
+	// read it.
+	BootID string `json:"boot_id,omitempty"`
 }
 
 // registered is one runner as its entry names it.
@@ -239,9 +243,9 @@ func (r Registry) sweep() {
 	_, _ = r.scan()
 }
 
-// scan reads the directory for the runners registered in it whose pids are
-// running. An entry whose pid isn't running is removed with its socket; one
-// it can't read is left. A socket with no entry, which no runner registering
+// scan reads the directory for the runners registered in it that may be
+// running. An entry stale proves gone is removed with its socket; one it
+// can't read is left. A socket with no entry, which no runner registering
 // leaves for longer than it takes to write one, is removed if it refuses
 // connections. A registry never made holds no runners.
 func (r Registry) scan() ([]registered, error) {
@@ -265,20 +269,52 @@ func (r Registry) scan() ([]registered, error) {
 			r.removeOrphan(token)
 		}
 	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	boot := currentBoot()
 	var runners []registered
 	for token := range entries {
 		e, err := r.read(token)
 		rn := registered{token: token, entry: e}
-		switch {
-		case err != nil:
+		if err != nil {
 			r.leave(token, 0, "unreadable", err)
-		case !running(e.PID):
-			r.remove(rn)
-		default:
+		} else if reason := stale(e, boot); reason != "" {
+			r.remove(rn, reason)
+		} else {
 			runners = append(runners, rn)
 		}
 	}
 	return runners, nil
+}
+
+// stale is why e's runner is proved gone, empty while it may be running: its
+// pid isn't running, or its entry is from a boot other than boot, the current
+// one, or names none. After a reboot a dead runner's pid may be another
+// process's, so only the boot tells its entry is stale. With boot unknown, the
+// pid alone judges.
+func stale(e entry, boot string) string {
+	switch {
+	case !running(e.PID):
+		return "dead"
+	case boot == "":
+		return ""
+	case e.BootID == "":
+		return "no boot id"
+	case e.BootID != boot:
+		return "another boot"
+	}
+	return ""
+}
+
+// currentBoot is the current boot's id, empty when it can't be read.
+func currentBoot() string {
+	id, err := bootID()
+	if err != nil {
+		logger.Debug("boot id unknown", "error", err)
+		return ""
+	}
+	return id
 }
 
 // read reads token's entry, refusing one that names no pid or no session.
@@ -288,7 +324,7 @@ func (r Registry) read(token string) (entry, error) {
 		return entry{}, err
 	}
 	var e entry
-	if err := decodeStrict(data, fields{"pid": &e.PID, "session": &e.Session}); err != nil {
+	if err := decodeStrict(data, fields{"pid": &e.PID, "session": &e.Session, "boot_id": &e.BootID}); err != nil {
 		return entry{}, err
 	}
 	if e.PID <= 0 || e.Session == "" {
@@ -306,7 +342,7 @@ func (r Registry) read(token string) (entry, error) {
 // that refuses, or answers unreadably, may be another version's.
 func (r Registry) ask(ctx context.Context, rn registered, req request) error {
 	if !running(rn.PID) {
-		r.remove(rn)
+		r.remove(rn, "dead")
 		return fmt.Errorf("%w: runner %d has exited", runnertoken.ErrNoRunner, rn.PID)
 	}
 	err := send(ctx, r.socketPath(rn.token), rn.PID, req)
@@ -333,15 +369,15 @@ func leftReason(err error) string {
 	return "no answer"
 }
 
-// remove removes the socket, then the entry, of a runner whose pid isn't
-// running, unless r is read-only.
-func (r Registry) remove(rn registered) {
+// remove removes the socket, then the entry, of a runner proved gone for
+// reason, unless r is read-only.
+func (r Registry) remove(rn registered, reason string) {
 	if r.readOnly {
 		return
 	}
 	_ = os.Remove(r.socketPath(rn.token))
 	_ = os.Remove(r.entryPath(rn.token))
-	logger.Debug("stale runner", "path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", "dead")
+	logger.Debug("stale runner", "path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", reason)
 }
 
 // leave logs why an entry stays, its runner's pid when it is known.
@@ -373,6 +409,10 @@ func (r Registry) removeOrphan(token string) {
 		logger.Debug("stale runner", "path", path, "reason", "orphan socket", "error", err)
 	}
 }
+
+// bootID reads the current boot's id, a variable so a test can stand in
+// another boot's.
+var bootID = bootid.Read
 
 // running is processRunning, a variable so a test can end a runner between
 // the scan that finds it and the request that asks it.
