@@ -31,6 +31,10 @@ type resumeWaitProbe struct {
 	execArgs  []string
 	execCalls int
 
+	// execShellEnv is the $SHELL the exec hands on: it passes this process's
+	// environment.
+	execShellEnv string
+
 	// Restores already run when the exec happened, so a restore that moved
 	// below the hand-off is visible as a zero reading.
 	restoredAtExec int
@@ -145,6 +149,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.order = append(p.order, "exec")
 			p.execProg = prog
 			p.execArgs = args
+			p.execShellEnv = os.Getenv("SHELL")
 			p.execCalls++
 			p.restoredAtExec = p.restores
 		},

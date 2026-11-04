@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -77,10 +76,10 @@ func TestResolveHookKey_AgainstARealServer(t *testing.T) {
 	t.Run("it probes without naming the option", func(t *testing.T) {
 		ts, client, pane := liveHookKeyPane(t, "rhk-named")
 
-		out, err := ts.TryRun("show-options", "-p", "-t", pane, state.PortalPaneIDOption)
+		out, err := ts.TryRun("show-options", "-p", "-t", pane, tmux.PortalPaneIDOption)
 		if err == nil {
 			t.Fatalf("show-options -p -t %s %s exited 0 (%q); naming the option is expected to fail on a live un-stamped pane",
-				pane, state.PortalPaneIDOption, out)
+				pane, tmux.PortalPaneIDOption, out)
 		}
 		if !strings.Contains(out, "invalid option") {
 			t.Errorf("show-options naming the option said %q, want %q — the failure indistinguishable from a gone pane", out, "invalid option")
@@ -94,7 +93,7 @@ func TestResolveHookKey_AgainstARealServer(t *testing.T) {
 	t.Run("it pins the raw tmux facts the probe rests on", func(t *testing.T) {
 		ts, _, _ := liveHookKeyPane(t, "rhk-facts")
 
-		if out, err := ts.TryRun("set-option", "-p", "-t", bogusPane, state.PortalPaneIDOption, "X"); err == nil {
+		if out, err := ts.TryRun("set-option", "-p", "-t", bogusPane, tmux.PortalPaneIDOption, "X"); err == nil {
 			t.Errorf("set-option -p against %s exited 0 (%q), want non-zero", bogusPane, out)
 		}
 		if out, err := ts.TryRun("display-message", "-p", "-t", bogusPane, tmux.HookKeyFormat); err != nil {

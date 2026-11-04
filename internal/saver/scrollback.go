@@ -1,7 +1,6 @@
 package saver
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -10,8 +9,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -19,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/vtcapture"
 )
 
 const (
@@ -126,7 +124,7 @@ func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bo
 // saved once the session is back on it.
 func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo creation) (capture, bool) {
 	vt, err := sb.backend.History(ctx, live.Name, 0)
-	if err == nil && alternateScreen(vt) {
+	if err == nil && vtcapture.AlternateScreen(vt) {
 		err = errAlternateScreen
 	}
 	if err != nil {
@@ -160,56 +158,6 @@ func skipped(session string, err error) {
 		}
 	}
 	captureLogger.Warn("capture failed", "session", session, "error", err)
-}
-
-// alternateScreenModes are the DEC private modes that put a terminal on its
-// alternate screen.
-var alternateScreenModes = []string{"47", "1047", "1049"}
-
-// alternateScreen reports whether vt, a session's history, is that of a
-// session on the alternate screen. zmx leads a history with the modes that
-// differ from a terminal's defaults, each set or reset by a sequence of its
-// own, ahead of the screen's first cell: the ANSI modes (ESC [ n h, or l),
-// then the DEC private ones (ESC [ ? n h, or l). On the alternate screen the
-// private 47, 1047 or 1049 is set among them, and the history holds that
-// screen alone. Only the lead is read, so a mode sequence later in a history
-// is never taken for one.
-func alternateScreen(vt []byte) bool {
-	for {
-		mode, rest, ok := leadingMode(vt)
-		if !ok {
-			return false
-		}
-		if mode.private && mode.set && slices.ContainsFunc(mode.params, func(param string) bool {
-			return slices.Contains(alternateScreenModes, param)
-		}) {
-			return true
-		}
-		vt = rest
-	}
-}
-
-// modeSequence is a sequence setting or resetting modes: a DEC private one
-// (ESC [ ?) or an ANSI one (ESC [).
-type modeSequence struct {
-	params  []string
-	private bool
-	set     bool
-}
-
-// leadingMode is the mode sequence vt starts with, and what follows it.
-func leadingMode(vt []byte) (mode modeSequence, rest []byte, ok bool) {
-	body, ok := bytes.CutPrefix(vt, []byte("\x1b["))
-	if !ok {
-		return modeSequence{}, nil, false
-	}
-	body, mode.private = bytes.CutPrefix(body, []byte("?"))
-	end := bytes.IndexFunc(body, func(r rune) bool { return r != ';' && (r < '0' || r > '9') })
-	if end < 0 || body[end] != 'h' && body[end] != 'l' {
-		return modeSequence{}, nil, false
-	}
-	mode.params, mode.set = strings.Split(string(body[:end]), ";"), body[end] == 'h'
-	return mode, body[end+1:], true
 }
 
 // write replaces the file target with vt, making the scrollback directory

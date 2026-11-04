@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/leeovery/portal/internal/xdg"
 )
@@ -56,19 +55,3 @@ func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }
 func PortalLogOld(dir string) string { return filepath.Join(dir, portalLogOldName) }
 
 func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubdir) }
-
-func ScrollbackFile(dir, paneKey string) string {
-	return filepath.Join(dir, scrollbackSubdir, paneKey+".bin")
-}
-
-func FIFOPath(dir, paneKey string) string {
-	return filepath.Join(dir, "hydrate-"+paneKey+".fifo")
-}
-
-// PaneKeyFromFIFOPath accepts a full FIFO path or a bare basename.
-func PaneKeyFromFIFOPath(path string) string {
-	name := filepath.Base(path)
-	name = strings.TrimSuffix(name, ".fifo")
-	name = strings.TrimPrefix(name, "hydrate-")
-	return name
-}

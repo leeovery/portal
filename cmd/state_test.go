@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"regexp"
 	"strings"
 	"testing"
@@ -128,8 +129,8 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "hydrate with all flags", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s", "--hook-key", "paneTokenA"}},
-		{name: "it accepts a hydrate invocation with no hook-key flag", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s"}},
+		{name: "hydrate with all flags", args: []string{"state", "hydrate", "--session", "proj-a1b2", "--file", "/tmp/s"}},
+		{name: "it accepts a hydrate invocation for a session that saved no scrollback", args: []string{"state", "hydrate", "--session", "proj-a1b2"}},
 	}
 
 	for _, tt := range tests {
@@ -138,11 +139,9 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 			// developer's real state.
 			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 
-			// state hydrate's RunE blocks on a real FIFO; stub it out for the
+			// state hydrate's body ends in an exec; stub it out for the
 			// argv-only assertions.
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "hydrate" {
-				withFuncSeam(t, &hydrateRunFunc, func(_ hydrateConfig) error { return nil })
-			}
+			withFuncSeam(t, &hydrateRunFunc, func(context.Context, hydrateConfig) {})
 
 			outBuf := new(bytes.Buffer)
 			errBuf := new(bytes.Buffer)
@@ -160,27 +159,33 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 	}
 }
 
-func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
+func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 	}{
 		{
-			name: "missing --fifo",
-			args: []string{"state", "hydrate", "--file", "/tmp/s", "--hook-key", "paneTokenA"},
-		},
-		{
-			name: "missing --file",
-			args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--hook-key", "paneTokenA"},
+			name: "missing --session",
+			args: []string{"state", "hydrate", "--file", "/tmp/s"},
 		},
 		{
 			name: "missing all flags",
 			args: []string{"state", "hydrate"},
 		},
+		{
+			name: "the tmux helper's --fifo",
+			args: []string{"state", "hydrate", "--session", "proj-a1b2", "--fifo", "/tmp/f"},
+		},
+		{
+			name: "the tmux helper's --hook-key",
+			args: []string{"state", "hydrate", "--session", "proj-a1b2", "--hook-key", "paneTokenA"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ran := false
+			withFuncSeam(t, &hydrateRunFunc, func(context.Context, hydrateConfig) { ran = true })
 			resetRootCmd()
 			rootCmd.SetOut(new(bytes.Buffer))
 			rootCmd.SetErr(new(bytes.Buffer))
@@ -188,6 +193,9 @@ func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
 			err := rootCmd.Execute()
 			if err == nil {
 				t.Fatalf("expected validation error for %s, got nil", tt.name)
+			}
+			if ran {
+				t.Error("the helper's body ran on an argv it refuses")
 			}
 		})
 	}

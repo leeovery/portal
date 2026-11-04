@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/resumemode"
 )
@@ -94,14 +93,14 @@ func TestParkedResumeChain_GroupSignal(t *testing.T) {
 }
 
 func TestHydrateLazy_ClearsSignalGenerationBeforeTheFirstDraw(t *testing.T) {
-	for _, tail := range lazyTails() {
+	for _, tail := range hydrateTails() {
 		t.Run(tail.name, func(t *testing.T) {
 			stub := &stubExecShell{}
 			var seam signalsSeam
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
-			opts.DisableTTYSignals = seam.record(stub)
+			cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+			cfg.DisableTTYSignals = seam.record(stub)
 
-			lazyRun(t, tail, opts)
+			lazyRun(t, tail, cfg)
 
 			if seam.calls != 1 {
 				t.Fatalf("signal generation cleared %d times, want exactly 1", seam.calls)
@@ -118,9 +117,9 @@ func TestHydrateLazy_ClearsSignalGenerationBeforeTheFirstDraw(t *testing.T) {
 
 func TestHydrateLazy_ParksTheChainBehindACaughtTrap(t *testing.T) {
 	stub := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+	cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
 
-	lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, hydrateTails()[0], cfg)
 
 	if len(stub.args) != 3 || !strings.HasPrefix(stub.args[2], "trap : INT QUIT TERM; ") {
 		t.Errorf("parked chain = %q, want it to open with a caught trap on INT, QUIT and TERM", stub.args)
@@ -130,17 +129,17 @@ func TestHydrateLazy_ParksTheChainBehindACaughtTrap(t *testing.T) {
 func TestHydrateLazy_ParksTheChainWhenSignalGenerationCannotBeCleared(t *testing.T) {
 	stub := &stubExecShell{}
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
-	opts.Logger = logger
-	opts.DisableTTYSignals = func() error { return errors.New("inappropriate ioctl for device") }
+	cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+	cfg.Logger = logger
+	cfg.DisableTTYSignals = func() error { return errors.New("inappropriate ioctl for device") }
 
-	lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, hydrateTails()[0], cfg)
 
 	if want := lazyChainArgs(t, "echo hi"); !slices.Equal(stub.args, want) {
 		t.Errorf("exec args = %q, want the parked chain %q", stub.args, want)
 	}
 	warn := execLogLine(t, sink.Body(), "WARN", "disable terminal signals failed")
-	if !strings.Contains(warn, "session="+lazySession) || !strings.Contains(warn, "inappropriate ioctl") {
+	if !strings.Contains(warn, "session="+hydrateSession) || !strings.Contains(warn, "inappropriate ioctl") {
 		t.Errorf("WARN = %q, want it to name the session and the error", warn)
 	}
 	if strings.Contains(warn, "pane_key=") || strings.Contains(warn, "hook_key=") {
@@ -151,29 +150,28 @@ func TestHydrateLazy_ParksTheChainWhenSignalGenerationCannotBeCleared(t *testing
 func TestHydrateLazy_LeavesSignalGenerationAloneOnASessionThatNeverWaits(t *testing.T) {
 	cases := []struct {
 		name  string
-		stage func(t *testing.T, stub *stubExecShell) hydrateCfgOpts
+		stage func(t *testing.T, stub *stubExecShell) hydrateConfig
 	}{
-		{name: "an eager registration", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			return lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Eager), lazyPrefs(t, ""), stub)
+		{name: "an eager registration", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			return lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Eager), lazyPrefs(t, ""), stub)
 		}},
-		{name: "no registration", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Body: map[string]map[string]string{}})
-			return lazyOpts(t, store, lazyPrefs(t, ""), stub)
+		{name: "no registration", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			return lazyConfig(t, emptyHookStore(t), lazyPrefs(t, ""), stub)
 		}},
-		{name: "a flag that could not be raised", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+		{name: "a flag that could not be raised", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
 			unwritableStateDir(t)
-			return opts
+			return cfg
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubExecShell{}
 			var seam signalsSeam
-			opts := tc.stage(t, stub)
-			opts.DisableTTYSignals = seam.record(stub)
+			cfg := tc.stage(t, stub)
+			cfg.DisableTTYSignals = seam.record(stub)
 
-			lazyRun(t, lazyTails()[0], opts)
+			lazyRun(t, hydrateTails()[0], cfg)
 
 			if seam.calls != 0 {
 				t.Errorf("signal generation cleared %d times on a session that never waits, want 0", seam.calls)

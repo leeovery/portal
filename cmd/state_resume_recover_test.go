@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/leeovery/portal/internal/state"
@@ -39,6 +40,10 @@ type resumeRecoverProbe struct {
 	execProg  string
 	execArgs  []string
 	execCalls int
+
+	// execShellEnv is the $SHELL the exec hands on: it passes this process's
+	// environment.
+	execShellEnv string
 
 	signalsOnCalls   int
 	signalsOnErr     error
@@ -89,6 +94,7 @@ func withRecoverProbe(cfg resumeRecoverConfig, p *resumeRecoverProbe) resumeReco
 		p.order = append(p.order, "exec")
 		p.execProg = prog
 		p.execArgs = args
+		p.execShellEnv = os.Getenv("SHELL")
 		p.execCalls++
 	}
 	return cfg
@@ -117,6 +123,19 @@ func TestRunResumeRecover(t *testing.T) {
 		}
 
 		assertRecovered(t, &probe, sink)
+	})
+
+	t.Run("it hands a session whose shell is gone /bin/sh, as its $SHELL too", func(t *testing.T) {
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		probe := resumeRecoverProbe{raised: true}
+
+		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
+			t.Fatalf("runResumeRecover() error = %v", err)
+		}
+
+		if probe.execProg != "/bin/sh" || !slices.Equal(probe.execArgs, []string{"-sh"}) || probe.execShellEnv != "/bin/sh" {
+			t.Errorf("exec = %q %q with $SHELL %q, want /bin/sh run as -sh with $SHELL /bin/sh", probe.execProg, probe.execArgs, probe.execShellEnv)
+		}
 	})
 
 	t.Run("it treats a flag it can't look for as still raised", func(t *testing.T) {
@@ -222,12 +241,13 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	if p.execCalls != 1 {
 		t.Fatalf("ExecShell called %d times, want exactly 1", p.execCalls)
 	}
-	shell := resolveShell()
+	shell := resolveShell(log.Discard())
 	if p.execProg != shell {
 		t.Errorf("exec target = %q, want %q", p.execProg, shell)
 	}
-	if !slices.Equal(p.execArgs, []string{shell}) {
-		t.Errorf("exec argv = %q, want %q", p.execArgs, []string{shell})
+	login := wantLoginShell(shell)
+	if !slices.Equal(p.execArgs, login) {
+		t.Errorf("exec argv = %q, want the login shell %q", p.execArgs, login)
 	}
 
 	rec := sink.Records().Matching("hydrate", "exec").Only(t, "the tail's exec marker")
@@ -237,8 +257,8 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	if got := rec.AttrOrEmpty("target"); got != shell {
 		t.Errorf("exec marker target = %q, want %q", got, shell)
 	}
-	if got := rec.AttrOrEmpty("args"); got != shell {
-		t.Errorf("exec marker args = %q, want %q", got, shell)
+	if got := rec.AttrOrEmpty("args"); got != login[0] {
+		t.Errorf("exec marker args = %q, want %q", got, login[0])
 	}
 	if got := rec.AttrOrEmpty("hook_present"); got != "false" {
 		t.Errorf("exec marker hook_present = %q, want %q", got, "false")

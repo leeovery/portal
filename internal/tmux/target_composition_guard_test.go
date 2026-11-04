@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	tmuxImportPath = "github.com/leeovery/portal/internal/tmux"
-	cmdImportPath  = "github.com/leeovery/portal/cmd"
+	tmuxImportPath      = "github.com/leeovery/portal/internal/tmux"
+	hooksweepImportPath = "github.com/leeovery/portal/internal/hooksweep"
 )
 
 // targetComposingPackages returns the directory of every package that can
@@ -133,31 +133,31 @@ func TestBareTargetGuard_ScansEveryPackageAddressingTmux(t *testing.T) {
 	t.Run("it derives the scanned package set from the packages importing internal/tmux", func(t *testing.T) {
 		byPath := targetComposingPackageDirs(t)
 
-		for _, want := range []string{cmdImportPath, tmuxImportPath, "github.com/leeovery/portal/internal/tmuxtest"} {
+		for _, want := range []string{hooksweepImportPath, tmuxImportPath, "github.com/leeovery/portal/internal/tmuxtest"} {
 			if _, ok := byPath[want]; !ok {
 				t.Errorf("derived package set %v holds no entry for %s", slices.Sorted(maps.Keys(byPath)), want)
 			}
 		}
 	})
 
-	t.Run("it flags a bare target composed in cmd", func(t *testing.T) {
+	t.Run("it flags a bare target composed in a package importing internal/tmux", func(t *testing.T) {
 		dirs := targetComposingPackages(t)
-		cmdDir := targetComposingPackageDirs(t)[cmdImportPath]
-		probed := stagePackageWithProbe(t, cmdDir, `package cmd
+		importerDir := targetComposingPackageDirs(t)[hooksweepImportPath]
+		probed := stagePackageWithProbe(t, importerDir, `package hooksweep
 
 func probeRun(args ...string) {}
 
 func probeAddressSession(name string) { probeRun("has-session", "-t", name) }
 `)
-		cmdAt := slices.Index(dirs, cmdDir)
-		if cmdAt < 0 {
-			t.Fatalf("the derived package set %v holds no cmd directory to stage a probe over", dirs)
+		importerAt := slices.Index(dirs, importerDir)
+		if importerAt < 0 {
+			t.Fatalf("the derived package set %v holds no hooksweep directory to stage a probe over", dirs)
 		}
-		dirs[cmdAt] = probed
+		dirs[importerAt] = probed
 
 		findings := scanBareTargets(t, dirs)
 		if len(findings) != 1 {
-			t.Fatalf("scan of the derived set with one bare target staged in cmd found %d findings, want 1: %v",
+			t.Fatalf("scan of the derived set with one bare target staged in hooksweep found %d findings, want 1: %v",
 				len(findings), findings)
 		}
 		if !strings.Contains(findings[0].pos, probeFileName) {

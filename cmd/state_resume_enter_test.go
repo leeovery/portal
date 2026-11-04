@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 )
 
@@ -30,14 +32,14 @@ func answerEnter(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload) {
 // already uses, so the session still closes on the first exit.
 func assertHookHandOff(t *testing.T, p *resumeWaitProbe, command string) {
 	t.Helper()
-	wantProg, wantArgs := hookExecArgs(command, resolveShell())
+	wantProg, wantArgs := hookExecArgs(command, resolveShell(log.Discard()))
 	assertExec(t, p, wantProg, wantArgs, true)
 }
 
 func assertShellHandOff(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
-	shell := resolveShell()
-	assertExec(t, p, shell, []string{shell}, false)
+	shell := resolveShell(log.Discard())
+	assertExec(t, p, shell, wantLoginShell(shell), false)
 }
 
 func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []string, wantHook bool) {
@@ -131,7 +133,7 @@ func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 		if len(probe.lookupKeys) != 0 {
 			t.Errorf("the store was read %d times after a failed clear, want 0", len(probe.lookupKeys))
 		}
-		if slices.Contains(probe.execArgs, "sh") || probe.execProg == resolveShell() {
+		if slices.Contains(probe.execArgs, "sh") || probe.execProg == resolveShell(log.Discard()) {
 			t.Errorf("exec argv = %q, want no shell or hook while the flag stands", probe.execArgs)
 		}
 	})
@@ -172,7 +174,7 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 			t.Errorf("store read with %q, want one read of %q", probe.lookupKeys, payload.Session)
 		}
 		assertHookHandOff(t, &probe, "make deploy-rewritten")
-		if _, displayedArgs := hookExecArgs(payload.Command, resolveShell()); slices.Equal(probe.execArgs, displayedArgs) {
+		if _, displayedArgs := hookExecArgs(payload.Command, resolveShell(log.Discard())); slices.Equal(probe.execArgs, displayedArgs) {
 			t.Errorf("exec argv = %q, want the command the store holds rather than the one the panel displayed", probe.execArgs)
 		}
 	})
@@ -226,7 +228,18 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		var probe resumeWaitProbe
 		answerEnter(t, &probe, samplePayload())
 
-		assertExec(t, &probe, "/bin/sh", []string{"/bin/sh"}, false)
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+	})
+
+	t.Run("it hands a session whose shell is gone /bin/sh, as its $SHELL too", func(t *testing.T) {
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		var probe resumeWaitProbe
+		answerEnter(t, &probe, samplePayload())
+
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+		if probe.execShellEnv != "/bin/sh" {
+			t.Errorf("$SHELL at the exec = %q, want /bin/sh", probe.execShellEnv)
+		}
 	})
 
 	t.Run("it treats an already-absent marker as cleared", func(t *testing.T) {
@@ -256,7 +269,7 @@ func TestResumeAnswerEnter_HookShapeMatchesTheHelper(t *testing.T) {
 		var helperArgs []string
 		logger, _ := logtest.NewCaptureLogger(t)
 		execLookedUpRegistration(hydrateConfig{
-			HookKey:   payload.Session,
+			Session:   payload.Session,
 			Logger:    logger,
 			HookStore: store,
 			ExecShell: func(prog string, args []string) {

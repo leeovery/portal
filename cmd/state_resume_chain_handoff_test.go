@@ -3,10 +3,13 @@ package cmd
 import (
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 )
 
@@ -143,31 +146,31 @@ func TestHandOffToHookOrShell(t *testing.T) {
 		wantPresent string
 	}{
 		{
-			name:        "it hands a pane with no command its shell alone",
+			name:        "it hands a session with no command its login shell, as zmx starts a fresh one's",
 			shellEnv:    "/bin/zsh",
 			wantProg:    "/bin/zsh",
-			wantArgs:    []string{"/bin/zsh"},
+			wantArgs:    []string{"-zsh"},
 			wantPresent: "false",
 		},
 		{
-			name:        "it hands a pane with no command /bin/sh when SHELL is unset",
+			name:        "it hands a session with no command /bin/sh when SHELL is unset",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"/bin/sh"},
+			wantArgs:    []string{"-sh"},
 			wantPresent: "false",
 		},
 		{
-			name:        "it hands a pane its command under sh followed by its shell",
+			name:        "it hands a session its command under sh followed by its login shell",
 			shellEnv:    "/bin/zsh",
 			command:     "claude --resume 'x'",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "trap : TERM; claude --resume 'x'; exec /bin/zsh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; claude --resume 'x'; exec '/bin/zsh' -l"},
 			wantPresent: "true",
 		},
 		{
 			name:        "it follows the command with /bin/sh when SHELL is unset",
 			command:     "make dev",
 			wantProg:    "/bin/sh",
-			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec /bin/sh"},
+			wantArgs:    []string{"sh", "-c", "trap : TERM; make dev; exec '/bin/sh' -l"},
 			wantPresent: "true",
 		},
 	}
@@ -211,4 +214,131 @@ func TestHandOffToHookOrShell(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The exec a session's shell is handed to searches no PATH, while zmx's
+// execvpe does, so a $SHELL naming no path is found on PATH first. Whatever
+// it finds is quoted into a command's argv.
+func TestHandOffToHookOrShell_HandsTheShellItFinds(t *testing.T) {
+	bin := t.TempDir()
+	shell := filepath.Join(bin, "myshell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+
+	handOff := func(t *testing.T, command string) (string, []string) {
+		t.Helper()
+		var prog string
+		var args []string
+		handOffToHookOrShell(log.Discard(), func(p string, a []string) { prog, args = p, a }, command)
+		return prog, args
+	}
+
+	t.Run("it hands a session with no command the shell PATH finds, still a login shell", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		if prog, args := handOff(t, ""); prog != shell || !slices.Equal(args, []string{"-myshell"}) {
+			t.Errorf("handed %q %q, want %q %q", prog, args, shell, []string{"-myshell"})
+		}
+	})
+
+	t.Run("it leaves the $SHELL it found as the session has it", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		if got := shellEnvAtExec(t, log.Discard(), ""); got != "myshell" {
+			t.Errorf("$SHELL at the exec = %q, want the session's own %q", got, "myshell")
+		}
+	})
+
+	t.Run("it follows a command with the shell PATH finds", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		want := []string{"sh", "-c", "trap : TERM; make dev; exec '" + shell + "' -l"}
+		if _, args := handOff(t, "make dev"); !slices.Equal(args, want) {
+			t.Errorf("handed argv %q, want %q", args, want)
+		}
+	})
+
+	t.Run("it quotes a shell whose path a word split would break", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "My Shells")
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		spaced := stageExecutable(t, dir, "fish", "#!/bin/sh\n")
+		t.Setenv("SHELL", spaced)
+		want := []string{"sh", "-c", "trap : TERM; make dev; exec '" + spaced + "' -l"}
+		if _, args := handOff(t, "make dev"); !slices.Equal(args, want) {
+			t.Errorf("handed argv %q, want %q", args, want)
+		}
+	})
+}
+
+// An exec of a shell that isn't there fails, which would end the restored
+// session; the saver would then drop it, and its transcript with it.
+func TestHandOffToHookOrShell_FallsBackToShForAShellItCannotFind(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for name, shell := range map[string]string{
+		"a path with no shell at it": filepath.Join(t.TempDir(), "zsh"),
+		"a name PATH doesn't hold":   "nosuchshell",
+	} {
+		t.Run("it hands a session /bin/sh for "+name+", run as -sh, with one WARN", func(t *testing.T) {
+			t.Setenv("SHELL", shell)
+			logger, sink := logtest.NewCaptureLogger(t)
+			var prog string
+			var args []string
+
+			handOffToHookOrShell(logger, func(p string, a []string) { prog, args = p, a }, "")
+
+			if prog != "/bin/sh" || !slices.Equal(args, []string{"-sh"}) {
+				t.Errorf("handed %q %q, want /bin/sh run as -sh", prog, args)
+			}
+			warn := sink.Records().AtExactLevel(slog.LevelWarn).Only(t, "the fallback's WARN")
+			if got := warn.AttrString(t, "path"); got != shell {
+				t.Errorf("WARN path = %q, want the shell it couldn't find, %q", got, shell)
+			}
+			if got := warn.AttrString(t, "target"); got != "/bin/sh" {
+				t.Errorf("WARN target = %q, want the shell it hands instead, /bin/sh", got)
+			}
+		})
+
+		t.Run("it follows a command with /bin/sh for "+name, func(t *testing.T) {
+			t.Setenv("SHELL", shell)
+			var args []string
+
+			handOffToHookOrShell(log.Discard(), func(_ string, a []string) { args = a }, "make dev")
+
+			if want := []string{"sh", "-c", "trap : TERM; make dev; exec '/bin/sh' -l"}; !slices.Equal(args, want) {
+				t.Errorf("handed argv %q, want %q", args, want)
+			}
+		})
+	}
+
+	shells := map[string]string{
+		"a path with no shell at it": filepath.Join(t.TempDir(), "zsh"),
+		"a name PATH doesn't hold":   "nosuchshell",
+		"nothing":                    "",
+	}
+	for name, shell := range shells {
+		for handed, command := range map[string]string{"its shell": "", "a command": "make dev"} {
+			t.Run("it hands /bin/sh on as the $SHELL of a session handed "+handed+" whose $SHELL is "+name, func(t *testing.T) {
+				t.Setenv("SHELL", shell)
+				if got := shellEnvAtExec(t, log.Discard(), command); got != "/bin/sh" {
+					t.Errorf("$SHELL at the exec = %q, want /bin/sh", got)
+				}
+			})
+		}
+	}
+}
+
+// shellEnvAtExec hands a session on and returns the $SHELL the exec would
+// hand it: the exec passes this process's environment.
+func shellEnvAtExec(t *testing.T, logger *slog.Logger, command string) string {
+	t.Helper()
+	var shell string
+	handOffToHookOrShell(logger, func(string, []string) { shell = os.Getenv("SHELL") }, command)
+	return shell
+}
+
+// wantLoginShell is the argv a session's shell is handed with: run as a login
+// shell, as zmx runs a fresh session's, its base name after a dash.
+func wantLoginShell(shell string) []string {
+	return []string{"-" + filepath.Base(shell)}
 }
