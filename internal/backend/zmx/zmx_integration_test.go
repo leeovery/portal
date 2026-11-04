@@ -237,28 +237,57 @@ func varying(frame []byte) []byte {
 // drives one.
 func TestOlderZmxDaemon(t *testing.T) {
 	older := zmxtest.OlderBinary(t)
-	b := zmxtest.New(t)
-	start := exec.Command(older, "attach", "older", "sleep", "1000")
-	start.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
-	start.Dir = t.TempDir()
-	if out, err := start.CombinedOutput(); err != nil {
-		t.Fatalf("zmx 0.8.1 attach: %v\n%s", err, out)
+	// start has zmx 0.8.1 start the session older, in b's directory.
+	start := func(t *testing.T, b *zmx.Backend) {
+		t.Helper()
+		attach := exec.Command(older, "attach", "older", "sleep", "1000")
+		attach.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
+		attach.Dir = t.TempDir()
+		if out, err := attach.CombinedOutput(); err != nil {
+			t.Fatalf("zmx 0.8.1 attach: %v\n%s", err, out)
+		}
 	}
-	ctx := t.Context()
+	gone := func(t *testing.T, b *zmx.Backend) {
+		t.Helper()
+		if _, err := os.Lstat(filepath.Join(b.Dir(), "older")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat the socket after the end = %v; want it gone", err)
+		}
+	}
 
-	if isOlder, err := b.OlderZmx(ctx, "older"); !isOlder || err != nil {
-		t.Errorf("OlderZmx = %v, %v; want true, nil", isOlder, err)
-	}
-	if _, err := b.ProtocolVersion(ctx, "older"); !errors.Is(err, backend.ErrTimeout) {
-		t.Errorf("ProtocolVersion = %v, want ErrTimeout: a 0.8.1 daemon answers Portal's protocol nothing", err)
-	}
+	t.Run("it is recognised, and ended by the proved SIGTERM", func(t *testing.T) {
+		b := zmxtest.New(t)
+		start(t, b)
+		ctx := t.Context()
 
-	if sent := endDaemon(t, b, "older"); len(sent) != 1 || !strings.HasSuffix(sent[0], " "+syscall.SIGTERM.String()) {
-		t.Errorf("signals = %v, want one SIGTERM", sent)
-	}
-	if _, err := os.Lstat(filepath.Join(b.Dir(), "older")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("stat the socket after the end = %v; want it gone", err)
-	}
+		if isOlder, err := b.OlderZmx(ctx, "older"); !isOlder || err != nil {
+			t.Errorf("OlderZmx = %v, %v; want true, nil", isOlder, err)
+		}
+		if _, err := b.ProtocolVersion(ctx, "older"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion = %v, want ErrTimeout: a 0.8.1 daemon answers Portal's protocol nothing", err)
+		}
+
+		if sent := endDaemon(t, b, "older"); len(sent) != 1 || !strings.HasSuffix(sent[0], " "+syscall.SIGTERM.String()) {
+			t.Errorf("signals = %v, want one SIGTERM", sent)
+		}
+		gone(t, b)
+	})
+
+	t.Run("it is ended by its own zmx's kill, as KillByCLI runs it bound to that zmx", func(t *testing.T) {
+		b := zmxtest.New(t)
+		start(t, b)
+		home := t.TempDir()
+		byOlder, err := zmx.New(zmx.Config{Binary: older, Dir: b.Dir(), Environ: func() []string {
+			return []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := byOlder.KillByCLI(t.Context(), "older"); err != nil {
+			t.Errorf("KillByCLI = %v, want nil", err)
+		}
+		gone(t, b)
+	})
 }
 
 func TestInfoFixture(t *testing.T) {
@@ -794,6 +823,26 @@ func TestBackendAgainstZmx(t *testing.T) {
 			t.Errorf("List = %v, want nothing", got)
 		}
 		mustCreate(t, b, "ended", t.TempDir(), "sleep", "1000")
+	})
+
+	t.Run("it ends a session with zmx's own kill, its program hung up, and frees its name", func(t *testing.T) {
+		b := zmxtest.New(t)
+		hup := createHangingUp(t, b, "killed")
+
+		if err := b.KillByCLI(t.Context(), "killed"); err != nil {
+			t.Fatalf("KillByCLI = %v, want nil", err)
+		}
+
+		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+			got, err := os.ReadFile(hup)
+			return err == nil && string(got) == "hup\n"
+		}) {
+			t.Error("the session's program never caught its SIGHUP")
+		}
+		if got := listed(t, b); len(got) != 0 {
+			t.Errorf("List = %v, want nothing", got)
+		}
+		mustCreate(t, b, "killed", t.TempDir(), "sleep", "1000")
 	})
 
 	t.Run("it leaves out a SIGKILLed daemon's socket from before this boot, and zmx replaces it on Create", func(t *testing.T) {

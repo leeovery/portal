@@ -53,6 +53,9 @@ func TestGateOwed(t *testing.T) {
 	for name, saver := range map[string]*presence{
 		"no saver session":                 {present: false},
 		"a saver that can't be told there": {err: errBoom},
+		// A read that fails says nothing of the saver, whatever else it
+		// answers.
+		"a saver that can't be told there, its read answering there as well": {present: true, err: errBoom},
 	} {
 		t.Run("a bootstrap is owed with the latch current and "+name, func(t *testing.T) {
 			if !(Gate{StateDir: latched(t, running), Running: running, Present: saver.check}).Owed(t.Context()) {

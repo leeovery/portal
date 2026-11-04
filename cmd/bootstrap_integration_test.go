@@ -881,7 +881,7 @@ func TestBootstrapRefusesOlderZmxAgainstZmx(t *testing.T) {
 			if !strings.Contains(string(out), olderZmxFatal) {
 				t.Errorf("portal list %d's output = %q, want %q", i, out, olderZmxFatal)
 			}
-			if n := strings.Count(w.log(), "Portal ended the saver running on it"); n != i+1 {
+			if n := strings.Count(w.log(), "Portal ended the saver it made on it"); n != i+1 {
 				t.Errorf("savers ended = %d after command %d, want %d\n--- portal.log ---\n%s", n, i, i+1, w.log())
 			}
 			w.awaitNoSessions(t)

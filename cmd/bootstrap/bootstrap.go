@@ -107,6 +107,10 @@ type Saver interface {
 	// End ends the saver session's daemon, whatever protocol it speaks, by a
 	// signal to the one process proved that daemon.
 	End(ctx context.Context) error
+	// EndMade ends the saver session EnsureSaver made with the zmx that made
+	// it, which speaks its daemon's protocol, and as End does when that zmx
+	// can't.
+	EndMade(ctx context.Context) error
 }
 
 // Restorer restores the saved sessions the backend doesn't hold.
@@ -142,8 +146,9 @@ type Orchestrator struct {
 
 // Run executes the steps in order and returns the soft warnings in step order.
 // Checking zmx, removing the latch, and raising and lowering the restoring
-// flag are fatal, as is a saver Portal can't use that it can't end; every
-// other failure is logged, and those a user can act on are warned of. The
+// flag are fatal, as is a saver Portal can't use that it made, or found and
+// can't end; every other failure is logged, and those a user can act on are
+// warned of. The
 // latch goes before the first change and is written only by a pass that ran
 // to the end, so a pass cut short leaves none, and so does one that leaves the
 // restore unfinished: its context's end, a saver it can't judge, sessions it
@@ -297,8 +302,9 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 // keepFound judges the saver session it finds, and reports whether one runs
 // that the pass keeps. One that speaks Portal's protocol is kept, judged; one
 // it can't judge is kept, the restore left unfinished; one Portal can't use is
-// ended, so the pass goes on as if none ran, and is fatal only when it can't
-// be ended.
+// ended, so the pass goes on as if none ran. One it can't end is the fatal
+// that names the way out, SaverLeftMessage: the judgement's own would send
+// the user to a zmx that leaves it there.
 func (p *pass) keepFound(ctx context.Context) (bool, *FatalError) {
 	if !p.saverPresent(ctx) {
 		return false, nil
@@ -311,10 +317,11 @@ func (p *pass) keepFound(ctx context.Context) (bool, *FatalError) {
 	case unusable == nil:
 		p.judged = true
 		return true, nil
-	case !p.end(ctx, unusable):
-		return true, unusable
 	}
-	p.logger.Info("saver ended", "detail", unusable.Cause.Error())
+	if err := p.Saver.End(ctx); err != nil {
+		return true, NewFatal(SaverLeftMessage, fmt.Errorf("%w; Portal couldn't end the saver running on it, which is left: %w", unusable.Cause, err))
+	}
+	p.logger.Info("saver ended", "detail", unusable.Cause.Error()+"; Portal ended the saver running on it")
 	return false, nil
 }
 
@@ -332,8 +339,8 @@ func (p *pass) saverPresent(ctx context.Context) bool {
 }
 
 // judgeMade judges the saver EnsureSaver made: one Portal can't use is ended,
-// and fatal; one gone at once is a saver down, the restore left unfinished, as
-// it is by one that answers neither protocol.
+// first by the zmx that made it, and fatal; one gone at once is a saver down,
+// the restore left unfinished, as it is by one that answers neither protocol.
 func (p *pass) judgeMade(ctx context.Context) *FatalError {
 	unusable, err := p.judge(ctx)
 	switch {
@@ -343,7 +350,7 @@ func (p *pass) judgeMade(ctx context.Context) *FatalError {
 	case err != nil:
 		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), err)
 	case unusable != nil:
-		p.end(ctx, unusable)
+		p.endMade(ctx, unusable)
 		return unusable
 	default:
 		p.judged = true
@@ -369,15 +376,14 @@ func (p *pass) judge(ctx context.Context) (*FatalError, error) {
 	return nil, nil
 }
 
-// end ends a saver Portal can't use, recording in unusable's cause whether it
-// went, and reports whether it did.
-func (p *pass) end(ctx context.Context, unusable *FatalError) bool {
-	if err := p.Saver.End(ctx); err != nil {
-		unusable.Cause = fmt.Errorf("%w; Portal couldn't end the saver running on it, which is left: %w", unusable.Cause, err)
-		return false
+// endMade ends the saver the pass made that Portal can't use, recording in
+// unusable's cause whether it went.
+func (p *pass) endMade(ctx context.Context, unusable *FatalError) {
+	if err := p.Saver.EndMade(ctx); err != nil {
+		unusable.Cause = fmt.Errorf("%w; Portal couldn't end the saver it made on it, which is left: %w", unusable.Cause, err)
+		return
 	}
-	unusable.Cause = fmt.Errorf("%w; Portal ended the saver running on it", unusable.Cause)
-	return true
+	unusable.Cause = fmt.Errorf("%w; Portal ended the saver it made on it", unusable.Cause)
 }
 
 // saverWarning words the cause of a saver that isn't running this binary's

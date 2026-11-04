@@ -66,6 +66,59 @@ func TestReadsThisProcess(t *testing.T) {
 	})
 }
 
+func TestRead(t *testing.T) {
+	t.Run("it reads a process as List lists it", func(t *testing.T) {
+		onTerminal := exec.Command("sleep", "30")
+		tty, err := pty.Start(onTerminal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = tty.Close() })
+		reap(t, onTerminal)
+		list, err := List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, pid := range []int{os.Getpid(), onTerminal.Process.Pid} {
+			i := slices.IndexFunc(list, func(p Process) bool { return p.PID == pid })
+			if i < 0 {
+				t.Fatalf("List lacks process %d", pid)
+			}
+			if got, err := Read(pid); err != nil || got != list[i] {
+				t.Errorf("Read(%d) = %+v, %v; want %+v, as List lists it", pid, got, err, list[i])
+			}
+		}
+	})
+
+	t.Run("a zombie is gone", func(t *testing.T) {
+		child := exec.Command("/usr/bin/true")
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = child.Wait() }()
+		var err error
+		for range 200 {
+			if _, err = Read(child.Process.Pid); err != nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !errors.Is(err, ErrGone) {
+			t.Errorf("Read(zombie) = %v, want ErrGone", err)
+		}
+	})
+
+	t.Run("a reaped process is gone", func(t *testing.T) {
+		child := exec.Command("/usr/bin/true")
+		if err := child.Run(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Read(child.Process.Pid); !errors.Is(err, ErrGone) {
+			t.Errorf("Read(reaped) = %v, want ErrGone", err)
+		}
+	})
+}
+
 func TestReadArgsKeepsAnEmptyArgvZero(t *testing.T) {
 	dir := t.TempDir()
 	// Executable paths of each length modulo the padding, so argv starts at

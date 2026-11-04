@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/state"
+	"golang.org/x/sys/unix"
 )
 
 // tornDown is the Fake whose saver session goes as its kill fails, as zmx's
@@ -568,6 +569,71 @@ func TestStopHoldsSaverLock(t *testing.T) {
 			t.Errorf("backend calls = %+v, events = %q; want none", b.Calls(), p.events)
 		}
 	})
+}
+
+func TestStopOr(t *testing.T) {
+	t.Run("a stop that fails hands its failure to orElse, still holding saver.lock, and is what orElse says", func(t *testing.T) {
+		dir := t.TempDir()
+		b := withSaver(daemonPID)
+		b.StopAnswering(saver.SessionName)
+		var handed error
+		var locked bool
+
+		stopped, err := hostOf(t, config(b, newProcs(nil), dir)).StopOr(t.Context(), func(_ context.Context, err error) (bool, error) {
+			handed, locked = err, lockHeld(t, dir)
+			return true, nil
+		})
+
+		if !stopped || err != nil {
+			t.Errorf("StopOr = %v, %v; want orElse's true, nil", stopped, err)
+		}
+		if !errors.Is(handed, backend.ErrTimeout) {
+			t.Errorf("orElse was handed %v, want the stop's ErrTimeout", handed)
+		}
+		if !locked {
+			t.Error("orElse ran with saver.lock free, want it held throughout")
+		}
+	})
+
+	t.Run("a stop that works asks nothing of orElse", func(t *testing.T) {
+		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
+
+		stopped, err := newHost(t, withSaver(daemonPID), p).StopOr(t.Context(), func(context.Context, error) (bool, error) {
+			t.Error("orElse asked after a stop that worked")
+			return false, nil
+		})
+
+		if !stopped || err != nil {
+			t.Errorf("StopOr = %v, %v; want true, nil", stopped, err)
+		}
+	})
+
+	t.Run("a saver.lock it can't take asks nothing of orElse", func(t *testing.T) {
+		dir := t.TempDir()
+		holdLock(t, dir)
+		cfg := config(withSaver(daemonPID), newProcs(nil), dir)
+		cfg.LockWait = 30 * time.Millisecond
+
+		_, err := hostOf(t, cfg).StopOr(t.Context(), func(context.Context, error) (bool, error) {
+			t.Error("orElse asked without saver.lock")
+			return true, nil
+		})
+
+		if !errors.Is(err, saverhost.ErrLockHeld) {
+			t.Errorf("StopOr = %v, want ErrLockHeld", err)
+		}
+	})
+}
+
+// lockHeld reports whether another descriptor holds saver.lock in dir.
+func lockHeld(t *testing.T, dir string) bool {
+	t.Helper()
+	f, err := os.Open(saverhost.LockPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	return errors.Is(unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB), unix.EWOULDBLOCK)
 }
 
 // assertRefused asserts the one WARN stop refused, for pid, its error saying

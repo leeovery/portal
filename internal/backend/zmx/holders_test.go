@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -20,6 +21,18 @@ func zmxProcess(argv []string, env ...string) zmx.Process {
 		Process: proctable.Process{PID: 40, PPID: 1, Command: "zmx"},
 		Args:    proctable.Args{Argv: argv, Env: env},
 	}
+}
+
+// caught is a read of a process caught as it forks or execs, as the kernel
+// fails one under load.
+func caught(errno syscall.Errno) error {
+	return fmt.Errorf("read arguments of process 40: %w", errno)
+}
+
+// settling is proc, whose first reads fail as one caught mid-exec's do.
+func settling(proc zmx.Process) zmx.Process {
+	proc.Reads = zmx.FailReads(caught(syscall.EINVAL), caught(syscall.EIO), caught(syscall.EINVAL))
+	return proc
 }
 
 // existsOver is Exists of dev, whose socket in dir refuses, over a process
@@ -67,6 +80,9 @@ func TestRefusingSocket_IsHeldByAProcessThatMayHoldItsSession(t *testing.T) {
 		{"a relative directory, which may resolve to it", zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=zmx")},
 		{"a client on a terminal", client(41, []string{"zmx", "attach", "dev"}, inDir)},
 		{"a zmx the kernel names otherwise, renamed or wrapped", renamed},
+		{"its first ZMX_DIR this directory, as zmx's getenv reads it", zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_DIR=/tmp/zx-other")},
+		{"zmx attach naming it after its first prefix", zmxProcess([]string{"zmx", "attach", "v"}, inDir, "ZMX_SESSION_PREFIX=de", "ZMX_SESSION_PREFIX=p-")},
+		{"one whose reads fail a while, as a process caught mid-exec's do", settling(zmxProcess([]string{"zmx", "attach", "dev"}, inDir))},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := existsOver(t, dir, tt.proc)
@@ -90,6 +106,10 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 	otherVerb.Command = "tmux"
 	hardenedOnAnotherName := zmxProcess([]string{"/opt/homebrew/bin/tart", "run", "kit-vm"})
 	hardenedOnAnotherName.Command = "tart"
+	hardenedOnNoName := zmxProcess([]string{"/opt/homebrew/bin/tart", "run"})
+	hardenedOnNoName.Command = "tart"
+	goneAsItIsRead := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
+	goneAsItIsRead.Reads = zmx.FailReads(caught(syscall.EIO), fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone))
 
 	for _, tt := range []struct {
 		name  string
@@ -107,6 +127,11 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 		{"a zmx exiting as it is read", []zmx.Process{exiting}},
 		{"another program naming it after a verb that starts nothing", []zmx.Process{otherVerb}},
 		{"a program of that argv shape on a name it can't end with, whose environment the kernel doesn't show", []zmx.Process{hardenedOnAnotherName}},
+		{"a program of that argv shape naming no session, whose environment the kernel doesn't show", []zmx.Process{hardenedOnNoName}},
+		{"zmx attach on its name, its first ZMX_DIR another directory", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=/tmp/zx-other", inDir)}},
+		{"zmx attach on its name under its first prefix", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_SESSION_PREFIX=p-", "ZMX_SESSION_PREFIX=")}},
+		{"a process whose reads fail a while, then show it holds nothing", []zmx.Process{settling(zmxProcess([]string{"zmx", "kill", "dev"}, inDir))}},
+		{"a zmx gone between reads that fail", []zmx.Process{goneAsItIsRead}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got, err := existsOver(t, dir, tt.procs...); got || err != nil {

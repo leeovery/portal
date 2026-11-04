@@ -6,6 +6,8 @@ func List() ([]Process, error) { return nil, ErrUnsupported }
 
 func ReadArgs(int) (Args, error) { return Args{}, ErrUnsupported }
 
+func Read(int) (Process, error) { return Process{}, ErrUnsupported }
+
 func Parent(int) (int, error) { return 0, ErrUnsupported }
 
 func Exited(int) (bool, error) { return false, ErrUnsupported }

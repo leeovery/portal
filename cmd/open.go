@@ -541,6 +541,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	if launch.bootstrap != nil {
 		pipe = newBootstrapProgressPipe()
 		pipe.start(cmd.Context(), launch.bootstrap.runner)
+		defer pipe.unwind()
 	}
 
 	store, err := loadProjectStore()

@@ -21,14 +21,21 @@ type zmxFake struct {
 	versionErr error
 	older      bool
 	olderErr   error
+	killErr    error
 	endErr     error
 
 	// signals has EndDaemon send pid 4242 SIGTERM through the signaller it is
 	// given, as the driver does the daemon it proves.
 	signals bool
 
-	olderAsks int
-	names     []string
+	olderAsks, kills, ends int
+	names                  []string
+}
+
+func (f *zmxFake) KillByCLI(_ context.Context, name string) error {
+	f.names = append(f.names, name)
+	f.kills++
+	return f.killErr
 }
 
 func (f *zmxFake) ProtocolVersion(_ context.Context, name string) (int, error) {
@@ -44,6 +51,7 @@ func (f *zmxFake) OlderZmx(_ context.Context, name string) (bool, error) {
 
 func (f *zmxFake) EndDaemon(_ context.Context, name string, signal func(pid int, sig syscall.Signal) error) error {
 	f.names = append(f.names, name)
+	f.ends++
 	if f.signals {
 		if err := signal(4242, syscall.SIGTERM); err != nil {
 			return err
@@ -138,6 +146,68 @@ func TestSaverDaemon_End(t *testing.T) {
 	t.Run("an end that fails fails it", func(t *testing.T) {
 		if err := daemonOver(&zmxFake{endErr: errBoom}).End(t.Context()); !errors.Is(err, errBoom) {
 			t.Errorf("End = %v, want the end's failure", err)
+		}
+	})
+
+	t.Run("it never runs zmx kill: the zmx on PATH may speak another protocol than the saver found", func(t *testing.T) {
+		fake := &zmxFake{}
+
+		if err := daemonOver(fake).End(t.Context()); err != nil || fake.kills != 0 {
+			t.Errorf("End = %v after %d zmx kills, want nil after none", err, fake.kills)
+		}
+	})
+}
+
+func TestSaverDaemon_EndMade(t *testing.T) {
+	t.Run("it ends the saver made with zmx kill, signalling nothing", func(t *testing.T) {
+		fake := &zmxFake{signals: true}
+		withFuncSeam(t, &signalProcess, func(pid int, sig syscall.Signal) error {
+			t.Errorf("signalled %d %v, want zmx kill alone", pid, sig)
+			return nil
+		})
+
+		if err := daemonOver(fake).EndMade(t.Context()); err != nil {
+			t.Fatalf("EndMade = %v", err)
+		}
+		if fake.kills != 1 || fake.ends != 0 {
+			t.Errorf("zmx kills %d, proved ends %d; want one kill and no end", fake.kills, fake.ends)
+		}
+		if len(fake.names) != 1 || fake.names[0] != saver.SessionName {
+			t.Errorf("killed %v, want %s alone", fake.names, saver.SessionName)
+		}
+	})
+
+	t.Run("a zmx kill that fails is followed by End's proved signal", func(t *testing.T) {
+		fake := &zmxFake{killErr: errBoom, signals: true}
+		var sent []string
+		withFuncSeam(t, &signalProcess, func(pid int, sig syscall.Signal) error {
+			sent = append(sent, fmt.Sprintf("%d %v", pid, sig))
+			return nil
+		})
+
+		if err := daemonOver(fake).EndMade(t.Context()); err != nil {
+			t.Fatalf("EndMade = %v, want the signal's end", err)
+		}
+		if want := fmt.Sprintf("4242 %v", syscall.SIGTERM); len(sent) != 1 || sent[0] != want {
+			t.Errorf("signals = %v, want %q through signalProcess", sent, want)
+		}
+	})
+
+	t.Run("both failing fails it with both", func(t *testing.T) {
+		unproved := errors.New("no one process is proved the session's zmx daemon")
+
+		err := daemonOver(&zmxFake{killErr: errBoom, endErr: unproved}).EndMade(t.Context())
+
+		if !errors.Is(err, errBoom) || !errors.Is(err, unproved) {
+			t.Errorf("EndMade = %v, want the kill's and the end's failures", err)
+		}
+	})
+
+	t.Run("a driver it can't bind fails it", func(t *testing.T) {
+		d := saverDaemon{driver: func() (saverZmx, error) { return nil, errBoom }}
+
+		if err := d.EndMade(t.Context()); !errors.Is(err, errBoom) {
+			t.Errorf("EndMade = %v, want the bind's failure", err)
 		}
 	})
 }

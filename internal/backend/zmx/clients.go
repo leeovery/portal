@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/proctable"
@@ -13,10 +14,35 @@ import (
 // processTable is the part of internal/proctable the Backend reads.
 type processTable struct {
 	list     func() ([]proctable.Process, error)
+	read     func(pid int) (proctable.Process, error)
 	readArgs func(pid int) (proctable.Args, error)
 }
 
-var systemProcesses = processTable{list: proctable.List, readArgs: proctable.ReadArgs}
+var systemProcesses = processTable{list: proctable.List, read: proctable.Read, readArgs: proctable.ReadArgs}
+
+// settleEvery and settleWithin space and bound the reads of a process's
+// arguments that fail while it runs.
+const (
+	settleEvery  = 5 * time.Millisecond
+	settleWithin = 100 * time.Millisecond
+)
+
+// args reads pid's argv and environment, reading again, every settleEvery
+// until settleWithin has passed, while a read fails and the process hasn't
+// gone: a process caught as it forks or execs fails a read it answers a
+// moment later, and under load about a third of the table's scans catch one.
+// It fails with proctable.ErrGone for a process gone meanwhile, and otherwise
+// with the last read's failure.
+func (t processTable) args(pid int) (proctable.Args, error) {
+	deadline := time.Now().Add(settleWithin)
+	for {
+		args, err := t.readArgs(pid)
+		if err == nil || errors.Is(err, proctable.ErrGone) || time.Now().After(deadline) {
+			return args, err
+		}
+		time.Sleep(settleEvery)
+	}
+}
 
 // program is the name the kernel keeps for zmx's executable.
 const program = "zmx"
@@ -35,8 +61,8 @@ const labelsFlag = "--labels"
 // keeps the argv of the attach it forked from, but has no terminal, so it is
 // never one. A client zmx switched to another session in the same process
 // still names the one it attached. A process that exits as it is read is
-// skipped; one that can't be read otherwise, or a zmx attach whose
-// environment the kernel doesn't show, fails the search with
+// skipped; one still unreadable once args gives up on it, or a zmx attach
+// whose environment the kernel doesn't show, fails the search with
 // backend.ErrUnreadableClient, since it might be one.
 func (b *Backend) AttachClients(name string) ([]backend.ClientProcess, error) {
 	procs, err := b.processes.list()
@@ -48,7 +74,7 @@ func (b *Backend) AttachClients(name string) ([]backend.ClientProcess, error) {
 		if !p.Terminal || p.Command != program {
 			continue
 		}
-		args, err := b.processes.readArgs(p.PID)
+		args, err := b.processes.args(p.PID)
 		if errors.Is(err, proctable.ErrGone) {
 			continue
 		}

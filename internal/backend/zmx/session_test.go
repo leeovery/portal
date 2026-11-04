@@ -477,9 +477,9 @@ func TestExists(t *testing.T) {
 }
 
 func TestCurrent(t *testing.T) {
-	t.Run("it reads ZMX_SESSION, the last entry winning", func(t *testing.T) {
+	t.Run("it reads ZMX_SESSION, the first entry winning, as zmx's getenv reads one", func(t *testing.T) {
 		dir := socketDir(t)
-		b := newBackend(t, dir, "ZMX_SESSION=first", "PATH=/bin", "ZMX_DIR="+dir, "ZMX_SESSION=work")
+		b := newBackend(t, dir, "ZMX_SESSION=work", "PATH=/bin", "ZMX_DIR="+dir, "ZMX_DIR=/tmp/zx-other", "ZMX_SESSION=later")
 		if got := b.Current(); got != "work" {
 			t.Errorf("Current = %q, want work", got)
 		}
@@ -707,6 +707,9 @@ func TestDirFor(t *testing.T) {
 		want    string
 	}{
 		{"ZMX_DIR when set", []string{"ZMX_DIR=/z", "XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/z"},
+		{"ZMX_DIR's first entry, as zmx's getenv reads it", []string{"ZMX_DIR=/z", "ZMX_DIR=/later"}, "/z"},
+		{"XDG_RUNTIME_DIR's first entry", []string{"XDG_RUNTIME_DIR=/run/user/1", "XDG_RUNTIME_DIR=/later"}, "/run/user/1/zmx"},
+		{"TMPDIR's first entry", []string{"TMPDIR=/t", "TMPDIR=/later"}, "/t/zmx-" + uid},
 		{"ZMX_DIR when set empty", []string{"ZMX_DIR=", "XDG_RUNTIME_DIR=/run/user/1"}, ""},
 		{"zmx in XDG_RUNTIME_DIR", []string{"XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/run/user/1/zmx"},
 		{"zmx-<uid> in TMPDIR, its trailing slashes trimmed", []string{"TMPDIR=/var/folders/x/T//"}, "/var/folders/x/T/zmx-" + uid},

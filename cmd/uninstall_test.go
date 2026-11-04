@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/saver"
@@ -22,34 +23,47 @@ import (
 const removal = "To remove Portal completely, uninstall the binary and delete that directory.\n"
 
 // stopperFake is a stop that finds a saver when stopped, failing with err,
-// and counts the stops asked of it.
+// which it hands to orElse, and counts the stops asked of it.
 type stopperFake struct {
 	stopped bool
 	err     error
 	stops   int
 }
 
-func (s *stopperFake) Stop(context.Context) (bool, error) {
+func (s *stopperFake) StopOr(ctx context.Context, orElse func(context.Context, error) (bool, error)) (bool, error) {
 	s.stops++
-	return s.stopped, s.err
+	if s.err != nil {
+		return orElse(ctx, s.err)
+	}
+	return s.stopped, nil
 }
 
 // daemonFake is the saver's daemon, one Portal can't use when unusable,
 // whose end fails with endErr, counting the judgements and ends asked of it.
+// onAsk runs at each judgement and each end, handed which it is.
 type daemonFake struct {
 	isUnusable bool
 	endErr     error
 	asks, ends int
+	onAsk      func(what string)
 }
 
 func (d *daemonFake) unusable(context.Context) bool {
 	d.asks++
+	d.asked("the judgement")
 	return d.isUnusable
 }
 
 func (d *daemonFake) End(context.Context) error {
 	d.ends++
+	d.asked("the end")
 	return d.endErr
+}
+
+func (d *daemonFake) asked(what string) {
+	if d.onAsk != nil {
+		d.onAsk(what)
+	}
 }
 
 func TestUninstall(t *testing.T) {
@@ -144,7 +158,7 @@ func TestUninstall(t *testing.T) {
 		}
 	})
 
-	t.Run("one it can't end fails the command with both reasons, printing nothing", func(t *testing.T) {
+	t.Run("one it can't end fails the command with the way out of it and both reasons, printing nothing", func(t *testing.T) {
 		unproved := errors.New("no one process is proved the session's zmx daemon")
 		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: &daemonFake{isUnusable: true, endErr: unproved}})
 
@@ -153,8 +167,45 @@ func TestUninstall(t *testing.T) {
 		if !errors.Is(err, refused) || !errors.Is(err, unproved) {
 			t.Fatalf("uninstall = %v, want the stop's and the end's failures", err)
 		}
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.SaverLeftMessage + " ("; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("error = %q, want it to begin %q", err, want)
+		}
 		if stdout.Len() != 0 {
 			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
+	// Decision 68: the judgement and the end hold saver.lock as the stop
+	// does, so neither can reach a saver a bootstrap makes meanwhile.
+	t.Run("unstaged, it judges and ends a saver it can't stop under saver.lock", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: 4242})
+		fake.SetReachEnv([]string{"ZMX_DIR=/tmp/zx-uninstall"})
+		fake.StopAnswering(saver.SessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		var free []string
+		daemon := &daemonFake{isUnusable: true}
+		daemon.onAsk = func(what string) {
+			if !saverLockHeld(t, dir) {
+				free = append(free, what)
+			}
+		}
+		withUninstallDeps(t, UninstallDeps{Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+		if !strings.HasPrefix(stdout.String(), "Portal's save daemon stopped.") {
+			t.Errorf("stdout = %q, want the saver reported stopped", stdout)
+		}
+		if daemon.asks != 1 || daemon.ends != 1 {
+			t.Errorf("the daemon was judged %d times and ended %d, want once each", daemon.asks, daemon.ends)
+		}
+		if len(free) != 0 {
+			t.Errorf("%v ran with saver.lock free, want every judgement and end under it", free)
 		}
 	})
 
@@ -256,6 +307,17 @@ func TestUninstall(t *testing.T) {
 			t.Errorf("stat %s = %v, want it still absent", dir, err)
 		}
 	})
+}
+
+// saverLockHeld reports whether a descriptor holds saver.lock in dir.
+func saverLockHeld(t *testing.T, dir string) bool {
+	t.Helper()
+	f, err := os.Open(saverhost.LockPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	return errors.Is(unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB), unix.EWOULDBLOCK)
 }
 
 // holdSaverLock takes saver.lock in dir as another process would, until the

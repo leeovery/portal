@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -10,6 +11,10 @@ import (
 )
 
 const bootstrapProgressBufferSize = 64
+
+// unwindWait bounds the wait, once the picker has quit, for the bootstrap it
+// ran to return on its context's end.
+const unwindWait = 2 * time.Second
 
 // Exactly one terminal event (Done) is sent, last, before the channel closes.
 type bootstrapProgress struct {
@@ -34,6 +39,11 @@ type bootstrapChannelClosedMsg struct{}
 type bootstrapProgressPipe struct {
 	ch chan bootstrapProgress
 
+	// cancel ends the bootstrap's context, and done closes once it returns.
+	cancel     context.CancelFunc
+	done       chan struct{}
+	unwindWait time.Duration
+
 	// Written by the goroutine before it closes the channel and read only after
 	// the program exits, so the close the receiver observed is the ordering edge
 	// and no further synchronisation is needed.
@@ -43,13 +53,16 @@ type bootstrapProgressPipe struct {
 
 func newBootstrapProgressPipe() *bootstrapProgressPipe {
 	return &bootstrapProgressPipe{
-		ch: make(chan bootstrapProgress, bootstrapProgressBufferSize),
+		ch:         make(chan bootstrapProgress, bootstrapProgressBufferSize),
+		done:       make(chan struct{}),
+		unwindWait: unwindWait,
 	}
 }
 
 // start closes the channel on success and fatal alike, so the receiver always
 // observes a close and never leaks a blocked receive.
 func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runner) {
+	ctx, p.cancel = context.WithCancel(ctx)
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
 		p.send(ctx, bootstrapProgress{
 			Step:     ev,
@@ -59,6 +72,7 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 	})
 
 	go func() {
+		defer close(p.done)
 		defer close(p.ch)
 		warnings, err := runner.Run(emitCtx)
 		p.warnings = warnings
@@ -70,6 +84,20 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 			FailedStep: failedStep(err),
 		})
 	}()
+}
+
+// unwind ends the bootstrap's context and waits up to unwindWait for it to
+// return: the picker has quit, as on Ctrl+C from its loading page, and a
+// restore cut short lowers the restoring flag on its way out, which left
+// raised would stand the saver down until the next command. A bootstrap past
+// the bound is left to the process's exit, as a kill leaves one; either way
+// it writes no latch, so the next command finishes its work.
+func (p *bootstrapProgressPipe) unwind() {
+	p.cancel()
+	select {
+	case <-p.done:
+	case <-time.After(p.unwindWait):
+	}
 }
 
 // failedStep is the step err, a bootstrap's fatal, names, zero for any other.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
@@ -14,15 +15,17 @@ var uninstallDeps *UninstallDeps
 
 // UninstallDeps overrides the saver's stop and the end of a saver Portal
 // can't use; production leaves uninstallDeps nil, stops the saver over the
-// session backend and ends one as the bootstrap does.
+// session backend and ends one as the bootstrap does. A field left nil is
+// production's.
 type UninstallDeps struct {
 	Saver  saverStopper
 	Daemon unusableSaver
 }
 
-// saverStopper stops the saver, reporting whether there was one.
+// saverStopper stops the saver, reporting whether there was one, and hands a
+// stop that fails to orElse under the same hold of saver.lock.
 type saverStopper interface {
-	Stop(ctx context.Context) (bool, error)
+	StopOr(ctx context.Context, orElse func(ctx context.Context, err error) (bool, error)) (bool, error)
 }
 
 // unusableSaver is the saver session's daemon as uninstall ends one whose zmx
@@ -33,8 +36,15 @@ type unusableSaver interface {
 }
 
 func uninstallSaver() (saverStopper, unusableSaver, error) {
+	var deps UninstallDeps
 	if uninstallDeps != nil {
-		return uninstallDeps.Saver, uninstallDeps.Daemon, nil
+		deps = *uninstallDeps
+	}
+	if deps.Daemon == nil {
+		deps.Daemon = newSaverDaemon()
+	}
+	if deps.Saver != nil {
+		return deps.Saver, deps.Daemon, nil
 	}
 	b, err := sessionBackend()
 	if err != nil {
@@ -45,7 +55,7 @@ func uninstallSaver() (saverStopper, unusableSaver, error) {
 		return nil, nil, err
 	}
 	host, err := newSaverHost(b, dir)
-	return host, newSaverDaemon(), err
+	return host, deps.Daemon, err
 }
 
 // Uninstall stops the saver and nothing more: it keeps the bootstrapped
@@ -71,18 +81,27 @@ var uninstallCmd = &cobra.Command{
 
 // stopSaver stops the saver, and reports whether there was one. A saver the
 // stop fails on whose daemon speaks a zmx protocol Portal can't use is ended
-// as the bootstrap ends one.
+// as the bootstrap ends one, still under saver.lock, so no saver an ensure
+// makes meanwhile is ended in its place.
 func stopSaver(ctx context.Context) (bool, error) {
 	stopper, daemon, err := uninstallSaver()
 	if err != nil {
 		return false, err
 	}
-	stopped, err := stopper.Stop(ctx)
-	if err == nil || !daemon.unusable(ctx) {
-		return stopped, err
+	return stopper.StopOr(ctx, func(ctx context.Context, stopErr error) (bool, error) {
+		return endUnusable(ctx, daemon, stopErr)
+	})
+}
+
+// endUnusable ends the saver a stop failed on with stopErr when its daemon
+// speaks a zmx protocol Portal can't use, and reports whether it did. One it
+// can neither stop nor end fails with the bootstrap's way out of it.
+func endUnusable(ctx context.Context, daemon unusableSaver, stopErr error) (bool, error) {
+	if !daemon.unusable(ctx) {
+		return false, stopErr
 	}
-	if endErr := daemon.End(ctx); endErr != nil {
-		return false, fmt.Errorf("%w; its daemon speaks a zmx protocol Portal can't use, and ending it failed: %w", err, endErr)
+	if err := daemon.End(ctx); err != nil {
+		return false, fmt.Errorf("%s (%w; %w)", bootstrap.SaverLeftMessage, stopErr, err)
 	}
 	return true, nil
 }

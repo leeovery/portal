@@ -167,6 +167,7 @@ func (s bootSaver) Present(ctx context.Context) (bool, error) { return s.host.Pr
 type saverZmx interface {
 	ProtocolVersion(ctx context.Context, name string) (int, error)
 	OlderZmx(ctx context.Context, name string) (bool, error)
+	KillByCLI(ctx context.Context, name string) error
 	EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error) error
 }
 
@@ -217,6 +218,29 @@ func (d saverDaemon) End(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return endBySignal(ctx, driver)
+}
+
+// EndMade ends the saver session the bootstrap made with zmx kill, run by the
+// zmx on PATH that made it, which speaks its daemon's protocol, so needs no
+// process table: off darwin, the only way. End's signal ends it when that
+// kill fails.
+func (d saverDaemon) EndMade(ctx context.Context) error {
+	driver, err := d.driver()
+	if err != nil {
+		return err
+	}
+	killErr := driver.KillByCLI(ctx, saver.SessionName)
+	if killErr == nil {
+		return nil
+	}
+	if err := endBySignal(ctx, driver); err != nil {
+		return fmt.Errorf("%w; then: %w", killErr, err)
+	}
+	return nil
+}
+
+func endBySignal(ctx context.Context, driver saverZmx) error {
 	return driver.EndDaemon(ctx, saver.SessionName, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) })
 }
 

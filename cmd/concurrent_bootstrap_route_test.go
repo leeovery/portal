@@ -2,11 +2,43 @@ package cmd
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
+
+// A picker quit from its loading page, as on Ctrl+C mid-restore, ends the
+// bootstrap it runs and waits for it, so a restore cut short lowers the
+// restoring flag before Portal exits.
+func TestPickerQuitFromItsLoadingPage_UnwindsTheBootstrap(t *testing.T) {
+	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(t.TempDir(), "projects.json"))
+	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "aliases"))
+	setPrefsFile(t, `{"theme":"nord"}`)
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+	runner := &unwindingRunner{}
+	withFuncSeam(t, &runProgramFunc, func(m tui.Model) (tea.Model, error) {
+		if !m.Bootstrapping() {
+			t.Error("the picker opened past its loading page")
+		}
+		if runner.returned.Load() {
+			t.Error("the bootstrap returned before the picker quit")
+		}
+		return m, nil
+	})
+	cmd := contextCommand()
+	cmd.SetContext(context.WithValue(cmd.Context(), deferredBootstrapKey, &deferredBootstrap{runner: runner}))
+
+	if err := openTUI(cmd, pickerLanding{}, nil); err != nil {
+		t.Fatalf("openTUI: %v", err)
+	}
+	if !runner.returned.Load() {
+		t.Error("openTUI returned with the bootstrap still running")
+	}
+}
 
 // stageGate stages runner as the bootstrap, owed as the gate answers.
 func stageGate(t *testing.T, runner *recordingRunner, owed bool) {

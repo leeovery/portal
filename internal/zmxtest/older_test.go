@@ -1,6 +1,7 @@
 package zmxtest
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,4 +45,50 @@ func TestOlderBuild(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFindOlder(t *testing.T) {
+	older := func(t *testing.T) string { return fakeZmx(t, "zmx", `printf 'zmx\t\t0.8.1\n'`) }
+	newer := func(t *testing.T) string { return fakeZmx(t, "zmx", `printf 'zmx\t\t0.9.0\n'`) }
+	env := func(vars map[string]string) func(string) string {
+		return func(key string) string { return vars[key] }
+	}
+
+	t.Run("it takes the build OlderBinaryEnv names", func(t *testing.T) {
+		named := older(t)
+
+		if got, err := findOlder(env(map[string]string{OlderBinaryEnv: named, "GITHUB_ACTIONS": "true"}), older(t), t.TempDir()); err != nil || got != named {
+			t.Errorf("findOlder = %q, %v; want %q", got, err, named)
+		}
+	})
+
+	t.Run("a build OlderBinaryEnv names that isn't 0.8.1 fails the test", func(t *testing.T) {
+		_, err := findOlder(env(map[string]string{OlderBinaryEnv: newer(t)}), older(t), t.TempDir())
+
+		if err == nil || errors.Is(err, errNoOlder) {
+			t.Errorf("findOlder = %v, want a failure, not a skip", err)
+		}
+	})
+
+	t.Run("on GitHub Actions without one named it fails the test, Homebrew's unasked", func(t *testing.T) {
+		_, err := findOlder(env(map[string]string{"GITHUB_ACTIONS": "true"}), older(t), t.TempDir())
+
+		if err == nil || errors.Is(err, errNoOlder) {
+			t.Errorf("findOlder = %v, want a failure, not a skip", err)
+		}
+	})
+
+	t.Run("elsewhere without one named it takes Homebrew's when it is 0.8.1", func(t *testing.T) {
+		homebrew := older(t)
+
+		if got, err := findOlder(env(nil), homebrew, t.TempDir()); err != nil || got != homebrew {
+			t.Errorf("findOlder = %q, %v; want %q", got, err, homebrew)
+		}
+	})
+
+	t.Run("elsewhere without one named or Homebrew's it finds none, so the test skips", func(t *testing.T) {
+		if _, err := findOlder(env(nil), newer(t), t.TempDir()); !errors.Is(err, errNoOlder) {
+			t.Errorf("findOlder = %v, want errNoOlder", err)
+		}
+	})
 }

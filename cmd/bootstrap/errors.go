@@ -25,6 +25,11 @@ func NewFatal(userMsg string, cause error) *FatalError {
 	return &FatalError{UserMessage: userMsg, Cause: cause}
 }
 
+// SaverLeftMessage is the way out of a _portal-saver Portal can neither use
+// nor end: the fatal of a bootstrap that finds one, and uninstall's failure on
+// one.
+const SaverLeftMessage = "Portal can't use the _portal-saver session left running on another zmx, and couldn't end it. End it with that zmx (zmx kill _portal-saver), or restart your computer."
+
 // Warning is an alias, not a local type: cmd, cmd/bootstrap and tui must share
 // one canonical shape across the import boundary.
 type Warning = warning.Warning

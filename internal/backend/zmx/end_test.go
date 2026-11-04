@@ -2,6 +2,7 @@ package zmx_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -176,33 +177,123 @@ func TestEndDaemon_SignalsNothingWhenTheTableCantBeListed(t *testing.T) {
 	}
 }
 
-func TestEndDaemon_ProvesTheDaemonAgainJustBeforeTheSignal(t *testing.T) {
+// provedThen has the world's table show the daemon 100 at the proof's
+// listing, and what the world's table holds at every read after it.
+func (w *endingWorld) provedThen(t *testing.T) {
+	t.Helper()
+	proved := daemonOf(100, w.dir, "work")
+	listings := 0
+	zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
+		if listings++; listings == 1 {
+			return []zmx.Process{proved}, nil
+		}
+		return w.listed(), nil
+	})
+}
+
+func TestEndDaemon_ReadsTheProvedDaemonAgainJustBeforeTheSignal(t *testing.T) {
+	again := func(mutate func(*zmx.Process)) func(dir string) []zmx.Process {
+		return func(dir string) []zmx.Process {
+			p := daemonOf(100, dir, "work")
+			mutate(&p)
+			return []zmx.Process{p}
+		}
+	}
 	for _, tt := range []struct {
 		name  string
 		again func(dir string) []zmx.Process
 	}{
-		{"its pid reused by another daemon of the session", func(dir string) []zmx.Process { return []zmx.Process{daemonOf(200, dir, "work")} }},
 		{"gone", func(string) []zmx.Process { return nil }},
+		{"its pid reused by another program", again(func(p *zmx.Process) { p.Args.Argv = []string{"sleep", "60"} })},
+		{"its pid reused in another environment", again(func(p *zmx.Process) { p.Args.Env = append(p.Args.Env, "HOME=/h") })},
+		{"its pid reused by a child of another process", again(func(p *zmx.Process) { p.PPID = 50 })},
+		{"its pid reused on a terminal", again(func(p *zmx.Process) { p.Terminal = true })},
+		{"unreadable", again(func(p *zmx.Process) { p.Err = errors.New("operation not permitted") })},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := newEndingWorld(t)
-			lists := [][]zmx.Process{{daemonOf(100, w.dir, "work")}, tt.again(w.dir)}
-			zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
-				next := lists[0]
-				if len(lists) > 1 {
-					lists = lists[1:]
-				}
-				return next, nil
-			})
+			w.table(tt.again(w.dir)...)
+			w.provedThen(t)
 
 			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {})); err == nil {
-				t.Error("EndDaemon(work) = nil, want the second proof's failure")
+				t.Error("EndDaemon(work) = nil, want the second read's failure")
 			}
 			if got := w.signals(); len(got) != 0 {
 				t.Errorf("signals sent = %v, want none", got)
 			}
 		})
 	}
+
+	t.Run("it reads only that pid again, so another process unreadable since keeps no signal back", func(t *testing.T) {
+		w := newEndingWorld(t)
+		unreadable := zmxProcess(nil)
+		unreadable.PID = 300
+		unreadable.Err = errors.New("operation not permitted")
+		w.table(daemonOf(100, w.dir, "work"), unreadable)
+		w.provedThen(t)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 || got[0] != syscall.SIGTERM {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+}
+
+// The process table's reads fail for a process caught as it forks or execs,
+// as about a third of scans under load catch one: each read that fails is read
+// again a while before it proves nothing.
+func TestEndDaemon_ReadsAgainAProcessWhoseReadsFailAWhile(t *testing.T) {
+	t.Run("the daemon", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(settling(daemonOf(100, w.dir, "work")))
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+
+	t.Run("another process", func(t *testing.T) {
+		w := newEndingWorld(t)
+		other := settling(zmxProcess([]string{"node", "server.js"}))
+		other.PID = 300
+		w.table(daemonOf(100, w.dir, "work"), other)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+	})
+
+	t.Run("the daemon as it exits, signalled", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(daemonOf(100, w.dir, "work"))
+		end := w.signalled(func() {
+			w.unlink(t)
+			exiting := daemonOf(100, w.dir, "work")
+			exiting.Reads = zmx.FailReads(caught(syscall.EIO), caught(syscall.EINVAL), fmt.Errorf("read arguments of process 100: %w", proctable.ErrGone))
+			w.table(exiting)
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil: its reads failed as it went", err)
+		}
+	})
 }
 
 func TestEndDaemon_FailsWhenTheDaemonOutlivesTheSignal(t *testing.T) {
