@@ -313,11 +313,13 @@ func TestForget(t *testing.T) {
 		}
 	})
 
-	t.Run("it forgets each of several entries, reading hooks.json once", func(t *testing.T) {
+	t.Run("it forgets each of several entries, reading hooks.json once and removing their hooks in one discard", func(t *testing.T) {
 		dir, entry, store, _ := stageForgettable(t)
 		other := sessionindex.Entry{Name: neighbour, ScrollbackFile: scrollbackFile(t, neighbour, apiCreated, 4242)}
 		reads := 0
 		state.AfterForgetReadsHooksForTest(t, func() { reads++ })
+		var discards []map[string]string
+		state.BeforeForgetDiscardsHooksForTest(t, func(shown map[string]string) { discards = append(discards, shown) })
 		sink := logtest.Install(t)
 
 		state.Forget(dir, store, "cli", entry, other)
@@ -336,12 +338,16 @@ func TestForget(t *testing.T) {
 		if reads != 1 {
 			t.Errorf("hooks.json read %d times, want once", reads)
 		}
+		want := map[string]string{forgotten: "claude --resume", neighbour: "vim"}
+		if len(discards) != 1 || !maps.Equal(discards[0], want) {
+			t.Errorf("discards = %v, want one, of %v", discards, want)
+		}
 		if n := len(sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelInfo)); n != 2 {
 			t.Errorf("forget records = %d, want one an entry", n)
 		}
 	})
 
-	t.Run("once the hooks lock refuses a removal it tries no other, keeping every hook, and the files still go", func(t *testing.T) {
+	t.Run("a hooks lock refusing the batch's discard keeps every hook it read, and the files still go", func(t *testing.T) {
 		dir, entry, store, hooksPath := stageForgettable(t)
 		other := sessionindex.Entry{Name: neighbour, ScrollbackFile: scrollbackFile(t, neighbour, apiCreated, 4242)}
 		hookstest.HoldHooksSidecar(t, hooksPath)
@@ -350,7 +356,9 @@ func TestForget(t *testing.T) {
 
 		state.Forget(dir, store, "cli", entry, other)
 
-		sink.Records().Matching("hooks", "discard").AtExactLevel(slog.LevelWarn).Only(t, "the one removal the lock refused")
+		if n := len(sink.Records().Matching("hooks", "discard").AtExactLevel(slog.LevelWarn)); n != 2 {
+			t.Errorf("refused discard warnings = %d, want one a key", n)
+		}
 		kept := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn)
 		if len(kept) != 2 {
 			t.Fatalf("kept-hook warnings = %d, want one an entry", len(kept))

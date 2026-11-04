@@ -54,15 +54,15 @@ func forgetSession(name, via string) error {
 	if err != nil {
 		return err
 	}
-	return updateSessionIndexForgetting(dir, via, func(idx *sessionindex.Index) error {
+	return updateSessionIndexLanding(dir, via, func(idx *sessionindex.Index) error {
 		idx.Remove(name)
 		return nil
-	}, func(outcome sessionindex.Outcome) []sessionindex.Entry {
+	}, forgetting(dir, via, func(outcome sessionindex.Outcome) []sessionindex.Entry {
 		if len(outcome.Removed) == 0 {
 			return []sessionindex.Entry{{Name: name}}
 		}
 		return outcome.Removed
-	})
+	}))
 }
 
 // killError words the backend's refusals for the user; any other failure is

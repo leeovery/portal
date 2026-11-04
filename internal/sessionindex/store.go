@@ -86,9 +86,11 @@ func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
 // UpdateThen is Update, running landed, when given, before the commit lock is
 // released: once fn's changes have landed, with what the write dropped, or
 // once fn changed nothing, with an empty outcome. It is where a caller forgets
-// what went with a dropped entry, so no claim or hook set slips in between
-// the write and the forgetting. landed runs for no Update that failed.
-func UpdateThen(dir, via string, fn func(*Index) error, landed func(Outcome)) (Outcome, error) {
+// what went with a dropped entry, and writes what goes beside an entry, so no
+// claim, kill or hook set slips in between. landed runs for no Update that
+// failed. An error landed returns is UpdateThen's, the outcome's write having
+// landed all the same.
+func UpdateThen(dir, via string, fn func(*Index) error, landed func(Outcome) error) (Outcome, error) {
 	lock, err := commitlock.Acquire(dir)
 	if err != nil {
 		return Outcome{}, err
@@ -97,7 +99,7 @@ func UpdateThen(dir, via string, fn func(*Index) error, landed func(Outcome)) (O
 
 	outcome, err := update(dir, via, fn)
 	if err == nil && landed != nil {
-		landed(outcome)
+		err = landed(outcome)
 	}
 	return outcome, err
 }

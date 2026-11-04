@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -382,7 +383,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		stageKept(t, dir, "api-x7Kd9a", "web-Qm3pLz")
 		store, _ := stageHooks(t, "api-x7Kd9a", "web-Qm3pLz")
 
-		err := claimSession("tui", claimed{Name: "api-x7Kd9a", Dir: "/work/api", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil)
+		err := claimSession("tui", claimed{Name: "api-x7Kd9a", Dir: "/work/api", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
 		if err != nil {
 			t.Fatalf("claimSession: %v", err)
 		}
@@ -408,7 +409,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		err = claimSession("cli", claimed{Name: "api-x7Kd9a", Created: created, PID: 4242}, func(idx *sessionindex.Index) error {
 			idx.SetScrollback("api-x7Kd9a", later)
 			return nil
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("claimSession: %v", err)
 		}
@@ -551,4 +552,83 @@ func TestForget_RunsUnderTheCommitLock(t *testing.T) {
 		t.Errorf("hook = %q, want the live creation's, set after the forgetting, kept", got)
 	}
 	assertLabel(t, dir, currentSessionName, "api work")
+}
+
+// The kill in hook set's gap: a hook set claims the live session's entry, and
+// before its hook lands a kill removes the entry and forgets what it keeps.
+// Were the hook written after the claim's unlock, the kill would find no hook
+// to forget, and the hook would then land on a dead name.
+func TestHookSet_WritesItsHookUnderTheClaimsLock(t *testing.T) {
+	fake, dir := stageRename(t)
+	store, _ := stageHooks(t)
+	paused, resume := make(chan struct{}), make(chan struct{})
+	var pausing atomic.Bool
+	pausing.Store(true)
+	withFuncSeam(t, &registerHook, func(store *hooks.Store, key string, event hooks.Event, registration hooks.Registration, via hooks.Via) error {
+		if pausing.Swap(false) {
+			close(paused)
+			<-resume
+		}
+		return store.Set(key, event, registration, via)
+	})
+
+	set := make(chan error, 1)
+	go func() {
+		set <- setResumeHook(context.Background(), fake, currentSessionName, hooks.Registration{Command: "make serve"})
+	}()
+	<-paused
+	killed := make(chan error, 1)
+	go func() { killed <- killSession(context.Background(), fake, currentSessionName, "cli") }()
+	select {
+	case err := <-killed:
+		t.Errorf("kill returned %v while hook set was writing its hook, want it held at the commit lock", err)
+		killed <- err
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(resume)
+
+	if err := <-set; err != nil {
+		t.Fatalf("hook set: %v", err)
+	}
+	if err := <-killed; err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if got := hookKeys(t, store); len(got) != 0 {
+		t.Errorf("hooks = %v, want the killed session's forgotten", got)
+	}
+	assertIndexed(t, dir, currentSessionName, false)
+}
+
+// A hook set over an earlier creation's entry replaces it, and the forgetting
+// of that entry, keyed by the same name, runs before the new hook is written.
+func TestHookSet_KeepsItsHookOverAnEarlierCreationsEntry(t *testing.T) {
+	fake, _ := stageRename(t)
+	dir := seedSessionsJSON(t, `{"version": 2, "sessions": [`+
+		`{"name": "`+currentSessionName+`", "label": "old", "created_at": "2026-10-28T09:00:00Z"}]}`)
+	stageKept(t, dir, currentSessionName)
+	store, _ := stageHooks(t, currentSessionName)
+
+	if err := setResumeHook(context.Background(), fake, currentSessionName, hooks.Registration{Command: "make serve"}); err != nil {
+		t.Fatalf("hook set: %v", err)
+	}
+
+	held, err := store.Load(hooks.ViaInternal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := held[currentSessionName][hooks.EventOnResume.String()].Command; got != "make serve" {
+		t.Errorf("hook = %q, want the one set, not the earlier creation's or none", got)
+	}
+	if e := entryOf(t, dir, currentSessionName); !e.CreatedAt.Equal(renameCreated) || e.Label != "" {
+		t.Errorf("entry = %+v, want the live creation's, made afresh", e)
+	}
+}
+
+func hookKeys(t *testing.T, store *hooks.Store) []string {
+	t.Helper()
+	held, err := store.Load(hooks.ViaInternal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.Sorted(maps.Keys(held))
 }

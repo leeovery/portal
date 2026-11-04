@@ -9,7 +9,12 @@ import (
 
 	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/log"
 )
+
+// The latch is the bootstrap's record of itself, so it logs under the
+// bootstrap's component.
+var bootstrapLogger = log.For("bootstrap")
 
 const bootstrappedName = "bootstrapped"
 
@@ -41,10 +46,16 @@ func WriteLatch(dir string, latch Latch) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("write bootstrapped latch: %w", err)
 	}
-	if err := fileutil.AtomicWrite0600(Bootstrapped(dir), data); err != nil {
+	if err := fileutil.AtomicWrite0600(Bootstrapped(dir), data, fileutil.ReportUnsynced(warnLatchUnsynced)); err != nil {
 		return fmt.Errorf("write bootstrapped latch: %w", err)
 	}
 	return nil
+}
+
+// warnLatchUnsynced logs a latch that landed though the directory sync after
+// its rename failed: the latch stands, and the bootstrap is recorded.
+func warnLatchUnsynced(err error) {
+	bootstrapLogger.Warn("latch unsynced", "error", err, "error_class", fileutil.ClassifyWriteError(err))
 }
 
 // ReadLatch returns the latch recorded in dir. A missing file is an error

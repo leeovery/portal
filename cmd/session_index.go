@@ -52,21 +52,29 @@ func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
 }
 
 func updateSessionIndexIn(dir, via string, fn func(*sessionindex.Index) error) error {
-	return updateSessionIndexForgetting(dir, via, fn, sessionindex.Outcome.Dropped)
+	return updateSessionIndexLanding(dir, via, fn, forgetting(dir, via, sessionindex.Outcome.Dropped))
 }
 
-// updateSessionIndexForgetting is updateSessionIndexIn forgetting, under the
-// same lock, the entries forgotten picks from what the update did, which is
-// empty when it changed nothing. Nothing is forgotten for an update that
-// failed.
-func updateSessionIndexForgetting(dir, via string, fn func(*sessionindex.Index) error, forgotten func(sessionindex.Outcome) []sessionindex.Entry) error {
-	_, err := sessionindex.UpdateThen(dir, via, fn, func(outcome sessionindex.Outcome) {
-		forgetEntries(dir, forgotten(outcome), via)
-	})
+// updateSessionIndexLanding is updateSessionIndexIn running landed in place of
+// its forgetting, under the same lock, once the update has landed: with what
+// it dropped, empty when it changed nothing. landed runs for no update that
+// failed, and an error it returns is the update's, whose write landed all the
+// same.
+func updateSessionIndexLanding(dir, via string, fn func(*sessionindex.Index) error, landed func(sessionindex.Outcome) error) error {
+	_, err := sessionindex.UpdateThen(dir, via, fn, landed)
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
 		return legacyIndexError{path: sessionindex.Path(dir)}
 	}
 	return err
+}
+
+// forgetting is a landing that forgets the entries picked chooses from what an
+// update dropped.
+func forgetting(dir, via string, picked func(sessionindex.Outcome) []sessionindex.Entry) func(sessionindex.Outcome) error {
+	return func(outcome sessionindex.Outcome) error {
+		forgetEntries(dir, picked(outcome), via)
+		return nil
+	}
 }
 
 // claimRule is the rule each claim judges by; tests fix the boot it reads.
@@ -82,19 +90,28 @@ type claimed struct {
 
 // claimSession claims the live session's entry by the one rule every claim
 // judges by, then runs then, when given, on the index in the same write, so
-// what then changes is this creation's.
-func claimSession(via string, live claimed, then func(*sessionindex.Index) error) error {
+// what then changes is this creation's. Once the write has landed and what it
+// dropped is forgotten, it runs afterward, when given, still under the commit
+// lock, so no kill or claim lands between the claim and what afterward writes
+// beside the entry.
+func claimSession(via string, live claimed, then func(*sessionindex.Index) error, afterward func() error) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
 	rule := claimRule(dir)
-	return updateSessionIndexIn(dir, via, func(idx *sessionindex.Index) error {
+	return updateSessionIndexLanding(dir, via, func(idx *sessionindex.Index) error {
 		idx.Claim(live.Name, live.Dir, live.Created, live.PID, rule)
 		if then == nil {
 			return nil
 		}
 		return then(idx)
+	}, func(outcome sessionindex.Outcome) error {
+		forgetEntries(dir, outcome.Dropped(), via)
+		if afterward == nil {
+			return nil
+		}
+		return afterward()
 	})
 }
 

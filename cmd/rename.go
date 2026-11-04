@@ -43,7 +43,7 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 	// does not match.
 	return claimSession(via, live, func(idx *sessionindex.Index) error {
 		return idx.SetLabel(name, label)
-	})
+	}, nil)
 }
 
 // liveSession reads the session a claim is for, wording one that fails as kill

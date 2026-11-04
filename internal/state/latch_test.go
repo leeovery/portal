@@ -4,18 +4,40 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/devversion"
+	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
 var running = state.Latch{BootID: "4DAA6ADD-0334-49EC-9FC6-8323D691249E", Version: "0.13.0"}
 
 func TestLatch(t *testing.T) {
+	t.Run("a latch whose directory sync fails has landed, and warns under the bootstrap's component", func(t *testing.T) {
+		dir := t.TempDir()
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+		sink := logtest.Install(t)
+
+		if err := state.WriteLatch(dir, running); err != nil {
+			t.Fatalf("WriteLatch = %v, want the landed write to succeed", err)
+		}
+
+		if !state.LatchCurrent(dir, running) {
+			t.Error("LatchCurrent = false, want the latch landed")
+		}
+		rec := sink.Records().Matching("bootstrap", "latch unsynced").Only(t, "the unsynced warning")
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.Level)
+		}
+		logtest.AssertWriteFailure(t, rec, "write-failed-fsync", fileutil.ErrWriteFsync)
+	})
+
 	t.Run("a latch written by this boot and version is current", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := state.WriteLatch(dir, running); err != nil {

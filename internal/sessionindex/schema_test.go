@@ -134,9 +134,9 @@ func TestCodec(t *testing.T) {
 		assertSameJSON(t, data, in)
 	})
 
-	t.Run("a member spelling a known key in another case is dropped, not written back to shadow the field", func(t *testing.T) {
-		idx, err := sessionindex.Decode([]byte(`{"version":2,"saved_at":"2026-11-02T09:30:00Z","Saved_At":"2020-01-01T00:00:00Z",` +
-			`"sessions":[{"name":"a","LABEL":"stale","label":"A","future":1}]}`))
+	t.Run("a member spelling a known key in another case reads as that key, and is written back in its spelling", func(t *testing.T) {
+		idx, err := sessionindex.Decode([]byte(`{"version":2,"Saved_At":"2026-11-02T09:30:00Z",` +
+			`"sessions":[{"name":"a","LABEL":"A","future":1}]}`))
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
@@ -165,8 +165,8 @@ func TestCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decode again: %v", err)
 		}
-		if got := again.Entries()[0].Label; got != idx.Entries()[0].Label {
-			t.Errorf("label read back = %q, want %q as first read", got, idx.Entries()[0].Label)
+		if got := again.Entries()[0].Label; got != "A" || !again.SavedAt.Equal(time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC)) {
+			t.Errorf("read back label %q and saved_at %v, want both as first read", got, again.SavedAt)
 		}
 	})
 }
@@ -259,6 +259,10 @@ func TestDecode_Refusals(t *testing.T) {
 		{"an entry with no name", `{"version":2,"sessions":[{"name":"a"},{"label":"x"}]}`},
 		{"an entry with an empty name", `{"version":2,"sessions":[{"name":""}]}`},
 		{"a name given twice", `{"version":2,"sessions":[{"name":"a"},{"name":"b"},{"name":"a","label":"x"}]}`},
+		{"a known root key in two spellings", `{"version":2,"sessions":[{"name":"a"}],"SESSIONS":[{"name":"b"}]}`},
+		{"a known root key given twice", `{"version":2,"sessions":[{"name":"a"}],"sessions":[{"name":"b"}]}`},
+		{"an entry's known key in two spellings", `{"version":2,"sessions":[{"name":"a","label":"A","Label":"B"}]}`},
+		{"an entry's known key given twice", `{"version":2,"sessions":[{"name":"a","label":"A","label":"B"}]}`},
 	} {
 		t.Run(tc.name+" is an error", func(t *testing.T) {
 			if _, err := sessionindex.Decode([]byte(tc.data)); err == nil {
@@ -266,6 +270,15 @@ func TestDecode_Refusals(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a version given twice is refused as corrupt, before either is judged", func(t *testing.T) {
+		_, err := sessionindex.Decode([]byte(`{"version":2,"VERSION":3,"sessions":[]}`))
+
+		var verr *sessionindex.VersionError
+		if err == nil || errors.As(err, &verr) {
+			t.Errorf("Decode = %v, want a refusal that is no VersionError", err)
+		}
+	})
 
 	// The version is judged before the body: another version's body need not
 	// fit version 2's types.

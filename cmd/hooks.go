@@ -103,22 +103,29 @@ var hooksSetCmd = &cobra.Command{
 	},
 }
 
+// registerHook is (*hooks.Store).Set; tests pause it to hold the commit lock
+// open.
+var registerHook = (*hooks.Store).Set
+
 // setResumeHook claims the session's entry, then registers its resume hook, as
 // rename claims before a label: a hook beside an entry left by an earlier
-// creation would go with it when a later claim replaced that entry.
+// creation would go with it when a later claim replaced that entry. The hook
+// is written under the claim's commit lock, so a kill can't remove the entry
+// before it lands and leave it on a dead name, and only once the claim's write
+// has landed and what it dropped is forgotten: set any sooner, the forgetting
+// of an earlier creation's entry would take it, being keyed by the same name.
 func setResumeHook(ctx context.Context, b backend.Backend, name string, registration hooks.Registration) error {
 	live, err := liveSession(ctx, b, name, "no hook is set")
 	if err != nil {
 		return err
 	}
-	if err := claimSession("cli", live, nil); err != nil {
-		return err
-	}
-	store, err := loadHookStore()
-	if err != nil {
-		return err
-	}
-	return store.Set(name, hooks.EventOnResume, registration, hooks.ViaCLI)
+	return claimSession("cli", live, nil, func() error {
+		store, err := loadHookStore()
+		if err != nil {
+			return err
+		}
+		return registerHook(store, name, hooks.EventOnResume, registration, hooks.ViaCLI)
+	})
 }
 
 // resumeModeFlag reads the registration's resume-mode pin: an unpassed flag

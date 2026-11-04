@@ -3,12 +3,13 @@
 package sessionindex
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -143,26 +144,82 @@ func marshalWithUnknown(fields any, unknown string) ([]byte, error) {
 }
 
 // unmarshalWithUnknown decodes data into fields, returning every member whose
-// key is not among known as one JSON object, or empty when there is none. A
-// member spelling a known key in another case is dropped, not kept: decoding
-// matches keys regardless of case, so written back it would take the known
-// field's place on every later read.
+// key is not among known as one JSON object, or empty when there is none.
+// Decoding matches keys regardless of case, so a member spelling a known key
+// in another case is dropped, not kept: written back it would take the known
+// field's place on every later read. One known key given twice, in any
+// spellings, is refused: decoding would keep the last and a rewrite drop the
+// others.
 func unmarshalWithUnknown(data []byte, fields any, known []string) (string, error) {
 	if err := json.Unmarshal(data, fields); err != nil {
 		return "", err
 	}
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(data, &members); err != nil {
+	members, err := objectMembers(data)
+	if err != nil {
 		return "", err
 	}
-	maps.DeleteFunc(members, func(key string, _ json.RawMessage) bool {
-		return slices.ContainsFunc(known, func(k string) bool { return strings.EqualFold(k, key) })
-	})
-	if len(members) == 0 {
+	if err := checkSpellings(members, known); err != nil {
+		return "", err
+	}
+	unknown := map[string]json.RawMessage{}
+	for _, m := range members {
+		if !slices.ContainsFunc(known, func(k string) bool { return strings.EqualFold(k, m.key) }) {
+			unknown[m.key] = m.value
+		}
+	}
+	if len(unknown) == 0 {
 		return "", nil
 	}
-	unknown, err := json.Marshal(members)
-	return string(unknown), err
+	encoded, err := json.Marshal(unknown)
+	return string(encoded), err
+}
+
+type member struct {
+	key   string
+	value json.RawMessage
+}
+
+// objectMembers is every member of the JSON object data in order, a key given
+// twice listed twice; none for null.
+func objectMembers(data []byte) ([]member, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	open, err := dec.Token()
+	if err != nil || open == nil {
+		return nil, err
+	}
+	if open != json.Delim('{') {
+		return nil, fmt.Errorf("want a JSON object, found %v", open)
+	}
+	var members []member
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		members = append(members, member{key: key.(string), value: value})
+	}
+	return members, nil
+}
+
+// checkSpellings refuses members that give one known key more than once,
+// however each spells it.
+func checkSpellings(members []member, known []string) error {
+	for _, k := range known {
+		var spellings []string
+		for _, m := range members {
+			if strings.EqualFold(k, m.key) {
+				spellings = append(spellings, strconv.Quote(m.key))
+			}
+		}
+		if len(spellings) > 1 {
+			return fmt.Errorf("sessions.json gives %q more than once, as %s", k, strings.Join(spellings, " and "))
+		}
+	}
+	return nil
 }
 
 // jsonKeys is every member name t's json tags give its fields.
@@ -194,7 +251,8 @@ func Encode(idx Index) ([]byte, error) {
 // than SchemaVersion (a *VersionError, judged before the body, whose shape the
 // other version may not share), and an entry with an empty or repeated name.
 // Members this version does not model are kept, for Encode to write again,
-// but for one spelling a known key in another case.
+// but for one spelling a known key in another case. A known key given twice,
+// on the root or an entry, in one spelling or two, is an error too.
 func Decode(data []byte) (Index, error) {
 	var head struct {
 		Version *int `json:"version"`
@@ -204,6 +262,14 @@ func Decode(data []byte) (Index, error) {
 	}
 	if head.Version == nil {
 		return Index{}, errors.New("sessions.json missing version field")
+	}
+	root, err := objectMembers(data)
+	if err != nil {
+		return Index{}, fmt.Errorf("decode sessions.json: %w", err)
+	}
+	// Before the version is judged: the version read is only the last given.
+	if err := checkSpellings(root, indexKeys); err != nil {
+		return Index{}, err
 	}
 	if *head.Version != SchemaVersion {
 		return Index{}, &VersionError{Found: *head.Version}

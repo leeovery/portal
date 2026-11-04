@@ -31,7 +31,7 @@ func (c indexingCreator) CreateFromDir(dir string, command []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	err = claimSession(c.via, claimed{Name: created.Name, Dir: created.Dir, Created: created.At, PID: created.PID}, nil)
+	err = claimSession(c.via, claimed{Name: created.Name, Dir: created.Dir, Created: created.At, PID: created.PID}, nil, nil)
 	// The store warns of a failed write itself; one before it, taking the
 	// lock or reading the index, is the caller's to report.
 	if err != nil && !fileutil.IsWriteFailure(err) {
