@@ -1,9 +1,6 @@
 package hooksweep
 
 import (
-	"context"
-	"log/slog"
-
 	"github.com/leeovery/portal/internal/hooks"
 )
 
@@ -16,12 +13,11 @@ func standDownAttrs(reason Reason, extra ...any) []any {
 }
 
 // StandDown is a declined cycle: the reason its caller reports alongside the
-// level and attrs its log line carries. The zero value means the cycle ran.
-// Emission is the sweep's — a diagnosis that declines has pruned nothing and
-// must not claim a stand-down in the reaper's own vocabulary.
+// attrs its log line carries. The zero value means the cycle ran. Emission is
+// the sweep's — a diagnosis that declines has pruned nothing and must not
+// claim a stand-down in the reaper's own vocabulary.
 type StandDown struct {
 	reason Reason
-	level  slog.Level
 	attrs  []any
 }
 
@@ -32,20 +28,15 @@ func (s StandDown) Reason() Reason { return s.reason }
 // Declined reports whether the cycle stood down at all.
 func (s StandDown) Declined() bool { return s.reason != "" }
 
+// emit logs the stand-down at DEBUG, whatever its reason: a deferred prune
+// loses nothing, and the next cycle retries it. A doctor --fix that stood
+// down prints its reason.
 func (s StandDown) emit() {
-	logger.Log(context.Background(), s.level, standDownMsg, standDownAttrs(s.reason, s.attrs...)...)
+	logger.Debug(standDownMsg, standDownAttrs(s.reason, s.attrs...)...)
 }
 
-// A restore window is an expected state, and warning through every one of them
-// would name a hazard being avoided rather than encountered.
-func declineDebug(reason Reason, attrs ...any) StandDown {
-	return StandDown{reason: reason, level: slog.LevelDebug, attrs: attrs}
-}
-
-// A lock that will not yield and a tmux read that answered nothing usable are
-// both anomalies.
-func declineWarn(reason Reason, attrs ...any) StandDown {
-	return StandDown{reason: reason, level: slog.LevelWarn, attrs: attrs}
+func decline(reason Reason, attrs ...any) StandDown {
+	return StandDown{reason: reason, attrs: attrs}
 }
 
 // declinedError is a stand-down in transit — the reason its guard decided on,

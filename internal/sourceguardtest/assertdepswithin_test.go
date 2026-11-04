@@ -33,7 +33,7 @@ func TestAssertDepsWithin_ReportsEveryDepOutsideTheAllowlist(t *testing.T) {
 
 	rec.Run(func() { AssertDepsWithin(rec, hooksPkg, []string{fileutilPkg}) })
 
-	for _, want := range []string{logPkg, nanoidPkg, "internal/storelog"} {
+	for _, want := range []string{logPkg, "internal/resumemode", "internal/storelog"} {
 		if !errored(rec, want) {
 			t.Errorf("AssertDepsWithin did not report %s as outside the allowlist; reported %v", want, rec.Errors)
 		}

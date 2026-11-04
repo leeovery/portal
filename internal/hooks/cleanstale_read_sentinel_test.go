@@ -29,7 +29,7 @@ func TestCleanStaleReadFailuresShareASentinel(t *testing.T) {
 	t.Run("a failed pre-read wraps the read sentinel", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 
-		_, err := store.CleanStale(enumerating(hookstest.LiveSeedA))
+		_, err := store.CleanStale(listing(hookstest.LiveSeedA), noIndex)
 		if !errors.Is(err, hooks.ErrStoreRead) {
 			t.Fatalf("CleanStale error = %v, want errors.Is the read sentinel", err)
 		}
@@ -43,7 +43,7 @@ func TestCleanStaleReadFailuresShareASentinel(t *testing.T) {
 		_, err := store.CleanStale(func(hooks.Snapshot) ([]string, error) {
 			makeUnreadable(t, path)
 			return []string{hookstest.LiveSeedA}, nil
-		})
+		}, noIndex)
 		if !errors.Is(err, hooks.ErrStoreRead) {
 			t.Fatalf("CleanStale error = %v, want errors.Is the read sentinel", err)
 		}
@@ -52,7 +52,7 @@ func TestCleanStaleReadFailuresShareASentinel(t *testing.T) {
 	t.Run("a failed save wraps no read sentinel", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed, WritesDenied: true})
 
-		_, err := store.CleanStale(enumerating(hookstest.LiveSeedA))
+		_, err := store.CleanStale(listing(hookstest.LiveSeedA), noIndex)
 		if err == nil {
 			t.Fatal("CleanStale succeeded with the directory unwritable, so nothing was reported")
 		}

@@ -22,7 +22,6 @@ const tmuxPkgPath = "github.com/leeovery/portal/internal/tmux"
 // names a file; elsewhere it names a package directory.
 var tmuxImportAllowList = map[string]int{
 	"cmd/state_hydrate.go": 3,
-	"internal/hooksweep":   3,
 }
 
 // tmuxTestOnlyPackages serve tests alone, so they are outside the guard; they

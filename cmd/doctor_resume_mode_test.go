@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/themetest"
@@ -161,8 +163,8 @@ func TestDoctorResumeMode(t *testing.T) {
 			return lines[len(lines)-1]
 		}
 		for _, stored := range []string{"eager", "lazy"} {
-			if got := summaryFor(stored); got != "  7 checks passed" {
-				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  7 checks passed")
+			if got := summaryFor(stored); got != "  8 checks passed" {
+				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  8 checks passed")
 			}
 		}
 
@@ -188,6 +190,7 @@ func TestDoctorResumeMode(t *testing.T) {
 	t.Run("it ignores a registration's own mode", func(t *testing.T) {
 		setPrefsFile(t, `{"resume_mode":"lazy"}`)
 		deps := healthyDoctorDeps(t)
+		deps.ListSessions = backendtest.New(backend.Session{Name: hookstest.LiveSeedA}).List
 		seed := `{"` + hookstest.LiveSeedA + `": {"on-resume": {"command": "echo hi", "resume": "eager"}}}`
 		_, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
 		t.Setenv("PORTAL_HOOKS_FILE", hooksPath)

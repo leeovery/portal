@@ -14,7 +14,6 @@ import (
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/storelog"
 )
@@ -362,28 +361,27 @@ func (s *Store) List(via Via) ([]Hook, error) {
 }
 
 // StaleKeys applies the staleness rule; every reader of staleness must route
-// through here rather than restate it. A persisted key is stale iff it is
-// absent from live and its shape is one the rule can judge — token-shaped, or
-// empty. A key of any other shape cannot be told apart from an entry that has
-// not been converted to a pane token yet, so it is retained.
+// through here rather than restate it. A persisted key is stale iff it names
+// neither a session in listed, the backend's listing (answering or not), nor
+// an entry in indexed, the names sessions.json holds. Every key is judged,
+// whatever its shape: one the tmux version wrote names no zmx session. The
+// stale keys come back sorted.
 //
-// It carries no mass-deletion guard: an empty live set makes every judgeable
-// persisted key stale, and deferring on that is the caller's repair-safety
-// policy.
-func StaleKeys(persisted Snapshot, live []string) []string {
-	liveSet := make(map[string]struct{}, len(live))
-	for _, k := range live {
-		liveSet[k] = struct{}{}
+// It carries no mass-deletion guard: an empty listing beside an empty index
+// makes every persisted key stale, and deferring on a read that may not be
+// one is the caller's repair-safety policy.
+func StaleKeys(persisted Snapshot, listed, indexed []string) []string {
+	protected := make(map[string]struct{}, len(listed)+len(indexed))
+	for _, name := range slices.Concat(listed, indexed) {
+		protected[name] = struct{}{}
 	}
 	var stale []string
 	for key := range persisted {
-		if _, ok := liveSet[key]; ok {
-			continue
-		}
-		if key == "" || nanoid.IsTokenShaped(key) {
+		if _, ok := protected[key]; !ok {
 			stale = append(stale, key)
 		}
 	}
+	slices.Sort(stale)
 	return stale
 }
 
@@ -409,43 +407,46 @@ var ErrStoreRead = errors.New("failed to read hooks store")
 // loaded from nothing and written back is every other entry gone.
 var ErrMalformed = errors.New("hooks.json holds malformed JSON")
 
-// CleanStale removes and returns the hook entries whose key enumerateLive's
-// answer leaves stale: absent from that live set, judgeable by the staleness
-// rule, and held by the snapshot this call read. A key it cannot judge is
-// retained untouched, and a clean that removes nothing writes no file and emits
+// CleanStale removes and returns the hook entries the staleness rule judges
+// stale against listSessions' and readIndex's answers, and that the snapshot
+// this call read holds. A clean that removes nothing writes no file and emits
 // no summary.
 //
-// The two reads a safe deletion needs are sequenced here rather than by the
-// caller: the snapshot first, then enumerateLive with no lock held. Taking the
-// snapshot first is what keeps a registration landing between the two out of
-// the delete set: it is the older view, and deleteStale narrows to it. Running
-// enumerateLive under the hold would also park every writer behind it.
+// The reads a safe deletion needs are sequenced here rather than by the
+// caller: the snapshot first, then listSessions with no lock held, then
+// readIndex under the exclusive hold. Taking the snapshot first is what keeps
+// a registration for a new key out of the delete set: it is the older view,
+// and deleteStale narrows to it. Running listSessions under the hold would
+// park every writer behind it. A session name recurs, so a registration can
+// land under a key the snapshot already holds as stale; `hook set` claims its
+// session's index entry before it writes, so the index read under the hold
+// protects every registration the file it judges holds.
 //
-// enumerateLive is handed that snapshot and returns the live keys; any error it
-// returns aborts the clean with the file untouched and is returned unwrapped, so
-// a caller can carry its own reasons through. A failed snapshot read returns
-// ErrStoreRead and never calls it.
-func (s *Store) CleanStale(enumerateLive func(Snapshot) ([]string, error)) ([]string, error) {
+// listSessions is handed that snapshot and returns the names the backend
+// lists; readIndex returns the names sessions.json holds. An error either one
+// returns aborts the clean with the file untouched and is returned unwrapped,
+// so a caller can carry its own reasons through. A failed snapshot read
+// returns ErrStoreRead and calls neither.
+func (s *Store) CleanStale(listSessions func(Snapshot) ([]string, error), readIndex func() ([]string, error)) ([]string, error) {
 	snapshot, err := s.loadSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStoreRead, err)
 	}
 
-	live, err := enumerateLive(snapshot)
+	listed, err := listSessions(snapshot)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.deleteStale(live, snapshot)
+	return s.deleteStale(listed, readIndex, snapshot)
 }
 
 // deleteStale is the clean's mutation: it derives the delete set from the file
 // it loads under its own exclusive hold, so a deletion is decided on the file as
 // it stands rather than on the older view the snapshot describes. The snapshot
 // may only narrow that set, never widen it: a key it does not hold was written
-// after the enumeration and so was never offered to it for protection, which
-// makes it unjudgeable by this live set however stale its shape looks.
-func (s *Store) deleteStale(live []string, snapshot Snapshot) ([]string, error) {
+// after the listing and so was never offered to it for protection.
+func (s *Store) deleteStale(listed []string, readIndex func() ([]string, error), snapshot Snapshot) ([]string, error) {
 	start := time.Now()
 
 	lock, err := s.acquireMutationLock()
@@ -459,7 +460,12 @@ func (s *Store) deleteStale(live []string, snapshot Snapshot) ([]string, error) 
 		return nil, fmt.Errorf("%w: %w", ErrStoreRead, err)
 	}
 
-	removed := narrowToSnapshot(StaleKeys(h, live), snapshot)
+	indexed, err := readIndex()
+	if err != nil {
+		return nil, err
+	}
+
+	removed := narrowToSnapshot(StaleKeys(h, listed, indexed), snapshot)
 
 	if len(removed) == 0 {
 		return removed, nil

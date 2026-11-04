@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,8 +9,10 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/logtest"
 )
 
@@ -88,18 +91,22 @@ func TestSweepPreReadBound(t *testing.T) {
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: `{"` + hookstest.ReapableSeedA + `": {"on-resume": "cmd-a"}}`})
 		hookstest.HoldHooksSidecar(t, path)
 
-		// An empty live set stands the cycle down after the pre-read, so the
+		// A failed listing stands the cycle down after the pre-read, so the
 		// elapsed time measures that read alone rather than CleanStale's own
 		// exclusive acquire behind it.
-		lister := &stubStaleSweepReader{rows: tokenRows()}
+		fake := backendtest.New()
+		fake.Fail(backendtest.OpList, errors.New("zmx directory unreadable"))
 		sink := logtest.Install(t)
 
 		start := time.Now()
-		err := sweepErr(lister, store)
+		outcome, err := hooksweep.Run(t.Context(), hooksweep.Sources{List: fake.List, StateDir: t.TempDir()}, store)
 		elapsed := time.Since(start)
 
 		if err != nil {
 			t.Fatalf("hooksweep.Run: %v", err)
+		}
+		if outcome.DeclineReason != hooksweep.ReasonListFailed {
+			t.Fatalf("DeclineReason = %q, want the listing's stand-down", outcome.DeclineReason)
 		}
 		if elapsed >= time.Second {
 			t.Fatalf("the pre-read spent %v under a held lock — it waited at the mutation bound, not the derived pre-read bound (%v)", elapsed, short)

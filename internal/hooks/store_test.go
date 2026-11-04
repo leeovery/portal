@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -650,7 +651,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0"))
+		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -681,7 +682,7 @@ func TestCleanStale(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0", "my-session:0.1"))
+		removed, err := store.CleanStale(listing("my-session:0.0", "my-session:0.1"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -703,7 +704,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0", "my-session:0.1"))
+		removed, err := store.CleanStale(listing("my-session:0.0", "my-session:0.1"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -725,7 +726,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(enumerating())
+		removed, err := store.CleanStale(listing(), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -757,7 +758,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to stat file: %v", err)
 		}
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0"))
+		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -780,7 +781,7 @@ func TestCleanStale(t *testing.T) {
 			Seed: fmt.Sprintf(`{%q:{"on-resume":"claude --resume old1"},%q:{"on-resume":"claude --resume old2"},"my-session:0.0":{"on-resume":"claude --resume new1"}}`, hookstest.ReapableSeedA, hookstest.ReapableSeedB),
 		})
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0"))
+		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -833,7 +834,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(enumerating("my-session:0.0", "other-session:0.1"))
+		removed, err := store.CleanStale(listing("my-session:0.0", "other-session:0.1"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -866,55 +867,53 @@ func TestCleanStale(t *testing.T) {
 	})
 }
 
+// A key is stale when it names neither a listed session nor an index entry,
+// whatever its shape.
 func TestStaleKeys(t *testing.T) {
-	t.Run("returns persisted keys absent from the live set", func(t *testing.T) {
+	t.Run("it returns, sorted, the keys named by neither the listing nor the index", func(t *testing.T) {
 		persisted := hooks.Snapshot{
-			"live-a:0.0":            {"on-resume": {Command: "x"}},
-			hookstest.ReapableSeedB: {"on-resume": {Command: "y"}},
-			"live-c:0.0":            {"on-resume": {Command: "z"}},
-			hookstest.ReapableSeedD: {"on-resume": {Command: "w"}},
+			hookstest.LiveSeedA:     {"on-resume": {Command: "listed"}},
+			hookstest.LiveSeedB:     {"on-resume": {Command: "indexed"}},
+			hookstest.ReapableSeedD: {"on-resume": {Command: "gone"}},
+			hookstest.ReapableSeedB: {"on-resume": {Command: "gone too"}},
 		}
-		live := []string{"live-a:0.0", "live-c:0.0", "extra-e:0.0"}
 
-		got := hooks.StaleKeys(persisted, live)
-		sort.Strings(got)
-		want := []string{hookstest.ReapableSeedB, hookstest.ReapableSeedD}
-		sort.Strings(want)
-		if len(got) != len(want) {
-			t.Fatalf("StaleKeys = %v, want %v", got, want)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Errorf("StaleKeys[%d] = %q, want %q", i, got[i], want[i])
-			}
+		got := hooks.StaleKeys(persisted, []string{hookstest.LiveSeedA, hookstest.LiveSeedC}, []string{hookstest.LiveSeedB})
+
+		if want := []string{hookstest.ReapableSeedB, hookstest.ReapableSeedD}; !slices.Equal(got, want) {
+			t.Errorf("StaleKeys = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("returns empty when every persisted key is live", func(t *testing.T) {
+	t.Run("it judges the keys the tmux version wrote, and an empty key, like any other", func(t *testing.T) {
 		persisted := hooks.Snapshot{
-			"a:0.0": {"on-resume": {Command: "x"}},
-			"b:0.0": {"on-resume": {Command: "y"}},
+			hookstest.TmuxEraSeedA: {"on-resume": {Command: "pane token"}},
+			hookstest.TmuxEraSeedB: {"on-resume": {Command: "coordinates"}},
+			hookstest.TmuxEraSeedC: {"on-resume": {Command: "listed coordinates"}},
+			"":                     {"on-resume": {Command: "empty"}},
 		}
-		got := hooks.StaleKeys(persisted, []string{"a:0.0", "b:0.0", "c:0.0"})
-		if len(got) != 0 {
-			t.Errorf("StaleKeys = %v, want empty", got)
+
+		got := hooks.StaleKeys(persisted, []string{hookstest.TmuxEraSeedC}, nil)
+
+		want := []string{"", hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB}
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("StaleKeys = %v, want %v", got, want)
 		}
 	})
 
-	t.Run("returns every judgeable persisted key when the live set is empty", func(t *testing.T) {
+	t.Run("it returns every persisted key when nothing is listed or indexed", func(t *testing.T) {
 		persisted := hooks.Snapshot{
 			hookstest.ReapableSeedA: {"on-resume": {Command: "x"}},
 			hookstest.ReapableSeedB: {"on-resume": {Command: "y"}},
 		}
-		got := hooks.StaleKeys(persisted, []string{})
-		if len(got) != 2 {
+		if got := hooks.StaleKeys(persisted, nil, nil); len(got) != 2 {
 			t.Fatalf("StaleKeys = %v, want both keys", got)
 		}
 	})
 
-	t.Run("returns empty for an empty persisted map", func(t *testing.T) {
-		got := hooks.StaleKeys(hooks.Snapshot{}, []string{"a:0.0"})
-		if len(got) != 0 {
+	t.Run("it returns empty for an empty persisted map", func(t *testing.T) {
+		if got := hooks.StaleKeys(hooks.Snapshot{}, []string{"a"}, []string{"b"}); len(got) != 0 {
 			t.Errorf("StaleKeys = %v, want empty", got)
 		}
 	})
@@ -929,19 +928,19 @@ func TestCleanStaleRemovesExactlyStaleKeys(t *testing.T) {
 		}
 	}
 
-	live := []string{hookstest.ReapableSeedA, hookstest.ReapableSeedC}
+	listed := []string{hookstest.ReapableSeedA}
+	indexed := []string{hookstest.ReapableSeedC}
 
 	persisted, err := store.Load(hooks.ViaInternal)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	predicted := hooks.StaleKeys(persisted, live)
-	sort.Strings(predicted)
+	predicted := hooks.StaleKeys(persisted, listed, indexed)
 	if len(predicted) == 0 {
 		t.Fatal("StaleKeys predicted nothing — an equality between two empty sets proves nothing here")
 	}
 
-	removed, err := store.CleanStale(enumerating(live...))
+	removed, err := store.CleanStale(listing(listed...), indexing(indexed...))
 	if err != nil {
 		t.Fatalf("CleanStale: %v", err)
 	}
@@ -1007,7 +1006,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		removed, err := store.CleanStale(enumerating("my-session:0.0"))
+		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1054,7 +1053,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1074,7 +1073,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1094,7 +1093,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1110,7 +1109,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1127,7 +1126,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1143,7 +1142,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		store, seeded := hookstest.StageStore(t, hookstest.Staging{Seed: body, WritesDenied: true})
 		sink := logtest.Install(t)
 
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err == nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err == nil {
 			t.Fatal("expected error from CleanStale on read-only dir, got nil")
 		}
 
@@ -1177,7 +1176,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(enumerating("my-session:0.0")); err != nil {
+		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1201,7 +1200,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q:{"on-resume":"x"},%q:{"on-resume":"y"}}`, hookstest.ReapableSeedA, hookstest.ReapableSeedB), WritesDenied: true})
 		sink := logtest.Install(t)
 
-		_, err := store.CleanStale(enumerating())
+		_, err := store.CleanStale(listing(), noIndex)
 		if err == nil {
 			t.Fatal("expected error from CleanStale on read-only dir, got nil")
 		}
@@ -1239,7 +1238,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		removed, err := store.CleanStale(enumerating("my-session:0.0"))
+		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

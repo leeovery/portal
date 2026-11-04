@@ -2,7 +2,6 @@ package hooksweep
 
 import (
 	"errors"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,28 +25,35 @@ func lockedSweepFixture(t *testing.T, bound time.Duration) (*hooks.Store, string
 }
 
 func TestHookSweepStandsDownOnLockTimeout(t *testing.T) {
-	lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
+	src := newWorld(t, hookstest.LiveSeedA).sources()
 
 	t.Run("it deletes nothing when the sweep cannot take the lock", func(t *testing.T) {
 		store, path, _ := lockedSweepFixture(t, lockBound)
 		before := hookstest.HooksFileBytes(t, path)
 
-		if err := runErr(lister, store); err != nil {
+		outcome, err := Run(t.Context(), src, store)
+		if err != nil {
 			t.Fatalf("Run: want nil on a lock timeout, got %v", err)
+		}
+		if outcome.DeclineReason != ReasonLockTimeout || len(outcome.Removed) != 0 {
+			t.Errorf("outcome = %+v, want a lock-timeout stand-down removing nothing", outcome)
 		}
 
 		hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten under a held lock")
 	})
 
-	t.Run("it emits exactly one WARN per stood-down cycle", func(t *testing.T) {
+	t.Run("it reports one stand-down per stood-down cycle", func(t *testing.T) {
 		store, _, _ := lockedSweepFixture(t, lockBound)
 		sink := logtest.Install(t)
 
-		if err := runErr(lister, store); err != nil {
+		if err := runErr(t, src, store); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 
-		assertStandDown(t, sink, slog.LevelWarn, "lock-timeout")
+		rec := assertStandDown(t, sink, ReasonLockTimeout)
+		if !errors.Is(rec.ErrorAttr(t, "error"), hooks.ErrLockHeld) {
+			t.Errorf("stand-down error attr = %v, want the lock timeout", rec.ErrorAttr(t, "error"))
+		}
 	})
 
 	// The sweep takes the sidecar twice, and only the mutation waits at the full
@@ -58,7 +64,7 @@ func TestHookSweepStandsDownOnLockTimeout(t *testing.T) {
 		store, _, _ := lockedSweepFixture(t, bound)
 
 		start := time.Now()
-		if err := runErr(lister, store); err != nil {
+		if err := runErr(t, src, store); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 		elapsed := time.Since(start)
@@ -74,12 +80,12 @@ func TestHookSweepStandsDownOnLockTimeout(t *testing.T) {
 	t.Run("it retries on the next cadence", func(t *testing.T) {
 		store, _, release := lockedSweepFixture(t, lockBound)
 
-		if err := runErr(lister, store); err != nil {
+		if err := runErr(t, src, store); err != nil {
 			t.Fatalf("Run under the lock: %v", err)
 		}
 		release()
 
-		outcome, err := Run(lister, store)
+		outcome, err := Run(t.Context(), src, store)
 		if err != nil {
 			t.Fatalf("Run after release: %v", err)
 		}
@@ -101,7 +107,7 @@ func TestHookSweepStandsDownOnLockTimeout(t *testing.T) {
 }
 
 func TestHookSweepDiscriminatesLockTimeoutFromFailure(t *testing.T) {
-	lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
+	src := newWorld(t, hookstest.LiveSeedA).sources()
 
 	t.Run("it still returns an error for a save failure", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
@@ -111,7 +117,7 @@ func TestHookSweepDiscriminatesLockTimeoutFromFailure(t *testing.T) {
 		})
 		sink := logtest.Install(t)
 
-		outcome, err := Run(lister, store)
+		outcome, err := Run(t.Context(), src, store)
 		if err == nil {
 			t.Fatal("Run: want an error on a save failure, got nil")
 		}
@@ -144,7 +150,7 @@ func TestHookSweepDiscriminatesLockTimeoutFromFailure(t *testing.T) {
 		})
 		sink := logtest.Install(t)
 
-		outcome, err := Run(lister, store)
+		outcome, err := Run(t.Context(), src, store)
 		if err == nil {
 			t.Fatal("Run: want an error, got nil")
 		}

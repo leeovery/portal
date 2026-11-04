@@ -14,16 +14,17 @@ import (
 func preReadFailureCycle(t *testing.T) Outcome {
 	t.Helper()
 	store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-	return readFailureCycle(t, &stubReader{rows: tokenRows(hookstest.LiveSeedA)}, store)
+	return readFailureCycle(t, newWorld(t, hookstest.LiveSeedA), store)
 }
 
 // deletePhaseReadFailureCycle runs a cycle over a hooks.json that goes
-// unreadable while the pane enumeration is out: readable when the snapshot was
-// taken, unreadable by the time the deletion reads it under its own hold.
+// unreadable while the listing is out: readable when the snapshot was taken,
+// unreadable by the time the deletion reads it under its own hold.
 func deletePhaseReadFailureCycle(t *testing.T) Outcome {
 	t.Helper()
 	store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-	reader := &stubReader{rows: tokenRows(hookstest.LiveSeedA), during: func() {
+	w := newWorld(t, hookstest.LiveSeedA)
+	w.during = func() {
 		if err := os.Remove(path); err != nil {
 			t.Errorf("remove the staged hooks.json: %v", err)
 			return
@@ -31,18 +32,18 @@ func deletePhaseReadFailureCycle(t *testing.T) Outcome {
 		if err := os.Mkdir(path, 0o755); err != nil {
 			t.Errorf("stage a directory at the hooks.json path: %v", err)
 		}
-	}}
-	return readFailureCycle(t, reader, store)
+	}
+	return readFailureCycle(t, w, store)
 }
 
 // readFailureCycle runs one cycle that must stand down rather than fail: a read
 // it could not take is a decline, so the error belongs to the emitted line and
 // not to the caller.
-func readFailureCycle(t *testing.T, reader Reader, store *hooks.Store) Outcome {
+func readFailureCycle(t *testing.T, w *world, store *hooks.Store) Outcome {
 	t.Helper()
 	logtest.Install(t)
 
-	outcome, err := Run(reader, store)
+	outcome, err := Run(t.Context(), w.sources(), store)
 	if err != nil {
 		t.Fatalf("Run on an unreadable hooks.json: want a stand-down, got %v", err)
 	}
@@ -71,21 +72,12 @@ func TestHookSweepClassifiesEitherReadFailure(t *testing.T) {
 		logtest.Install(t)
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed, WritesDenied: true})
 
-		outcome, err := Run(&stubReader{rows: tokenRows(hookstest.LiveSeedA)}, store)
+		outcome, err := Run(t.Context(), newWorld(t, hookstest.LiveSeedA).sources(), store)
 		if err == nil {
 			t.Fatal("Run returned no error for a save it could not make")
 		}
 		if outcome.DeclineReason != "" {
 			t.Errorf("DeclineReason = %q, want none — a failed write is no stand-down", outcome.DeclineReason)
-		}
-	})
-
-	// Where the two failures meet a user is the caller's copy tables to answer
-	// for; what this package owes them is one reason, whichever read failed, so
-	// neither surface has to word two conditions for one file it could not read.
-	t.Run("it reports both read failures under one reason", func(t *testing.T) {
-		if pre, delete := preReadFailureCycle(t).DeclineReason, deletePhaseReadFailureCycle(t).DeclineReason; pre != delete {
-			t.Errorf("pre-read declined under %q and the delete-phase read under %q; want one reason for both", pre, delete)
 		}
 	})
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
@@ -66,6 +68,7 @@ type DoctorDeps struct {
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
 	ProtocolVersion func(ctx context.Context, name string) (int, error)
+	HookStore       *hooks.Store
 	ProjectStore    *project.Store
 	PrefsStore      *prefs.Store
 	Detector        TerminalDetector
@@ -116,6 +119,11 @@ func resolveDoctorDeps() *DoctorDeps {
 
 	// Each best-effort load is constructed only for a seam left unset, so an
 	// injected store costs no config read.
+	if deps.HookStore == nil {
+		if hookStore, err := loadHookStore(); err == nil {
+			deps.HookStore = hookStore
+		}
+	}
 	if deps.ProjectStore == nil {
 		if projectStore, err := loadProjectStore(); err == nil {
 			deps.ProjectStore = projectStore
@@ -192,12 +200,99 @@ var doctorCmd = &cobra.Command{
 // best-effort so a failure is left for the re-diagnosis to report. Themes get no
 // repair step at all: rewriting a broken theme file would destroy user-authored
 // content, and creating or seeding the themes directory is something Portal
-// never does — diagnosed or not. Stale hooks get none in this phase: hooks.json
-// is keyed by pane token until it is keyed by session name, and judged against
-// session names every real key would read as stale.
+// never does — diagnosed or not.
 func runDoctorFix(cmd *cobra.Command, deps *DoctorDeps) {
-	pruneDoctorStaleProjects(cmd.OutOrStdout(), deps)
+	w := cmd.OutOrStdout()
+	pruneDoctorStaleHooks(cmd.Context(), w, deps)
+	pruneDoctorStaleProjects(w, deps)
 	sweepDoctorLogs(deps)
+}
+
+// pruneDoctorStaleHooks runs the daemon's sweep once. A sweep that removed
+// nothing for a reason renders that reason — why it declined, or that it
+// failed — so a prune that could not run never looks like one that ran and
+// found nothing. A store that could not be opened is one such reason: to a
+// user it is the file that could not be read, which is the words the
+// diagnosis already uses for it.
+func pruneDoctorStaleHooks(ctx context.Context, w io.Writer, deps *DoctorDeps) {
+	if deps.HookStore == nil {
+		reportSkippedPrune(w, hooksweep.ReasonStoreReadFailed)
+		return
+	}
+	dir, _ := doctorStateDir(deps)
+	outcome, err := hooksweep.Run(ctx, hookSweepSources(deps, dir), deps.HookStore)
+	switch {
+	case err != nil:
+		reportFailedPrune(w)
+	case outcome.DeclineReason != "":
+		reportSkippedPrune(w, outcome.DeclineReason)
+	case len(outcome.Removed) > 0:
+		_, _ = fmt.Fprintf(w, "Pruned %s: %s\n",
+			pluralCount(len(outcome.Removed), "stale hook", "stale hooks"), strings.Join(outcome.Removed, ", "))
+	}
+}
+
+// hookSweepSources are what the stale-hooks check and its repair judge keys
+// against: the sessions doctor lists and the state dir it diagnoses. An
+// unresolvable state dir is handed on empty, and the sweep stands down on it.
+func hookSweepSources(deps *DoctorDeps, stateDir string) hooksweep.Sources {
+	return hooksweep.Sources{List: deps.ListSessions, StateDir: stateDir}
+}
+
+// The phrases both surface vocabularies share are written once here, so
+// re-wording one moves every line that prints it.
+const (
+	restoreStandDownPhrase       = "restore in progress"
+	restoringReadStandDownPhrase = "could not read the restoring flag"
+	storeReadStandDownPhrase     = "could not read hooks.json"
+	listStandDownPhrase          = "could not list sessions"
+	indexStandDownPhrase         = "could not read sessions.json"
+	lockStandDownPhrase          = "hooks.json is locked"
+)
+
+// sweepFailedStandDownPhrase words a sweep that ran and failed. It reads
+// alongside the stand-down phrases above and is deliberately not one of them:
+// no reason names it, because the cycle declined nothing.
+const sweepFailedStandDownPhrase = "the sweep could not complete"
+
+// skippedPrunePhrases completes "Skipped stale hook prune: …" for a user who
+// asked for a repair.
+var skippedPrunePhrases = map[hooksweep.Reason]string{
+	hooksweep.ReasonRestoring:           restoreStandDownPhrase,
+	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
+	hooksweep.ReasonStoreReadFailed:     storeReadStandDownPhrase,
+	hooksweep.ReasonListFailed:          listStandDownPhrase,
+	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
+	hooksweep.ReasonLockTimeout:         lockStandDownPhrase,
+}
+
+// notEvaluableDetails renders a stand-down reason as the reason the count
+// cannot be taken, so the diagnosis reports exactly what the reaper declined
+// to judge. A restore and a held lock are states that pass, so they say the
+// count waits on them; the rest name the read that failed.
+var notEvaluableDetails = map[hooksweep.Reason]string{
+	hooksweep.ReasonRestoring:           restoreStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
+	hooksweep.ReasonStoreReadFailed:     storeReadStandDownPhrase,
+	hooksweep.ReasonListFailed:          listStandDownPhrase,
+	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
+	hooksweep.ReasonLockTimeout:         lockStandDownPhrase + " (not evaluable)",
+}
+
+// reportSkippedPrune renders a prune that removed nothing from the shared
+// reason vocabulary, so no branch can reach for words of its own. A reason no
+// vocabulary words renders nothing rather than its own slug: exhaustiveness is
+// a test's to enforce.
+func reportSkippedPrune(w io.Writer, reason hooksweep.Reason) {
+	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", skippedPrunePhrases[reason])
+}
+
+// reportFailedPrune renders a prune that ran and failed. It reads as a skipped
+// prune because that is what the user got, but it is no stand-down — the sweep
+// declined nothing — so it names its own phrase rather than drawing one from
+// the stand-down vocabulary.
+func reportFailedPrune(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", sweepFailedStandDownPhrase)
 }
 
 func pruneDoctorStaleProjects(w io.Writer, deps *DoctorDeps) {
@@ -217,28 +312,31 @@ func pruneDoctorStaleProjects(w io.Writer, deps *DoctorDeps) {
 // sweepDoctorLogs is unconditional maintenance, not the repair of a diagnosed
 // condition — there is no stale-logs check.
 func sweepDoctorLogs(deps *DoctorDeps) {
-	stateDir := deps.StateDir
-	if stateDir == "" {
-		dir, err := state.Dir()
-		if err != nil {
-			bootstrapLogger.Warn("doctor --fix: state dir unresolvable, skipping log sweep", "error", err)
-			return
-		}
-		stateDir = dir
+	stateDir, err := doctorStateDir(deps)
+	if err != nil {
+		bootstrapLogger.Warn("doctor --fix: state dir unresolvable, skipping log sweep", "error", err)
+		return
 	}
 	if err := log.SweepLogsForClean(stateDir); err != nil {
 		bootstrapLogger.Warn("doctor --fix: log sweep failed", "error", err)
 	}
 }
 
-// runDoctorDiagnosis resolves the state directory read-only — never EnsureDir;
-// doctor creates nothing.
-func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, error) {
-	dir := deps.StateDir
-	var dirErr error
-	if dir == "" {
-		dir, dirErr = state.Dir()
+// doctorStateDir resolves the state directory read-only — never EnsureDir;
+// doctor creates nothing. It is empty when it can't be resolved.
+func doctorStateDir(deps *DoctorDeps) (string, error) {
+	if deps.StateDir != "" {
+		return deps.StateDir, nil
 	}
+	dir, err := state.Dir()
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, error) {
+	dir, dirErr := doctorStateDir(deps)
 
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
@@ -246,6 +344,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkSessionsAnswer(ctx, deps.ListSessions, deps.ProtocolVersion),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
+		checkStaleHooks(ctx, deps.HookStore, hookSweepSources(deps, dir)),
 		checkStaleProjects(deps.ProjectStore),
 		checkKeyConfig(deps.PrefsStore),
 	}
@@ -284,7 +383,7 @@ func checkSessionsAnswer(ctx context.Context, list func(context.Context) ([]back
 	const name = "sessions"
 	sessions, err := list(ctx)
 	if err != nil {
-		return checkResult{name: name, status: checkNotEvaluable, detail: "could not list sessions: " + err.Error()}
+		return checkResult{name: name, status: checkNotEvaluable, detail: listStandDownPhrase + ": " + err.Error()}
 	}
 	var silent []string
 	for _, s := range sessions {
@@ -407,6 +506,38 @@ func checkHostTerminal(detector TerminalDetector, resolve spawn.AdapterResolver)
 		return checkResult{name: name, status: checkInfo, detail: fmt.Sprintf("%s (unsupported)", id.Name)}
 	}
 	return checkResult{name: name, status: checkInfo, detail: fmt.Sprintf("%s (supported)", id.Name)}
+}
+
+// checkStaleHooks counts the keys the daemon's sweep would remove, removing
+// none. The store is read first, so an unreadable hooks.json is reported as
+// itself rather than as whatever the other reads make of it; past it, the
+// sweep's own judgement decides, stand-downs included, so the count and the
+// sweep never disagree on what is stale.
+func checkStaleHooks(ctx context.Context, store *hooks.Store, src hooksweep.Sources) checkResult {
+	const name = "stale hooks"
+	// No store to read and a read that failed are one condition to a user: the
+	// file could not be read, so both render the vocabulary's words for it.
+	if store == nil {
+		return staleHooksNotEvaluable(name, hooksweep.ReasonStoreReadFailed)
+	}
+	persisted, err := store.Load(hooks.ViaDoctor)
+	if err != nil {
+		return staleHooksNotEvaluable(name, hooksweep.ReasonStoreReadFailed)
+	}
+	stale, d := hooksweep.Stale(ctx, src, persisted)
+	switch {
+	case d.Declined():
+		return staleHooksNotEvaluable(name, d.Reason())
+	case len(persisted) == 0:
+		return checkResult{name: name, status: checkPass, detail: "no hooks"}
+	case len(stale) > 0:
+		return checkResult{name: name, status: checkFail, detail: pluralCount(len(stale), "stale hook entry", "stale hook entries")}
+	}
+	return checkResult{name: name, status: checkPass, detail: "no stale hooks"}
+}
+
+func staleHooksNotEvaluable(name string, reason hooksweep.Reason) checkResult {
+	return checkResult{name: name, status: checkNotEvaluable, detail: notEvaluableDetails[reason]}
 }
 
 // projectStoreReadStandDownPhrase words a projects.json the check could not

@@ -1,12 +1,14 @@
 package hooksweep
 
 import (
+	"context"
 	"errors"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // The whole cycle rides the component of the subsystem it sweeps, whichever
@@ -23,32 +25,12 @@ const (
 	sweepFailedMsg = "stale-hook cleanup failed"
 )
 
-// PaneHookLister returns one row per live pane: the pane's hook token, empty
-// for an unstamped pane, alongside its display-only location. The row count
-// answers whether the tmux read succeeded and the non-empty tokens answer which
-// panes are protected — two questions no consumer may conflate.
-type PaneHookLister interface {
-	ListAllPaneHookKeys() ([]tmux.PaneHookRow, error)
-}
-
-// Reader is the whole tmux surface hook-staleness work reads: the live pane
-// enumeration keys are judged against, and the @portal-restoring marker that
-// stands that judgement down for a restore's duration.
-type Reader interface {
-	PaneHookLister
-	state.RestoringChecker
-}
-
-// View is what the enumeration could establish about this moment: the live
-// token set persisted keys may be judged against, or the reason nothing may be
-// judged at all. A declined view's LiveTokens is not authority.
-type View struct {
-	LiveTokens []string
-	// PaneRows is meaningful only where Enumerated is set: an empty read is a
-	// completed read, an unreached or failed one has no count to report.
-	PaneRows   int
-	Enumerated bool
-	Decline    StandDown
+// Sources are what protect a key from the sweep: every session List names,
+// answering or not, and every entry sessions.json in StateDir holds. StateDir
+// also holds the restoring flag that stands the judgement down.
+type Sources struct {
+	List     func(context.Context) ([]backend.Session, error)
+	StateDir string
 }
 
 // Outcome is everything one cycle has to say: the keys it removed, or the
@@ -59,104 +41,132 @@ type Outcome struct {
 	DeclineReason Reason
 }
 
-// StalenessStandDown reports whether hook-staleness work may run at all.
-// Both the sweep and the diagnostic take it before they judge a single key, so
-// neither judges an entry the other protects. A restore's panes carry no token
-// until the re-stamp, so work landing in that window would treat every
-// token-keyed entry on the machine as lost; a deferred prune costs nothing, so
-// a failed read reports no louder than the stand-down itself. The read that
-// failed folds into the same stand-down under its own reason: it establishes
-// nothing about the marker, so the reason it is reported under must not claim a
-// restore the user is not running.
-func StalenessStandDown(reader state.RestoringChecker) StandDown {
-	active, err := state.RestoreWindowActive(state.IsRestoringSet(reader))
-	switch {
+// errNoStateDir declines a judgement handed no state directory, whose flag
+// and index reads would otherwise resolve against the working directory.
+var errNoStateDir = errors.New("no state directory")
+
+// restoringStandDown reports whether hook-staleness work may run at all. Both
+// the sweep and the diagnosis take it before they judge a single key, so
+// neither judges an entry the other protects. A bootstrap's restore is
+// creating sessions and recording them as it runs, and a deferred prune costs
+// nothing. A flag that can't be read folds into the same stand-down under its
+// own reason: it establishes nothing about the flag, so the reason it is
+// reported under must not claim a restore the user is not running.
+func restoringStandDown(dir string) StandDown {
+	if dir == "" {
+		return decline(ReasonRestoringReadFailed, "error", errNoStateDir)
+	}
+	switch raised, err := state.Restoring.Exists(dir); {
 	case err != nil:
-		return declineDebug(ReasonMarkerReadFailed, "error", err)
-	case active:
-		return declineDebug(ReasonRestoring)
+		return decline(ReasonRestoringReadFailed, "error", err)
+	case raised:
+		return decline(ReasonRestoring)
 	}
 	return StandDown{}
 }
 
-// JudgeAgainstLivePanes enumerates the live pane tokens persisted keys are
-// judged against. entries is how many keys the file holds, which is the whole
-// of what the guard below needs from it.
-func JudgeAgainstLivePanes(reader PaneHookLister, entries int) View {
-	rows, err := reader.ListAllPaneHookKeys()
+// listedNames is every session name the backend lists, answering or not: a
+// session that doesn't answer is still a session, and its hook is still its.
+func listedNames(ctx context.Context, list func(context.Context) ([]backend.Session, error)) ([]string, StandDown) {
+	sessions, err := list(ctx)
 	if err != nil {
-		return View{Decline: declineWarn(ReasonPaneReadFailed, "error", err)}
+		return nil, decline(ReasonListFailed, "error", err)
 	}
-
-	view := View{PaneRows: len(rows), Enumerated: true}
-
-	// A pane-less read is a bad read, not authority: it must never reach the
-	// staleness rule, which would judge every key it can parse stale. Defer to
-	// the next run. The count is of rows — under lazy stamping a live server
-	// carrying no token at all is ordinary, not a failure — and with nothing
-	// persisted there is nothing to protect, so the guard has no work.
-	if len(rows) == 0 && entries > 0 {
-		view.Decline = declineWarn(ReasonEmptyPaneRead, "entries", entries)
-		return view
+	names := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		names = append(names, s.Name)
 	}
-
-	view.LiveTokens = liveTokensFrom(rows)
-	return view
+	return names, StandDown{}
 }
 
-// liveTokensFrom projects the enumeration onto the staleness rule's vocabulary:
-// an unstamped pane protects no key, so its empty token must never enter the
-// live set.
-func liveTokensFrom(rows []tmux.PaneHookRow) []string {
-	tokens := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row.Token != "" {
-			tokens = append(tokens, row.Token)
-		}
+// indexedNames is every name sessions.json holds an entry for: a saved
+// session awaiting its restore keeps its hook. An index this version must not
+// read — version 1, corrupt or newer — or can't read at all protects nothing
+// it can name, so the judgement stands down on it.
+func indexedNames(dir string) ([]string, StandDown) {
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return nil, decline(ReasonIndexUnusable, "error", err)
 	}
-	return tokens
+	entries := idx.Entries()
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	return names, StandDown{}
+}
+
+// Stale reports the keys of persisted the sweep would remove at this moment,
+// or the stand-down that forbids judging them. It takes the sweep's reads in
+// the sweep's order and removes nothing, so a diagnosis answers the reaper's
+// question with the reaper's own answer.
+func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string, StandDown) {
+	if d := restoringStandDown(src.StateDir); d.Declined() {
+		return nil, d
+	}
+	if len(persisted) == 0 {
+		return nil, StandDown{}
+	}
+	listed, d := listedNames(ctx, src.List)
+	if d.Declined() {
+		return nil, d
+	}
+	indexed, d := indexedNames(src.StateDir)
+	if d.Declined() {
+		return nil, d
+	}
+	return hooks.StaleKeys(persisted, listed, indexed), StandDown{}
 }
 
 // A store holding nothing to sweep is an answer, not a failure: it aborts the
 // clean with the file untouched, which is the point of returning it as an error.
 var errNothingPersisted = errors.New("no hook entries to sweep")
 
-// liveTokenEnumeration answers the clean with the live token set persisted keys
-// are judged against, or with the stand-down that forbids judging them at all.
-func liveTokenEnumeration(reader PaneHookLister) func(hooks.Snapshot) ([]string, error) {
+// listing answers the clean with the names the backend lists, or with the
+// stand-down that forbids judging any key at all.
+func listing(ctx context.Context, list func(context.Context) ([]backend.Session, error)) func(hooks.Snapshot) ([]string, error) {
 	return func(snapshot hooks.Snapshot) ([]string, error) {
 		// Nothing persisted is nothing to sweep, and everything past this point
-		// costs: a whole-server pane enumeration here, and a deletion that
-		// creates the config directory, creates the sidecar and takes an
+		// costs: a listing that asks every session's daemon, and a deletion
+		// that creates the config directory, creates the sidecar and takes an
 		// exclusive hold. An install that has never registered a hook would
-		// otherwise pay all four on every cycle, in every `hook set`'s way. The
-		// counts line carries no pane figure, because none was taken.
+		// otherwise pay them on every cycle, in every `hook set`'s way. The
+		// counts line carries no session figure, because none was taken.
 		if len(snapshot) == 0 {
 			logger.Debug(countsMsg, "entries", 0)
 			return nil, errNothingPersisted
 		}
+		listed, d := listedNames(ctx, list)
+		if d.Declined() {
+			return nil, declinedError{d}
+		}
+		logger.Debug(countsMsg, "sessions", len(listed), "entries", len(snapshot))
+		return listed, nil
+	}
+}
 
-		view := JudgeAgainstLivePanes(reader, len(snapshot))
-		if view.Enumerated {
-			logger.Debug(countsMsg, "panes", view.PaneRows, "entries", len(snapshot))
+// indexing answers the clean, under its hold, with the names sessions.json
+// holds, or with the stand-down that forbids judging any key at all.
+func indexing(dir string) func() ([]string, error) {
+	return func() ([]string, error) {
+		indexed, d := indexedNames(dir)
+		if d.Declined() {
+			return nil, declinedError{d}
 		}
-		if view.Decline.Declined() {
-			return nil, declinedError{view.Decline}
-		}
-		return view.LiveTokens, nil
+		return indexed, nil
 	}
 }
 
 // Run runs one hook-staleness cycle, reporting what it removed or the reason it
 // declined to remove anything.
-func Run(reader Reader, store *hooks.Store) (Outcome, error) {
-	// Taken before the store is read at all: a restore window is no time to
-	// wait on this file's lock for an answer that cannot be acted on.
-	if decline := StalenessStandDown(reader); decline.Declined() {
-		return standDownOutcome(decline)
+func Run(ctx context.Context, src Sources, store *hooks.Store) (Outcome, error) {
+	// Taken before the store is read at all: a restore is no time to wait on
+	// this file's lock for an answer that cannot be acted on.
+	if d := restoringStandDown(src.StateDir); d.Declined() {
+		return standDownOutcome(d)
 	}
 
-	removed, err := store.CleanStale(liveTokenEnumeration(reader))
+	removed, err := store.CleanStale(listing(ctx, src.List), indexing(src.StateDir))
 	if err != nil {
 		return declinedSweep(err)
 	}
@@ -182,12 +192,11 @@ func declinedSweep(err error) (Outcome, error) {
 		// Another writer held the sidecar past the bound: nothing was written
 		// and nothing is wrong, so the cycle stands down rather than reporting a
 		// defect, and the next cadence retries.
-		return standDownOutcome(declineWarn(ReasonLockTimeout, "error", err))
+		return standDownOutcome(decline(ReasonLockTimeout, "error", err))
 	case errors.Is(err, hooks.ErrStoreRead):
 		// A hooks.json the cycle could not read, at either of the two reads it
-		// takes, is a decline like any other: it wrote nothing, and its own WARN
-		// names the condition and the read error that produced it.
-		return standDownOutcome(declineWarn(ReasonStoreReadFailed, "error", err))
+		// takes, is a decline like any other: it wrote nothing.
+		return standDownOutcome(decline(ReasonStoreReadFailed, "error", err))
 	}
 	logger.Warn(sweepFailedMsg, "error", err)
 	return Outcome{}, err
@@ -196,7 +205,7 @@ func declinedSweep(err error) (Outcome, error) {
 // standDownOutcome emits a decline and renders it as the cycle's outcome. The
 // nil error is the point: the emitted line is the whole report, so a caller
 // cannot add a second one for the same event.
-func standDownOutcome(decline StandDown) (Outcome, error) {
-	decline.emit()
-	return Outcome{DeclineReason: decline.reason}, nil
+func standDownOutcome(d StandDown) (Outcome, error) {
+	d.emit()
+	return Outcome{DeclineReason: d.reason}, nil
 }
