@@ -122,13 +122,32 @@ func (p *portalTerm) token(t *testing.T) string {
 // session.
 func (p *portalTerm) awaitRunner(t *testing.T, session string) {
 	t.Helper()
+	p.awaitRunners(t, session, "alone", func(pids []int) bool {
+		return slices.Equal(pids, []int{p.cmd.Process.Pid})
+	})
+}
+
+// awaitListed waits for the registry to list p's portal among the runners on
+// session. A runner lists itself only once its attach has begun, so a client
+// count, which its zmx client meets first, can't tell that the registry will
+// find it.
+func (p *portalTerm) awaitListed(t *testing.T, session string) {
+	t.Helper()
+	p.awaitRunners(t, session, "among the runners", func(pids []int) bool {
+		return slices.Contains(pids, p.cmd.Process.Pid)
+	})
+}
+
+// awaitRunners waits for the pids the registry lists on session to satisfy
+// want, described by how p's portal should be listed there.
+func (p *portalTerm) awaitRunners(t *testing.T, session, how string, want func(pids []int) bool) {
+	t.Helper()
 	var got map[string][]int
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
 		got = p.runners(t)
-		pids := got[session]
-		return len(pids) == 1 && pids[0] == p.cmd.Process.Pid
+		return want(got[session])
 	}) {
-		t.Fatalf("runners = %v, want portal %d alone on %s", got, p.cmd.Process.Pid, session)
+		t.Fatalf("runners = %v, want portal %d %s on %s", got, p.cmd.Process.Pid, how, session)
 	}
 }
 
@@ -239,6 +258,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		first, alpha := w.openProject(t)
 		second := w.portal(t, "open", alpha)
 		w.awaitClients(t, alpha, 2)
+		second.awaitListed(t, alpha)
 		w.create(t, "beta")
 		first.echoes(t, 6, 7)
 
@@ -349,6 +369,7 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		first, alpha := w.openProject(t)
 		second := w.portal(t, "open", alpha)
 		w.awaitClients(t, alpha, 2)
+		second.awaitListed(t, alpha)
 		w.create(t, "beta")
 		other := w.portal(t, "open", "beta")
 		w.awaitClients(t, "beta", 1)
