@@ -246,8 +246,8 @@ func TestEndDaemon_ReadsTheProvedDaemonAgainJustBeforeTheSignal(t *testing.T) {
 }
 
 // The process table's reads fail for a process caught as it forks or execs,
-// as about a third of scans under load catch one: each read that fails is read
-// again a while before it proves nothing.
+// as scans under load often catch one: each read that fails is read again a
+// while before it proves nothing.
 func TestEndDaemon_ReadsAgainAProcessWhoseReadsFailAWhile(t *testing.T) {
 	t.Run("the daemon", func(t *testing.T) {
 		w := newEndingWorld(t)

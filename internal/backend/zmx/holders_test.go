@@ -110,6 +110,9 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 	hardenedOnNoName.Command = "tart"
 	goneAsItIsRead := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
 	goneAsItIsRead.Reads = zmx.FailReads(caught(syscall.EIO), fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone))
+	unreadableOther := zmxProcess(nil)
+	unreadableOther.Command = "node"
+	unreadableOther.Err = caught(syscall.EINVAL)
 
 	for _, tt := range []struct {
 		name  string
@@ -132,6 +135,9 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 		{"zmx attach on its name under its first prefix", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_SESSION_PREFIX=p-", "ZMX_SESSION_PREFIX=")}},
 		{"a process whose reads fail a while, then show it holds nothing", []zmx.Process{settling(zmxProcess([]string{"zmx", "kill", "dev"}, inDir))}},
 		{"a zmx gone between reads that fail", []zmx.Process{goneAsItIsRead}},
+		// Decision 70: under load a scan often catches a process mid-exec,
+		// some for seconds; only one the kernel names zmx may be one.
+		{"a process the kernel names otherwise that it can't read, even once it has read it again a while", []zmx.Process{unreadableOther}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got, err := existsOver(t, dir, tt.procs...); got || err != nil {
@@ -147,11 +153,12 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
 	dir := socketDir(t)
 	refusing(t, dir, "dev")
-	unreadable := zmxProcess(nil)
-	unreadable.Err = errors.New("read arguments of process 40: invalid argument")
-	unreadableOther := zmxProcess(nil)
-	unreadableOther.Command = "launchd"
-	unreadableOther.Err = errors.New("operation not permitted")
+	unreadableNamed := func(command string) zmx.Process {
+		p := zmxProcess(nil)
+		p.Command = command
+		p.Err = caught(syscall.EINVAL)
+		return p
+	}
 	hidingItsEnvironment := zmxProcess([]string{"zmx", "attach", "dev"})
 	hidingItsPrefix := zmxProcess([]string{"zmx", "attach", "v"})
 
@@ -160,8 +167,9 @@ func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
 		procs []zmx.Process
 		err   error
 	}{
-		{"a zmx it can't read", []zmx.Process{unreadable}, nil},
-		{"any process it can't read, as its name proves nothing", []zmx.Process{unreadableOther}, nil},
+		{"a zmx it can't read", []zmx.Process{unreadableNamed("zmx")}, nil},
+		{"a process the kernel names zmx-foo that it can't read", []zmx.Process{unreadableNamed("zmx-foo")}, nil},
+		{"a process the kernel names .zmx-wrapped that it can't read", []zmx.Process{unreadableNamed(".zmx-wrapped")}, nil},
 		{"a zmx attach on its name whose environment the kernel doesn't show", []zmx.Process{hidingItsEnvironment}, nil},
 		{"a zmx attach on a name it ends with, whose environment, and so prefix, the kernel doesn't show", []zmx.Process{hidingItsPrefix}, nil},
 		{"a process table it can't list", nil, errors.New("sysctl failed")},

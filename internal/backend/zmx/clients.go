@@ -30,7 +30,7 @@ const (
 // args reads pid's argv and environment, reading again, every settleEvery
 // until settleWithin has passed, while a read fails and the process hasn't
 // gone: a process caught as it forks or execs fails a read it answers a
-// moment later, and under load about a third of the table's scans catch one.
+// moment later, and under load the table's scans often catch one.
 // It fails with proctable.ErrGone for a process gone meanwhile, and otherwise
 // with the last read's failure.
 func (t processTable) args(pid int) (proctable.Args, error) {

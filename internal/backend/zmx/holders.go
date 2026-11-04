@@ -26,8 +26,11 @@ var startingVerbs = map[string]bool{"attach": true, "a": true, "run": true, "r":
 // session's daemon keeps the argv and environment of the command it forked
 // from, so it is one; a client of the session may be counted too, and a
 // client whose daemon has died exits on the closed socket. A table that can't
-// be read, or a process it can't read once args gives up on it, proves
-// nothing.
+// be read proves nothing, nor does a process it can't read once args gives up
+// on it whose kernel name contains zmx. Any other process it can't read is
+// skipped (decision 70): under load a scan often catches one mid-exec, and
+// some stay unreadable for seconds, so only a renamed zmx, unreadable that
+// long while its daemon's backlog is full, is miscounted.
 func (b *Backend) unheld(entry string) error {
 	procs, err := b.processes.list()
 	if err != nil {
@@ -35,11 +38,13 @@ func (b *Backend) unheld(entry string) error {
 	}
 	for _, p := range procs {
 		args, err := b.processes.args(p.PID)
-		if errors.Is(err, proctable.ErrGone) {
+		switch {
+		case errors.Is(err, proctable.ErrGone):
 			continue
-		}
-		if err != nil {
+		case err != nil && strings.Contains(p.Command, program):
 			return fmt.Errorf("read process %d, which may hold it: %w", p.PID, err)
+		case err != nil:
+			continue
 		}
 		switch started, ok := startedName(args.Argv); {
 		case !ok || !b.mayHold(args, started, entry):
