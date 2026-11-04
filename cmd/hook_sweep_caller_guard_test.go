@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -166,12 +168,33 @@ func TestOnlyTheTmuxStateCommandsReachTheHookSweep(t *testing.T) {
 		}
 	})
 
+	// cmd no longer imports the sweep, so its export data is outside the type
+	// checker's reach; the import rule reads syntax alone and needs none.
+	t.Run("it judges an import of the sweep", func(t *testing.T) {
+		const src = "package cmd\n\nimport _ \"" + hooksweepPkgPath + "\"\n"
+		for name, want := range map[string][]string{
+			"hooks.go":        {"hooks.go:3: " + hooksweepPkgPath},
+			"state_daemon.go": nil,
+		} {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, name, src, sourceguardtest.ParseMode)
+			if err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			pkg := sourceguardtest.TypedPackage{
+				Sources: []sourceguardtest.ParsedSource{{Path: name, Fset: fset, File: file}},
+				Info:    &types.Info{},
+			}
+			if got := hookSweepReferences(pkg); !slices.Equal(got, want) {
+				t.Errorf("hookSweepReferences(%s) = %q, want %q", name, got, want)
+			}
+		}
+	})
+
 	for _, tc := range []struct {
 		name, body string
 		want       []string
 	}{
-		{"an import of the sweep", `import _ "github.com/leeovery/portal/internal/hooksweep"`,
-			[]string{"hooks.go:3: " + hooksweepPkgPath}},
 		{"StaleKeys under an alias", `import h "github.com/leeovery/portal/internal/hooks"
 
 var stale = h.StaleKeys`,

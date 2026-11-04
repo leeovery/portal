@@ -1,4 +1,4 @@
-// Package bootstrap runs the tmux server bootstrap sequence invoked from root's
+// Package bootstrap runs the bootstrap sequence invoked from root's
 // PersistentPreRunE. Step ordering is load-bearing.
 package bootstrap
 
@@ -11,40 +11,34 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// Deliberately a second component in this package: the clean component is
-// shared with internal/state's sweeps so one grep reconstructs them all.
+// Deliberately a second component in this package: the taxonomy files the
+// orphan sweep's kills under clean, beside the other sweeps.
 var cleanLogger = log.For("clean")
 
-const totalSteps = 10
+const totalSteps = 5
 
 const (
-	stepEnsureServer       = "EnsureServer"
-	stepRegisterHooks      = "RegisterPortalHooks"
 	stepSetRestoring       = "SetRestoring"
 	stepSweepOrphanDaemons = "SweepOrphanDaemons"
 	stepEnsureSaver        = "EnsureSaver"
 	stepRestore            = "Restore"
-	stepEagerSignalHydrate = "EagerSignalHydrate"
 	stepClearRestoring     = "ClearRestoring"
-	stepCleanStaleMarkers  = "CleanStaleMarkers"
-	stepSweepOrphanFIFOs   = "SweepOrphanFIFOs"
+)
+
+// The emitted step indices keep the loading page's numbering (internal/tui's
+// stepLabelTable), whose per-session restore events are keyed to step 6.
+const (
+	indexSetRestoring       = 3
+	indexSweepOrphanDaemons = 4
+	indexEnsureSaver        = 5
+	indexRestore            = 6
+	indexClearRestoring     = 8
 )
 
 // Runner abstracts the bootstrap run so PersistentPreRunE need not import the
 // concrete *Orchestrator.
 type Runner interface {
 	Run(ctx context.Context) (bool, []Warning, error)
-}
-
-// ServerBootstrapper starts the tmux server when not already running; the bool
-// reports whether Portal itself was the one that started it.
-type ServerBootstrapper interface {
-	EnsureServer() (bool, error)
-}
-
-// HookRegistrar registers Portal's global tmux hooks idempotently.
-type HookRegistrar interface {
-	RegisterPortalHooks() error
 }
 
 // RestoringMarker manages the @portal-restoring server option that
@@ -60,9 +54,9 @@ type SaverBootstrapper interface {
 	EnsureSaver() error
 }
 
-// Restorer performs skeleton-only session restoration. err is non-nil only when
-// corrupt is true, and must then wrap state.ErrCorruptIndex; per-session
-// failures are logged and swallowed inside the implementation.
+// Restorer performs session restoration. err is non-nil only when corrupt is
+// true; per-session failures are logged and swallowed inside the
+// implementation.
 type Restorer interface {
 	Restore() (corrupt bool, err error)
 }
@@ -71,27 +65,6 @@ type Restorer interface {
 // restore step calls SetProgress only when a progress emitter is wired.
 type RestoreProgressSink interface {
 	SetProgress(fn func(n, m int))
-}
-
-// EagerHydrateSignaler writes the hydrate signal byte to every freshly-armed
-// `@portal-skeleton-*` pane's FIFO, because the client-attached hook fires only
-// for the attached session and the other helpers would time out and leak
-// markers. Every non-nil return is soft.
-type EagerHydrateSignaler interface {
-	EagerSignalHydrate() error
-}
-
-// MarkerCleaner unsets every `@portal-skeleton-*` marker whose paneKey is no
-// longer represented by a live pane. A non-nil return is soft.
-type MarkerCleaner interface {
-	CleanStaleMarkers() error
-}
-
-// FIFOSweeper removes stale hydrate-*.fifo files whose paneKey is no longer
-// represented by a live `@portal-skeleton-*` marker. Implementations swallow
-// per-file failures; a non-nil return means enumeration itself failed.
-type FIFOSweeper interface {
-	Sweep() error
 }
 
 // LatchWriter records the version-stamped @portal-bootstrapped latch as the
@@ -103,24 +76,19 @@ type LatchWriter interface {
 // Orchestrator runs the bootstrap sequence. A nil Logger is tolerated — Run
 // substitutes a discard sink.
 type Orchestrator struct {
-	Server        ServerBootstrapper
-	Hooks         HookRegistrar
 	Restoring     RestoringMarker
 	OrphanSweeper OrphanSweeper
 	Saver         SaverBootstrapper
 	Restore       Restorer
-	EagerSignaler EagerHydrateSignaler
-	StaleMarkers  MarkerCleaner
-	Sweeper       FIFOSweeper
 	Latch         LatchWriter
 	Version       string
 	Logger        *slog.Logger
 }
 
-// Run executes the bootstrap steps in order and reports whether Portal started
-// the tmux server, plus the soft warnings in step order. Only EnsureServer,
-// RegisterPortalHooks and the @portal-restoring steps are fatal; every other
-// step logs its failure and continues.
+// Run executes the bootstrap steps in order and returns the soft warnings in
+// step order. It starts no server, so its started report is always false. Only
+// the @portal-restoring steps are fatal; every other step logs its failure and
+// continues.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	emit := progressEmitterFromContext(ctx)
 	emitStep := func(index int, name string) {
@@ -135,32 +103,15 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	var warnings []Warning
 
-	o.Logger.Debug("step entering", "step", stepEnsureServer)
-	stepStart := time.Now()
-	serverStarted, err := o.Server.EnsureServer()
-	if err != nil {
-		return false, nil, o.fatalf("start tmux server", err)
-	}
-	o.Logger.Info("step complete", "step", stepEnsureServer, log.Took(stepStart))
-	emitStep(1, stepEnsureServer)
-
-	o.Logger.Debug("step entering", "step", stepRegisterHooks)
-	stepStart = time.Now()
-	if err := o.Hooks.RegisterPortalHooks(); err != nil {
-		return serverStarted, nil, o.fatalf("register tmux hooks", err)
-	}
-	o.Logger.Info("step complete", "step", stepRegisterHooks, log.Took(stepStart))
-	emitStep(2, stepRegisterHooks)
-
 	// Must precede the orphan sweep and the saver: the daemon and the hydrate
 	// helpers key their suppression window off this marker.
 	o.Logger.Debug("step entering", "step", stepSetRestoring)
-	stepStart = time.Now()
+	stepStart := time.Now()
 	if err := o.Restoring.Set(); err != nil {
-		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
+		return false, nil, o.fatalf("set @portal-restoring marker", err)
 	}
 	o.Logger.Info("step complete", "step", stepSetRestoring, log.Took(stepStart))
-	emitStep(3, stepSetRestoring)
+	emitStep(indexSetRestoring, stepSetRestoring)
 
 	// Must precede EnsureSaver so the new saver-pane daemon's first tick is
 	// uncontested by leftover daemons from prior server lifetimes.
@@ -170,7 +121,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepSweepOrphanDaemons, "error", err)
 	}
 	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, log.Took(stepStart))
-	emitStep(4, stepSweepOrphanDaemons)
+	emitStep(indexSweepOrphanDaemons, stepSweepOrphanDaemons)
 
 	o.Logger.Debug("step entering", "step", stepEnsureSaver)
 	stepStart = time.Now()
@@ -179,14 +130,14 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepEnsureSaver, "error", err)
 	}
 	o.Logger.Info("step complete", "step", stepEnsureSaver, log.Took(stepStart))
-	emitStep(5, stepEnsureSaver)
+	emitStep(indexEnsureSaver, stepEnsureSaver)
 
 	o.Logger.Debug("step entering", "step", stepRestore)
 	stepStart = time.Now()
 	if emit != nil {
 		if sink, ok := o.Restore.(RestoreProgressSink); ok {
 			sink.SetProgress(func(n, m int) {
-				emit(StepEvent{Index: 6, Name: stepRestore, RestoreN: n, RestoreM: m})
+				emit(StepEvent{Index: indexRestore, Name: stepRestore, RestoreN: n, RestoreM: m})
 			})
 		}
 	}
@@ -203,44 +154,15 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", stepRestore, "error", restoreErr)
 	}
 	o.Logger.Info("step complete", "step", stepRestore, log.Took(stepStart))
-	emitStep(6, stepRestore)
-
-	// Must run before the marker is cleared, so the daemon's capture
-	// suppression still covers the helper-driven scrollback replay.
-	o.Logger.Debug("step entering", "step", stepEagerSignalHydrate)
-	stepStart = time.Now()
-	if err := o.EagerSignaler.EagerSignalHydrate(); err != nil {
-		o.Logger.Warn("step failed", "step", stepEagerSignalHydrate, "error", err)
-	}
-	o.Logger.Info("step complete", "step", stepEagerSignalHydrate, log.Took(stepStart))
-	emitStep(7, stepEagerSignalHydrate)
+	emitStep(indexRestore, stepRestore)
 
 	o.Logger.Debug("step entering", "step", stepClearRestoring)
 	stepStart = time.Now()
 	if err := o.Restoring.Clear(); err != nil {
-		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
+		return false, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
 	o.Logger.Info("step complete", "step", stepClearRestoring, log.Took(stepStart))
-	emitStep(8, stepClearRestoring)
-
-	// Must run after the marker is cleared, so it observes post-restore tmux
-	// state, and before the FIFO sweep, which cannot reclaim a FIFO whose
-	// marker is still set.
-	o.Logger.Debug("step entering", "step", stepCleanStaleMarkers)
-	stepStart = time.Now()
-	if err := o.StaleMarkers.CleanStaleMarkers(); err != nil {
-		o.Logger.Warn("step failed", "step", stepCleanStaleMarkers, "error", err)
-	}
-	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, log.Took(stepStart))
-	emitStep(9, stepCleanStaleMarkers)
-
-	o.Logger.Debug("step entering", "step", stepSweepOrphanFIFOs)
-	stepStart = time.Now()
-	if err := o.Sweeper.Sweep(); err != nil {
-		o.Logger.Warn("step failed", "step", stepSweepOrphanFIFOs, "error", err)
-	}
-	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, log.Took(stepStart))
-	emitStep(10, stepSweepOrphanFIFOs)
+	emitStep(indexClearRestoring, stepClearRestoring)
 
 	// Must stay Run's last action: the latch has to land before the concurrent
 	// route's terminal Done event, so a present latch always means a bootstrap
@@ -252,7 +174,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	}
 
 	o.Logger.Info("orchestration complete", "steps", totalSteps, "warnings", len(warnings), log.Took(orchestrationStart))
-	return serverStarted, warnings, nil
+	return false, warnings, nil
 }
 
 func (o *Orchestrator) fatal(userMsg string, cause error) error {

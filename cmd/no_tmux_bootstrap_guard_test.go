@@ -31,7 +31,6 @@ import (
 const (
 	portalModule     = "github.com/leeovery/portal"
 	bootstrapPkgPath = portalModule + "/cmd/bootstrap"
-	adapterPkgPath   = portalModule + "/internal/bootstrapadapter"
 )
 
 // tmuxBootstrapEntries names, by package, what no production source of the
@@ -47,14 +46,9 @@ func TestBinaryHoldsNoPathToTheTmuxBootstrap(t *testing.T) {
 	root := sourceguardtest.ProjectRoot(t)
 	deps := sourceguardtest.PackageDeps(t, portalModule, sourceguardtest.InDir(root))
 
-	t.Run("it leaves the bootstrap adapters out of the binary", func(t *testing.T) {
-		if !slices.Contains(deps, portalModule+"/cmd") {
-			t.Fatalf("the binary's dependencies %v do not hold cmd; the reading is not of the binary", deps)
-		}
-		if slices.Contains(deps, adapterPkgPath) {
-			t.Errorf("the binary depends on %s, which wires the tmux bootstrap", adapterPkgPath)
-		}
-	})
+	if !slices.Contains(deps, portalModule+"/cmd") {
+		t.Fatalf("the binary's dependencies %v do not hold cmd; the reading is not of the binary", deps)
+	}
 
 	t.Run("it references no tmux bootstrap entry point outside its owner", func(t *testing.T) {
 		var sources []sourceguardtest.ParsedSource

@@ -15,7 +15,6 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/state"
 )
 
 // seamCase pins one field of a *Deps struct: what a test injects into it, and
@@ -128,37 +127,6 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 	})
 }
 
-func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
-	t.Run("it resolves commit-now's seams by the same rule", func(t *testing.T) {
-		for _, tc := range commitNowSeamCases() {
-			t.Run(tc.field, func(t *testing.T) {
-				tc.inject(t)
-				tc.assert(t)
-			})
-		}
-	})
-
-	t.Run("every exported field of CommitNowDeps is covered", func(t *testing.T) {
-		assertSeamCasesCoverFields(t, reflect.TypeFor[CommitNowDeps](), commitNowSeamCases())
-	})
-
-	t.Run("it falls through to the production default for an unset field", func(t *testing.T) {
-		withCommitNowDeps(t, CommitNowDeps{TouchSaveRequested: func(string) error { return nil }})
-
-		deps := resolveCommitNowDeps()
-
-		if deps.RunCommitCycle == nil {
-			t.Error("RunCommitCycle = nil; an unset seam must fall through to its production default")
-		}
-		if deps.NewClient == nil {
-			t.Error("NewClient = nil; an unset seam must fall through to its production default")
-		}
-		if deps.IsRestoring == nil {
-			t.Error("IsRestoring = nil; an unset seam must fall through to its production default")
-		}
-	})
-}
-
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
 func doctorSeamCases() []seamCase {
@@ -265,77 +233,6 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if _, got := resolveDoctorDeps().Resolve(spawn.Identity{}); got != spawn.ResolutionNative {
 					t.Errorf("Resolve() resolution = %q; want the injected seam's %q", got, spawn.ResolutionNative)
-				}
-			},
-		},
-	}
-}
-
-func commitNowSeamCases() []seamCase {
-	return []seamCase{
-		{
-			field: "RunCommitCycle",
-			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{RunCommitCycle: func(state.CommitCycle) (state.CaptureCycle, error) {
-					return state.CaptureCycle{Index: state.Index{Version: 98}}, nil
-				}})
-			},
-			assert: func(t *testing.T) {
-				capture, _ := resolveCommitNowDeps().RunCommitCycle(state.CommitCycle{})
-				if capture.Index.Version != 98 {
-					t.Errorf("RunCommitCycle() version = %d; want the injected seam's 98", capture.Index.Version)
-				}
-			},
-		},
-		{
-			field: "NewClient",
-			inject: func(t *testing.T) {
-				called := false
-				withCommitNowDeps(t, CommitNowDeps{NewClient: func() state.CaptureCycleClient {
-					called = true
-					return nil
-				}})
-				t.Cleanup(func() {
-					if !called {
-						t.Error("the injected NewClient seam was never called; resolveCommitNowDeps must not overwrite it")
-					}
-				})
-			},
-			assert: func(t *testing.T) {
-				if got := resolveCommitNowDeps().NewClient(); got != nil {
-					t.Errorf("NewClient() = %#v; want the injected seam's nil client", got)
-				}
-			},
-		},
-		{
-			field: "IsRestoring",
-			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{IsRestoring: func() (bool, error) { return true, nil }})
-			},
-			assert: func(t *testing.T) {
-				restoring, err := resolveCommitNowDeps().IsRestoring()
-				if err != nil || !restoring {
-					t.Errorf("IsRestoring() = (%v, %v); want the injected seam's (true, nil)", restoring, err)
-				}
-			},
-		},
-		{
-			field: "TouchSaveRequested",
-			inject: func(t *testing.T) {
-				touched := ""
-				withCommitNowDeps(t, CommitNowDeps{TouchSaveRequested: func(dir string) error {
-					touched = dir
-					return nil
-				}})
-				t.Cleanup(func() {
-					if touched != "/sentinel/state" {
-						t.Errorf("the injected TouchSaveRequested seam saw %q; want /sentinel/state", touched)
-					}
-				})
-			},
-			assert: func(t *testing.T) {
-				if err := resolveCommitNowDeps().TouchSaveRequested("/sentinel/state"); err != nil {
-					t.Errorf("TouchSaveRequested() err = %v; want the injected seam's nil", err)
 				}
 			},
 		},

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"regexp"
 	"strings"
 	"testing"
@@ -75,7 +74,7 @@ func TestStateCommandRegistration(t *testing.T) {
 				t.Errorf("portal state --help must not list removed subcommand %q; got %v", removed, listed)
 			}
 		}
-		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+		hidden := []string{"signal-hydrate", "hydrate", "resume-draw", "resume-wait", "resume-recover"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal state --help must not list hidden subcommand %q; got %v", h, listed)
@@ -100,7 +99,7 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 		listed := availableCommandNames(buf.String())
 
-		hidden := []string{"signal-hydrate", "hydrate", "notify"}
+		hidden := []string{"signal-hydrate", "hydrate", "resume-draw"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal --help must not list hidden subcommand %q; got %v", h, listed)
@@ -129,8 +128,6 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "daemon with no args", args: []string{"state", "daemon"}},
-		{name: "notify with no args", args: []string{"state", "notify"}},
 		{name: "signal-hydrate with session name", args: []string{"state", "signal-hydrate", "foo"}},
 		{name: "hydrate with all flags", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s", "--hook-key", "paneTokenA"}},
 		{name: "it accepts a hydrate invocation with no hook-key flag", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s"}},
@@ -138,13 +135,9 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// A fresh per-subtest state dir so notify / signal-hydrate / hydrate
-			// never touch the developer's real state.
+			// A fresh per-subtest state dir so signal-hydrate / hydrate never
+			// touch the developer's real state.
 			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "daemon" {
-				withFuncSeam(t, &daemonRunFunc, func(_ context.Context, _ *daemonDeps) error { return nil })
-				withDaemonLockFileReset(t)
-			}
 
 			// state hydrate's RunE blocks on a real FIFO; stub it out for the
 			// argv-only assertions.
@@ -215,11 +208,8 @@ func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
 // Referenced by their package-level command vars so a rename or a dropped
 // registration is a compile error rather than a silent miss.
 var stateChildCommands = []*cobra.Command{
-	stateDaemonCmd,
 	stateHydrateCmd,
 	stateSignalHydrateCmd,
-	stateNotifyCmd,
-	stateCommitNowCmd,
 	stateResumeDrawCmd,
 	stateResumeWaitCmd,
 	stateResumeRecoverCmd,
@@ -235,9 +225,9 @@ func TestStateParentIsHidden(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	t.Run("it registers exactly eight hidden state children", func(t *testing.T) {
-		if len(stateChildCommands) != 8 {
-			t.Fatalf("stateChildCommands has %d entries, want 8", len(stateChildCommands))
+	t.Run("it registers exactly five hidden state children", func(t *testing.T) {
+		if len(stateChildCommands) != 5 {
+			t.Fatalf("stateChildCommands has %d entries, want 5", len(stateChildCommands))
 		}
 		for _, c := range stateChildCommands {
 			if !c.Hidden {
@@ -260,7 +250,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"daemon", "hydrate", "signal-hydrate", "notify", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+	names := []string{"hydrate", "signal-hydrate", "resume-draw", "resume-wait", "resume-recover"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()
@@ -285,8 +275,21 @@ func TestStateMigrateRenameIsRetired(t *testing.T) {
 	})
 }
 
+// notify and commit-now were entry points for tmux hooks, which zmx has none of.
+func TestStateTmuxHookEntryPointsAreRetired(t *testing.T) {
+	for _, name := range []string{"notify", "commit-now"} {
+		t.Run("it does not resolve portal state "+name, func(t *testing.T) {
+			resetRootCmd()
+			found, _, err := rootCmd.Find([]string{"state", name})
+			if err == nil && found.Name() == name {
+				t.Fatalf("portal state %s still resolves; the subcommand must be retired", name)
+			}
+		})
+	}
+}
+
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {
-	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+	hidden := []string{"signal-hydrate", "hydrate", "resume-draw", "resume-wait", "resume-recover"}
 	// The completion boilerplate contains the word "statement(s)", so a bare
 	// substring check for "state" false-positives; \bstate\b matches only a
 	// standalone command entry.

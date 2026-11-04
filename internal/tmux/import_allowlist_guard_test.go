@@ -21,24 +21,18 @@ const tmuxPkgPath = "github.com/leeovery/portal/internal/tmux"
 // list by deleting its lines. In cmd, which mixes zmx and tmux code, an entry
 // names a file; elsewhere it names a package directory.
 var tmuxImportAllowList = map[string]int{
-	"cmd/state_commit_now.go":       3,
-	"cmd/state_daemon.go":           3,
 	"cmd/state_hydrate.go":          3,
 	"cmd/state_resume_altscreen.go": 3,
 	"cmd/state_resume_recover.go":   3,
 	"cmd/state_resume_report.go":    3,
 	"cmd/state_resume_wait.go":      3,
 	"cmd/state_signal_hydrate.go":   3,
-	"cmd/bootstrap":                 3,
-	"internal/bootstrapadapter":     3,
 	"internal/hooksweep":            3,
-	"internal/restore":              3,
 }
 
 // tmuxTestOnlyPackages serve tests alone, so they are outside the guard; they
 // go with internal/tmux in phase 5.
 var tmuxTestOnlyPackages = []string{
-	"internal/restoretest",
 	"internal/tmuxtest",
 	"internal/transienttest",
 }
@@ -136,7 +130,6 @@ func TestTmuxImportGuard_Rule(t *testing.T) {
 				"internal/listed/a.go":        importsTmux,
 				"cmd/picker_test.go":          importsTmux,
 				"internal/tmuxtest/socket.go": importsTmux,
-				"internal/restoretest/r.go":   importsTmux,
 				"internal/transienttest/t.go": importsTmux,
 				"internal/tui/model_test.go":  aliasesTmux,
 				"internal/backend/backend.go": clean,

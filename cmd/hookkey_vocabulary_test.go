@@ -9,13 +9,10 @@ package cmd
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
-	"testing"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hooksweep"
-	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -97,70 +94,11 @@ func (s *stubStaleSweepReader) TryGetServerOption(string) (string, bool, error) 
 
 var _ hooksweep.Reader = (*stubStaleSweepReader)(nil)
 
-// assertHookKeysStaged proves the seed keys a sweep fixture is about to measure
-// were staged before it ran. Without it an "absent afterwards" assertion passes
-// just as readily on a key the seed never held, so a seed re-pointed at another
-// key defangs the fixture instead of failing it.
-func assertHookKeysStaged(t *testing.T, store *hooks.Store, keys ...string) {
-	t.Helper()
-	staged, err := store.Load(hooks.ViaInternal)
-	if err != nil {
-		t.Fatalf("store.Load: %v", err)
-	}
-	for _, key := range keys {
-		if _, ok := staged[key]; !ok {
-			t.Fatalf("seed key %q absent from the staged hooks.json before the sweep runs; hooks=%v", key, keysOf(staged))
-		}
-	}
-}
-
-// The messages the hook-staleness cycle reports itself under. They are written
-// out here rather than read off internal/hooksweep because a cmd suite asserting
-// on them is asserting the observable line an operator greps for: a message the
-// cycle re-words must fail here rather than silently agree with itself.
-const (
-	standDownMsg   = "clean-stale-skipped"
-	sweepFailedMsg = "stale-hook cleanup failed"
-)
-
 // sweepErr drives one cycle and keeps only its error, for the cases that assert
 // on hooks.json or on the log rather than on what the cycle reported.
 func sweepErr(reader hooksweep.Reader, store *hooks.Store) error {
 	_, err := hooksweep.Run(reader, store)
 	return err
-}
-
-// assertStandDown pins the stand-down breadcrumb at the level the sweep is
-// expected to report it, and returns it for per-case attr assertions. The level
-// picks the record set the count is taken over: a DEBUG stand-down is the only
-// line the sink holds, so anything at WARN or above is itself a failure, while a
-// WARN stand-down shares the sink with the degraded pre-read's own DEBUG
-// breadcrumb and can only be counted among the WARNs.
-func assertStandDown(t *testing.T, sink *logtest.Sink, level slog.Level, reason hooksweep.Reason) logtest.Record {
-	t.Helper()
-
-	var rec logtest.Record
-	if level < slog.LevelWarn {
-		for _, r := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
-			t.Errorf("stand-down emitted at %v: %+v", r.Level, r)
-		}
-		rec = sink.Records().Only(t, "log record")
-	} else {
-		rec = sink.Records().AtOrAboveLevel(level).Only(t, "record at or above level")
-	}
-
-	assertHooksRecord(t, rec, standDownWant(level))
-	if got := rec.AttrString(t, "reason"); got != string(reason) {
-		t.Errorf("reason = %q, want %q", got, reason)
-	}
-	return rec
-}
-
-// standDownWant is the stand-down's half of the hooks record shape: every
-// stand-down carries the same message, op and via, and differs only in the
-// level it is reported at.
-func standDownWant(level slog.Level) hooksRecordWant {
-	return hooksRecordWant{level: level, msg: standDownMsg, op: standDownMsg, via: "internal"}
 }
 
 func keysOf(m hooks.Snapshot) []string {

@@ -11,7 +11,6 @@ import (
 func IsSilentExitError(err error) bool {
 	_, isExitCode := errors.AsType[*ExitCodeError](err)
 	return isExitCode ||
-		errors.Is(err, errCommitNowFailed) ||
 		errors.Is(err, ErrDoctorUnhealthy) ||
 		errors.Is(err, errNoCurrentSession)
 }
