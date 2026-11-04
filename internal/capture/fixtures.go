@@ -66,7 +66,6 @@ type Fixture struct {
 	command             []string
 	history             string
 	historyFile         string
-	bootstrapping       bool
 	loadingEvents       []tui.BootstrapProgressMsg
 	fatalEvent          tui.BootstrapFatalMsg
 	// Tapes are scaffolding and do not live in the repository, so the post-load
@@ -100,14 +99,13 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		// DirRunner stays nil, so the git-root fallback resolves nothing and a
 		// fixture session carrying no recorded directory groups into the
 		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
-		InitialMode:   f.initialMode,
-		Search:        f.search,
-		KillAsk:       f.killAsk,
-		Command:       f.command,
-		CWD:           fixtureHome,
-		Home:          fixtureHome,
-		Bootstrapping: f.bootstrapping,
-		NoColor:       f.noColor,
+		InitialMode: f.initialMode,
+		Search:      f.search,
+		KillAsk:     f.killAsk,
+		Command:     f.command,
+		CWD:         fixtureHome,
+		Home:        fixtureHome,
+		NoColor:     f.noColor,
 		Capture: tui.CaptureSeeds{
 			ThemeCursor:  f.initialThemeCursor,
 			ThemeConfirm: f.initialThemeConfirm,
@@ -966,7 +964,6 @@ func loadingScreenFixture() *Fixture {
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		bootstrapping: true,
 		loadingEvents: events,
 	}
 }
@@ -980,7 +977,6 @@ func loadingErrorFixture() *Fixture {
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		bootstrapping: true,
 		loadingEvents: events,
 		fatalEvent: tui.BootstrapFatalMsg{
 			FailedStep: 2,

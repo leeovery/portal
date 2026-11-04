@@ -47,11 +47,11 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
-	t.Run("server-started routes to the loading page", func(t *testing.T) {
+	t.Run("a bootstrap behind the picker routes to the loading page", func(t *testing.T) {
 		m := tui.Build(tui.Deps{
-			Lister:        &mockSessionLister{},
-			InitialMode:   prefs.ModeFlat,
-			Bootstrapping: true,
+			Lister:           &mockSessionLister{},
+			InitialMode:      prefs.ModeFlat,
+			ProgressReceiver: idleBootstrap,
 		})
 
 		if m.ActivePage() != tui.PageLoading {

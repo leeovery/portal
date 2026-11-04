@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,8 +38,17 @@ var testBoot = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 // own cleanup cannot remove. The values come from the toolchain rather than
 // being rebuilt from the pre-poison home, so an explicitly configured cache is
 // honoured instead of overwritten with the default.
+//
+// A test binary a test re-executes inherits both, already pinned, along with
+// a HOME some earlier re-execution's TestMain poisoned beneath the test's own
+// temp dir. It runs no `go` then: the toolchain writes its telemetry under
+// HOME, and a telemetry process outliving the command races that test's
+// TempDir cleanup.
 func pinToolchainCaches() error {
 	names := []string{"GOMODCACHE", "GOCACHE"}
+	if !slices.ContainsFunc(names, func(name string) bool { return !filepath.IsAbs(os.Getenv(name)) }) {
+		return nil
+	}
 
 	out, err := exec.Command("go", append([]string{"env"}, names...)...).Output()
 	if err != nil {
@@ -88,6 +98,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("PORTAL_ALIASES_FILE", "/nonexistent/portal-test-must-isolate-aliases")
 	os.Setenv("PORTAL_THEMES_DIR", "/nonexistent/portal-test-must-isolate-themes")
 	os.Setenv("PORTAL_PREFS_FILE", "/nonexistent/portal-test-must-isolate-prefs.json")
+	os.Setenv("PORTAL_TERMINALS_FILE", "/nonexistent/portal-test-must-isolate-terminals.json")
 	os.Setenv("TMUX", "/nonexistent/portal-test-must-set-tmux-socket,0,0")
 	// ZMX_SESSION would turn an attach into a switch of a live session, and
 	// ZMX_SESSION_PREFIX would rename every session a test names.

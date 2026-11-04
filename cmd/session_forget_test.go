@@ -431,8 +431,9 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
 		sink := logtest.Install(t)
 
-		if err := updateSessionIndex("cli", func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }); err != nil {
-			t.Fatalf("updateSessionIndex: %v", err)
+		live := claimed{Name: "a", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}
+		if err := claimSession("cli", live, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }, nil); err != nil {
+			t.Fatalf("claimSession: %v", err)
 		}
 
 		if recs := sink.Records().Matching("sessions", "forget"); len(recs) != 0 {
@@ -451,8 +452,8 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		t.Setenv("HOME", "")
 		sink := logtest.Install(t)
 
-		if err := updateSessionIndex("cli", func(idx *sessionindex.Index) error { idx.Remove("api-x7Kd9a"); return nil }); err != nil {
-			t.Fatalf("updateSessionIndex: %v", err)
+		if err := forgetSession("api-x7Kd9a", "cli"); err != nil {
+			t.Fatalf("forgetSession: %v", err)
 		}
 
 		r := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn).Only(t, "the kept hook's warning")

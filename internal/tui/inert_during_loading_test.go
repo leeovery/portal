@@ -41,8 +41,7 @@ func TestInertDuringLoading_NoMutationFromLiveEventLoop(t *testing.T) {
 	rec := &mutationRecorder{}
 
 	m := New(rec,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithKiller(rec),
 		WithLabeller(rec),
 		WithSessionCreator(rec),

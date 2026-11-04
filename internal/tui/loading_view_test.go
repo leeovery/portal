@@ -422,7 +422,7 @@ func TestLoadingScreen_IsRealListNotInPlaceSwap(t *testing.T) {
 }
 
 func TestViewLoading_PaintsCanvasFromFrameOneGated(t *testing.T) {
-	m := New(fakeLister{}, WithBootstrapping(true), WithThemeNomination(testBuiltinPair(t)))
+	m := New(fakeLister{}, WithBootstrapping(idleBootstrap), WithThemeNomination(testBuiltinPair(t)))
 	m.armAppearanceDetection()
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -447,7 +447,7 @@ func TestViewLoading_PaintsCanvasFromFrameOneGated(t *testing.T) {
 
 func TestLoading_TransitionDualGated(t *testing.T) {
 	t.Run("complete-then-elapsed", func(t *testing.T) {
-		m := New(fakeLister{}, WithBootstrapping(true))
+		m := New(fakeLister{}, WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -461,7 +461,7 @@ func TestLoading_TransitionDualGated(t *testing.T) {
 		}
 	})
 	t.Run("elapsed-then-complete", func(t *testing.T) {
-		m := New(fakeLister{}, WithBootstrapping(true))
+		m := New(fakeLister{}, WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 

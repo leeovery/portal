@@ -25,8 +25,7 @@ func searchDecisionModel(t *testing.T, d *decisionCounter) tea.Model {
 	lister := postloadStubLister{sessions: []Session{{Name: "portal"}}}
 	receiver := func() tea.Msg { return nil }
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(receiver),
+		WithBootstrapping(receiver),
 		WithSearchForm("port"),
 		WithSearchDecision(d.decide),
 	)

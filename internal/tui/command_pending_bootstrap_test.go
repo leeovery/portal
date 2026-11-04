@@ -16,7 +16,6 @@ func commandPendingDeps(receiver tea.Cmd) tui.Deps {
 	return tui.Deps{
 		Lister:           &mockSessionLister{sessions: []tui.Session{}},
 		Command:          []string{"npm", "run", "dev"},
-		Bootstrapping:    receiver != nil,
 		ProgressReceiver: receiver,
 	}
 }
@@ -171,7 +170,6 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 
 		m := tui.Build(tui.Deps{
 			Lister:           &mockSessionLister{sessions: []tui.Session{}},
-			Bootstrapping:    true,
 			ProgressReceiver: receiver,
 		})
 		var model tea.Model = m

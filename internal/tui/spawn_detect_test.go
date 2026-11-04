@@ -205,8 +205,7 @@ func TestDetection_ColdLoadingToSessions_DispatchesOnce(t *testing.T) {
 	restored := twoRestoredSessions()
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 		WithTerminalDetector(det),
 		WithResolve(res.resolve),
@@ -249,7 +248,7 @@ func TestDetection_IndependentOfAppearanceGate(t *testing.T) {
 	}
 
 	loading := New(fakeLister{},
-		WithBootstrapping(true),
+		WithBootstrapping(idleBootstrap),
 		WithTerminalDetector(det),
 		WithResolve(nativeResolve()),
 	)

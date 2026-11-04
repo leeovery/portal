@@ -310,7 +310,7 @@ var runningBinary = []string{"Executable", "Args"}
 // testOnlyPackages are the test-only packages CLAUDE.md lists, under internal.
 var testOnlyPackages = []string{
 	"capture", "portaltest", "tmuxtest", "portalbintest", "hookstest", "logtest", "harnesstest", "sourceguardtest",
-	"commandertest", "transienttest", "spawntest", "themetest", "backendtest", "zmxtest", "proctest",
+	"commandertest", "spawntest", "themetest", "backendtest", "zmxtest", "proctest",
 }
 
 // allowed is the one function of each directory that may reach the running

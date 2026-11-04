@@ -581,13 +581,6 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 	return out, nil
 }
 
-// StructuralKeyFormat yields a pane's name-based structural key, the join key
-// between live-pane enumeration and @portal-skeleton-* marker names. Every call
-// whose output is read as a structural key must request exactly this format, or
-// the cleanup paths disagree about what a paneKey is. It is not the hook key —
-// see HookKeyFormat.
-const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
-
 // PortalPaneIDOption names the tmux pane user-option holding a pane's durable
 // identity token. Every format string, option argument and stamp must compose
 // the name from here rather than restate the literal, so no two sites can drift.
@@ -597,56 +590,6 @@ const PortalPaneIDOption = "@portal-pane-id"
 // else. It carries no session component and no coordinates, so no tmux operation
 // that moves a pane can recompute it. An un-stamped pane yields an empty key.
 const HookKeyFormat = "#{" + PortalPaneIDOption + "}"
-
-// PaneHookRow describes one live pane for the hook machinery. Token is the
-// pane's @portal-pane-id, empty for a pane that carries no stamp. Location is
-// the pane's "<session>:<window>.<pane>" address and is display-only — it is
-// never a key.
-type PaneHookRow struct {
-	Token    string
-	Location string
-}
-
-// paneHookRowSeparator must stay a non-whitespace character: the commander trims
-// the whole output, so a blank leading token followed by whitespace would lose
-// its separator on the first row.
-const paneHookRowSeparator = "|"
-
-// The location half deliberately does not reuse StructuralKeyFormat despite
-// rendering the same shape: the location is display-only and never a key, so
-// coupling the two would tie a display column to a key contract.
-const paneHookRowFormat = HookKeyFormat + paneHookRowSeparator +
-	"#{session_name}:#{window_index}.#{pane_index}"
-
-// ListAllPaneHookKeys returns one row per live pane on the server, including
-// panes carrying no token — the row count is what tells a caller the read
-// succeeded, which is a different question from which panes are stamped. A tmux
-// failure returns (nil, err), never an empty slice: a caller reading a failure
-// as "no live panes" would orphan every hooks.json entry at once.
-func (c *Client) ListAllPaneHookKeys() ([]PaneHookRow, error) {
-	raw, err := c.ListAllPanesWithFormat(paneHookRowFormat)
-	if err != nil {
-		return nil, err
-	}
-	return parsePaneHookRows(raw)
-}
-
-// parsePaneHookRows splits each line at its first separator only: the location
-// half carries ":" and ".", and a session name may itself carry the separator.
-func parsePaneHookRows(output string) ([]PaneHookRow, error) {
-	rows := []PaneHookRow{}
-	for line := range strings.SplitSeq(output, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		token, location, ok := strings.Cut(line, paneHookRowSeparator)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse pane hook row %q: no %q separator", line, paneHookRowSeparator)
-		}
-		rows = append(rows, PaneHookRow{Token: token, Location: location})
-	}
-	return rows, nil
-}
 
 // RespawnPane replaces the process running in the pane with command. The -k
 // flag is load-bearing: it kills the existing process atomically, rather than

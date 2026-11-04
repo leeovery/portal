@@ -389,7 +389,6 @@ type tuiConfig struct {
 	spawnLogger      *slog.Logger
 	cwd              string
 	currentSession   string
-	bootstrapping    bool
 	progressReceiver tea.Cmd
 	noColor          bool
 }
@@ -454,7 +453,6 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ThemeKeys:        cfg.themeKeys,
 		ThemeSource:      cfg.themeSource,
 		Command:          command,
-		Bootstrapping:    cfg.bootstrapping,
 		CurrentSession:   cfg.currentSession,
 		NoColor:          cfg.noColor,
 		ProgressReceiver: cfg.progressReceiver,
@@ -594,7 +592,6 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		themeKeys:      themeKeys,
 		themeSource:    newThemeSource(themeLoader),
 		cwd:            cwd,
-		bootstrapping:  pipe != nil,
 		detector:       spawnSeams.Detector,
 		resolve:        spawnSeams.Resolve,
 		sessionExists:  spawnSeams.Exists,
@@ -604,8 +601,8 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		spawnLogger:    spawnSeams.Logger,
 		noColor:        noColorEnabled(),
 	}
-	// On the concurrent route the channel owns the terminal BootstrapCompleteMsg;
-	// Init does not synthesize one.
+	// The concurrent route: the picker opens on its loading page, and the
+	// channel owns the terminal BootstrapCompleteMsg.
 	if pipe != nil {
 		cfg.progressReceiver = pipe.receiver()
 	}

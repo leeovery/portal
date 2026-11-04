@@ -30,7 +30,7 @@ var renameCmd = &cobra.Command{
 
 // setSessionLabel labels the live session name; empty text, or the name
 // itself, resets the label to the name. via is the surface asking, as
-// updateSessionIndex records it.
+// the index write records it.
 func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via string) error {
 	live, err := liveSession(ctx, b, name, "its label is unchanged")
 	if err != nil {

@@ -162,23 +162,33 @@ func newStampedPaneFixture(t *testing.T, sessionName, token string) (*tmuxtest.S
 	return ts, client, probe
 }
 
-// tokenRow returns the one enumerated row carrying the probe's token. Zero rows
+// paneTokenRow is one live pane: its token, empty when unstamped, and its
+// "<session>:<window>.<pane>" location.
+type paneTokenRow struct {
+	Token, Location string
+}
+
+// paneTokenRowFormat puts the token first and splits at its first "|", since a
+// location carries ":" and ".".
+const paneTokenRowFormat = "#{" + tmux.PortalPaneIDOption + "}|#{session_name}:#{window_index}.#{pane_index}"
+
+// tokenRow returns the one live pane carrying the probe's token. Zero rows
 // means the key was lost; more than one means a rearrangement duplicated the
 // token, which would fire one hook on two panes.
-func (p *paneTokenProbe) tokenRow(t *testing.T) tmux.PaneHookRow {
+func (p *paneTokenProbe) tokenRow(t *testing.T) paneTokenRow {
 	t.Helper()
-	rows, err := p.client.ListAllPaneHookKeys()
+	raw, err := p.client.ListAllPanesWithFormat(paneTokenRowFormat)
 	if err != nil {
-		t.Fatalf("ListAllPaneHookKeys: %v", err)
+		t.Fatalf("list-panes -a: %v", err)
 	}
-	var matches []tmux.PaneHookRow
-	for _, row := range rows {
-		if row.Token == p.token {
-			matches = append(matches, row)
+	var matches []paneTokenRow
+	for line := range strings.SplitSeq(raw, "\n") {
+		if token, location, _ := strings.Cut(line, "|"); token == p.token {
+			matches = append(matches, paneTokenRow{Token: token, Location: location})
 		}
 	}
 	if len(matches) != 1 {
-		t.Fatalf("rows carrying token %q = %d, want exactly 1; enumeration was %+v", p.token, len(matches), rows)
+		t.Fatalf("panes carrying token %q = %d, want exactly 1; list-panes was %q", p.token, len(matches), raw)
 	}
 	return matches[0]
 }
@@ -197,7 +207,7 @@ func (p *paneTokenProbe) assertResolvesToToken(t *testing.T) {
 // assertSurvivedMove asserts the pane still answers to its token through both
 // Portal reads, and that it genuinely moved: a rearrangement that left the
 // coordinates alone says nothing about their irrelevance to the key.
-func (p *paneTokenProbe) assertSurvivedMove(t *testing.T) tmux.PaneHookRow {
+func (p *paneTokenProbe) assertSurvivedMove(t *testing.T) paneTokenRow {
 	t.Helper()
 	p.assertResolvesToToken(t)
 	row := p.tokenRow(t)

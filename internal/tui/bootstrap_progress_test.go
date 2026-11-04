@@ -18,7 +18,7 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 		}
 		return tui.BootstrapProgressMsg{Index: 2}
 	})
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -44,7 +44,7 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -65,7 +65,7 @@ func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 func TestConcurrentInit_DoesNotSynthesizeBootstrapComplete(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned nil")
@@ -98,7 +98,7 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 		hit <- struct{}{}
 		return tui.BootstrapProgressMsg{Index: 1}
 	})
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned nil")
@@ -135,7 +135,7 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 func TestLoadingInert_NoEnumerationBeforeComplete(t *testing.T) {
 	lister := &mockSessionLister{sessions: []tui.Session{{Name: "a"}}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 

@@ -17,7 +17,6 @@ func TestKillAsk_PostRestoreListingOpensThePromptPastTheLoadingPage(t *testing.T
 		AskedKiller:      &killerStub{},
 		Theme:            theme.ConstantNomination(testDarkTheme(t)),
 		KillAsk:          "bravo-d4e5f6",
-		Bootstrapping:    true,
 		ProgressReceiver: func() tea.Msg { return BootstrapProgressMsg{Index: 1} },
 	})
 	m = deliver(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
