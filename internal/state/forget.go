@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/leeovery/portal/internal/hooks"
@@ -12,32 +13,41 @@ import (
 // component.
 var sessionsLogger = log.For("sessions")
 
-// Forget removes what Portal keeps beside entry, an index entry as it was
-// before a write dropped it, in the state directory dir: its session's
-// hydrating and resume-pending flags, the scrollback file the entry names, and
-// the session's resume hook. Call it once the index write that removed the
-// entry, or replaced it with another creation's, has landed. It takes the
-// hooks lock but never commit.lock, so even run with commit.lock held the
-// order is commit.lock, then the hooks lock.
+// Forget removes what Portal keeps beside each of entries, index entries as
+// they were before a write dropped them, in the state directory dir: its
+// session's hydrating and resume-pending flags, the scrollback file the entry
+// names, and the session's resume hook. Run it under the commit lock the write
+// that removed the entries, or replaced them with another creation's, held, so
+// no claim, and so no hook set, lands between the write and the forgetting.
 //
-// The hook goes only while it holds the command Forget read, compared under
-// the hooks lock, so one set again between the read and the removal stays.
-// Each removal is tried whatever the others do. The entry is gone already, so
-// a failure is logged and leaves the rest to the sweeps of stale state. A nil
-// hookStore keeps the hook, for a caller that could not find hooks.json and
+// It takes the hooks lock but never commit.lock, so the order is commit.lock,
+// then the hooks lock. Whatever the entries, it waits on the hooks lock at
+// most twice: once reading hooks.json, which degrades to an unlocked read past
+// the bound, and once for a removal the lock refuses, after which it keeps
+// every hook left. Two hooks-lock bounds sit inside commit.lock's, which every
+// other writer of the index waits for.
+//
+// A hook goes only while it holds the command Forget read, compared under the
+// hooks lock, so one set again between the read and the removal stays. Each
+// removal is tried whatever the others do. The entries are gone already, so a
+// failure is logged and leaves the rest to the sweeps of stale state. A nil
+// hookStore keeps every hook, for a caller that could not find hooks.json and
 // has said so. via is the surface the index write came from: cli, tui or
 // internal.
-func Forget(dir string, hookStore *hooks.Store, entry sessionindex.Entry, via string) {
-	f := forgetting{name: entry.Name, via: via}
-	if err := checkFileName(entry.Name); err != nil {
-		f.kept("files", err)
-	} else {
-		f.file("hydrating flag", Hydrating.path(dir, entry.Name))
-		f.file("resume-pending flag", ResumePending.path(dir, entry.Name))
-		f.scrollback(dir, entry)
+func Forget(dir string, hookStore *hooks.Store, via string, entries ...sessionindex.Entry) {
+	resumeHooks := &hookRemover{store: hookStore, via: hookVia(via)}
+	for _, entry := range entries {
+		f := forgetting{name: entry.Name, via: via}
+		if err := checkFileName(entry.Name); err != nil {
+			f.kept("files", err)
+		} else {
+			f.file("hydrating flag", Hydrating.path(dir, entry.Name))
+			f.file("resume-pending flag", ResumePending.path(dir, entry.Name))
+			f.scrollback(dir, entry)
+		}
+		f.hook(resumeHooks)
+		f.log()
 	}
-	f.hook(hookStore)
-	f.log()
 }
 
 // hookVia is the hooks store's name for an index write's surface, its zero
@@ -55,6 +65,43 @@ func hookVia(via string) hooks.Via {
 }
 
 var loadHooks = (*hooks.Store).Load
+
+// hookRemover removes the resume hooks of one Forget's entries. It reads
+// hooks.json once, before it removes, so entries with no hook take no lock
+// and create no sidecar.
+type hookRemover struct {
+	store *hooks.Store
+	via   hooks.Via
+	read  bool
+	held  hooks.Snapshot
+	// stopped is why it removes no more hooks: a read that failed, or a
+	// removal the lock refused.
+	stopped error
+}
+
+// remove removes name's resume hook, reporting whether it did. The hooks
+// store's discard breadcrumb carries the removed command, to copy back out of
+// the log.
+func (r *hookRemover) remove(name string) (bool, error) {
+	if r.stopped != nil {
+		return false, r.stopped
+	}
+	if !r.read {
+		r.read = true
+		if r.held, r.stopped = loadHooks(r.store, r.via); r.stopped != nil {
+			return false, r.stopped
+		}
+	}
+	registration, ok := r.held[name][hooks.EventOnResume.String()]
+	if !ok {
+		return false, nil
+	}
+	removed, err := r.store.Discard(name, hooks.EventOnResume, registration.Command, r.via)
+	if errors.Is(err, hooks.ErrLockHeld) {
+		r.stopped = err
+	}
+	return removed, err
+}
 
 type forgetting struct {
 	name, via string
@@ -84,24 +131,11 @@ func (f *forgetting) scrollback(dir string, e sessionindex.Entry) {
 	f.file("scrollback", path)
 }
 
-// hook reads before it removes, so a session with no hook takes no lock and
-// creates no sidecar. The hooks store's discard breadcrumb carries the
-// removed command, to copy back out of the log.
-func (f *forgetting) hook(store *hooks.Store) {
-	if store == nil {
+func (f *forgetting) hook(r *hookRemover) {
+	if r.store == nil {
 		return
 	}
-	via := hookVia(f.via)
-	held, err := loadHooks(store, via)
-	if err != nil {
-		f.kept("resume hook", err)
-		return
-	}
-	registration, ok := held[f.name][hooks.EventOnResume.String()]
-	if !ok {
-		return
-	}
-	removed, err := store.Discard(f.name, hooks.EventOnResume, registration.Command, via)
+	removed, err := r.remove(f.name)
 	if err != nil {
 		f.kept("resume hook", err)
 		return

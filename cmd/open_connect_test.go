@@ -482,8 +482,8 @@ func TestOpenPath_MintsThroughTheBackend(t *testing.T) {
 			t.Fatal("openPath = nil, want the create failure")
 		}
 		rec.assertNone(t)
-		if idx, _ := sessionindex.Read(stateDir); len(idx.Sessions) != 0 {
-			t.Errorf("index = %+v, want empty", idx.Sessions)
+		if idx, _ := sessionindex.Read(stateDir); idx.Len() != 0 {
+			t.Errorf("index = %+v, want empty", idx.Entries())
 		}
 	})
 }

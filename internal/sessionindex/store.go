@@ -42,7 +42,7 @@ func Read(dir string) (Index, error) {
 // Outcome is what a written Update dropped, each entry as Update read it: those
 // fn removed, and those it replaced with an entry made afresh, in the order
 // they were read. What Portal keeps beside an entry goes with it, so a caller
-// forgets these entries once Update returns.
+// forgets these entries in UpdateThen's landed, under the same lock.
 type Outcome struct {
 	Removed  []Entry
 	Replaced []Entry
@@ -80,17 +80,35 @@ func outcomeOf(read []Entry, idx Index) Outcome {
 // outcome is empty whenever nothing was written. via records the calling
 // surface: cli, tui or internal.
 func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
+	return UpdateThen(dir, via, fn, nil)
+}
+
+// UpdateThen is Update, running landed, when given, before the commit lock is
+// released: once fn's changes have landed, with what the write dropped, or
+// once fn changed nothing, with an empty outcome. It is where a caller forgets
+// what went with a dropped entry, so no claim or hook set slips in between
+// the write and the forgetting. landed runs for no Update that failed.
+func UpdateThen(dir, via string, fn func(*Index) error, landed func(Outcome)) (Outcome, error) {
 	lock, err := commitlock.Acquire(dir)
 	if err != nil {
 		return Outcome{}, err
 	}
 	defer func() { _ = lock.Close() }()
 
+	outcome, err := update(dir, via, fn)
+	if err == nil && landed != nil {
+		landed(outcome)
+	}
+	return outcome, err
+}
+
+// update is Update's work under the commit lock.
+func update(dir, via string, fn func(*Index) error) (Outcome, error) {
 	idx, err := Read(dir)
 	if err != nil {
 		return Outcome{}, err
 	}
-	read := slices.Clone(idx.Sessions)
+	read := slices.Clone(idx.sessions)
 	if err := fn(&idx); err != nil {
 		return Outcome{}, err
 	}
@@ -103,7 +121,12 @@ func Update(dir, via string, fn func(*Index) error) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("encode sessions.json: %w", err)
 	}
-	if err := fileutil.AtomicWrite0600(Path(dir), data); err != nil {
+	// Once the rename lands the changes have: a sync after it that fails is
+	// a warning, not a write to undo.
+	unsynced := fileutil.ReportUnsynced(func(err error) {
+		logger.Warn("unsynced", "op", "unsynced", "error", err, "error_class", fileutil.ClassifyWriteError(err), "via", via)
+	})
+	if err := fileutil.AtomicWrite0600(Path(dir), data, unsynced); err != nil {
 		for _, c := range idx.changes {
 			logger.Warn(c.op, append(c.attrs(via), "error", err, "error_class", fileutil.ClassifyWriteError(err))...)
 		}

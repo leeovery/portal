@@ -40,9 +40,9 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 
 // updateSessionIndex runs fn on the state directory's index under the commit
 // lock, writing it back when fn changed something, and makes the directory
-// first: the lock lives in it. Once the write has landed and the lock is
-// released, it forgets each entry the write removed or replaced. via is cli,
-// tui or internal.
+// first: the lock lives in it. Once the write has landed, and before the lock
+// is released, it forgets each entry the write removed or replaced. via is
+// cli, tui or internal.
 func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
@@ -52,11 +52,20 @@ func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
 }
 
 func updateSessionIndexIn(dir, via string, fn func(*sessionindex.Index) error) error {
-	outcome, err := sessionindex.Update(dir, via, fn)
+	return updateSessionIndexForgetting(dir, via, fn, sessionindex.Outcome.Dropped)
+}
+
+// updateSessionIndexForgetting is updateSessionIndexIn forgetting, under the
+// same lock, the entries forgotten picks from what the update did, which is
+// empty when it changed nothing. Nothing is forgotten for an update that
+// failed.
+func updateSessionIndexForgetting(dir, via string, fn func(*sessionindex.Index) error, forgotten func(sessionindex.Outcome) []sessionindex.Entry) error {
+	_, err := sessionindex.UpdateThen(dir, via, fn, func(outcome sessionindex.Outcome) {
+		forgetEntries(dir, forgotten(outcome), via)
+	})
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
 		return legacyIndexError{path: sessionindex.Path(dir)}
 	}
-	forgetEntries(dir, outcome.Dropped(), via)
 	return err
 }
 
@@ -89,6 +98,9 @@ func claimSession(via string, live claimed, then func(*sessionindex.Index) error
 	})
 }
 
+// forget is state.Forget; tests pause it to hold the commit lock open.
+var forget = state.Forget
+
 // forgetEntries forgets each of entries, as the index in dir held them before
 // a write dropped them.
 func forgetEntries(dir string, entries []sessionindex.Entry, via string) {
@@ -96,12 +108,12 @@ func forgetEntries(dir string, entries []sessionindex.Entry, via string) {
 		return
 	}
 	store, err := loadHookStore()
-	for _, entry := range entries {
-		if err != nil {
+	if err != nil {
+		for _, entry := range entries {
 			indexLogger.Warn("forget", "op", "forget", "session", entry.Name, "detail", "kept its resume hook", "error", err, "via", via)
 		}
-		state.Forget(dir, store, entry, via)
 	}
+	forget(dir, store, via, entries...)
 }
 
 // refuseUnusableState stops a command while the state directory holds an

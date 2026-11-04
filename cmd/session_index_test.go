@@ -162,8 +162,8 @@ func TestReadShownIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readShownIndex: %v", err)
 		}
-		if len(shown.idx.Sessions) != 0 {
-			t.Errorf("sessions = %+v, want none", shown.idx.Sessions)
+		if shown.idx.Len() != 0 {
+			t.Errorf("sessions = %+v, want none", shown.idx.Entries())
 		}
 		if _, err := os.Stat(sessionindex.Path(dir)); !os.IsNotExist(err) {
 			t.Errorf("sessions.json stat = %v, want it still absent", err)

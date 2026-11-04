@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 )
@@ -35,21 +37,33 @@ func (e *VersionError) Unwrap() error {
 	return nil
 }
 
-// Index is the root document persisted to sessions.json.
+// Index is the root document persisted to sessions.json. Its entries change
+// only through its own methods, so every change is one Update logs and judges
+// by the claim rule; Entries and Lookup read copies.
 type Index struct {
-	Version  int       `json:"version"`
-	SavedAt  time.Time `json:"saved_at"`
-	Sessions []Entry   `json:"sessions"`
+	Version int
+	SavedAt time.Time
 
+	sessions []Entry
 	// changes are the mutations made through Index's methods since it was
 	// read, logged by Update once its write lands.
 	changes []change
 	// fresh names the sessions whose entries were made afresh since the index
 	// was read, rather than changed from the entry read.
 	fresh map[string]bool
+	// removed names the sessions whose entries were removed since the index
+	// was read. No method makes one again in the same Update, so a removal
+	// never stands for a replace the claim rule didn't judge.
+	removed map[string]bool
 	// unknown holds the members this version does not model, as a JSON object.
 	unknown string
 }
+
+// Entries returns a copy of every entry, in the order the index holds them.
+func (idx *Index) Entries() []Entry { return slices.Clone(idx.sessions) }
+
+// Len is how many entries the index holds.
+func (idx *Index) Len() int { return len(idx.sessions) }
 
 // Entry is one session. Label is empty while the session shows its name. Dir
 // is where Portal minted the session; Cwd is where the saver last saw it. A
@@ -73,7 +87,11 @@ type Entry struct {
 // older saver still running across an upgrade must not erase what the newer
 // binary records.
 type (
-	indexFields Index
+	indexFields struct {
+		Version  int       `json:"version"`
+		SavedAt  time.Time `json:"saved_at"`
+		Sessions []Entry   `json:"sessions"`
+	}
 	entryFields Entry
 )
 
@@ -83,7 +101,7 @@ var (
 )
 
 func (idx Index) MarshalJSON() ([]byte, error) {
-	return marshalWithUnknown(indexFields(idx), idx.unknown)
+	return marshalWithUnknown(indexFields{Version: idx.Version, SavedAt: idx.SavedAt, Sessions: idx.sessions}, idx.unknown)
 }
 
 func (idx *Index) UnmarshalJSON(data []byte) error {
@@ -92,8 +110,7 @@ func (idx *Index) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	*idx = Index(fields)
-	idx.unknown = unknown
+	*idx = Index{Version: fields.Version, SavedAt: fields.SavedAt, sessions: fields.Sessions, unknown: unknown}
 	return nil
 }
 
@@ -126,7 +143,10 @@ func marshalWithUnknown(fields any, unknown string) ([]byte, error) {
 }
 
 // unmarshalWithUnknown decodes data into fields, returning every member whose
-// key is not among known as one JSON object, or empty when there is none.
+// key is not among known as one JSON object, or empty when there is none. A
+// member spelling a known key in another case is dropped, not kept: decoding
+// matches keys regardless of case, so written back it would take the known
+// field's place on every later read.
 func unmarshalWithUnknown(data []byte, fields any, known []string) (string, error) {
 	if err := json.Unmarshal(data, fields); err != nil {
 		return "", err
@@ -135,9 +155,9 @@ func unmarshalWithUnknown(data []byte, fields any, known []string) (string, erro
 	if err := json.Unmarshal(data, &members); err != nil {
 		return "", err
 	}
-	for _, key := range known {
-		delete(members, key)
-	}
+	maps.DeleteFunc(members, func(key string, _ json.RawMessage) bool {
+		return slices.ContainsFunc(known, func(k string) bool { return strings.EqualFold(k, key) })
+	})
 	if len(members) == 0 {
 		return "", nil
 	}
@@ -157,15 +177,15 @@ func jsonKeys(t reflect.Type) []string {
 }
 
 func emptyIndex() Index {
-	return Index{Version: SchemaVersion, Sessions: []Entry{}}
+	return Index{Version: SchemaVersion, sessions: []Entry{}}
 }
 
 // Encode serialises idx to indented JSON at SchemaVersion, with no sessions
 // encoding as [] rather than null.
 func Encode(idx Index) ([]byte, error) {
 	idx.Version = SchemaVersion
-	if idx.Sessions == nil {
-		idx.Sessions = []Entry{}
+	if idx.sessions == nil {
+		idx.sessions = []Entry{}
 	}
 	return json.MarshalIndent(idx, "", "  ")
 }
@@ -173,7 +193,8 @@ func Encode(idx Index) ([]byte, error) {
 // Decode errors on malformed JSON, a missing version field, a version other
 // than SchemaVersion (a *VersionError, judged before the body, whose shape the
 // other version may not share), and an entry with an empty or repeated name.
-// Members this version does not model are kept, for Encode to write again.
+// Members this version does not model are kept, for Encode to write again,
+// but for one spelling a known key in another case.
 func Decode(data []byte) (Index, error) {
 	var head struct {
 		Version *int `json:"version"`
@@ -191,11 +212,11 @@ func Decode(data []byte) (Index, error) {
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return Index{}, fmt.Errorf("decode sessions.json: %w", err)
 	}
-	if err := checkNames(idx.Sessions); err != nil {
+	if err := checkNames(idx.sessions); err != nil {
 		return Index{}, err
 	}
-	if idx.Sessions == nil {
-		idx.Sessions = []Entry{}
+	if idx.sessions == nil {
+		idx.sessions = []Entry{}
 	}
 	return idx, nil
 }

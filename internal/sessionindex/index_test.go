@@ -9,14 +9,14 @@ import (
 )
 
 func TestLookup(t *testing.T) {
-	idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Dir: "/a"}, {Name: "b"}}}
+	idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a", Dir: "/a"}, {Name: "b"}})
 
 	e, ok := idx.Lookup("a")
 	if !ok || e != (sessionindex.Entry{Name: "a", Dir: "/a"}) {
 		t.Fatalf("Lookup(a) = %+v, %v; want the a entry", e, ok)
 	}
 	e.Dir = "/moved"
-	if idx.Sessions[0].Dir != "/a" {
+	if idx.Entries()[0].Dir != "/a" {
 		t.Errorf("an edit to the looked-up copy reached the index")
 	}
 	if _, ok := idx.Lookup("missing"); ok {
@@ -25,12 +25,12 @@ func TestLookup(t *testing.T) {
 }
 func TestSetLabel(t *testing.T) {
 	t.Run("it sets a trimmed label", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Dir: "/a"}}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a", Dir: "/a"}})
 		if err := idx.SetLabel("a", "  my work \n"); err != nil {
 			t.Fatalf("SetLabel: %v", err)
 		}
-		if want := (sessionindex.Entry{Name: "a", Label: "my work", Dir: "/a"}); idx.Sessions[0] != want {
-			t.Errorf("entry = %+v, want %+v", idx.Sessions[0], want)
+		if want := (sessionindex.Entry{Name: "a", Label: "my work", Dir: "/a"}); idx.Entries()[0] != want {
+			t.Errorf("entry = %+v, want %+v", idx.Entries()[0], want)
 		}
 	})
 
@@ -39,29 +39,29 @@ func TestSetLabel(t *testing.T) {
 		if err := idx.SetLabel("a", "Alpha"); err != nil {
 			t.Fatalf("SetLabel: %v", err)
 		}
-		if len(idx.Sessions) != 1 || idx.Sessions[0] != (sessionindex.Entry{Name: "a", Label: "Alpha"}) {
-			t.Errorf("sessions = %+v, want one bare entry labelled Alpha", idx.Sessions)
+		if idx.Len() != 1 || idx.Entries()[0] != (sessionindex.Entry{Name: "a", Label: "Alpha"}) {
+			t.Errorf("sessions = %+v, want one bare entry labelled Alpha", idx.Entries())
 		}
 	})
 
 	for _, reset := range []string{"", "   ", "a", " a "} {
 		t.Run("the label "+`"`+reset+`"`+" resets to the default", func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Label: "Alpha"}}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a", Label: "Alpha"}})
 			if err := idx.SetLabel("a", reset); err != nil {
 				t.Fatalf("SetLabel: %v", err)
 			}
-			if idx.Sessions[0].Label != "" {
-				t.Errorf("label = %q, want cleared", idx.Sessions[0].Label)
+			if idx.Entries()[0].Label != "" {
+				t.Errorf("label = %q, want cleared", idx.Entries()[0].Label)
 			}
 		})
 
 		t.Run("the label "+`"`+reset+`"`+" on a session with no entry creates none", func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b"}}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
 			if err := idx.SetLabel("a", reset); err != nil {
 				t.Fatalf("SetLabel: %v", err)
 			}
-			if len(idx.Sessions) != 1 {
-				t.Errorf("sessions = %+v, want only b", idx.Sessions)
+			if idx.Len() != 1 {
+				t.Errorf("sessions = %+v, want only b", idx.Entries())
 			}
 		})
 	}
@@ -78,15 +78,15 @@ func TestSetLabel(t *testing.T) {
 		"invalid UTF-8":         "bad\xffbyte",
 	} {
 		t.Run("a label holding "+name+" is refused and changes nothing", func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a", Label: "Alpha"}}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a", Label: "Alpha"}})
 			if err := idx.SetLabel("a", label); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
 				t.Errorf("SetLabel(%q) = %v, want ErrLabelUnprintable", label, err)
 			}
 			if err := idx.SetLabel("b", label); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
 				t.Errorf("SetLabel on a new session = %v, want ErrLabelUnprintable", err)
 			}
-			if len(idx.Sessions) != 1 || idx.Sessions[0].Label != "Alpha" {
-				t.Errorf("sessions = %+v, want untouched", idx.Sessions)
+			if idx.Len() != 1 || idx.Entries()[0].Label != "Alpha" {
+				t.Errorf("sessions = %+v, want untouched", idx.Entries())
 			}
 		})
 	}
@@ -123,7 +123,7 @@ func TestSetScrollbackAndRecordCwd(t *testing.T) {
 	} {
 		t.Run(tc.name+" sets the field of an existing entry and nothing else", func(t *testing.T) {
 			kept := sessionindex.Entry{Name: "a", Label: "Alpha", Dir: "/a", CreatedAt: time.Unix(1793000000, 0).UTC(), PID: 7}
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{kept}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{kept})
 
 			tc.set(&idx, "a", "value")
 
@@ -138,24 +138,24 @@ func TestSetScrollbackAndRecordCwd(t *testing.T) {
 		})
 
 		t.Run(tc.name+" creates no entry for a session with none", func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b"}}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
 
 			tc.set(&idx, "a", "value")
 
-			if len(idx.Sessions) != 1 || idx.Sessions[0] != (sessionindex.Entry{Name: "b"}) {
-				t.Errorf("sessions = %+v, want only b, untouched", idx.Sessions)
+			if idx.Len() != 1 || idx.Entries()[0] != (sessionindex.Entry{Name: "b"}) {
+				t.Errorf("sessions = %+v, want only b, untouched", idx.Entries())
 			}
 		})
 	}
 }
 
 func TestRemove(t *testing.T) {
-	idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a"}, {Name: "b"}, {Name: "c"}}}
+	idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a"}, {Name: "b"}, {Name: "c"}})
 	if !idx.Remove("b") {
 		t.Errorf("Remove(b) = false, want true")
 	}
-	if len(idx.Sessions) != 2 || idx.Sessions[0].Name != "a" || idx.Sessions[1].Name != "c" {
-		t.Errorf("sessions = %+v, want a and c", idx.Sessions)
+	if idx.Len() != 2 || idx.Entries()[0].Name != "a" || idx.Entries()[1].Name != "c" {
+		t.Errorf("sessions = %+v, want a and c", idx.Entries())
 	}
 	if idx.Remove("b") {
 		t.Errorf("Remove of an absent entry = true, want false")

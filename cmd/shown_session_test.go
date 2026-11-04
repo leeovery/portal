@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -46,11 +47,26 @@ func storedLabel(t *testing.T, stateDir, name, label string) {
 // labels included, in a state directory of the test's own.
 func seedIndex(t *testing.T, entries ...sessionindex.Entry) string {
 	t.Helper()
-	body, err := sessionindex.Encode(sessionindex.Index{Sessions: entries})
+	return seedSessionsJSON(t, string(indexJSON(t, entries)))
+}
+
+// entryIndexOf is the index a sessions.json holding entries reads as.
+func entryIndexOf(t *testing.T, entries ...sessionindex.Entry) sessionindex.Index {
+	t.Helper()
+	idx, err := sessionindex.Decode(indexJSON(t, entries))
+	if err != nil {
+		t.Fatalf("decode sessions.json: %v", err)
+	}
+	return idx
+}
+
+func indexJSON(t *testing.T, entries []sessionindex.Entry) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"version": sessionindex.SchemaVersion, "sessions": append([]sessionindex.Entry{}, entries...)})
 	if err != nil {
 		t.Fatalf("encode sessions.json: %v", err)
 	}
-	return seedSessionsJSON(t, string(body))
+	return body
 }
 
 var joinCreated = time.Date(2026, 10, 30, 9, 15, 0, 0, time.UTC)
@@ -99,7 +115,7 @@ var wantJoined = []tui.Session{
 }
 
 func TestShownSession(t *testing.T) {
-	shown := shownIndex{idx: sessionindex.Index{Sessions: joinEntries()}, rule: claimRule("")}
+	shown := shownIndex{idx: entryIndexOf(t, joinEntries()...), rule: claimRule("")}
 	silent := backend.Session{Name: joinSilent.Name}
 	for _, tc := range []struct {
 		name string
@@ -123,7 +139,7 @@ func TestShownSession(t *testing.T) {
 		live := withAnswered(joinOwn)
 		live.PID = 4243
 		recorded := shownIndex{
-			idx:  sessionindex.Index{Sessions: []sessionindex.Entry{{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: joinCreated, PID: 4242}}},
+			idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: joinCreated, PID: 4242}),
 			rule: claimRule(""),
 		}
 
@@ -142,7 +158,7 @@ func TestShownSession(t *testing.T) {
 	} {
 		t.Run("an entry "+name+" gives its label and dir, as a claim would take it over", func(t *testing.T) {
 			recorded := shownIndex{
-				idx:  sessionindex.Index{Sessions: []sessionindex.Entry{{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: created, PID: 1717}}},
+				idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: created, PID: 1717}),
 				rule: claimRule(""),
 			}
 

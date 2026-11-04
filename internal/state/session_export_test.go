@@ -8,12 +8,16 @@ import (
 )
 
 // SetBootTimeForTest fixes the boot time ClaimRule reads for the duration of
-// the test.
+// the test, with the process's claim-rule warning not yet given.
 func SetBootTimeForTest(t *testing.T, fn func() (time.Time, error)) {
 	t.Helper()
-	prev := bootTime
+	prev, warned := bootTime, warnedNoBootTime.Load()
 	bootTime = fn
-	t.Cleanup(func() { bootTime = prev })
+	warnedNoBootTime.Store(false)
+	t.Cleanup(func() {
+		bootTime = prev
+		warnedNoBootTime.Store(warned)
+	})
 }
 
 // AfterForgetReadsHooksForTest runs fn once Forget has read hooks.json, before

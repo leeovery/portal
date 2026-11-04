@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -23,10 +24,24 @@ func bootedAt(at time.Time) func() (time.Time, error) {
 // ClaimRule(dir) takes over held rather than replacing it.
 func claims(t *testing.T, dir string, held sessionindex.Entry) bool {
 	t.Helper()
-	idx := sessionindex.Index{Sessions: []sessionindex.Entry{held}}
+	idx := entryIndexOf(t, held)
 	idx.Claim(held.Name, "", ruleBooted.Add(2*time.Hour), 4242, state.ClaimRule(dir))
 	got, _ := idx.Lookup(held.Name)
 	return got.Label == held.Label
+}
+
+// entryIndexOf is a version 2 index holding entries as sessions.json would.
+func entryIndexOf(t *testing.T, entries ...sessionindex.Entry) sessionindex.Index {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"version": sessionindex.SchemaVersion, "sessions": entries})
+	if err != nil {
+		t.Fatalf("encode sessions.json: %v", err)
+	}
+	idx, err := sessionindex.Decode(data)
+	if err != nil {
+		t.Fatalf("decode sessions.json: %v", err)
+	}
+	return idx
 }
 
 func TestClaimRule(t *testing.T) {
@@ -55,7 +70,6 @@ func TestClaimRule(t *testing.T) {
 	}
 
 	for name, raise := range map[string]func(dir string) error{
-		"a bootstrap is restoring":                    state.Restoring.Set,
 		"the session's hydrating flag is raised":      func(dir string) error { return state.Hydrating.Set(dir, forgotten) },
 		"the session's resume-pending flag is raised": func(dir string) error { return state.ResumePending.Set(dir, forgotten) },
 	} {
@@ -71,6 +85,18 @@ func TestClaimRule(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("an entry of this boot is replaced while a bootstrap restores, as only the session's own flags adopt", func(t *testing.T) {
+		state.SetBootTimeForTest(t, bootedAt(ruleBooted))
+		dir := t.TempDir()
+		if err := state.Restoring.Set(dir); err != nil {
+			t.Fatal(err)
+		}
+
+		if claims(t, dir, labelled(ruleBooted.Add(time.Hour))) {
+			t.Error("the entry was adopted, want it replaced")
+		}
+	})
 
 	t.Run("an entry of this boot is replaced while only another session's flag is raised", func(t *testing.T) {
 		state.SetBootTimeForTest(t, bootedAt(ruleBooted))
@@ -110,6 +136,18 @@ func TestClaimRule(t *testing.T) {
 		if rec.ErrorAttr(t, "error") == nil {
 			t.Error("the warning carries no error")
 		}
+	})
+
+	t.Run("a boot time that can't be read warns once a process, however many rules are built", func(t *testing.T) {
+		state.SetBootTimeForTest(t, func() (time.Time, error) { return time.Time{}, errors.New("no sysctl") })
+		sink := logtest.Install(t)
+
+		for range 3 {
+			if !claims(t, t.TempDir(), labelled(ruleBooted.Add(time.Hour))) {
+				t.Error("the entry was replaced, want it adopted")
+			}
+		}
+		sink.Records().Matching("sessions", "claim-rule").Only(t, "the one warning")
 	})
 
 	t.Run("it reads this machine's boot time", func(t *testing.T) {

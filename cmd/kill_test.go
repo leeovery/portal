@@ -39,7 +39,7 @@ func assertIndexed(t *testing.T, dir, name string, want bool) {
 	t.Helper()
 	idx := readIndex(t, dir)
 	if _, got := idx.Lookup(name); got != want {
-		t.Errorf("index entry for %s present = %v, want %v: %+v", name, got, want, idx.Sessions)
+		t.Errorf("index entry for %s present = %v, want %v: %+v", name, got, want, idx.Entries())
 	}
 }
 

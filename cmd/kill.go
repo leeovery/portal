@@ -47,24 +47,22 @@ func killSession(ctx context.Context, b backend.Backend, name, via string) error
 }
 
 // forgetSession removes the session's index entry and forgets what Portal
-// keeps beside it, whether or not the index held one: a hook or flag may be
-// left with no entry to go with it.
+// keeps beside it, under the same lock, whether or not the index held one: a
+// hook or flag may be left with no entry to go with it.
 func forgetSession(name, via string) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
-	held := false
-	if err := updateSessionIndexIn(dir, via, func(idx *sessionindex.Index) error {
-		held = idx.Remove(name)
+	return updateSessionIndexForgetting(dir, via, func(idx *sessionindex.Index) error {
+		idx.Remove(name)
 		return nil
-	}); err != nil {
-		return err
-	}
-	if !held {
-		forgetEntries(dir, []sessionindex.Entry{{Name: name}}, via)
-	}
-	return nil
+	}, func(outcome sessionindex.Outcome) []sessionindex.Entry {
+		if len(outcome.Removed) == 0 {
+			return []sessionindex.Entry{{Name: name}}
+		}
+		return outcome.Removed
+	})
 }
 
 // killError words the backend's refusals for the user; any other failure is

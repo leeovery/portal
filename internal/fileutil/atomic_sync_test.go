@@ -59,6 +59,29 @@ func TestOrderedSync(t *testing.T) {
 	}
 }
 
+func TestSkipUnsupported(t *testing.T) {
+	for _, errno := range []syscall.Errno{syscall.ENOTSUP, syscall.EOPNOTSUPP, syscall.EINVAL, syscall.ENOTTY, syscall.ENOSYS} {
+		t.Run("a filesystem answering "+errno.Error()+" proceeds without the sync", func(t *testing.T) {
+			wrapped := &os.PathError{Op: "sync", Path: "/s", Err: errno}
+			if err := skipUnsupported(wrapped); err != nil {
+				t.Errorf("skipUnsupported(%v) = %v, want nil", wrapped, err)
+			}
+		})
+	}
+
+	t.Run("a real failure is kept", func(t *testing.T) {
+		if err := skipUnsupported(syscall.EIO); !errors.Is(err, syscall.EIO) {
+			t.Errorf("skipUnsupported(EIO) = %v, want EIO", err)
+		}
+	})
+
+	t.Run("no error is no error", func(t *testing.T) {
+		if err := skipUnsupported(nil); err != nil {
+			t.Errorf("skipUnsupported(nil) = %v", err)
+		}
+	})
+}
+
 func TestSyncs_OnARealFilesystem(t *testing.T) {
 	dir := t.TempDir()
 	f, err := os.Create(filepath.Join(dir, "data"))

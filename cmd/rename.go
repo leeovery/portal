@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -46,9 +47,9 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 }
 
 // liveSession reads the session a claim is for, wording one that fails as kill
-// does, unchanged saying what the refusal leaves. One that does not answer is
-// refused: what a claim ties to a creation it can't read would pass to
-// whatever session next takes the name.
+// does, unchanged saying what the refusal leaves. One that does not answer, or
+// answers with no creation, is refused: what a claim ties to a creation it
+// can't read would pass to whatever session next takes the name.
 func liveSession(ctx context.Context, b backend.Backend, name, unchanged string) (claimed, error) {
 	s, err := b.Session(ctx, name)
 	if fault, ok := sessionFault(name, err, unchanged); ok {
@@ -56,6 +57,9 @@ func liveSession(ctx context.Context, b backend.Backend, name, unchanged string)
 	}
 	if err != nil {
 		return claimed{}, err
+	}
+	if s.Created.IsZero() {
+		return claimed{}, fmt.Errorf("session %s did not report when it was created; %s", name, unchanged)
 	}
 	return claimed{Name: name, Created: s.Created, PID: s.PID}, nil
 }

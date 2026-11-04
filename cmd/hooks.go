@@ -99,28 +99,26 @@ var hooksSetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := claimForHook(cmd.Context(), b, hookKey); err != nil {
-			return err
-		}
-
-		store, err := loadHookStore()
-		if err != nil {
-			return err
-		}
-
-		return store.Set(hookKey, hooks.EventOnResume, hooks.Registration{Command: command, Resume: mode}, hooks.ViaCLI)
+		return setResumeHook(cmd.Context(), b, hookKey, hooks.Registration{Command: command, Resume: mode})
 	},
 }
 
-// claimForHook claims the session's entry before its hook is written, as
-// rename does before a label: a hook beside an entry left by an earlier
+// setResumeHook claims the session's entry, then registers its resume hook, as
+// rename claims before a label: a hook beside an entry left by an earlier
 // creation would go with it when a later claim replaced that entry.
-func claimForHook(ctx context.Context, b backend.Backend, name string) error {
+func setResumeHook(ctx context.Context, b backend.Backend, name string, registration hooks.Registration) error {
 	live, err := liveSession(ctx, b, name, "no hook is set")
 	if err != nil {
 		return err
 	}
-	return claimSession("cli", live, nil)
+	if err := claimSession("cli", live, nil); err != nil {
+		return err
+	}
+	store, err := loadHookStore()
+	if err != nil {
+		return err
+	}
+	return store.Set(name, hooks.EventOnResume, registration, hooks.ViaCLI)
 }
 
 // resumeModeFlag reads the registration's resume-mode pin: an unpassed flag

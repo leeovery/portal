@@ -37,7 +37,7 @@ func withDir(e sessionindex.Entry, dir string) sessionindex.Entry {
 
 func seedIndex(t *testing.T, dir string, entries ...sessionindex.Entry) {
 	t.Helper()
-	data, err := sessionindex.Encode(sessionindex.Index{Sessions: entries})
+	data, err := sessionindex.Encode(sessionindex.IndexOf(entries))
 	if err != nil {
 		t.Fatalf("encode seed: %v", err)
 	}
@@ -183,8 +183,8 @@ func TestClaim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Read: %v", err)
 			}
-			if !sameEntries(idx.Sessions, []sessionindex.Entry{tc.want, neighbour}) {
-				t.Errorf("sessions = %+v, want a as %+v beside b untouched", idx.Sessions, tc.want)
+			if !sameEntries(idx.Entries(), []sessionindex.Entry{tc.want, neighbour}) {
+				t.Errorf("sessions = %+v, want a as %+v beside b untouched", idx.Entries(), tc.want)
 			}
 			var wantReplaced []sessionindex.Entry
 			if tc.replaced {
@@ -205,7 +205,7 @@ func TestClaim(t *testing.T) {
 		{"a session with no entry claimed knowing no creation gets one with its dir", time.Time{}, sessionindex.Entry{Name: "a", Dir: "/a"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b"}}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
 			pid := 0
 			if !tc.created.IsZero() {
 				pid = 4242
@@ -213,8 +213,8 @@ func TestClaim(t *testing.T) {
 
 			idx.Claim("a", "/a", tc.created, pid, judged)
 
-			if got, ok := idx.Lookup("a"); !ok || !sameEntry(got, tc.want) || len(idx.Sessions) != 2 {
-				t.Errorf("sessions = %+v, want b and a as %+v", idx.Sessions, tc.want)
+			if got, ok := idx.Lookup("a"); !ok || !sameEntry(got, tc.want) || idx.Len() != 2 {
+				t.Errorf("sessions = %+v, want b and a as %+v", idx.Entries(), tc.want)
 			}
 		})
 	}
@@ -245,7 +245,7 @@ func TestLookupLive(t *testing.T) {
 		{"a live session reporting no creation finds none, even of an entry saved before this boot", keeping(beforeBoot, 1717), judged, time.Time{}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{tc.held}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{tc.held})
 
 			got, ok := idx.LookupLive("a", tc.created, tc.pid, tc.rule)
 
@@ -260,7 +260,7 @@ func TestLookupLive(t *testing.T) {
 	}
 
 	t.Run("no entry finds none", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b", CreatedAt: liveCreation}}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b", CreatedAt: liveCreation}})
 		if got, ok := idx.LookupLive("a", liveCreation, 0, judged); ok {
 			t.Errorf("LookupLive = %+v, true; want none", got)
 		}
@@ -270,7 +270,7 @@ func TestLookupLive(t *testing.T) {
 		t.Run(name+" is dropped, the rest kept, and left in the index", func(t *testing.T) {
 			held := keeping(liveCreation, 4242)
 			held.Label = label
-			idx := sessionindex.Index{Sessions: []sessionindex.Entry{held}}
+			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
 
 			got, ok := idx.LookupLive("a", liveCreation, 4242, judged)
 
@@ -279,8 +279,8 @@ func TestLookupLive(t *testing.T) {
 			if !ok || !sameEntry(got, want) {
 				t.Errorf("LookupLive = %+v, %v; want %+v", got, ok, want)
 			}
-			if idx.Sessions[0].Label != label {
-				t.Errorf("Label = %q, want the file's label untouched", idx.Sessions[0].Label)
+			if idx.Entries()[0].Label != label {
+				t.Errorf("Label = %q, want the file's label untouched", idx.Entries()[0].Label)
 			}
 		})
 	}
@@ -290,7 +290,7 @@ func TestRestored(t *testing.T) {
 	saved := keeping(beforeBoot, 1717)
 
 	t.Run("it records the new creation and keeps everything else", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{saved, {Name: "b", Label: "Beta"}}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{saved, {Name: "b", Label: "Beta"}})
 
 		if !idx.Restored("a", liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
@@ -305,7 +305,7 @@ func TestRestored(t *testing.T) {
 	})
 
 	t.Run("it records the creation whatever the entry's, with no rule to consult", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{keeping(earlierThisBoot, 1717)}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(earlierThisBoot, 1717)})
 
 		if !idx.Restored("a", liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
@@ -316,7 +316,7 @@ func TestRestored(t *testing.T) {
 	})
 
 	t.Run("an entry already recording the creation reports it recorded", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{keeping(liveCreation, 4242)}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(liveCreation, 4242)})
 
 		if !idx.Restored("a", liveCreation, 4242) {
 			t.Error("Restored = false, want the creation reported recorded")
@@ -324,7 +324,7 @@ func TestRestored(t *testing.T) {
 	})
 
 	t.Run("a zero creation records nothing, and says so", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{saved}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{saved})
 
 		if idx.Restored("a", time.Time{}, 4242) {
 			t.Error("Restored = true, want false: nothing was recorded")
@@ -335,13 +335,13 @@ func TestRestored(t *testing.T) {
 	})
 
 	t.Run("a session with no entry gets none, and says so", func(t *testing.T) {
-		idx := sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "b"}}}
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
 
 		if idx.Restored("a", liveCreation, 4242) {
 			t.Error("Restored = true, want false: there was no entry")
 		}
-		if len(idx.Sessions) != 1 {
-			t.Errorf("sessions = %+v, want only b", idx.Sessions)
+		if idx.Len() != 1 {
+			t.Errorf("sessions = %+v, want only b", idx.Entries())
 		}
 	})
 }

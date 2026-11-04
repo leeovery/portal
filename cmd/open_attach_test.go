@@ -321,7 +321,7 @@ func assertIndexLacks(t *testing.T, stateDir, name string) {
 		t.Fatalf("read index: %v", err)
 	}
 	if _, ok := idx.Lookup(name); ok {
-		t.Errorf("index = %+v, want %s's entry gone", idx.Sessions, name)
+		t.Errorf("index = %+v, want %s's entry gone", idx.Entries(), name)
 	}
 }
 

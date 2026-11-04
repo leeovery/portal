@@ -3,7 +3,9 @@ package sessionindex_test
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,14 +15,11 @@ import (
 
 func TestCodec(t *testing.T) {
 	t.Run("an index round-trips through Encode and Decode", func(t *testing.T) {
-		in := sessionindex.Index{
-			Version: sessionindex.SchemaVersion,
-			SavedAt: time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC),
-			Sessions: []sessionindex.Entry{
-				{Name: "dotfiles-PpaTER", Label: "dots", Dir: "/code/dotfiles", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/dotfiles-PpaTER.bin"},
-				{Name: "bare"},
-			},
-		}
+		in := sessionindex.IndexOf([]sessionindex.Entry{
+			{Name: "dotfiles-PpaTER", Label: "dots", Dir: "/code/dotfiles", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/dotfiles-PpaTER.bin"},
+			{Name: "bare"},
+		})
+		in.Version, in.SavedAt = sessionindex.SchemaVersion, time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC)
 		data, err := sessionindex.Encode(in)
 		if err != nil {
 			t.Fatalf("Encode: %v", err)
@@ -35,10 +34,9 @@ func TestCodec(t *testing.T) {
 	})
 
 	t.Run("it writes the version 2 shape with RFC3339 timestamps", func(t *testing.T) {
-		data, err := sessionindex.Encode(sessionindex.Index{
-			SavedAt:  time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC),
-			Sessions: []sessionindex.Entry{{Name: "a", Label: "A", Dir: "/d", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/a.bin"}},
-		})
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "a", Label: "A", Dir: "/d", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/a.bin"}})
+		idx.SavedAt = time.Date(2026, 11, 2, 9, 30, 0, 0, time.UTC)
+		data, err := sessionindex.Encode(idx)
 		if err != nil {
 			t.Fatalf("Encode: %v", err)
 		}
@@ -60,7 +58,7 @@ func TestCodec(t *testing.T) {
 	})
 
 	t.Run("empty fields are omitted and no sessions encode as an empty list", func(t *testing.T) {
-		data, err := sessionindex.Encode(sessionindex.Index{Sessions: []sessionindex.Entry{{Name: "a"}}})
+		data, err := sessionindex.Encode(sessionindex.IndexOf([]sessionindex.Entry{{Name: "a"}}))
 		if err != nil {
 			t.Fatalf("Encode: %v", err)
 		}
@@ -85,7 +83,7 @@ func TestCodec(t *testing.T) {
 
 	t.Run("an entry's cwd and pid encode under their own keys and round-trip", func(t *testing.T) {
 		in := sessionindex.Entry{Name: "a", Dir: "/d", Cwd: "/d/src", CreatedAt: time.Unix(1793000000, 0).UTC(), PID: 4242}
-		data, err := sessionindex.Encode(sessionindex.Index{Sessions: []sessionindex.Entry{in}})
+		data, err := sessionindex.Encode(sessionindex.IndexOf([]sessionindex.Entry{in}))
 		if err != nil {
 			t.Fatalf("Encode: %v", err)
 		}
@@ -102,8 +100,8 @@ func TestCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if !reflect.DeepEqual(out.Sessions, []sessionindex.Entry{in}) {
-			t.Errorf("round trip = %+v, want %+v", out.Sessions, in)
+		if !reflect.DeepEqual(out.Entries(), []sessionindex.Entry{in}) {
+			t.Errorf("round trip = %+v, want %+v", out.Entries(), in)
 		}
 	})
 
@@ -114,8 +112,8 @@ func TestCodec(t *testing.T) {
 			t.Fatalf("Decode: %v", err)
 		}
 		want := sessionindex.Entry{Name: "a", Label: "A", Dir: "/d", CreatedAt: time.Unix(1793000000, 0).UTC(), ScrollbackFile: "scrollback/a.bin"}
-		if !reflect.DeepEqual(idx.Sessions, []sessionindex.Entry{want}) {
-			t.Errorf("sessions = %+v, want %+v", idx.Sessions, want)
+		if !reflect.DeepEqual(idx.Entries(), []sessionindex.Entry{want}) {
+			t.Errorf("sessions = %+v, want %+v", idx.Entries(), want)
 		}
 	})
 
@@ -125,8 +123,8 @@ func TestCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if len(idx.Sessions) != 2 || idx.Sessions[0].Name != "a" || idx.Sessions[0].Label != "A" {
-			t.Errorf("sessions = %+v, want a labelled A and b", idx.Sessions)
+		if idx.Len() != 2 || idx.Entries()[0].Name != "a" || idx.Entries()[0].Label != "A" {
+			t.Errorf("sessions = %+v, want a labelled A and b", idx.Entries())
 		}
 
 		data, err := sessionindex.Encode(idx)
@@ -134,6 +132,42 @@ func TestCodec(t *testing.T) {
 			t.Fatalf("Encode: %v", err)
 		}
 		assertSameJSON(t, data, in)
+	})
+
+	t.Run("a member spelling a known key in another case is dropped, not written back to shadow the field", func(t *testing.T) {
+		idx, err := sessionindex.Decode([]byte(`{"version":2,"saved_at":"2026-11-02T09:30:00Z","Saved_At":"2020-01-01T00:00:00Z",` +
+			`"sessions":[{"name":"a","LABEL":"stale","label":"A","future":1}]}`))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+
+		data, err := sessionindex.Encode(idx)
+		if err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var raw struct {
+			Root     map[string]json.RawMessage
+			Sessions []map[string]json.RawMessage `json:"sessions"`
+		}
+		if err := json.Unmarshal(data, &raw.Root); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Sorted(maps.Keys(raw.Root)); !slices.Equal(got, []string{"saved_at", "sessions", "version"}) {
+			t.Errorf("root keys = %v, want the known three alone", got)
+		}
+		if got := slices.Sorted(maps.Keys(raw.Sessions[0])); !slices.Equal(got, []string{"future", "label", "name"}) {
+			t.Errorf("entry keys = %v, want name, label and the unknown future", got)
+		}
+		again, err := sessionindex.Decode(data)
+		if err != nil {
+			t.Fatalf("Decode again: %v", err)
+		}
+		if got := again.Entries()[0].Label; got != idx.Entries()[0].Label {
+			t.Errorf("label read back = %q, want %q as first read", got, idx.Entries()[0].Label)
+		}
 	})
 }
 

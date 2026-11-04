@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -205,6 +206,34 @@ func TestUpdate_Logging(t *testing.T) {
 		})
 		if n := len(sink.Records()); n != 0 {
 			t.Errorf("records = %d, want none", n)
+		}
+	})
+
+	t.Run("a write whose directory sync fails has landed: its changes log as written, then one WARN unsynced", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, sessionindex.Entry{Name: "gone"})
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+		sink := logtest.Install(t)
+
+		outcome, err := sessionindex.Update(dir, "tui", func(idx *sessionindex.Index) error {
+			idx.Remove("gone")
+			return idx.SetLabel("a", "Alpha")
+		})
+		if err != nil {
+			t.Fatalf("Update = %v, want the landed write to succeed", err)
+		}
+
+		if !sameEntries(outcome.Removed, []sessionindex.Entry{{Name: "gone"}}) {
+			t.Errorf("removed = %+v, want gone, as a landed write reports", outcome.Removed)
+		}
+		for _, op := range []string{"rm", "set-label"} {
+			sink.Records().Matching("sessions", op).AtExactLevel(slog.LevelInfo).Only(t, op+" as written")
+		}
+		rec := sink.Records().Matching("sessions", "unsynced").Only(t, "the unsynced warning")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelWarn, Msg: "unsynced", Component: "sessions", Op: "unsynced", Via: "tui"})
+		logtest.AssertWriteFailure(t, rec, "write-failed-fsync", fileutil.ErrWriteFsync)
+		if idx, _ := sessionindex.Read(dir); idx.Len() != 1 {
+			t.Errorf("sessions = %+v, want a alone", idx.Entries())
 		}
 	})
 

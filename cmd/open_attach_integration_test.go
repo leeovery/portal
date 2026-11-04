@@ -306,7 +306,7 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 			t.Fatalf("read index: %v", err)
 		}
 		if _, ok := idx.Lookup(name); ok {
-			t.Errorf("index = %+v, want the killed session's entry gone", idx.Sessions)
+			t.Errorf("index = %+v, want the killed session's entry gone", idx.Entries())
 		}
 
 		p.typeIn(t, "q")

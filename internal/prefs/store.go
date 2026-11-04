@@ -374,8 +374,9 @@ func (s *Store) SaveTranslation(slug string) (persisted bool, err error) {
 }
 
 // Substitutable so the write can be intercepted without a filesystem;
-// production never reassigns it.
-var atomicWrite = fileutil.AtomicWrite
+// production never reassigns it. prefs logs nothing, so a directory sync that
+// fails after the rename goes unreported, the write landed all the same.
+var atomicWrite = func(path string, data []byte) error { return fileutil.AtomicWrite(path, data) }
 
 // HTML escaping stays off so a raw value keeps its bytes: it would rewrite a
 // "<" or "&" inside one as a \u escape.

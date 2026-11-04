@@ -127,7 +127,13 @@ func (s *Store) save(h Snapshot) error {
 		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 
-	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")), fileutil.ReportUnsynced(warnUnsynced))
+}
+
+// warnUnsynced logs a write that landed though the directory sync after its
+// rename failed: the mutation stands, and logs as written.
+func warnUnsynced(err error) {
+	logger.Warn("unsynced", "op", "unsynced", "error", err, "error_class", fileutil.ClassifyWriteError(err))
 }
 
 // acquireMutationLockFor takes the mutation hold for a per-key mutation and,

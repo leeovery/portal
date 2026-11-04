@@ -15,6 +15,10 @@ import (
 // footers that print it. Its text is the refusal every surface shows.
 var ErrLabelUnprintable = errors.New("label refused: it holds a control or formatting character, such as a newline, tab or escape")
 
+// ErrRemoved refuses a label for a session whose entry the same Update
+// removed: an entry made again there would be a replace no claim judged.
+var ErrRemoved = errors.New("the session's entry was removed in this update")
+
 type change struct {
 	op      string
 	session string
@@ -34,7 +38,7 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 	if i < 0 {
 		return Entry{}, false
 	}
-	return idx.Sessions[i], true
+	return idx.sessions[i], true
 }
 
 // SetLabel sets the session's label, trimmed of surrounding whitespace. An
@@ -56,12 +60,15 @@ func (idx *Index) SetLabel(name, label string) error {
 		if label == "" {
 			return nil
 		}
-		i = idx.add(Entry{Name: name})
+		var made bool
+		if i, made = idx.add(Entry{Name: name}); !made {
+			return ErrRemoved
+		}
 	}
-	if idx.Sessions[i].Label == label {
+	if idx.sessions[i].Label == label {
 		return nil
 	}
-	idx.Sessions[i].Label = label
+	idx.sessions[i].Label = label
 	if label == "" {
 		idx.changes = append(idx.changes, change{op: "clear-label", session: name})
 	} else {
@@ -73,7 +80,7 @@ func (idx *Index) SetLabel(name, label string) error {
 // The zero-width joiner is format-class but builds joined emoji, so it stays.
 func printable(label string) bool {
 	return utf8.ValidString(label) && !strings.ContainsFunc(label, func(r rune) bool {
-		return r != '‍' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
+		return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
 	})
 }
 
@@ -97,29 +104,39 @@ func (idx *Index) setField(name, op, value string, level slog.Level, field func(
 	if i < 0 {
 		return
 	}
-	if f := field(&idx.Sessions[i]); *f != value {
+	if f := field(&idx.sessions[i]); *f != value {
 		*f = value
 		idx.changes = append(idx.changes, change{op: op, session: name, value: value, level: level})
 	}
 }
 
-// Remove drops the session's entry, reporting whether there was one.
+// Remove drops the session's entry, reporting whether there was one. No
+// method makes an entry under the name again in the same Update. Its callers
+// are kill and the saver's drop of a session that ended, which a guard holds
+// to.
 func (idx *Index) Remove(name string) bool {
 	i := idx.indexOf(name)
 	if i < 0 {
 		return false
 	}
-	idx.Sessions = slices.Delete(idx.Sessions, i, i+1)
+	idx.sessions = slices.Delete(idx.sessions, i, i+1)
+	if idx.removed == nil {
+		idx.removed = map[string]bool{}
+	}
+	idx.removed[name] = true
 	idx.changes = append(idx.changes, change{op: "rm", session: name})
 	return true
 }
 
 // add appends e, an entry made afresh rather than read, and returns its
-// position.
-func (idx *Index) add(e Entry) int {
+// position, or reports it made none for a name removed in this Update.
+func (idx *Index) add(e Entry) (int, bool) {
+	if idx.removed[e.Name] {
+		return -1, false
+	}
 	idx.markFresh(e.Name)
-	idx.Sessions = append(idx.Sessions, e)
-	return len(idx.Sessions) - 1
+	idx.sessions = append(idx.sessions, e)
+	return len(idx.sessions) - 1, true
 }
 
 // markFresh records that name's entry was made afresh rather than read, so
@@ -132,5 +149,5 @@ func (idx *Index) markFresh(name string) {
 }
 
 func (idx *Index) indexOf(name string) int {
-	return slices.IndexFunc(idx.Sessions, func(e Entry) bool { return e.Name == name })
+	return slices.IndexFunc(idx.sessions, func(e Entry) bool { return e.Name == name })
 }

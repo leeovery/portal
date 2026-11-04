@@ -13,3 +13,9 @@ func SetClockForTest(t *testing.T, at time.Time) {
 	now = func() time.Time { return at }
 	t.Cleanup(func() { now = prev })
 }
+
+// IndexOf is an index holding entries as read, for a test to stage one
+// without a file.
+func IndexOf(entries []Entry) Index {
+	return Index{sessions: entries}
+}

@@ -160,6 +160,22 @@ func TestRenameCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("it refuses a session that answers with no creation, writing nothing, so no later session inherits the label", func(t *testing.T) {
+		fake := inSession(t, "", backend.Session{Name: currentSessionName, Dir: renameDir, PID: renamePID})
+		fake.SetCurrent(currentSessionName)
+		dir := os.Getenv("PORTAL_STATE_DIR")
+
+		_, _, err := runRootCmd(t, "rename", "api work")
+
+		want := "session " + currentSessionName + " did not report when it was created; its label is unchanged"
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if entries := dirListing(t, dir); len(entries) != 0 {
+			t.Errorf("state directory = %v, want nothing written", entries)
+		}
+	})
+
 	t.Run("it says the current session refuses connections in kill's words, writing nothing", func(t *testing.T) {
 		fake, dir := stageRename(t)
 		fake.Fail(backendtest.OpSession, fmt.Errorf("session %q: %w", currentSessionName, zmx.ErrRefusing))

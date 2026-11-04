@@ -8,12 +8,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/commitlock"
+	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
@@ -184,8 +187,9 @@ func TestKill_Forgets(t *testing.T) {
 		})
 	}
 
-	// The order is commit.lock, then the hooks lock: the index write has landed,
-	// and its lock is released, before the hook's removal waits on its own.
+	// The order is commit.lock, then the hooks lock: the index write has landed
+	// before the hook's removal waits on the hooks lock, so a wait past its
+	// bound costs only the hook.
 	t.Run("a hooks lock held past its bound costs the hook, never the kill or its index write", func(t *testing.T) {
 		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
 		dir := stageKill(t, fake, "api-x7Kd9a")
@@ -458,4 +462,93 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 			t.Errorf("hydrating flag = %v, %v; want it removed", raised, err)
 		}
 	})
+}
+
+// A write whose rename lands has landed, whatever the directory sync after it
+// answers: what went with a dropped entry goes too.
+func TestIndexWrite_LandsThoughTheDirectorySyncFails(t *testing.T) {
+	t.Run("a kill succeeds, its entry goes, and everything kept beside it is forgotten", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		dir := stageKill(t, fake, "api-x7Kd9a")
+		stageKept(t, dir, "api-x7Kd9a")
+		store, _ := stageHooks(t, "api-x7Kd9a")
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+
+		if _, stderr, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil {
+			t.Fatalf("kill = %v, want it to succeed\nstderr: %s", err, stderr)
+		}
+
+		if idx := readIndex(t, dir); idx.Len() != 0 {
+			t.Errorf("index = %+v, want it empty", idx.Entries())
+		}
+		assertKept(t, dir, store, "api-x7Kd9a", nil)
+	})
+
+	t.Run("a rename replacing an earlier creation's entry forgets that one's hook", func(t *testing.T) {
+		fake, _ := stageRename(t)
+		dir := seedSessionsJSON(t, `{"version": 2, "sessions": [`+
+			`{"name": "`+currentSessionName+`", "label": "old", "created_at": "2026-10-28T09:00:00Z"}]}`)
+		stageKept(t, dir, currentSessionName)
+		store, _ := stageHooks(t, currentSessionName)
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+
+		if err := setSessionLabel(context.Background(), fake, currentSessionName, "api work", "cli"); err != nil {
+			t.Fatalf("rename = %v, want it to succeed", err)
+		}
+
+		assertLabel(t, dir, currentSessionName, "api work")
+		assertKept(t, dir, store, currentSessionName, nil)
+	})
+}
+
+// The reviewers' interleaving: a rename replaces the entry an earlier creation
+// left, and while it forgets that creation's hook, a hook set for the live
+// creation claims, finding its own entry, and writes its hook. Were the
+// forgetting run after the rename's unlock, it could read that hook and
+// discard it.
+func TestForget_RunsUnderTheCommitLock(t *testing.T) {
+	fake, _ := stageRename(t)
+	dir := seedSessionsJSON(t, `{"version": 2, "sessions": [`+
+		`{"name": "`+currentSessionName+`", "label": "old", "created_at": "2026-10-28T09:00:00Z"}]}`)
+	store, _ := stageHooks(t, currentSessionName)
+	paused, resume := make(chan struct{}), make(chan struct{})
+	var pausing atomic.Bool
+	pausing.Store(true)
+	withFuncSeam(t, &forget, func(dir string, store *hooks.Store, via string, entries ...sessionindex.Entry) {
+		if pausing.Swap(false) {
+			close(paused)
+			<-resume
+		}
+		state.Forget(dir, store, via, entries...)
+	})
+
+	renamed := make(chan error, 1)
+	go func() { renamed <- setSessionLabel(context.Background(), fake, currentSessionName, "api work", "cli") }()
+	<-paused
+	set := make(chan error, 1)
+	go func() {
+		set <- setResumeHook(context.Background(), fake, currentSessionName, hooks.Registration{Command: "make serve"})
+	}()
+	select {
+	case err := <-set:
+		t.Errorf("hook set returned %v while the rename was forgetting, want it held at the commit lock", err)
+		set <- err
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(resume)
+
+	if err := <-renamed; err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if err := <-set; err != nil {
+		t.Fatalf("hook set: %v", err)
+	}
+	held, err := store.Load(hooks.ViaInternal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := held[currentSessionName][hooks.EventOnResume.String()].Command; got != "make serve" {
+		t.Errorf("hook = %q, want the live creation's, set after the forgetting, kept", got)
+	}
+	assertLabel(t, dir, currentSessionName, "api work")
 }

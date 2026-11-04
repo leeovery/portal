@@ -144,7 +144,7 @@ func TestForget(t *testing.T) {
 		dir, entry, store, _ := stageForgettable(t)
 		before := tree(t, dir)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		assertTree(t, dir, without(t, before, "hydrating/"+apiStem, "resume-pending/"+apiStem, filepath.FromSlash(entry.ScrollbackFile)))
 		if got := hookKeys(t, store); !slices.Equal(got, []string{neighbour}) {
@@ -156,7 +156,7 @@ func TestForget(t *testing.T) {
 		dir, entry, store, _ := stageForgettable(t)
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, entry, "tui")
+		state.Forget(dir, store, "tui", entry)
 
 		rec := sink.Records().Matching("sessions", "forget").Only(t, "forget record")
 		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "forget", Component: "sessions", Op: "forget", Via: "tui"})
@@ -178,7 +178,7 @@ func TestForget(t *testing.T) {
 			dir, entry, store, _ := stageForgettable(t)
 			sink := logtest.Install(t)
 
-			state.Forget(dir, store, entry, via)
+			state.Forget(dir, store, via, entry)
 
 			rec := sink.Records().Matching("hooks", "discard").Only(t, "discard record")
 			if got := rec.AttrOrEmpty("via"); got != via {
@@ -196,7 +196,7 @@ func TestForget(t *testing.T) {
 		})
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		held, err := store.Load(hooks.ViaInternal)
 		if err != nil {
@@ -216,7 +216,7 @@ func TestForget(t *testing.T) {
 		entry.ScrollbackFile = ""
 		before := tree(t, dir)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		assertTree(t, dir, without(t, before, "hydrating/"+apiStem, "resume-pending/"+apiStem))
 		if got := hookKeys(t, store); !slices.Equal(got, []string{neighbour}) {
@@ -230,7 +230,7 @@ func TestForget(t *testing.T) {
 		before := tree(t, dir)
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		assertTree(t, dir, without(t, before, "hydrating/"+apiStem, "resume-pending/"+apiStem))
 		rec := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn).Only(t, "the kept scrollback's warning")
@@ -248,7 +248,7 @@ func TestForget(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Entries: map[string]string{"Foo": "vim"}})
 		before := tree(t, dir)
 
-		state.Forget(dir, store, sessionindex.Entry{Name: "foo", ScrollbackFile: scrollbackFile(t, "foo", apiCreated, 4242)}, "cli")
+		state.Forget(dir, store, "cli", sessionindex.Entry{Name: "foo", ScrollbackFile: scrollbackFile(t, "foo", apiCreated, 4242)})
 
 		assertTree(t, dir, before)
 		if got := hookKeys(t, store); !slices.Equal(got, []string{"Foo"}) {
@@ -265,7 +265,7 @@ func TestForget(t *testing.T) {
 		before := tree(t, dir)
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, sessionindex.Entry{Name: forgotten}, "cli")
+		state.Forget(dir, store, "cli", sessionindex.Entry{Name: forgotten})
 
 		if n := len(sink.Records().AtOrAboveLevel(slog.LevelInfo)); n != 0 {
 			t.Errorf("records at INFO or above = %d, want none", n)
@@ -277,7 +277,7 @@ func TestForget(t *testing.T) {
 	t.Run("a nil hook store keeps the hook and still removes the rest", func(t *testing.T) {
 		dir, entry, store, _ := stageForgettable(t)
 
-		state.Forget(dir, nil, entry, "cli")
+		state.Forget(dir, nil, "cli", entry)
 
 		if got := hookKeys(t, store); !slices.Equal(got, []string{forgotten, neighbour}) {
 			t.Errorf("hooks = %v, want both kept", got)
@@ -294,7 +294,7 @@ func TestForget(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(scrollback, 0o700) })
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		rec := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn).Only(t, "the failed removal's warning")
 		if got := rec.AttrString(t, "detail"); got != "kept its scrollback" {
@@ -313,13 +313,66 @@ func TestForget(t *testing.T) {
 		}
 	})
 
+	t.Run("it forgets each of several entries, reading hooks.json once", func(t *testing.T) {
+		dir, entry, store, _ := stageForgettable(t)
+		other := sessionindex.Entry{Name: neighbour, ScrollbackFile: scrollbackFile(t, neighbour, apiCreated, 4242)}
+		reads := 0
+		state.AfterForgetReadsHooksForTest(t, func() { reads++ })
+		sink := logtest.Install(t)
+
+		state.Forget(dir, store, "cli", entry, other)
+
+		if got := hookKeys(t, store); len(got) != 0 {
+			t.Errorf("hooks = %v, want both removed", got)
+		}
+		for _, e := range []sessionindex.Entry{entry, other} {
+			for _, flag := range []state.SessionFlag{state.Hydrating, state.ResumePending} {
+				if up, err := flag.Exists(dir, e.Name); up || err != nil {
+					t.Errorf("%s's %s flag = %v, %v; want it removed", e.Name, flag, up, err)
+				}
+			}
+			assertAbsent(t, filepath.Join(dir, filepath.FromSlash(e.ScrollbackFile)))
+		}
+		if reads != 1 {
+			t.Errorf("hooks.json read %d times, want once", reads)
+		}
+		if n := len(sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelInfo)); n != 2 {
+			t.Errorf("forget records = %d, want one an entry", n)
+		}
+	})
+
+	t.Run("once the hooks lock refuses a removal it tries no other, keeping every hook, and the files still go", func(t *testing.T) {
+		dir, entry, store, hooksPath := stageForgettable(t)
+		other := sessionindex.Entry{Name: neighbour, ScrollbackFile: scrollbackFile(t, neighbour, apiCreated, 4242)}
+		hookstest.HoldHooksSidecar(t, hooksPath)
+		hooks.SetLockTimeoutForTest(t, 30*time.Millisecond)
+		sink := logtest.Install(t)
+
+		state.Forget(dir, store, "cli", entry, other)
+
+		sink.Records().Matching("hooks", "discard").AtExactLevel(slog.LevelWarn).Only(t, "the one removal the lock refused")
+		kept := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn)
+		if len(kept) != 2 {
+			t.Fatalf("kept-hook warnings = %d, want one an entry", len(kept))
+		}
+		for _, rec := range kept {
+			if got := rec.AttrString(t, "detail"); got != "kept its resume hook" {
+				t.Errorf("detail = %q, want it to name the hook", got)
+			}
+		}
+		if got := hookKeys(t, store); !slices.Equal(got, []string{forgotten, neighbour}) {
+			t.Errorf("hooks = %v, want both kept", got)
+		}
+		assertAbsent(t, filepath.Join(dir, filepath.FromSlash(other.ScrollbackFile)))
+	})
+
 	t.Run("a hooks lock held past its bound keeps the hook, warns, and the files still go", func(t *testing.T) {
 		dir, entry, store, hooksPath := stageForgettable(t)
 		hookstest.HoldHooksSidecar(t, hooksPath)
 		hooks.SetLockTimeoutForTest(t, 30*time.Millisecond)
 		sink := logtest.Install(t)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		rec := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn).Only(t, "the kept hook's warning")
 		if got := rec.AttrString(t, "detail"); got != "kept its resume hook" {
@@ -338,7 +391,7 @@ func TestForget(t *testing.T) {
 		commitlock.HoldForTest(t, dir)
 		commitlock.SetTimeoutForTest(t, 30*time.Millisecond)
 
-		state.Forget(dir, store, entry, "cli")
+		state.Forget(dir, store, "cli", entry)
 
 		assertAbsent(t, filepath.Join(dir, "hydrating", apiStem))
 		assertAbsent(t, filepath.Join(dir, filepath.FromSlash(entry.ScrollbackFile)))
@@ -364,7 +417,7 @@ func TestForget(t *testing.T) {
 			before := tree(t, dir)
 			sink := logtest.Install(t)
 
-			state.Forget(dir, store, sessionindex.Entry{Name: name, ScrollbackFile: "scrollback/.bin"}, "cli")
+			state.Forget(dir, store, "cli", sessionindex.Entry{Name: name, ScrollbackFile: "scrollback/.bin"})
 
 			assertTree(t, dir, before)
 			rec := sink.Records().Matching("sessions", "forget").AtExactLevel(slog.LevelWarn).Only(t, "the refusal's warning")

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/fileutil"
@@ -78,18 +79,17 @@ func TestAtomicWrite_Ordered(t *testing.T) {
 		}
 	})
 
-	t.Run("a temp file that won't sync fails the write with ErrWriteFsync, renaming nothing", func(t *testing.T) {
+	t.Run("a temp file that fails its sync with EIO fails the write with ErrWriteFsync, renaming nothing", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "sessions.json")
 		mustWrite(t, target, "old")
-		boom := errors.New("device gone")
 		dirSynced := false
-		fileutil.SetSyncsForTest(t, func(*os.File) error { return boom }, func(string) error { dirSynced = true; return nil })
+		fileutil.SetSyncsForTest(t, func(*os.File) error { return syscall.EIO }, func(string) error { dirSynced = true; return nil })
 
 		err := fileutil.AtomicWrite(target, []byte("new"))
 
-		if !errors.Is(err, fileutil.ErrWriteFsync) || !errors.Is(err, boom) {
-			t.Errorf("AtomicWrite = %v, want ErrWriteFsync wrapping the sync's error", err)
+		if !errors.Is(err, fileutil.ErrWriteFsync) || !errors.Is(err, syscall.EIO) {
+			t.Errorf("AtomicWrite = %v, want ErrWriteFsync wrapping EIO", err)
 		}
 		requireContent(t, target, "old")
 		requireNoTempFiles(t, dir)
@@ -98,20 +98,34 @@ func TestAtomicWrite_Ordered(t *testing.T) {
 		}
 	})
 
-	t.Run("a directory that won't sync fails the write with ErrWriteFsync, the file replaced", func(t *testing.T) {
+	t.Run("a directory that fails its sync after the rename leaves the write landed, reported to ReportUnsynced", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "sessions.json")
 		mustWrite(t, target, "old")
-		boom := errors.New("device gone")
-		fileutil.SetSyncsForTest(t, (*os.File).Sync, func(string) error { return boom })
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+		var reported []error
 
-		err := fileutil.AtomicWrite(target, []byte("new"))
+		err := fileutil.AtomicWrite0600(target, []byte("new"), fileutil.ReportUnsynced(func(err error) { reported = append(reported, err) }))
 
-		if !errors.Is(err, fileutil.ErrWriteFsync) || !errors.Is(err, boom) {
-			t.Errorf("AtomicWrite = %v, want ErrWriteFsync wrapping the sync's error", err)
+		if err != nil {
+			t.Errorf("AtomicWrite = %v, want nil: the rename landed", err)
 		}
 		requireContent(t, target, "new")
 		requireNoTempFiles(t, dir)
+		if len(reported) != 1 || !errors.Is(reported[0], fileutil.ErrWriteFsync) || !errors.Is(reported[0], syscall.EIO) {
+			t.Errorf("reported = %v, want one ErrWriteFsync wrapping EIO", reported)
+		}
+	})
+
+	t.Run("a directory that fails its sync after the rename leaves the write landed with no one to report to", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "hooks.json")
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
+
+		if err := fileutil.AtomicWrite(target, []byte("new")); err != nil {
+			t.Errorf("AtomicWrite = %v, want nil: the rename landed", err)
+		}
+		requireContent(t, target, "new")
 	})
 }
 

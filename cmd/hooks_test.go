@@ -21,14 +21,17 @@ const (
 	hookSessionB = "web-Qm3pLz"
 )
 
-// inSession stages a backend holding a session named name and running this
-// process inside it, in a state directory of the test's own; an empty name
-// stages one running outside any session.
+// hookSessionCreated is when inSession's session was created, in this boot.
+var hookSessionCreated = testBoot.Add(time.Hour)
+
+// inSession stages a backend holding a session named name, created at
+// hookSessionCreated, and running this process inside it, in a state directory
+// of the test's own; an empty name stages one running outside any session.
 func inSession(t *testing.T, name string, others ...backend.Session) *backendtest.Fake {
 	t.Helper()
 	fake := backendtest.New(others...)
 	if name != "" {
-		fake.Add(backend.Session{Name: name})
+		fake.Add(backend.Session{Name: name, Created: hookSessionCreated})
 	}
 	fake.SetCurrent(name)
 	withBackendDeps(t, BackendDeps{Backend: fake})
@@ -411,6 +414,23 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("stat hooks.json = %v, want nothing set", err)
+		}
+	})
+
+	t.Run("a session that answers with no creation is refused, claiming and setting nothing", func(t *testing.T) {
+		_, hooksFile := hooksFileInTempDir(t, nil)
+		inSession(t, "", backend.Session{Name: hookSessionA, PID: 4242}).SetCurrent(hookSessionA)
+
+		_, err := runHookSet(t, "npm start")
+
+		if want := "session " + hookSessionA + " did not report when it was created; no hook is set"; err == nil || err.Error() != want {
+			t.Errorf("hook set = %v, want %q", err, want)
+		}
+		if _, err := os.Stat(hooksFile); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat hooks.json = %v, want nothing set", err)
+		}
+		if entries := dirListing(t, os.Getenv("PORTAL_STATE_DIR")); len(entries) != 0 {
+			t.Errorf("state directory = %v, want no claim written", entries)
 		}
 	})
 }

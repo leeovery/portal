@@ -46,15 +46,41 @@ func TestUpdate_Outcome(t *testing.T) {
 		}
 	})
 
-	t.Run("a name removed and claimed again reports the entry it read", func(t *testing.T) {
-		outcome := update(t, func(idx *sessionindex.Index) error {
+	t.Run("a name removed is not claimed again in the same update, and reports the entry it read removed", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, held...)
+
+		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("saved")
 			idx.Claim("saved", "/new", liveCreation, 4242, ruleRestoring())
 			return nil
-		}, held...)
+		})
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
 
-		if got := outcome.Dropped(); !sameEntries(got, []sessionindex.Entry{saved}) {
-			t.Errorf("dropped = %+v, want saved as read", got)
+		if !sameEntries(outcome.Removed, []sessionindex.Entry{saved}) || len(outcome.Replaced) != 0 {
+			t.Errorf("outcome = %+v, want saved as read, removed", outcome)
+		}
+		if idx, _ := sessionindex.Read(dir); func() bool { _, ok := idx.Lookup("saved"); return ok }() {
+			t.Error("the claim made the removed entry again")
+		}
+	})
+
+	t.Run("a name removed is not labelled again in the same update", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, held...)
+
+		_, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Remove("saved")
+			return idx.SetLabel("saved", "Again")
+		})
+
+		if !errors.Is(err, sessionindex.ErrRemoved) {
+			t.Errorf("Update = %v, want ErrRemoved", err)
+		}
+		if idx, _ := sessionindex.Read(dir); idx.Len() != len(held) {
+			t.Errorf("sessions = %+v, want the index untouched", idx.Entries())
 		}
 	})
 

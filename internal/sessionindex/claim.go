@@ -63,7 +63,8 @@ func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule)
 
 // Claim makes the session's entry the live session's: the one its backend
 // created at created, running pid, each zero when it reports none.
-//   - A session with no entry gets one.
+//   - A session with no entry gets one, unless this Update removed its entry:
+//     then the claim changes nothing.
 //   - A claim knowing no creation can judge none, and changes nothing.
 //   - An entry of the same creation keeps everything, taking the dir and pid
 //     it records none of.
@@ -75,21 +76,23 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 	i := idx.indexOf(name)
 	switch {
 	case i < 0:
-		idx.add(Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid})
+		if _, made := idx.add(Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}); !made {
+			return
+		}
 	case created.IsZero():
 		return
-	case idx.Sessions[i].sameCreation(created, pid):
-		if !idx.Sessions[i].fillIn(dir, pid) {
+	case idx.sessions[i].sameCreation(created, pid):
+		if !idx.sessions[i].fillIn(dir, pid) {
 			return
 		}
 	default:
-		if why := rule.adoption(idx.Sessions[i]); why != "" {
+		if why := rule.adoption(idx.sessions[i]); why != "" {
 			idx.adopt(i, created, pid, "adopt", why)
-			idx.Sessions[i].fillIn(dir, 0)
+			idx.sessions[i].fillIn(dir, 0)
 			return
 		}
-		earlier := idx.Sessions[i]
-		idx.Sessions[i] = Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}
+		earlier := idx.sessions[i]
+		idx.sessions[i] = Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}
 		idx.markFresh(name)
 		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
 		return
@@ -101,13 +104,15 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 // and pid, as its entry's own, keeping everything else the entry was saved
 // with. It reports whether the entry now records that creation: a session
 // with no entry, or a created of zero, records nothing, so its entry keeps the
-// creation it was saved with for a later claim to take over.
+// creation it was saved with for a later claim to take over. It adopts
+// whatever the entry records, consulting no rule, so restore is its only
+// caller, which a guard holds to.
 func (idx *Index) Restored(name string, created time.Time, pid int) bool {
 	i := idx.indexOf(name)
 	if i < 0 || created.IsZero() {
 		return false
 	}
-	if e := idx.Sessions[i]; !e.CreatedAt.Equal(created) || e.PID != pid {
+	if e := idx.sessions[i]; !e.CreatedAt.Equal(created) || e.PID != pid {
 		idx.adopt(i, created, pid, "restored", "restore made it")
 	}
 	return true
@@ -116,7 +121,7 @@ func (idx *Index) Restored(name string, created time.Time, pid int) bool {
 // adopt makes the creation created, running pid, the entry at i's own,
 // recording the change as op, why it was adopted in its detail.
 func (idx *Index) adopt(i int, created time.Time, pid int, op, why string) {
-	e := &idx.Sessions[i]
+	e := &idx.sessions[i]
 	detail := fmt.Sprintf("%s; pid %d, in place of %s", why, pid, creationOf(*e))
 	e.CreatedAt, e.PID = created, pid
 	idx.changes = append(idx.changes, change{op: op, session: e.Name, value: created.UTC().Format(time.RFC3339), detail: detail})
