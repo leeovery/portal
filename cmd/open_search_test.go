@@ -140,6 +140,7 @@ func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	t.Helper()
 
 	sc := &searchFormCapture{seams: &recordingResolverSeams{}, fake: backendtest.New()}
+	withBootstrapDeps(t, BootstrapDeps{})
 	withBackendDeps(t, BackendDeps{Backend: sc.fake})
 
 	withOpenDeps(t, OpenDeps{
@@ -149,7 +150,7 @@ func installSearchFormSeams(t *testing.T) *searchFormCapture {
 		DirValidator:  sc.seams,
 	})
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		sc.tuiCalled = true
 		sc.landing = landing
 		sc.command = command
@@ -291,7 +292,7 @@ func TestOpenCommand_MultiSegmentPathPositional_StillMints(t *testing.T) {
 		gotPath = path
 		return nil
 	})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a multi-segment path positional must mint rather than open the picker")
 		return nil
 	})
@@ -443,7 +444,7 @@ func TestValidateSearchFormCollisions_AdmitsASearchFormThatSetNoFlag(t *testing.
 func TestValidateOpenArgs_RefusedLineStartsNoBootstrap(t *testing.T) {
 	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a refused line must never reach the picker")
 		return nil
 	})
@@ -681,7 +682,7 @@ func executeOpenExpectingPreBootstrapUsage(t *testing.T, wantMsg string, argv ..
 		Zoxide:        seams,
 		DirValidator:  seams,
 	})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a refused line must never reach the picker")
 		return nil
 	})

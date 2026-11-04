@@ -206,7 +206,7 @@ func TestOpenCommand_SessionNameHit_RoutesToSessionConnector(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -251,7 +251,7 @@ func TestOpenCommand_SessionPin_ExactHit_RoutesToConnector(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -424,7 +424,7 @@ func TestOpenCommand_SessionPin_Miss_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -507,7 +507,7 @@ func TestOpenCommand_PathPin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -575,7 +575,7 @@ func TestOpenCommand_PathPin_Miss_HardFailsNoPicker(t *testing.T) {
 	missDir := filepath.Join(t.TempDir(), "does-not-exist")
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -695,7 +695,7 @@ func TestOpenCommand_AliasPin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -728,7 +728,7 @@ func TestOpenCommand_AliasPin_UnknownKey_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -848,7 +848,7 @@ func TestOpenCommand_ZoxidePin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -881,7 +881,7 @@ func TestOpenCommand_ZoxidePin_NotInstalled_ErrorsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -921,7 +921,7 @@ func TestOpenCommand_ZoxidePin_NoMatch_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1394,36 +1394,36 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 }
 
-func TestBuildTUIModel_ServerStarted(t *testing.T) {
-	t.Run("serverStarted true starts on loading page", func(t *testing.T) {
+func TestBuildTUIModel_Bootstrapping(t *testing.T) {
+	t.Run("bootstrapping starts on loading page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.serverStarted = true
+		cfg.bootstrapping = true
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)
 		}
-		if !m.ServerStarted() {
-			t.Error("ServerStarted() = false, want true")
+		if !m.Bootstrapping() {
+			t.Error("Bootstrapping() = false, want true")
 		}
 	})
 
-	t.Run("serverStarted false starts on sessions page", func(t *testing.T) {
+	t.Run("not bootstrapping starts on sessions page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.serverStarted = false
+		cfg.bootstrapping = false
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if m.ActivePage() != tui.PageSessions {
 			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
 		}
-		if m.ServerStarted() {
-			t.Error("ServerStarted() = true, want false")
+		if m.Bootstrapping() {
+			t.Error("Bootstrapping() = true, want false")
 		}
 	})
 
-	t.Run("default serverStarted starts on sessions page", func(t *testing.T) {
+	t.Run("by default starts on sessions page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
@@ -1433,15 +1433,15 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 		}
 	})
 
-	t.Run("serverStarted true preserves other options", func(t *testing.T) {
+	t.Run("bootstrapping preserves other options", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.currentSession = "dev"
-		cfg.serverStarted = true
+		cfg.bootstrapping = true
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
-		if !m.ServerStarted() {
-			t.Error("ServerStarted() = false, want true")
+		if !m.Bootstrapping() {
+			t.Error("Bootstrapping() = false, want true")
 		}
 		if m.CurrentSession() != "dev" {
 			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "dev")
@@ -1498,7 +1498,7 @@ func TestOpenCommand_TotalMiss_HardFails(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1758,7 +1758,7 @@ func TestOpenCommand_Filter_OpensPickerPrefilteredAndSkipsResolution(t *testing.
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -1797,7 +1797,7 @@ func TestOpenCommand_Filter_WithPositionalTarget_UsageError(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1848,7 +1848,7 @@ func TestOpenCommand_Filter_WithPin_UsageError(t *testing.T) {
 			})
 
 			tuiCalled := false
-			withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+			withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 				tuiCalled = true
 				return nil
 			})
@@ -1904,7 +1904,7 @@ func TestOpenCommand_Filter_WithMultiplePins_UsageError(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1935,7 +1935,7 @@ func TestOpenCommand_Filter_EmptyValue_UsageError(t *testing.T) {
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1964,7 +1964,7 @@ func TestOpenCommand_NoArgs_NoFilter_LaunchesPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, _ []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		return nil
@@ -1998,7 +1998,7 @@ func TestOpenCommand_CommandNoTarget_ExecFlag_OpensProjectsPicker(t *testing.T) 
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -2055,7 +2055,7 @@ func TestOpenCommand_CommandNoTarget_DashDash_OpensProjectsPicker(t *testing.T) 
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -2103,7 +2103,7 @@ func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	var gotCommand []string
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		gotLanding = landing
 		gotCommand = command
 		return nil
@@ -2129,7 +2129,7 @@ func TestOpenCommand_Filter_ThreadsDashDashCommandToPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	var gotCommand []string
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		gotLanding = landing
 		gotCommand = command
 		return nil

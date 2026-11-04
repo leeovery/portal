@@ -79,11 +79,11 @@ func TestPerSessionCalls(t *testing.T) {
 			}
 		})
 
-		t.Run(op.name+" reports a refusing socket from this boot as not answering", func(t *testing.T) {
+		t.Run(op.name+" reports a refusing socket from this boot that a process may hold as not answering", func(t *testing.T) {
 			dir := socketDir(t)
 			refusing(t, dir, "busy")
 
-			err := op.call(t.Context(), newBackend(t, dir), "busy")
+			err := op.call(t.Context(), held(newBackend(t, dir), dir, "busy"), "busy")
 
 			if !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
 				t.Errorf("%s(busy) = %v, want ErrTimeout and not ErrNoSuchSession", op.name, err)
@@ -367,7 +367,7 @@ func TestAttachCommand(t *testing.T) {
 		} {
 			t.Run("inside "+tt.inside, func(t *testing.T) {
 				env := append(slices.Clone(tt.env), "TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
-				cmd, err := newBackend(t, dir, env...).AttachCommand(t.Context(), "work")
+				cmd, err := held(newBackend(t, dir, env...), dir, "busy").AttachCommand(t.Context(), "work")
 				if err != nil {
 					t.Fatalf("AttachCommand: %v", err)
 				}
@@ -477,9 +477,9 @@ func TestExists(t *testing.T) {
 }
 
 func TestCurrent(t *testing.T) {
-	t.Run("it reads ZMX_SESSION, the last entry winning", func(t *testing.T) {
+	t.Run("it reads ZMX_SESSION, the first entry winning, as zmx's getenv reads one", func(t *testing.T) {
 		dir := socketDir(t)
-		b := newBackend(t, dir, "ZMX_SESSION=first", "PATH=/bin", "ZMX_DIR="+dir, "ZMX_SESSION=work")
+		b := newBackend(t, dir, "ZMX_SESSION=work", "PATH=/bin", "ZMX_DIR="+dir, "ZMX_DIR=/tmp/zx-other", "ZMX_SESSION=later")
 		if got := b.Current(); got != "work" {
 			t.Errorf("Current = %q, want work", got)
 		}
@@ -577,11 +577,11 @@ func TestProtocolVersion(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports a refusing socket as refusing", func(t *testing.T) {
+	t.Run("it reports a refusing socket a process may hold as refusing", func(t *testing.T) {
 		dir := socketDir(t)
 		refusing(t, dir, "crashed")
 
-		_, err := newBackend(t, dir).ProtocolVersion(t.Context(), "crashed")
+		_, err := held(newBackend(t, dir), dir, "crashed").ProtocolVersion(t.Context(), "crashed")
 		if !errors.Is(err, zmx.ErrRefusing) || !errors.Is(err, backend.ErrTimeout) {
 			t.Errorf("ProtocolVersion of a refusing socket = %v, want ErrRefusing wrapping ErrTimeout", err)
 		}
@@ -707,6 +707,9 @@ func TestDirFor(t *testing.T) {
 		want    string
 	}{
 		{"ZMX_DIR when set", []string{"ZMX_DIR=/z", "XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/z"},
+		{"ZMX_DIR's first entry, as zmx's getenv reads it", []string{"ZMX_DIR=/z", "ZMX_DIR=/later"}, "/z"},
+		{"XDG_RUNTIME_DIR's first entry", []string{"XDG_RUNTIME_DIR=/run/user/1", "XDG_RUNTIME_DIR=/later"}, "/run/user/1/zmx"},
+		{"TMPDIR's first entry", []string{"TMPDIR=/t", "TMPDIR=/later"}, "/t/zmx-" + uid},
 		{"ZMX_DIR when set empty", []string{"ZMX_DIR=", "XDG_RUNTIME_DIR=/run/user/1"}, ""},
 		{"zmx in XDG_RUNTIME_DIR", []string{"XDG_RUNTIME_DIR=/run/user/1", "TMPDIR=/t"}, "/run/user/1/zmx"},
 		{"zmx-<uid> in TMPDIR, its trailing slashes trimmed", []string{"TMPDIR=/var/folders/x/T//"}, "/var/folders/x/T/zmx-" + uid},

@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/zmxtest"
@@ -16,6 +18,7 @@ import (
 
 func TestPortalOpenPathAgainstZmx(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t)
 	binary := buildPortalBinary(t)
 
@@ -41,6 +44,8 @@ func TestPortalOpenPathAgainstZmx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list %s: %v", b.Dir(), err)
 	}
+	// The bootstrap's saver is the other.
+	sessions = slices.DeleteFunc(sessions, backend.Session.PortalOwned)
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %+v, want the one portal open made", sessions)
 	}

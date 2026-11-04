@@ -24,14 +24,33 @@ func List() ([]Process, error) {
 	}
 	list := make([]Process, 0, len(procs))
 	for _, p := range procs {
-		list = append(list, Process{
-			PID:      int(p.Proc.P_pid),
-			PPID:     int(p.Eproc.Ppid),
-			Terminal: p.Eproc.Tdev != noDevice,
-			Command:  unix.ByteSliceToString(p.Proc.P_comm[:]),
-		})
+		list = append(list, processOf(p))
 	}
 	return list, nil
+}
+
+// Read reads pid, from the kernel as it is called, as List lists this user's
+// processes. Unlike List, it filters by no uid: another user's pid reads too.
+// It fails with ErrGone for a process that has exited or is exiting, a zombie
+// among them.
+func Read(pid int) (Process, error) {
+	procs, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
+	switch {
+	case err != nil:
+		return Process{}, fmt.Errorf("read process %d: %w", pid, err)
+	case goneFrom(procs):
+		return Process{}, fmt.Errorf("read process %d: %w", pid, ErrGone)
+	}
+	return processOf(procs[0]), nil
+}
+
+func processOf(p unix.KinfoProc) Process {
+	return Process{
+		PID:      int(p.Proc.P_pid),
+		PPID:     int(p.Eproc.Ppid),
+		Terminal: p.Eproc.Tdev != noDevice,
+		Command:  unix.ByteSliceToString(p.Proc.P_comm[:]),
+	}
 }
 
 // ReadArgs reads pid's argv and environment. It fails with ErrGone for a

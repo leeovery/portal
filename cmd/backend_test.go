@@ -49,7 +49,7 @@ func TestAttachingBackend(t *testing.T) {
 		pathWithoutZmx(t)
 
 		_, err := attachingBackend()
-		if err == nil || err.Error() != "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx" {
+		if err == nil || err.Error() != "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1" {
 			t.Errorf("error = %v, want the zmx-missing line", err)
 		}
 	})
@@ -174,7 +174,7 @@ func TestOpen_ZmxMissingIsFatal(t *testing.T) {
 func stubPicker(t *testing.T) *bool {
 	t.Helper()
 	reached := new(bool)
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		*reached = true
 		return nil
 	})

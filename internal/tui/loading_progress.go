@@ -6,16 +6,17 @@ import "fmt"
 // keyed off BootstrapProgressMsg.Index alone.
 
 const (
-	LabelStartedTmuxServer     = "Started tmux server"
-	LabelRegisteredHooks       = "Registered hooks"
-	LabelRestoringSessions     = "Restoring sessions"
-	LabelReplayingScrollback   = "Replaying scrollback"
-	LabelRunningResumeCommands = "Running resume commands"
+	LabelCheckingZmx       = "Checking zmx"
+	LabelStartingTheSaver  = "Starting the saver"
+	LabelRestoringSessions = "Restoring sessions"
+	// LabelWaiting leads the labels only once the bootstrap has waited a while
+	// for another Portal's to finish.
+	LabelWaiting = "Waiting for another Portal"
 )
 
 // One increment per distinct completed step, not per label. Keep in lockstep
-// with stepLabelTable.
-const totalBootstrapSteps = 10
+// with stepLabelTable and cmd/bootstrap's step indices.
+const totalBootstrapSteps = 6
 
 type LabelState int
 
@@ -27,35 +28,28 @@ const (
 )
 
 var labelOrder = []string{
-	LabelStartedTmuxServer,
-	LabelRegisteredHooks,
+	LabelCheckingZmx,
+	LabelStartingTheSaver,
 	LabelRestoringSessions,
-	LabelReplayingScrollback,
-	LabelRunningResumeCommands,
 }
 
-// Step 6 (Restore) dual-maps at runtime, not here: its per-session skeleton
-// events (RestoreM > 0) belong to "Restoring sessions", its completion tick here.
+// The bootstrap's six steps under their labels: checking zmx; removing the
+// latch, the sweep and the saver; then restore and the latch.
 var stepLabelTable = map[int]string{
-	1:  LabelStartedTmuxServer,
-	2:  LabelRegisteredHooks,
-	3:  LabelRegisteredHooks,
-	4:  LabelRegisteredHooks,
-	5:  LabelRegisteredHooks,
-	6:  LabelReplayingScrollback,
-	7:  LabelReplayingScrollback,
-	8:  LabelRunningResumeCommands,
-	9:  LabelRunningResumeCommands,
-	10: LabelRunningResumeCommands,
+	1: LabelCheckingZmx,
+	2: LabelStartingTheSaver,
+	3: LabelStartingTheSaver,
+	4: LabelStartingTheSaver,
+	5: LabelRestoringSessions,
+	6: LabelRestoringSessions,
 }
 
-const restoreStep = 6
+// restoreStep's per-session events (RestoreM > 0) count its sessions, n of m,
+// rather than completing it.
+const restoreStep = 5
 
 // LabelForStep returns "" for an out-of-range index.
 func LabelForStep(e BootstrapProgressMsg) string {
-	if e.Index == restoreStep && e.RestoreM > 0 {
-		return LabelRestoringSessions
-	}
 	return stepLabelTable[e.Index]
 }
 
@@ -80,21 +74,26 @@ type LoadingProgress struct {
 	completedSteps map[int]bool
 	restoreN       int
 	restoreM       int
+	waiting        bool
 }
 
 // Apply is idempotent per step index, so a duplicate or out-of-order event
-// never double-advances the bar. It assumes the producer emits every skeleton
-// event (RestoreM > 0) before step 6's trailing completion tick.
+// never double-advances the bar. It assumes the producer emits every
+// per-session event (RestoreM > 0) before the restore step's completion tick.
 func (p LoadingProgress) Apply(e BootstrapProgressMsg) LoadingProgress {
-	if _, mapped := stepLabelTable[e.Index]; !mapped {
+	_, mapped := stepLabelTable[e.Index]
+	if !mapped && !e.Waiting {
 		return p
 	}
 
 	next := p.clone()
-	if e.Index == restoreStep && e.RestoreM > 0 {
+	switch {
+	case e.Waiting:
+		next.waiting = true
+	case e.Index == restoreStep && e.RestoreM > 0:
 		next.restoreN = e.RestoreN
 		next.restoreM = e.RestoreM
-	} else {
+	default:
 		next.completedSteps[e.Index] = true
 	}
 	return next
@@ -109,31 +108,29 @@ func (p LoadingProgress) clone() LoadingProgress {
 		completedSteps: steps,
 		restoreN:       p.restoreN,
 		restoreM:       p.restoreM,
+		waiting:        p.waiting,
 	}
 }
 
 func (p LoadingProgress) View() LoadingProgressView {
-	v := LoadingProgressView{
-		BarFraction: float64(len(p.completedSteps)) / float64(totalBootstrapSteps),
-		Labels:      make([]LoadingLabel, 0, len(labelOrder)),
-	}
-	for _, text := range labelOrder {
-		v.Labels = append(v.Labels, LoadingLabel{
-			Text:    text,
-			State:   p.labelState(text),
-			Counter: p.counterFor(text),
-		})
-	}
-	return v
+	return p.view(0, "")
 }
 
-// FailedView leaves no label failed when failedStep is out of range.
+// FailedView leaves no label failed when failedStep is out of range, as a
+// fatal before any step leaves it.
 func (p LoadingProgress) FailedView(failedStep int, message string) LoadingProgressView {
+	return p.view(failedStep, message)
+}
+
+func (p LoadingProgress) view(failedStep int, message string) LoadingProgressView {
 	failedLabel := LabelForStepIndex(failedStep)
 	v := LoadingProgressView{
 		BarFraction: float64(len(p.completedSteps)) / float64(totalBootstrapSteps),
-		Labels:      make([]LoadingLabel, 0, len(labelOrder)),
+		Labels:      make([]LoadingLabel, 0, len(labelOrder)+1),
 		Message:     message,
+	}
+	if p.waiting {
+		v.Labels = append(v.Labels, LoadingLabel{Text: LabelWaiting, State: p.waitState()})
 	}
 	for _, text := range labelOrder {
 		state := p.labelState(text)
@@ -149,10 +146,18 @@ func (p LoadingProgress) FailedView(failedStep int, message string) LoadingProgr
 	return v
 }
 
-// A fatal step is never the dual-mapped restore step, so the static table is
-// exact here. An out-of-range index returns "".
+// LabelForStepIndex returns "" for an out-of-range index.
 func LabelForStepIndex(index int) string {
 	return stepLabelTable[index]
+}
+
+// The waiting label is active until the first step completes: the wait for
+// the other Portal is over once this bootstrap runs a step.
+func (p LoadingProgress) waitState() LabelState {
+	if len(p.completedSteps) == 0 {
+		return LabelActive
+	}
+	return LabelDone
 }
 
 // A label is done once every constituent step completed; the active label is the
@@ -179,17 +184,9 @@ func (p LoadingProgress) activeLabel() string {
 	return ""
 }
 
-// "Restoring sessions" has no static table entry (step 6's slot is the
-// scrollback label), so its completion keys off step 6 directly.
 func (p LoadingProgress) labelDone(text string) bool {
-	if text == LabelRestoringSessions {
-		return p.completedSteps[restoreStep]
-	}
 	for idx := 1; idx <= totalBootstrapSteps; idx++ {
-		if stepLabelTable[idx] != text {
-			continue
-		}
-		if !p.completedSteps[idx] {
+		if stepLabelTable[idx] == text && !p.completedSteps[idx] {
 			return false
 		}
 	}

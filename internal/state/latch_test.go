@@ -194,6 +194,34 @@ func TestLatch(t *testing.T) {
 			assertAbsent(t, state.Bootstrapped(dir))
 		})
 	}
+
+	t.Run("a removed latch is gone, and removing none succeeds", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := state.WriteLatch(dir, running); err != nil {
+			t.Fatal(err)
+		}
+
+		for range 2 {
+			if err := state.RemoveLatch(dir); err != nil {
+				t.Fatalf("RemoveLatch = %v, want nil", err)
+			}
+		}
+		assertAbsent(t, state.Bootstrapped(dir))
+	})
+
+	t.Run("a latch that can't be removed is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(state.Bootstrapped(dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state.Bootstrapped(dir), "x"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := state.RemoveLatch(dir); err == nil {
+			t.Error("RemoveLatch = nil, want the failed removal")
+		}
+	})
 }
 
 func inode(t *testing.T, path string) uint64 {

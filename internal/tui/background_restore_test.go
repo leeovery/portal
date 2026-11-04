@@ -56,7 +56,7 @@ func TestInit_BatchesBackgroundColorQuery(t *testing.T) {
 	})
 
 	t.Run("loading path (server started)", func(t *testing.T) {
-		m := New(fakeLister{}, WithServerStarted(true))
+		m := New(fakeLister{}, WithBootstrapping(true))
 		if !initReturnsBatch(t, m) {
 			t.Error("Init did not batch the background-color query on the loading path")
 		}

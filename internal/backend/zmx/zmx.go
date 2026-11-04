@@ -72,7 +72,8 @@ type Backend struct {
 	hostname func() (string, error)
 	booted   func() (time.Time, error)
 	limits   ceilings
-	// processes is the process table AttachClients reads.
+	// processes is the process table AttachClients, unheld and EndDaemon
+	// read.
 	processes processTable
 }
 
@@ -392,8 +393,8 @@ func (b *Backend) env(drop ...string) []string {
 	return append(env, envDir+"="+b.dir)
 }
 
-// lookup is key's value in env, the last entry winning as it does in an
-// exec.Cmd's Env.
+// lookup is key's value in env, the first entry winning, as zmx's getenv
+// reads its own environment.
 func lookup(env []string, key string) string {
 	value, _ := lookupSet(env, key)
 	return value
@@ -403,17 +404,17 @@ func lookup(env []string, key string) string {
 func lookupSet(env []string, key string) (value string, set bool) {
 	for _, kv := range env {
 		if k, v, _ := strings.Cut(kv, "="); k == key {
-			value, set = v, true
+			return v, true
 		}
 	}
-	return value, set
+	return "", false
 }
 
 // DirFor is the directory zmx uses in the environment environ, resolved as
-// zmx's cfg.zig does: ZMX_DIR when set, otherwise zmx in XDG_RUNTIME_DIR,
-// otherwise zmx-<uid> in TMPDIR, or in /tmp when TMPDIR is unset. zmx sets no
-// ZMX_DIR of its own in a session, so a session started without one is in
-// this default directory.
+// zmx's cfg.zig does, each variable's first entry winning: ZMX_DIR when set,
+// otherwise zmx in XDG_RUNTIME_DIR, otherwise zmx-<uid> in TMPDIR, or in /tmp
+// when TMPDIR is unset. zmx sets no ZMX_DIR of its own in a session, so a
+// session started without one is in this default directory.
 func DirFor(environ []string) string {
 	if dir, ok := lookupSet(environ, envDir); ok {
 		return dir

@@ -15,7 +15,7 @@ func coldTUIModel(t *testing.T, sessions []Session) tea.Model {
 	t.Helper()
 	lister := postloadStubLister{sessions: sessions}
 	receiver := func() tea.Msg { return nil }
-	m := New(lister, WithServerStarted(true), WithProgressReceiver(receiver))
+	m := New(lister, WithBootstrapping(true), WithProgressReceiver(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model
@@ -24,7 +24,7 @@ func coldTUIModel(t *testing.T, sessions []Session) tea.Model {
 func warmStagingModel(t *testing.T) tea.Model {
 	t.Helper()
 	lister := postloadStubLister{sessions: []Session{}}
-	m := New(lister, WithServerStarted(true))
+	m := New(lister, WithBootstrapping(true))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model

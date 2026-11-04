@@ -207,13 +207,13 @@ func TestSpawnCommandIsRetired(t *testing.T) {
 
 type nopRunner struct{}
 
-func (nopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, nil
+func (nopRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, nil
 }
 
 type panicRunner struct{}
 
-func (panicRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+func (panicRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
 	panic("buildBootstrapDeps / Run must not be reached")
 }
 
@@ -221,8 +221,8 @@ type errRunner struct {
 	err error
 }
 
-func (r *errRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, r.err
+func (r *errRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, r.err
 }
 
 func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
@@ -244,7 +244,7 @@ func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
 	})
 
 	t.Run("orchestrator error propagates to caller", func(t *testing.T) {
-		runner := &recordingRunner{err: fmt.Errorf("failed to start tmux server: permission denied")}
+		runner := &recordingRunner{err: fmt.Errorf("take bootstrap.lock: permission denied")}
 		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 		resetRootCmd()
@@ -254,7 +254,7 @@ func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		want := "failed to start tmux server: permission denied"
+		want := "take bootstrap.lock: permission denied"
 		if err.Error() != want {
 			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
@@ -309,103 +309,21 @@ func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("PersistentPreRunE stores serverStarted=true in context", func(t *testing.T) {
-		runner := &recordingRunner{started: true}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		var gotStarted bool
-		testCmd := &cobra.Command{
-			Use: "testcmd",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				gotStarted = serverWasStarted(cmd)
-				return nil
-			},
-		}
-		rootCmd.AddCommand(testCmd)
-		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"testcmd"})
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !gotStarted {
-			t.Error("expected serverWasStarted=true, got false")
-		}
-	})
-
-	t.Run("PersistentPreRunE stores serverStarted=false in context", func(t *testing.T) {
-		runner := &recordingRunner{started: false}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		var gotStarted bool
-		var runCalled bool
-		testCmd := &cobra.Command{
-			Use: "testcmd2",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				runCalled = true
-				gotStarted = serverWasStarted(cmd)
-				return nil
-			},
-		}
-		rootCmd.AddCommand(testCmd)
-		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"testcmd2"})
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !runCalled {
-			t.Fatal("RunE was not called")
-		}
-		if gotStarted {
-			t.Error("expected serverWasStarted=false, got true")
-		}
-	})
 }
 
 type fatalRunner struct {
 	fatal *bootstrap.FatalError
 }
 
-func (r *fatalRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, r.fatal
-}
-
-func TestPersistentPreRunE_RunsNoBootstrapInProduction(t *testing.T) {
-	for _, args := range [][]string{{"list"}, {"open"}} {
-		t.Run("portal "+strings.Join(args, " "), func(t *testing.T) {
-			resetBootstrapOnce(t)
-			fake := backendtest.New()
-			withBackendDeps(t, BackendDeps{Backend: fake})
-			withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, started bool) error {
-				if deferredBootstrapFromContext(cmd) != nil || started {
-					t.Error("the picker was handed a bootstrap to wait for; want it straight onto its list")
-				}
-				return nil
-			})
-
-			if _, _, err := runRootCmd(t, args...); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if bootstrapStarted || bootstrapErr != nil {
-				t.Errorf("the bootstrap gate ran: started = %v, err = %v", bootstrapStarted, bootstrapErr)
-			}
-		})
-	}
+func (r *fatalRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, r.fatal
 }
 
 func TestPersistentPreRunE_OrchestratorFatalErrorPropagatesUnwrapped(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	cause := errors.New("hooks boom")
-	want := "Portal failed to register tmux hooks: hooks boom"
+	cause := errors.New("permission denied")
+	want := "Portal failed to raise the restoring flag: permission denied"
 	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, cause)}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
@@ -431,7 +349,7 @@ func TestPersistentPreRunE_OrchestratorFatalErrorPropagatesUnwrapped(t *testing.
 func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	want := "Portal failed to register tmux hooks: synthetic"
+	want := "Portal failed to raise the restoring flag: synthetic"
 	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, errors.New("synthetic"))}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 

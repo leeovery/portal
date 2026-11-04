@@ -11,9 +11,10 @@ import (
 // an entry left by an earlier session of this boot is replaced. Any other
 // belongs to a session Portal created or restored, whose label, dirs,
 // scrollback and hook it must keep: one whose creation was never recorded,
-// one saved before this boot and so awaiting restore, and one whose session
-// Portal is restoring now. NewRule builds the rule; the zero Rule can judge
-// nothing, so a claim under it replaces no entry and can lose none.
+// one saved before this boot or owed a restore and so awaiting one, and one
+// whose session Portal is restoring now. NewRule builds the rule; the zero
+// Rule can judge nothing, so a claim under it replaces no entry and can lose
+// none.
 type Rule struct {
 	judges    bool
 	booted    time.Time
@@ -30,10 +31,12 @@ func NewRule(booted time.Time, restoring func(name string) bool) Rule {
 // adoption says why the live session takes over e, an entry from another
 // creation, rather than replacing it, and is empty when it replaces it.
 func (r Rule) adoption(e Entry) string {
-	if why := r.predating(e); why != "" {
+	switch why := r.predating(e); {
+	case why != "":
 		return why
-	}
-	if r.restoring != nil && r.restoring(e.Name) {
+	case e.Owed:
+		return "it is owed a restore"
+	case r.restoring != nil && r.restoring(e.Name):
 		return "its session is restoring"
 	}
 	return ""
@@ -89,7 +92,8 @@ func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule)
 //   - Any other is replaced whole, a change of its own, replace, saying what it
 //     dropped, and Update reports the entry it read dropped.
 //
-// It reports whether it changed the session's entry.
+// An entry kept or taken over is owed no restore any more: its session is
+// live. It reports whether it changed the session's entry.
 func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule) bool {
 	i := idx.indexOf(name)
 	switch {
@@ -100,12 +104,14 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 	case created.IsZero():
 		return false
 	case idx.sessions[i].SameCreation(created, pid):
+		repaid := idx.repay(i, liveAgain)
 		if !idx.sessions[i].fillIn(dir, pid) {
-			return false
+			return repaid
 		}
 	default:
 		if why := rule.adoption(idx.sessions[i]); why != "" {
 			idx.adopt(i, created, pid, "adopt", why)
+			idx.repay(i, liveAgain)
 			idx.sessions[i].fillIn(dir, 0)
 			return true
 		}
@@ -121,27 +127,39 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 
 // Restored records the creation restore just made, created and pid, as the
 // entry's own that restore read as read, keeping everything else it was saved
-// with. It reports whether the entry now records that creation. It changes
-// nothing in an entry that no longer records the creation restore read, one a
-// claim has taken over for another creation since: that is no longer restore's
-// to overwrite. A session with no entry, or a created of zero, records
-// nothing, so its entry keeps the creation it was saved with for a later claim
-// to take over. It consults no rule, so restore is its only caller, which a
-// guard holds to.
+// with, and owed no restore any more. It reports whether the entry now
+// records that creation. It changes nothing in an entry that no longer
+// records the creation restore read, one a claim has taken over for another
+// creation since: that is no longer restore's to overwrite. A created of zero
+// records no creation, so the entry keeps the one it was saved with, and its
+// owed mark, for a later claim to take over: the claim rule adopts an owed
+// entry whatever creation it records. It consults no rule, so restore is its
+// only caller, which a guard holds to.
 func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
 	i := idx.indexOf(read.Name)
-	if i < 0 || created.IsZero() {
+	if i < 0 {
 		return false
 	}
-	switch e := idx.sessions[i]; {
-	case e.SameCreation(created, pid):
-		return true
-	case !e.recordsCreationOf(read):
+	e := idx.sessions[i]
+	same := e.SameCreation(created, pid)
+	switch {
+	case !same && !e.recordsCreationOf(read):
+		return false
+	case created.IsZero():
 		return false
 	}
-	idx.adopt(i, created, pid, "restored", "restore made it")
+	idx.repay(i, restoreMadeIt)
+	if !same {
+		idx.adopt(i, created, pid, "restored", restoreMadeIt)
+	}
 	return true
 }
+
+// Why an entry is owed no restore any more.
+const (
+	liveAgain     = "its session is live"
+	restoreMadeIt = "restore made it"
+)
 
 // recordsCreationOf reports whether the entry still records the creation read
 // recorded: none, if read recorded none.

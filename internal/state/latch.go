@@ -52,6 +52,14 @@ func WriteLatch(dir string, latch Latch) error {
 	return nil
 }
 
+// RemoveLatch removes the latch in dir, if there is one.
+func RemoveLatch(dir string) error {
+	if _, err := removeIfPresent(Bootstrapped(dir)); err != nil {
+		return fmt.Errorf("remove bootstrapped latch: %w", err)
+	}
+	return nil
+}
+
 // warnLatchUnsynced logs a latch that landed though the directory sync after
 // its rename failed: the latch stands, and the bootstrap is recorded.
 func warnLatchUnsynced(err error) {

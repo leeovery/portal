@@ -151,14 +151,76 @@ func thisBoot(t *testing.T, name string) sessionindex.Entry {
 	return e
 }
 
-// decision 58: with no saver running, none saw the sessions end, so this
-// boot's come back with the rest.
-func TestRestore_NoSaverRan(t *testing.T) {
-	t.Run("it restores this boot's entries with the rest", func(t *testing.T) {
-		w := newWorld(t)
-		w.save(t, thisBoot(t, "since"), entry(t, "before"))
+// owing is e marked owed a restore.
+func owing(e sessionindex.Entry) sessionindex.Entry {
+	e.Owed = true
+	return e
+}
 
-		res := w.r.Restore(t.Context(), restore.NoSaverRan())
+// decisions 58 and 62: with no saver running, none saw the sessions end, so
+// the bootstrap marks this boot's owed, and they come back with the rest.
+func TestMarkOwed(t *testing.T) {
+	t.Run("it marks owed every entry not live but Portal's own, under the commit lock", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "live"})
+		w.save(t, thisBoot(t, "since"), entry(t, "before"), thisBoot(t, "live"), thisBoot(t, "_portal-saver"))
+
+		if err := w.r.MarkOwed(t.Context()); err != nil {
+			t.Fatalf("MarkOwed: %v", err)
+		}
+
+		for name, want := range map[string]bool{"since": true, "before": true, "live": false, "_portal-saver": false} {
+			if got, _ := w.lookup(t, name); got.Owed != want {
+				t.Errorf("%s owed = %v, want %v", name, got.Owed, want)
+			}
+		}
+	})
+
+	t.Run("it marks nothing, and fails, when the sessions can't be listed", func(t *testing.T) {
+		w := newWorld(t)
+		listing := errors.New("read zmx dir: permission denied")
+		w.fake.Fail(backendtest.OpList, listing)
+		w.save(t, thisBoot(t, "since"))
+
+		if err := w.r.MarkOwed(t.Context()); !errors.Is(err, listing) {
+			t.Errorf("MarkOwed = %v, want the listing's failure", err)
+		}
+		if got, _ := w.lookup(t, "since"); got.Owed {
+			t.Errorf("since = %+v, want it unmarked", got)
+		}
+	})
+
+	t.Run("it fails when the commit lock can't be had", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, thisBoot(t, "since"))
+		commitlock.SetTimeoutForTest(t, 50*time.Millisecond)
+		commitlock.HoldForTest(t, w.dir)
+
+		if err := w.r.MarkOwed(t.Context()); !errors.Is(err, commitlock.ErrHeld) {
+			t.Errorf("MarkOwed = %v, want ErrHeld", err)
+		}
+	})
+
+	t.Run("it marks nothing in an index it can't read, and leaves that for Restore to report", func(t *testing.T) {
+		w := newWorld(t)
+		if err := os.WriteFile(sessionindex.Path(w.dir), []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := w.r.MarkOwed(t.Context()); err != nil {
+			t.Errorf("MarkOwed = %v, want nil", err)
+		}
+		if calls := w.fake.CallsTo(backendtest.OpList); len(calls) != 0 {
+			t.Errorf("listed %d times, want none for an index with nothing to mark", len(calls))
+		}
+	})
+}
+
+func TestRestore_OwedEntries(t *testing.T) {
+	t.Run("it restores an owed entry of this boot with the rest, and it is owed no more", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, owing(thisBoot(t, "since")), entry(t, "before"))
+
+		res := w.r.Restore(t.Context())
 
 		if want := (restore.Result{Restored: 2}); res != want {
 			t.Errorf("Restore = %+v, want %+v", res, want)
@@ -166,13 +228,29 @@ func TestRestore_NoSaverRan(t *testing.T) {
 		if got := w.created(); !slices.Equal(got, []string{"since", "before"}) {
 			t.Errorf("created %q, want both", got)
 		}
+		if got, _ := w.lookup(t, "since"); got.Owed {
+			t.Errorf("since = %+v, want it owed no more once restore made it", got)
+		}
 	})
 
-	t.Run("it still skips a live session and Portal's own", func(t *testing.T) {
-		w := newWorld(t, backend.Session{Name: "work"})
-		w.save(t, thisBoot(t, "work"), thisBoot(t, "_portal-saver"))
+	t.Run("an owed entry whose Create fails stays owed for the next restore", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+		w.save(t, owing(thisBoot(t, "since")))
 
-		if res := w.r.Restore(t.Context(), restore.NoSaverRan()); res != (restore.Result{}) {
+		if res := w.r.Restore(t.Context()); res.Failed != 1 {
+			t.Errorf("Restore = %+v, want one failed", res)
+		}
+		if got, _ := w.lookup(t, "since"); !got.Owed {
+			t.Errorf("since = %+v, want it owed still", got)
+		}
+	})
+
+	t.Run("it still skips an owed entry live, and Portal's own", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "work"})
+		w.save(t, owing(thisBoot(t, "work")), owing(thisBoot(t, "_portal-saver")))
+
+		if res := w.r.Restore(t.Context()); res != (restore.Result{}) {
 			t.Errorf("Restore = %+v, want nothing", res)
 		}
 		if created := w.created(); len(created) > 0 {
@@ -851,6 +929,55 @@ func TestRestore_HelperArgv(t *testing.T) {
 		rec := w.sink.Records().WithMessage("scrollback file refused").AtExactLevel(slog.LevelWarn).Only(t, "refusal")
 		if !errors.Is(rec.ErrorAttr(t, "error"), state.ErrForeignScrollback) {
 			t.Errorf("refusal = %v, want the foreign file named", rec.Attrs)
+		}
+	})
+}
+
+func TestRunsHelper(t *testing.T) {
+	t.Run("it counts each session restore made, with a transcript or without", func(t *testing.T) {
+		w := newWorld(t)
+		withFile, _ := w.saveTranscript(t, entry(t, "work"))
+		w.save(t, withFile, entry(t, "notes"))
+
+		w.r.Restore(t.Context())
+
+		for _, name := range []string{"work", "notes"} {
+			s, ok := w.fake.Held(name)
+			if !ok {
+				t.Fatalf("%s was not restored", name)
+			}
+			if !w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = false, want restore's own session counted", s)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		command []string
+	}{
+		{"the helper for another name", []string{exe, "state", "hydrate", "--session", "work-2"}},
+		{"another portal's helper", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
+		{"another of portal's commands", []string{exe, "state", "resume-wait", "--session", "work"}},
+		{"another program", []string{"vim", "notes.md"}},
+		{"the user's shell", nil},
+	} {
+		t.Run("it counts no session running "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = true, want false", s)
+			}
+		})
+	}
+
+	t.Run("it counts no session that didn't answer, known by its name alone", func(t *testing.T) {
+		if newWorld(t).r.RunsHelper(backend.Session{Name: "work"}) {
+			t.Error("RunsHelper = true for a session that told nothing of its command")
 		}
 	})
 }

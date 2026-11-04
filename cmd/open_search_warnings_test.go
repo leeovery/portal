@@ -59,7 +59,7 @@ func searchTeardownModel(t *testing.T, decide func() (string, error), warnings [
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
 		Lister:           fakePickerLister(),
-		ServerStarted:    true,
+		Bootstrapping:    true,
 		ProgressReceiver: receiver,
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
 	})
@@ -218,7 +218,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		m := tui.Build(tui.Deps{
 			Lister:           fakePickerLister(),
-			ServerStarted:    true,
+			Bootstrapping:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
@@ -272,7 +272,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
 			Lister:           fakePickerLister(),
-			ServerStarted:    true,
+			Bootstrapping:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
@@ -295,7 +295,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
 			Lister:           fakePickerLister(),
-			ServerStarted:    true,
+			Bootstrapping:    true,
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
@@ -453,7 +453,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes nothing at teardown when the loading gate already surfaced them", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: fakePickerLister(), ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: fakePickerLister(), Bootstrapping: true})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m
@@ -479,7 +479,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes the warnings the gate took when the loading page was cancelled", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: fakePickerLister(), ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: fakePickerLister(), Bootstrapping: true})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m

@@ -76,7 +76,7 @@ func capturedStates() []capturedStateWant {
 		// the pending-wrap reprint or the cwd, is drawn.
 		{fixture: "preview-zmx-history", present: []string{"tessera-proxy-Vb3kQw", "gap     after-tab", "wide 中文 end", "last row 000"}, absent: []string{"(history unavailable)", "example-host"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
-		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to set @portal-restoring marker"}},
+		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to remove the bootstrapped latch"}},
 	}
 }
 

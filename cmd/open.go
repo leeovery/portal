@@ -149,7 +149,7 @@ in host-terminal windows.`,
 		// the Args validator has already refused every line where it would not.
 		if cmd.Flags().Changed("filter") {
 			filterVal, _ := cmd.Flags().GetString("filter")
-			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command)
 		}
 
 		// Raw argv because cobra collapses repeated same-flag values and splits
@@ -170,7 +170,7 @@ in host-terminal windows.`,
 		}
 
 		if destination == "" {
-			return openTUIFunc(cmd, pickerLanding{}, command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{}, command)
 		}
 
 		query := destination
@@ -389,7 +389,7 @@ type tuiConfig struct {
 	spawnLogger      *slog.Logger
 	cwd              string
 	currentSession   string
-	serverStarted    bool
+	bootstrapping    bool
 	progressReceiver tea.Cmd
 	noColor          bool
 }
@@ -454,7 +454,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ThemeKeys:        cfg.themeKeys,
 		ThemeSource:      cfg.themeSource,
 		Command:          command,
-		ServerStarted:    cfg.serverStarted,
+		Bootstrapping:    cfg.bootstrapping,
 		CurrentSession:   cfg.currentSession,
 		NoColor:          cfg.noColor,
 		ProgressReceiver: cfg.progressReceiver,
@@ -510,25 +510,23 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 	return processTUIResult(model, connector)
 }
 
-func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
+func openTUI(cmd *cobra.Command, landing pickerLanding, command []string) error {
 	b, err := attachingBackend()
 	if err != nil {
 		return err
 	}
 	launch := pickerLaunch{
-		landing:       landing,
-		command:       command,
-		serverStarted: serverStarted,
-		bootstrap:     deferredBootstrapFromContext(cmd),
+		landing:   landing,
+		command:   command,
+		bootstrap: deferredBootstrapFromContext(cmd),
 	}
 	return runPicker(cmd, b, launch, connectorFunc(newSessionConnector(cmd, b).ConnectPick))
 }
 
 // pickerLaunch is what one run of the picker opens with.
 type pickerLaunch struct {
-	landing       pickerLanding
-	command       []string
-	serverStarted bool
+	landing pickerLanding
+	command []string
 	// bootstrap is the deferred bootstrap the picker runs behind its loading
 	// page; nil when none is owed.
 	bootstrap *deferredBootstrap
@@ -536,17 +534,14 @@ type pickerLaunch struct {
 
 // runPicker runs the picker, tears it down and connects its pick. The
 // connector is handed in, since the attach takes over the terminal the
-// picker holds and so runs only once the picker has shut down.
+// picker holds and so runs only once the picker has shut down. A picker with
+// a bootstrap to run opens on its loading page while it runs.
 func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, connector SessionConnector) error {
-	serverStarted := launch.serverStarted
 	var pipe *bootstrapProgressPipe
 	if launch.bootstrap != nil {
 		pipe = newBootstrapProgressPipe()
 		pipe.start(cmd.Context(), launch.bootstrap.runner)
-		// Forced because a bootstrap is in progress, not because the server was cold
-		// — a warm-unlatched server reaches this route too. Its only effect is
-		// parking the model on the loading page.
-		serverStarted = true
+		defer pipe.unwind()
 	}
 
 	store, err := loadProjectStore()
@@ -599,7 +594,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 		themeKeys:      themeKeys,
 		themeSource:    newThemeSource(themeLoader),
 		cwd:            cwd,
-		serverStarted:  serverStarted,
+		bootstrapping:  pipe != nil,
 		detector:       spawnSeams.Detector,
 		resolve:        spawnSeams.Resolve,
 		sessionExists:  spawnSeams.Exists,

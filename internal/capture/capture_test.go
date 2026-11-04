@@ -128,8 +128,8 @@ func TestLoadingScreenFixture(t *testing.T) {
 		t.Errorf("ActivePage() = %d, want PageLoading (the loading-screen fixture must park on the loading page)", m.ActivePage())
 	}
 
-	if !m.ServerStarted() {
-		t.Error("loading-screen fixture must set ServerStarted so the cold-boot loading page shows")
+	if !m.Bootstrapping() {
+		t.Error("loading-screen fixture must set Bootstrapping so the cold-boot loading page shows")
 	}
 
 	found := false
@@ -157,10 +157,9 @@ func TestLoadingErrorFixture(t *testing.T) {
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
-		FailedStep: 3,
-		Message:    "Portal failed to set @portal-restoring marker: permission denied",
+		FailedStep: 2,
+		Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 		Err:        errors.New("permission denied"),
 	})
 
@@ -176,7 +175,7 @@ func TestLoadingErrorFixture(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("loading-error frame missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to set @portal-restoring marker") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("loading-error frame missing the one-line fatal message:\n%s", visible)
 	}
 	if !strings.Contains(visible, "quit") {

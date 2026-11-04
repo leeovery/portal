@@ -136,13 +136,15 @@ func (b envBackend) AttachCommand(ctx context.Context, name string) (backend.Com
 var attachEnv = []string{"ZMX_DIR=/tmp/zx-open-test", "TERM=xterm-256color"}
 
 // stageAttach stages a Fake holding sessions behind an environment-carrying
-// attach, and a runner and an exec that record instead of attaching.
+// attach, and a runner and an exec that record instead of attaching, owing no
+// bootstrap.
 func stageAttach(t *testing.T, sessions ...string) (*backendtest.Fake, *attachRecorder) {
 	t.Helper()
 	fake := backendtest.New()
 	for _, name := range sessions {
 		fake.Add(backend.Session{Name: name})
 	}
+	withBootstrapDeps(t, BootstrapDeps{})
 	withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, env: attachEnv}})
 	rec := &attachRecorder{runners: runnersFake{switchErr: runnertoken.ErrNoRunner}}
 	withOpenDeps(t, OpenDeps{Execer: rec, Runner: rec.Run, Runners: &rec.runners})

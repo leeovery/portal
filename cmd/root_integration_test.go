@@ -33,13 +33,15 @@ func TestPortalBinaryZmxMissing(t *testing.T) {
 			name:     "open prints error to stderr and exits 1",
 			args:     []string{"open"},
 			wantErr:  true,
-			wantMsg:  "zmx not found on PATH; install it with: brew install neurosnap/tap/zmx",
+			wantMsg:  "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1",
 			wantCode: 1,
 		},
 		{
-			name:    "list works without zmx",
-			args:    []string{"list"},
-			wantErr: false,
+			name:     "list's bootstrap prints error to stderr and exits 1",
+			args:     []string{"list"},
+			wantErr:  true,
+			wantMsg:  "zmx not found on PATH; Portal needs a zmx build newer than 0.8.1",
+			wantCode: 1,
 		},
 		{
 			name:    "version works without zmx",
@@ -62,7 +64,7 @@ func TestPortalBinaryZmxMissing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			env, _ := portaltest.IsolateStateForTest(t)
 			cmd := exec.Command(binary, tt.args...)
-			// A zmx dir of the test's own, never there: list reads it as no sessions.
+			// A zmx dir of the test's own, never there.
 			cmd.Env = append(env, "PATH=/nonexistent/path", "ZMX_DIR="+filepath.Join(t.TempDir(), "zmx"))
 
 			output, err := cmd.CombinedOutput()

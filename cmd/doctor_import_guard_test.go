@@ -234,7 +234,7 @@ var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
 
 // doctorSignallers are cmd's ways to a process and the hosts that signal
 // through one.
-var doctorSignallers = []string{"signalProcess", "newSaverHost", "saverHostSignalling"}
+var doctorSignallers = []string{"signalProcess", "newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon", "endBySignal"}
 
 // doctorSaverReaches reports each "<file>:<line>: <reach>" a doctor source
 // makes past the saver's reads. The host doctor is given exposes the reads

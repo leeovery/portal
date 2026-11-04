@@ -10,9 +10,10 @@ import (
 )
 
 // stageList stages fake as the backend and tty as whether stdout is a
-// terminal, in a state directory of the test's own.
+// terminal, in a state directory of the test's own, owing no bootstrap.
 func stageList(t *testing.T, fake *backendtest.Fake, tty bool) string {
 	t.Helper()
+	withBootstrapDeps(t, BootstrapDeps{})
 	withBackendDeps(t, BackendDeps{Backend: fake})
 	withListDeps(t, ListDeps{IsTTY: func() bool { return tty }})
 	return isolateStateDir(t)
@@ -179,9 +180,12 @@ func TestListCommand(t *testing.T) {
 	})
 }
 
+// The bootstrap's first step needs the binary; once it is owed none, list
+// itself reads zmx's sockets alone.
 func TestListCommand_DoesNotNeedTheZmxBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("ZMX_DIR", t.TempDir())
+	withBootstrapDeps(t, BootstrapDeps{})
 	withListDeps(t, ListDeps{IsTTY: func() bool { return false }})
 
 	stdout, _, err := runRootCmd(t, "list")

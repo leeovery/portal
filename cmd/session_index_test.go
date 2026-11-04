@@ -104,6 +104,7 @@ func TestLegacyIndexStop(t *testing.T) {
 	t.Run("it passes a missing sessions.json", func(t *testing.T) {
 		isolateStateDir(t)
 		fake := backendtest.New()
+		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: fake})
 
 		if _, _, err := runRootCmd(t, "list"); err != nil {
@@ -115,6 +116,7 @@ func TestLegacyIndexStop(t *testing.T) {
 	t.Run("it passes a sessions.json that cannot be read", func(t *testing.T) {
 		blockStateDir(t)
 		fake := backendtest.New()
+		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: fake})
 
 		if _, _, err := runRootCmd(t, "list"); err != nil {
@@ -126,6 +128,7 @@ func TestLegacyIndexStop(t *testing.T) {
 	t.Run("it passes a version 2 sessions.json", func(t *testing.T) {
 		seedSessionsJSON(t, `{"version": 2, "saved_at": "2026-11-01T00:00:00Z", "sessions": []}`)
 		fake := backendtest.New()
+		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: fake})
 
 		if _, _, err := runRootCmd(t, "list"); err != nil {

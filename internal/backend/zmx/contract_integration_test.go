@@ -58,7 +58,8 @@ func (s *zmxSubject) Hold(t *testing.T, name string, state backendtest.State) ba
 		zmxtest.StopDaemon(t, s.b, name)
 		return backend.Session{Name: name}
 	case backendtest.Refusing:
-		crash(t, s.b, name)
+		zmxtest.StopDaemon(t, s.b, name)
+		fillBacklog(t, filepath.Join(s.b.Dir(), name))
 		return backend.Session{Name: name}
 	}
 	real, err := filepath.EvalSymlinks(dir)

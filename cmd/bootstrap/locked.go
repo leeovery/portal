@@ -1,0 +1,121 @@
+package bootstrap
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/leeovery/portal/internal/commitlock"
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/state"
+)
+
+// The bounds of a bootstrap's longest run, step by step, each wait at its
+// bound and each backend call at its ceiling. zmx's own ceilings are pinned
+// within saverhost's.
+const (
+	// checkRun is zmx version, a run of the binary bounded as Create is, with
+	// its grace.
+	checkRun = saverhost.CreateCeiling + saverhost.RunGrace
+	// sweepRun is the sweep's reads of the saver session and of the listing
+	// the flags are judged by.
+	sweepRun = 2 * saverhost.ReadCeiling
+	// saverRun is the read of whether a saver runs; the judgement of one
+	// found, and the end of one Portal can't use; the listing of the sessions
+	// to mark owed, whose write waits on commit.lock besides; then the wait
+	// for saver.lock, which an uninstall may hold, then the ensure's own run,
+	// which that wait outlasts.
+	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
+	// restoreRun is restore's listing, before its first session.
+	restoreRun = saverhost.ReadCeiling
+	// restoreSessionRun is a session restore makes: its Create, a run of the
+	// binary, with its grace; when that fails, a read, a probe ceiling's wait
+	// and a read again. Its record waits on commit.lock besides.
+	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling
+	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
+	// and the flag, latch and index files.
+	lockSlack = 15 * time.Second
+)
+
+// LockWait bounds the wait for bootstrap.lock while another bootstrap holds
+// it, given the entries sessions.json holds: the holder's longest run, which
+// restores at most that many sessions, with lockSlack over. A holder still
+// running past it is stuck, and the wait gives up rather than queue behind it.
+func LockWait(entries int) time.Duration {
+	each := restoreSessionRun + commitlock.Bound()
+	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*each + lockSlack
+}
+
+// LockNotice is how long a wait for bootstrap.lock goes unremarked.
+const LockNotice = time.Second
+
+// Locked runs a bootstrap one at a time on its state directory, under
+// bootstrap.lock, so two windows opening at once never restore a session
+// twice. One that waited out another runs only if a bootstrap is still owed
+// once it holds the lock.
+type Locked struct {
+	// Lock takes bootstrap.lock, waiting within its bound, and returns its
+	// release.
+	Lock func(ctx context.Context) (release func(), err error)
+	// Owed is the gate, asked again once the lock is held.
+	Owed      func(ctx context.Context) bool
+	Bootstrap Runner
+	// Notice is how long a wait for the lock lasts before the progress
+	// emitter hears of it; zero is LockNotice.
+	Notice time.Duration
+	Logger *slog.Logger
+}
+
+var _ Runner = Locked{}
+
+// Run takes the lock, then runs the bootstrap if one is still owed. A wait
+// for the lock past its notice is told to ctx's progress emitter, once. A lock
+// it can't take, another bootstrap holding it past its bound included, is
+// fatal, and nothing runs.
+func (l Locked) Run(ctx context.Context) ([]Warning, error) {
+	logger := log.OrDiscard(l.Logger)
+	start := time.Now()
+	stop := l.noticeWait(progressEmitterFromContext(ctx))
+	release, err := l.Lock(ctx)
+	stop()
+	if err != nil {
+		logger.Error("bootstrap.lock unavailable", "error", err, log.Took(start))
+		return nil, lockFatal(err)
+	}
+	defer release()
+	if !l.Owed(ctx) {
+		logger.Info("bootstrap skipped", "detail", "another bootstrap ran while this one waited", log.Took(start))
+		return nil, nil
+	}
+	return l.Bootstrap.Run(ctx)
+}
+
+// noticeWait tells emit, once the notice has passed, that this bootstrap
+// waits for another. The stop it returns ends the watch, waiting out a notice
+// already under way, so none follows it.
+func (l Locked) noticeWait(emit ProgressEmitter) (stop func()) {
+	if emit == nil {
+		return func() {}
+	}
+	notice := cmp.Or(l.Notice, LockNotice)
+	sent := make(chan struct{})
+	timer := time.AfterFunc(notice, func() {
+		defer close(sent)
+		emit(StepEvent{Waiting: true})
+	})
+	return func() {
+		if !timer.Stop() {
+			<-sent
+		}
+	}
+}
+
+func lockFatal(err error) *FatalError {
+	if errors.Is(err, state.ErrBootstrapLockHeld) {
+		return NewFatal("Portal gave up waiting for another Portal to finish starting: "+err.Error(), err)
+	}
+	return NewFatal("Portal failed to take bootstrap.lock: "+err.Error(), err)
+}

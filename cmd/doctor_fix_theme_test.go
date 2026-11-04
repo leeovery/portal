@@ -332,7 +332,7 @@ func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
 
 	t.Run("a --fix run with a full theme surface runs no bootstrap", func(t *testing.T) {
 		resetBootstrapOnce(t)
-		runner := &recordingRunner{started: true}
+		runner := &recordingRunner{}
 		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 		requireDropInSlug(t, "gone")
@@ -357,7 +357,7 @@ func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
 
 	t.Run("the orchestrator seam runs for a non-exempt command", func(t *testing.T) {
 		resetBootstrapOnce(t)
-		runner := &recordingRunner{started: true}
+		runner := &recordingRunner{}
 		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 		probe := &cobra.Command{Use: "doctorfixprobe", RunE: func(*cobra.Command, []string) error { return nil }}

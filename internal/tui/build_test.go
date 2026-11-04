@@ -51,14 +51,14 @@ func TestBuild(t *testing.T) {
 		m := tui.Build(tui.Deps{
 			Lister:        &mockSessionLister{},
 			InitialMode:   prefs.ModeFlat,
-			ServerStarted: true,
+			Bootstrapping: true,
 		})
 
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("ActivePage() = %d, want PageLoading", m.ActivePage())
 		}
-		if !m.ServerStarted() {
-			t.Error("ServerStarted() = false, want true")
+		if !m.Bootstrapping() {
+			t.Error("Bootstrapping() = false, want true")
 		}
 	})
 

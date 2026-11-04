@@ -36,12 +36,15 @@ func TestRestore_JudgesEachEntryByTheBoot(t *testing.T) {
 		}
 	})
 
-	t.Run("with no saver running, it restores the entry from since the boot as well", func(t *testing.T) {
+	t.Run("it restores the entry from since the boot as well once it is owed", func(t *testing.T) {
 		t.Setenv(state.BootTimeEnv, booted.Format(time.RFC3339Nano))
 		w := newWorldJudgingByState(t)
 		w.save(t, before, since)
+		if err := w.r.MarkOwed(t.Context()); err != nil {
+			t.Fatalf("MarkOwed: %v", err)
+		}
 
-		if res, want := w.r.Restore(t.Context(), restore.NoSaverRan()), (restore.Result{Restored: 2}); res != want {
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 2}); res != want {
 			t.Errorf("Restore = %+v, want %+v", res, want)
 		}
 	})

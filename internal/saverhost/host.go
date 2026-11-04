@@ -193,6 +193,15 @@ func (h *Host) SaverPID(ctx context.Context) (pid int, present bool, err error) 
 // unless a saver runs without one, for which it creates the directory and
 // its lock; it creates nothing when there is no saver.
 func (h *Host) Stop(ctx context.Context) (bool, error) {
+	return h.StopOr(ctx, nil)
+}
+
+// StopOr is Stop that hands a stop failing once it holds saver.lock to
+// orElse, still holding it, and reports what orElse does: a saver whose
+// daemon the stop can't read, as one speaking a zmx protocol Portal can't
+// use, is judged and ended there, so never in place of one an ensure makes
+// meanwhile. A nil orElse is Stop.
+func (h *Host) StopOr(ctx context.Context, orElse func(ctx context.Context, err error) (bool, error)) (bool, error) {
 	release, err := h.lock(ctx)
 	if errors.Is(err, fs.ErrNotExist) {
 		var present bool
@@ -205,6 +214,15 @@ func (h *Host) Stop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer release()
+	stopped, err := h.stopHeld(ctx)
+	if err != nil && orElse != nil {
+		return orElse(ctx, err)
+	}
+	return stopped, err
+}
+
+// stopHeld is Stop's run under saver.lock.
+func (h *Host) stopHeld(ctx context.Context) (bool, error) {
 	pid, present, err := h.SaverPID(ctx)
 	if err != nil || !present {
 		return false, err

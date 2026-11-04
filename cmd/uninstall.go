@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
@@ -12,30 +13,49 @@ import (
 
 var uninstallDeps *UninstallDeps
 
-// UninstallDeps overrides the saver's stop; production leaves uninstallDeps
-// nil and stops the saver over the session backend.
+// UninstallDeps overrides the saver's stop and the end of a saver Portal
+// can't use; production leaves uninstallDeps nil, stops the saver over the
+// session backend and ends one as the bootstrap does. A field left nil is
+// production's.
 type UninstallDeps struct {
-	Saver saverStopper
+	Saver  saverStopper
+	Daemon unusableSaver
 }
 
-// saverStopper stops the saver, reporting whether there was one.
+// saverStopper stops the saver, reporting whether there was one, and hands a
+// stop that fails to orElse under the same hold of saver.lock.
 type saverStopper interface {
-	Stop(ctx context.Context) (bool, error)
+	StopOr(ctx context.Context, orElse func(ctx context.Context, err error) (bool, error)) (bool, error)
 }
 
-func uninstallStopper() (saverStopper, error) {
+// unusableSaver is the saver session's daemon as uninstall ends one whose zmx
+// protocol Portal can't use, and so can't read to stop.
+type unusableSaver interface {
+	unusable(ctx context.Context) bool
+	End(ctx context.Context) error
+}
+
+func uninstallSaver() (saverStopper, unusableSaver, error) {
+	var deps UninstallDeps
 	if uninstallDeps != nil {
-		return uninstallDeps.Saver, nil
+		deps = *uninstallDeps
+	}
+	if deps.Daemon == nil {
+		deps.Daemon = newSaverDaemon()
+	}
+	if deps.Saver != nil {
+		return deps.Saver, deps.Daemon, nil
 	}
 	b, err := sessionBackend()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dir, err := state.Dir()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return newSaverHost(b, dir)
+	host, err := newSaverHost(b, dir)
+	return host, deps.Daemon, err
 }
 
 // Uninstall stops the saver and nothing more: it keeps the bootstrapped
@@ -59,13 +79,31 @@ var uninstallCmd = &cobra.Command{
 	},
 }
 
-// stopSaver stops the saver, and reports whether there was one.
+// stopSaver stops the saver, and reports whether there was one. A saver the
+// stop fails on whose daemon speaks a zmx protocol Portal can't use is ended
+// as the bootstrap ends one, still under saver.lock, so no saver an ensure
+// makes meanwhile is ended in its place.
 func stopSaver(ctx context.Context) (bool, error) {
-	stopper, err := uninstallStopper()
+	stopper, daemon, err := uninstallSaver()
 	if err != nil {
 		return false, err
 	}
-	return stopper.Stop(ctx)
+	return stopper.StopOr(ctx, func(ctx context.Context, stopErr error) (bool, error) {
+		return endUnusable(ctx, daemon, stopErr)
+	})
+}
+
+// endUnusable ends the saver a stop failed on with stopErr when its daemon
+// speaks a zmx protocol Portal can't use, and reports whether it did. One it
+// can neither stop nor end fails with the bootstrap's way out of it.
+func endUnusable(ctx context.Context, daemon unusableSaver, stopErr error) (bool, error) {
+	if !daemon.unusable(ctx) {
+		return false, stopErr
+	}
+	if err := daemon.End(ctx); err != nil {
+		return false, fmt.Errorf("%s (%w; %w)", bootstrap.SaverLeftMessage, stopErr, err)
+	}
+	return true, nil
 }
 
 // uninstallReport says what uninstall did, where the saved sessions and

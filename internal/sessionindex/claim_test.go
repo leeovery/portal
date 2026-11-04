@@ -30,6 +30,12 @@ func keeping(at time.Time, pid int) sessionindex.Entry {
 	}
 }
 
+// owed is e marked owed a restore.
+func owed(e sessionindex.Entry) sessionindex.Entry {
+	e.Owed = true
+	return e
+}
+
 func withDir(e sessionindex.Entry, dir string) sessionindex.Entry {
 	e.Dir = dir
 	return e
@@ -139,6 +145,21 @@ func TestClaim(t *testing.T) {
 			name: "an entry recording no creation or dir claimed knowing no creation is kept untouched",
 			held: withDir(keeping(time.Time{}, 0), ""), rule: judged,
 			want: withDir(keeping(time.Time{}, 0), ""),
+		},
+		{
+			name: "an owed entry of the same creation is owed no more, keeping everything else",
+			held: owed(keeping(liveCreation, 4242)), rule: judged, created: liveCreation, pid: 4242,
+			want: keeping(liveCreation, 4242),
+		},
+		{
+			name: "an owed entry of an earlier creation this boot is adopted, keeping everything, and owed no more",
+			held: owed(keeping(earlierThisBoot, 1717)), rule: judged, created: liveCreation, pid: 4242,
+			want: keeping(liveCreation, 4242),
+		},
+		{
+			name: "an owed entry claimed knowing no creation stays owed",
+			held: owed(keeping(earlierThisBoot, 1717)), rule: judged,
+			want: owed(keeping(earlierThisBoot, 1717)),
 		},
 		{
 			name: "an entry of an earlier creation this boot is replaced whole",
@@ -379,6 +400,54 @@ func TestRestored(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("the entry it records the creation of is owed no more", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{owed(saved)})
+
+		if !idx.Restored(owed(saved), liveCreation, 4242) {
+			t.Fatal("Restored = false, want the creation recorded")
+		}
+		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
+			t.Errorf("entry = %+v, want %+v, owed no more", got, keeping(liveCreation, 4242))
+		}
+	})
+
+	t.Run("an owed entry that already records the creation is owed no more: restore made its session", func(t *testing.T) {
+		held := owed(keeping(liveCreation, 4242))
+		idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+
+		idx.Restored(held, liveCreation, 4242)
+
+		if got, _ := idx.Lookup("a"); got.Owed {
+			t.Errorf("entry = %+v, want it owed no more", got)
+		}
+	})
+
+	// The claim rule adopts an owed entry whatever creation it records, so
+	// the mark is what lets the saver take over a session restore made but
+	// couldn't read the creation of.
+	t.Run("an owed entry restored with no creation keeps its mark", func(t *testing.T) {
+		held := owed(keeping(earlierThisBoot, 1717))
+		idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+
+		if idx.Restored(held, time.Time{}, 4242) {
+			t.Error("Restored = true, want false: nothing was recorded")
+		}
+		if got, _ := idx.Lookup("a"); !sameEntry(got, held) {
+			t.Errorf("entry = %+v, want it untouched and owed, %+v", got, held)
+		}
+	})
+
+	t.Run("an owed entry taken over for another creation since restore read it keeps its mark", func(t *testing.T) {
+		since := owed(keeping(earlierThisBoot, 7))
+		idx := sessionindex.IndexOf([]sessionindex.Entry{since})
+
+		idx.Restored(saved, liveCreation, 4242)
+
+		if got, _ := idx.Lookup("a"); !sameEntry(got, since) {
+			t.Errorf("entry = %+v, want it untouched, %+v", got, since)
+		}
+	})
 
 	t.Run("a zero creation records nothing, and says so", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{saved})

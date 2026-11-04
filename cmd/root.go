@@ -48,11 +48,14 @@ var stateCheckExempt = map[string]bool{
 
 var bootstrapDeps *BootstrapDeps
 
-// BootstrapDeps overrides bootstrap collaborators; production leaves the
-// package-level bootstrapDeps nil.
+// BootstrapDeps overrides the bootstrap's gate and the bootstrap it owes;
+// production leaves the package-level bootstrapDeps nil.
 type BootstrapDeps struct {
-	// Orchestrator is the bootstrap. Production has none until the zmx
-	// bootstrap lands, so no command runs one.
+	// Owed reports whether a bootstrap is owed. Nil owes one exactly when an
+	// Orchestrator is staged, so an empty BootstrapDeps owes none.
+	Owed func(ctx context.Context) bool
+
+	// Orchestrator is the bootstrap a command owed one runs.
 	Orchestrator bootstrap.Runner
 
 	// ForceMemoise opts back into the production sync.Once gate, which tests
@@ -62,32 +65,41 @@ type BootstrapDeps struct {
 
 var (
 	bootstrapOnce          sync.Once
-	bootstrapStarted       bool
 	bootstrapWarningsSlice []bootstrap.Warning
 	bootstrapErr           error
 )
 
-func bootstrapRunner() bootstrap.Runner {
-	if bootstrapDeps == nil {
-		return nil
+// owedBootstrap is the bootstrap this command owes, nil when it owes none:
+// the warm path, which asks the gate alone.
+func owedBootstrap(ctx context.Context) (bootstrap.Runner, error) {
+	if bootstrapDeps != nil {
+		return bootstrapDeps.owed(ctx), nil
 	}
-	return bootstrapDeps.Orchestrator
+	p, err := newProductionBootstrap()
+	if err != nil {
+		return nil, err
+	}
+	if !p.gate.Owed(ctx) {
+		return nil, nil
+	}
+	return p.runner()
 }
 
-func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, []bootstrap.Warning, error) {
+func (d BootstrapDeps) owed(ctx context.Context) bootstrap.Runner {
+	if d.Owed != nil && !d.Owed(ctx) {
+		return nil
+	}
+	return d.Orchestrator
+}
+
+func runBootstrap(ctx context.Context, runner bootstrap.Runner) ([]bootstrap.Warning, error) {
 	if bootstrapDeps != nil && !bootstrapDeps.ForceMemoise {
-		if runner == nil {
-			return false, nil, nil
-		}
 		return runner.Run(ctx)
 	}
 	bootstrapOnce.Do(func() {
-		if runner == nil {
-			return
-		}
-		bootstrapStarted, bootstrapWarningsSlice, bootstrapErr = runner.Run(ctx)
+		bootstrapWarningsSlice, bootstrapErr = runner.Run(ctx)
 	})
-	return bootstrapStarted, bootstrapWarningsSlice, bootstrapErr
+	return bootstrapWarningsSlice, bootstrapErr
 }
 
 var rootCmd = &cobra.Command{
@@ -115,14 +127,17 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
-// bootstrapFor runs the injected bootstrap, or defers it to the picker's
-// loading page on a picker launch. With none injected it does nothing.
+// bootstrapFor runs the bootstrap the command owes, or defers it to the
+// picker's loading page on a picker launch. A command owed none runs
+// straight away.
 func bootstrapFor(cmd *cobra.Command, args []string) error {
-	runner := bootstrapRunner()
+	runner, err := owedBootstrap(cmd.Context())
+	if err != nil {
+		return err
+	}
 	if shouldRunConcurrentBootstrap(cmd, args, runner) {
-		// openTUI runs the deferred orchestrator in a goroutine behind the
-		// loading page, and reads serverStarted from the progress pipe's
-		// terminal event.
+		// openTUI runs the deferred bootstrap in a goroutine behind the
+		// loading page.
 		cmd.SetContext(context.WithValue(cmd.Context(), deferredBootstrapKey, &deferredBootstrap{runner: runner}))
 		return nil
 	}
@@ -130,7 +145,7 @@ func bootstrapFor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	started, warnings, err := runBootstrap(cmd.Context(), runner)
+	warnings, err := runBootstrap(bootstrap.WithProgressEmitter(cmd.Context(), waitNotice(cmd.ErrOrStderr())), runner)
 	if err != nil {
 		return err
 	}
@@ -140,8 +155,17 @@ func bootstrapFor(cmd *cobra.Command, args []string) error {
 		bootstrapWarnings.Add(w)
 	}
 	bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
-	cmd.SetContext(context.WithValue(cmd.Context(), serverStartedKey, started))
 	return nil
+}
+
+// waitNotice is a command's progress off the picker: one line on w should its
+// bootstrap wait a while for another Portal's, and nothing of its steps.
+func waitNotice(w io.Writer) bootstrap.ProgressEmitter {
+	return func(ev bootstrap.StepEvent) {
+		if ev.Waiting {
+			_, _ = fmt.Fprintln(w, "Waiting for another Portal to finish starting…")
+		}
+	}
 }
 
 // inChain reports whether cmd or any command above it is named in set.

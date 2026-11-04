@@ -26,6 +26,10 @@ var timeout = 5 * time.Second
 
 var pollInterval = 5 * time.Millisecond
 
+// Bound is how long Acquire waits for the lock before it gives up, for a
+// caller bounding a run that commits.
+func Bound() time.Duration { return timeout }
+
 // Path is the commit lock in dir. It is not daemon.lock, which the daemon
 // holds for its whole life.
 func Path(dir string) string { return filepath.Join(dir, name) }

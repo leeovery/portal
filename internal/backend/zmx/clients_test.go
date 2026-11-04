@@ -121,6 +121,19 @@ func TestAttachClients_RefusesAProcessItCannotRead(t *testing.T) {
 	}
 }
 
+// A client caught as it forks or execs fails a read it answers a moment
+// later, so it is read again before it fails the search.
+func TestAttachClients_ReadsAgainAClientWhoseReadsFailAWhile(t *testing.T) {
+	const dir = "/tmp/zx-clients"
+	b := newBackend(t, dir)
+	zmx.FakeProcesses(b, []zmx.Process{settling(client(10, []string{"zmx", "attach", "dev"}, "ZMX_DIR="+dir))}, nil)
+
+	got, err := b.AttachClients("dev")
+	if err != nil || len(got) != 1 || got[0].PID != 10 {
+		t.Errorf("AttachClients(dev) = %v, %v; want client 10", got, err)
+	}
+}
+
 func TestAttachClients_FailsWithTheProcessListing(t *testing.T) {
 	b := newBackend(t, "/tmp/zx-clients")
 	listing := errors.New("sysctl failed")

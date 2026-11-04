@@ -171,7 +171,7 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 			return model, nil
 		})
 
-		if err := openTUI(contextCommand(), pickerLanding{}, nil, false); err != nil {
+		if err := openTUI(contextCommand(), pickerLanding{}, nil); err != nil {
 			t.Fatalf("openTUI: %v", err)
 		}
 		if want := []switchCall{{"lead01", "api-x7Kd9a", "blog-c3d4"}}; !slices.Equal(rec.runners.switches, want) {
@@ -211,7 +211,7 @@ func TestAttach_ASwitchAttachesTheSessionItNames(t *testing.T) {
 			{"held under another spelling", "BLOG-c3d4", func(*backendtest.Fake) {}, "No session found: BLOG-c3d4; did you mean blog-c3d4?"},
 			{"refusing connections", "blog-c3d4", func(fake *backendtest.Fake) {
 				fake.Fail(backendtest.OpAttachCommand, fmt.Errorf("attach session %q: %w", "blog-c3d4", zmx.ErrRefusing))
-			}, "session blog-c3d4 refuses connections: " + crashedDaemon},
+			}, "session blog-c3d4 refuses connections: " + stillHeld},
 			{"not answering", "blog-c3d4", func(fake *backendtest.Fake) { fake.StopAnswering("blog-c3d4") }, "session blog-c3d4 is not answering; nothing was opened"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

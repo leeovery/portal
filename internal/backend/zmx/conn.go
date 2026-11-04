@@ -15,20 +15,20 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 )
 
-// ErrRefusing marks a session whose socket, made since this boot, refuses
-// connections. That is a crashed daemon's socket, which holds the name until
-// zmx clears it, or on macOS a live daemon's whose listen backlog is full. It
-// wraps backend.ErrTimeout: the session is held but not answering.
+// ErrRefusing marks a session whose socket refuses connections while a
+// process may still hold it: on macOS a live daemon whose listen backlog is
+// full refuses as a dead one's socket does. It wraps backend.ErrTimeout: the
+// session is held but not answering.
 var ErrRefusing = fmt.Errorf("zmx session refuses connections: %w", errNotAccepting)
 
 var (
 	errUnsupported = errors.New("zmx daemon does not support the request")
 	errSecondFrame = errors.New("a second frame on one connection to a zmx daemon")
-	// errStale marks a refused connect to a socket made before this boot.
-	errStale = errors.New("socket predates this boot")
+	// errStale marks a refused connect to a socket no daemon is behind.
+	errStale = errors.New("no daemon holds the socket")
 	// errNotAccepting marks a connect a daemon may be behind but did not
-	// accept: refused from a socket made since boot (ErrRefusing), or a full
-	// backlog.
+	// accept: refused while a process may hold the socket (ErrRefusing), or a
+	// full backlog.
 	errNotAccepting = fmt.Errorf("zmx daemon is not accepting connections: %w", backend.ErrTimeout)
 	errNoAnswer     = fmt.Errorf("zmx daemon gave no well-formed answer: %w", backend.ErrTimeout)
 )
@@ -181,17 +181,26 @@ func (b *Backend) dialFailure(entry string, err error) error {
 	return err
 }
 
-// refused tells a stale socket from a session not answering. A daemon whose
-// listen backlog is full refuses as a dead one does, so a refusal alone is no
-// proof the session has gone: only a socket made before this boot, whose
-// daemon cannot be running now, is stale. Without the boot time, none is.
+// refused tells a stale socket from a session not answering. On Linux a
+// refusal proves no listener, a full backlog failing with EAGAIN instead, so
+// the socket is stale. On macOS a daemon whose listen backlog is full refuses
+// as a dead one does, so a refusal alone is no proof the session has gone. A
+// socket made before this boot, whose daemon cannot be running now, is stale;
+// one made since is stale only once the process table proves no process holds
+// it, a read paid for on a refusal alone.
 func (b *Backend) refused(entry string, err error) error {
+	if refusalProvesNoListener {
+		return fmt.Errorf("%w: %w", err, errStale)
+	}
 	info, statErr := os.Stat(b.path(entry))
 	boot, bootErr := b.booted()
 	if statErr == nil && bootErr == nil && info.ModTime().Before(boot) {
 		return fmt.Errorf("%w: %w", err, errStale)
 	}
-	return fmt.Errorf("%w: %w", err, ErrRefusing)
+	if held := b.unheld(entry); held != nil {
+		return fmt.Errorf("%w: %w: %w", err, ErrRefusing, held)
+	}
+	return fmt.Errorf("%w: %w", err, errStale)
 }
 
 // gone reports whether a connect found no session: the socket is missing, or

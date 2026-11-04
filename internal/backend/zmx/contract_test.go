@@ -4,11 +4,13 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 )
 
@@ -20,12 +22,21 @@ type daemonSubject struct {
 	info    []byte
 	current string
 
-	mu      sync.Mutex
-	leaders map[string][]byte
+	mu       sync.Mutex
+	leaders  map[string][]byte
+	refusing []zmx.Process
 }
 
+// Backend reads a process table in which a daemon holds each refusing socket
+// held so far, so a refusal is a full backlog, never a crash.
 func (s *daemonSubject) Backend() backend.Backend {
-	return newBackend(s.t, s.dir, "PATH=/usr/bin:/bin", "ZMX_DIR="+s.dir, "ZMX_SESSION="+s.current)
+	b := newBackend(s.t, s.dir, "PATH=/usr/bin:/bin", "ZMX_DIR="+s.dir, "ZMX_SESSION="+s.current)
+	zmx.FakeProcessesFrom(b, func() ([]zmx.Process, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return slices.Clone(s.refusing), nil
+	})
+	return b
 }
 
 func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
@@ -39,6 +50,9 @@ func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State)
 		return backend.Session{Name: name}
 	case backendtest.Refusing:
 		refusing(t, s.dir, name)
+		s.mu.Lock()
+		s.refusing = append(s.refusing, daemonOf(100+len(s.refusing), s.dir, name))
+		s.mu.Unlock()
 		return backend.Session{Name: name}
 	case backendtest.HangingUp:
 		serve(t, s.dir, name, hangingUp())

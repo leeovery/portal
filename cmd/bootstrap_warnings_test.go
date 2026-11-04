@@ -179,7 +179,6 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 	resetBootstrapOnce(t)
 
 	runner := &recordingRunner{
-		started: false,
 		warnings: []bootstrap.Warning{
 			bootstrap.SaverDownWarning(),
 			bootstrap.CorruptSessionsJSONWarning(),
@@ -231,7 +230,7 @@ func assertPickerPathWritesNoWarnings(t *testing.T, args ...string) {
 	t.Helper()
 	resetBootstrapOnce(t)
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error { return nil })
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error { return nil })
 	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	runner := &recordingRunner{

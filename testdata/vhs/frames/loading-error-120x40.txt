@@ -9,24 +9,24 @@
 
 
 
-                                         █████ █████ █████ █████ █████ █       █
-                                         █   █ █   █ █   █   █   █   █ █       █
-                                         █████ █   █ █████   █   █████ █       █
-                                         █     █   █ █  █    █   █   █ █       █
-                                         █     █████ █   █   █   █   █ █████   █
+
+                                        █████ █████ █████ █████ █████ █       █
+                                        █   █ █   █ █   █   █   █   █ █       █
+                                        █████ █   █ █████   █   █████ █       █
+                                        █     █   █ █  █    █   █   █ █       █
+                                        █     █████ █   █   █   █   █ █████   █
 
 
-                                         ███████████████████████████████████████
+                                        ███████████████████████████████████████
 
 
-                                               ✓   Started tmux server
-                                               ✗   Registered hooks
-                                               ·   Restoring sessions
-                                               ·   Replaying scrollback
-                                               ·   Running resume commands
+                                                 ✓   Checking zmx
+                                                 ✗   Starting the saver
+                                                 ·   Restoring sessions
 
-                            Portal failed to set @portal-restoring marker: permission denied
-                                                    q quit · esc quit
+                           Portal failed to remove the bootstrapped latch: permission denied
+                                                   q quit · esc quit
+
 
 
 

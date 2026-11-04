@@ -54,6 +54,8 @@ func newZmxWorld(t *testing.T) *zmxWorld {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(stateDir) })
 	portaltest.OwnStateDir(t, stateDir)
+	// The first open's bootstrap starts a saver, a writer there to the end.
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t)
 	env = append(env,
 		"PORTAL_STATE_DIR="+stateDir,

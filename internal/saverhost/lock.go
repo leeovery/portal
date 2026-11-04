@@ -18,22 +18,33 @@ import (
 const lockName = "saver.lock"
 
 // The ceilings LockWait allows the backend's calls: a read of the saver
-// session, its creation, and its kill. zmx's own are pinned within them.
+// session, its creation, and its kill; and RunGrace, how much longer than its
+// ceiling a call that runs the backend's binary, killed at the ceiling, has
+// for its output to close. zmx's own are pinned within them.
 const (
 	ReadCeiling   = time.Second
 	CreateCeiling = 10 * time.Second
 	KillCeiling   = 5 * time.Second
+	RunGrace      = time.Second
 )
+
+// JudgeRun bounds a judgement of the saver's protocol: a read in Portal's
+// protocol, a read in an older zmx's, and the end of a saver judged
+// unusable, zmx kill, a run of the binary, then the wait for a proved
+// signal's end, each bounded as a kill. Ensure's caller keeps its judge of a
+// saver made within it.
+const JudgeRun = 2*ReadCeiling + 2*KillCeiling + RunGrace
 
 // holderRun is the longest a holder of saver.lock runs, each wait at its
 // bound and each backend call at its ceiling: the ensure's wait for a saver
 // still starting (ReadyWait, then the read in flight); the recycle's stop (a
 // read of the session, TermWait, the kill bound, then the session's kill: a
-// read, the kill, a read); then the create, and the wait for its daemon
-// (ReadyWait, then the read in flight).
+// read, the kill, a read); then the create, a run of the binary, its
+// judgement, and the wait for its daemon (ReadyWait, then the read in
+// flight).
 const holderRun = ReadyWait + ReadCeiling +
 	ReadCeiling + TermWait + killWait + ReadCeiling + KillCeiling + ReadCeiling +
-	CreateCeiling + ReadyWait + ReadCeiling
+	CreateCeiling + RunGrace + JudgeRun + ReadyWait + ReadCeiling
 
 // LockWait bounds the wait for saver.lock: a holder's longest run, with 15 s
 // over for what no bound covers, the proofs' ps calls and the reads of the

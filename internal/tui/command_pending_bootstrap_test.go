@@ -16,7 +16,7 @@ func commandPendingDeps(receiver tea.Cmd) tui.Deps {
 	return tui.Deps{
 		Lister:           &mockSessionLister{sessions: []tui.Session{}},
 		Command:          []string{"npm", "run", "dev"},
-		ServerStarted:    receiver != nil,
+		Bootstrapping:    receiver != nil,
 		ProgressReceiver: receiver,
 	}
 }
@@ -83,11 +83,11 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 
 	t.Run("it records a bootstrap fatal delivered to a command-pending model", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-		fatal := errors.New("clear @portal-restoring: no server")
+		fatal := errors.New("lower the restoring flag: permission denied")
 
 		var model tea.Model = tui.Build(commandPendingDeps(receiver))
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model, cmd := model.Update(tui.BootstrapFatalMsg{FailedStep: 8, Message: "bootstrap failed", Err: fatal})
+		model, cmd := model.Update(tui.BootstrapFatalMsg{FailedStep: 6, Message: "bootstrap failed", Err: fatal})
 
 		updated := model.(tui.Model)
 		if !errors.Is(updated.FatalError(), fatal) {
@@ -113,7 +113,7 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 		if page := model.(tui.Model).ActivePage(); page != tui.PageProjects {
 			t.Fatalf("ActivePage() = %d, want PageProjects", page)
 		}
-		model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 8, Message: "bootstrap failed", Err: errors.New("boom")})
+		model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 6, Message: "bootstrap failed", Err: errors.New("boom")})
 
 		model, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		if cmd != nil {
@@ -171,7 +171,7 @@ func TestCommandPendingBootstrapDelivery(t *testing.T) {
 
 		m := tui.Build(tui.Deps{
 			Lister:           &mockSessionLister{sessions: []tui.Session{}},
-			ServerStarted:    true,
+			Bootstrapping:    true,
 			ProgressReceiver: receiver,
 		})
 		var model tea.Model = m

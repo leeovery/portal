@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
@@ -21,11 +22,12 @@ import (
 
 func TestPortalListAgainstZmx(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
+	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t)
 	binary := buildPortalBinary(t)
 
 	workDir := realPath(t, t.TempDir())
-	for _, name := range []string{"_portal-saver", "api-x7Kd9a", "web-Qm3pLz", "wedged-Lp4s"} {
+	for _, name := range []string{"api-x7Kd9a", "web-Qm3pLz", "wedged-Lp4s"} {
 		if _, err := b.Create(t.Context(), name, workDir, []string{"sleep", "1000"}); err != nil {
 			t.Fatalf("Create(%s): %v", name, err)
 		}
@@ -66,6 +68,9 @@ func TestPortalListAgainstZmx(t *testing.T) {
 	t.Run("it prints the user's sessions by name, Portal's own hidden", func(t *testing.T) {
 		if got, want := list("--short"), "api-x7Kd9a\nweb-Qm3pLz\nwedged-Lp4s\n"; got != want {
 			t.Errorf("output = %q, want %q", got, want)
+		}
+		if held, err := b.Exists(t.Context(), saver.SessionName); err != nil || !held {
+			t.Errorf("Exists(%s) = %v, %v; want the saver its bootstrap started, hidden", saver.SessionName, held, err)
 		}
 	})
 

@@ -69,7 +69,11 @@ func (idx *Index) Len() int { return len(idx.sessions) }
 // Entry is one session. Label is empty while the session shows its name. Dir
 // is where Portal minted the session; Cwd is where the saver last saw it. A
 // creation is CreatedAt, with PID, the process the session runs, zero where
-// none was recorded. ScrollbackFile is relative to the state directory.
+// none was recorded. ScrollbackFile is relative to the state directory. Owed
+// marks an entry whose session ended with no saver to see it end, which every
+// restore brings back and no saver drops until restore has made it again or
+// a claim has found it live; an index written before the mark reads with
+// none owed.
 type Entry struct {
 	Name           string    `json:"name"`
 	Label          string    `json:"label,omitempty"`
@@ -78,6 +82,7 @@ type Entry struct {
 	CreatedAt      time.Time `json:"created_at,omitzero"`
 	PID            int       `json:"pid,omitempty"`
 	ScrollbackFile string    `json:"scrollback_file,omitempty"`
+	Owed           bool      `json:"owed,omitempty"`
 
 	// unknown holds the members this version does not model, as a JSON
 	// object, kept as a string so an Entry stays comparable.
