@@ -1,5 +1,5 @@
 // Package bootstrap runs the bootstrap invoked from root's PersistentPreRunE:
-// seven steps that bring the saved sessions back and the saver up as this
+// six steps that bring the saved sessions back and the saver up as this
 // binary. Step ordering is load-bearing.
 package bootstrap
 
@@ -20,13 +20,12 @@ import (
 var cleanLogger = log.For("clean")
 
 const (
-	stepCheckZmx       = "CheckZmx"
-	stepRaiseRestoring = "RaiseRestoring"
-	stepSweep          = "Sweep"
-	stepEnsureSaver    = "EnsureSaver"
-	stepRestore        = "Restore"
-	stepLowerRestoring = "LowerRestoring"
-	stepWriteLatch     = "WriteLatch"
+	stepCheckZmx    = "CheckZmx"
+	stepRemoveLatch = "RemoveLatch"
+	stepSweep       = "Sweep"
+	stepEnsureSaver = "EnsureSaver"
+	stepRestore     = "Restore"
+	stepWriteLatch  = "WriteLatch"
 )
 
 // The steps' indices, from 1: the loading page (internal/tui's
@@ -34,11 +33,10 @@ const (
 // per-session events carry its index.
 const (
 	indexCheckZmx = iota + 1
-	indexRaiseRestoring
+	indexRemoveLatch
 	indexSweep
 	indexEnsureSaver
 	indexRestore
-	indexLowerRestoring
 	indexWriteLatch
 
 	totalSteps = indexWriteLatch
@@ -48,6 +46,9 @@ var (
 	// ErrOlderZmx is a saver whose daemon gives Portal's zmx protocol no
 	// answer but answers zmx 0.8.1's framing: a zmx Portal doesn't support.
 	ErrOlderZmx = errors.New("the saver's daemon speaks zmx 0.8.1's framing")
+	// ErrSaverGone is a saver session gone by the time its daemon is asked
+	// its protocol.
+	ErrSaverGone = errors.New("the saver session is gone")
 	// ErrNoBootID is a latch that can't be written for want of this boot's id.
 	ErrNoBootID = errors.New("this boot's id can't be read")
 )
@@ -67,11 +68,22 @@ type ZmxChecker interface {
 	CheckZmx(ctx context.Context) error
 }
 
+// Latch is the record that the last bootstrap finished: this boot's, and this
+// version's, which the gate reads.
+type Latch interface {
+	RemoveLatch() error
+	// WriteLatch records it. Its error wraps ErrNoBootID when this boot's id
+	// can't be read.
+	WriteLatch() error
+}
+
 // RestoringFlag raises and lowers the state directory's restoring flag, which
-// stands the saver and the hook sweep down while sessions are restored.
+// stands the saver and the hook sweep down while restore's creates are in
+// flight.
 type RestoringFlag interface {
 	Raise() error
-	Lower() error
+	// Lower lowers it, reporting whether it was raised.
+	Lower() (bool, error)
 }
 
 // FlagSweeper lowers the session flags nothing else ever would. Best-effort:
@@ -88,11 +100,12 @@ type Saver interface {
 	// judges a saver it creates by made before waiting for its daemon, and
 	// made's error is its own; its other failures wrap saverhost's causes.
 	EnsureSaver(ctx context.Context, made func(context.Context) error) error
-	// Protocol is the zmx protocol the saver session's daemon speaks, or
-	// ErrOlderZmx for an older zmx's daemon.
+	// Protocol is the zmx protocol the saver session's daemon speaks:
+	// ErrOlderZmx for an older zmx's daemon, and ErrSaverGone for a saver
+	// session gone.
 	Protocol(ctx context.Context) (int, error)
-	// End ends the saver session through zmx's own CLI, which speaks the
-	// protocol of the zmx that made it, Portal sending no signal itself.
+	// End ends the saver session's daemon, whatever protocol it speaks, by a
+	// signal to the one process proved that daemon.
 	End(ctx context.Context) error
 }
 
@@ -111,43 +124,37 @@ type RestoreProgressSink interface {
 	SetProgress(fn func(n, m int))
 }
 
-// LatchWriter records the bootstrapped latch: this boot's, and this
-// version's. Its error wraps ErrNoBootID when this boot's id can't be read.
-type LatchWriter interface {
-	WriteLatch() error
-}
-
 // Orchestrator runs the bootstrap's steps. Every seam must be set. A nil
 // Logger is tolerated — Run substitutes a discard sink.
 type Orchestrator struct {
 	Zmx           ZmxChecker
+	Latch         Latch
 	Restoring     RestoringFlag
 	OrphanSweeper OrphanSweeper
 	FlagSweeper   FlagSweeper
 	Saver         Saver
 	// Protocol is the zmx protocol Portal speaks. A saver whose daemon speaks
-	// another is fatal before restore creates anything.
+	// another is ended before restore creates anything.
 	Protocol int
 	Restore  Restorer
-	Latch    LatchWriter
 	Logger   *slog.Logger
 }
 
 // Run executes the steps in order and returns the soft warnings in step order.
-// Checking zmx and raising and lowering the restoring flag are fatal, as is a
-// saver speaking another protocol or an older zmx's; every other failure is
-// logged, and those a user can act on are warned of. A pass that leaves the
-// restore unfinished, so its context's end, a saver it can't judge, sessions
-// it can't mark owed or a listing it can't read, leaves the restoring flag
-// raised and writes no latch: the next command owes the bootstrap again. The
-// latch is written last, so only a bootstrap that ran to the end records
-// itself.
+// Checking zmx, removing the latch, and raising and lowering the restoring
+// flag are fatal, as is a saver Portal can't use that it can't end; every
+// other failure is logged, and those a user can act on are warned of. The
+// latch goes before the first change and is written only by a pass that ran
+// to the end, so a pass cut short leaves none, and so does one that leaves the
+// restore unfinished: its context's end, a saver it can't judge, sessions it
+// can't mark owed or a listing it can't read. The next command then owes the
+// bootstrap again.
 func (o *Orchestrator) Run(ctx context.Context) ([]Warning, error) {
 	p := &pass{Orchestrator: o, logger: log.OrDiscard(o.Logger), emit: progressEmitterFromContext(ctx)}
 	start := time.Now()
 	for _, s := range p.steps() {
 		if s.finishing && p.unfinished {
-			p.logger.Info("step skipped", "step", s.name, "detail", "the restore is unfinished: restoring stays raised, and the next command bootstraps again")
+			p.logger.Info("step skipped", "step", s.name, "detail", "the restore is unfinished: no latch is written, and the next command bootstraps again")
 			p.progress(StepEvent{Index: s.index, Name: s.name})
 			continue
 		}
@@ -189,11 +196,10 @@ type step struct {
 func (p *pass) steps() []step {
 	return []step{
 		{indexCheckZmx, stepCheckZmx, false, p.checkZmx},
-		{indexRaiseRestoring, stepRaiseRestoring, false, p.raiseRestoring},
+		{indexRemoveLatch, stepRemoveLatch, false, p.removeLatch},
 		{indexSweep, stepSweep, false, p.sweep},
 		{indexEnsureSaver, stepEnsureSaver, false, p.ensureSaver},
 		{indexRestore, stepRestore, true, p.restore},
-		{indexLowerRestoring, stepLowerRestoring, true, p.lowerRestoring},
 		{indexWriteLatch, stepWriteLatch, true, p.writeLatch},
 	}
 }
@@ -223,13 +229,20 @@ func (p *pass) checkZmx(ctx context.Context) *FatalError {
 	return nil
 }
 
-// raiseRestoring must precede the sweep and the saver: the saver stands down
-// while the flag is up, so a saver started next claims nothing restore is
-// still making. Raised first, it is what tells the next command a bootstrap
-// is under way or was cut short.
-func (p *pass) raiseRestoring(context.Context) *FatalError {
-	if err := p.Restoring.Raise(); err != nil {
-		return NewFatal("Portal failed to raise the restoring flag: "+err.Error(), err)
+// removeLatch must precede the bootstrap's first change, so a pass cut short
+// anywhere after it leaves no latch, and the next command finishes its work.
+// It lowers a restoring flag left raised by a pass cut short mid-restore:
+// under bootstrap.lock no restore's creates are in flight, and left up, the
+// flag would stand the saver down until some later pass finished a restore.
+func (p *pass) removeLatch(context.Context) *FatalError {
+	if err := p.Latch.RemoveLatch(); err != nil {
+		return NewFatal("Portal failed to remove the bootstrapped latch: "+err.Error(), err)
+	}
+	switch raised, err := p.Restoring.Lower(); {
+	case err != nil:
+		return lowerFatal(err)
+	case raised:
+		p.logger.Info("restoring flag lowered", "detail", "a restore cut short left it raised")
 	}
 	return nil
 }
@@ -246,23 +259,25 @@ func (p *pass) sweep(ctx context.Context) *FatalError {
 	return nil
 }
 
-// ensureSaver judges a saver it finds before anything is made. Finding none,
-// it marks owed the sessions no saver saw end before any saver can commit,
-// then ensures the saver, judging one it makes before waiting for its daemon.
-// Restore runs only once a saver is judged to speak Portal's protocol: Portal
-// creates no session on a zmx it hasn't proved it speaks.
+// ensureSaver judges a saver it finds before anything is made, ending one
+// Portal can't use. Finding none, or ending one, it marks owed the sessions no
+// saver saw end before any saver can commit, then ensures the saver, judging
+// one it makes before waiting for its daemon. Restore runs only once a saver
+// is judged to speak Portal's protocol: Portal creates no session on a zmx it
+// hasn't proved it speaks.
 func (p *pass) ensureSaver(ctx context.Context) *FatalError {
-	if p.saverPresent(ctx) {
-		if fatal := p.judge(ctx, false); fatal != nil || p.unfinished {
-			return fatal
+	kept, fatal := p.keepFound(ctx)
+	switch {
+	case fatal != nil || p.unfinished:
+		return fatal
+	case !kept:
+		if err := p.Restore.MarkOwed(ctx); err != nil {
+			p.leaveUnfinished(stepEnsureSaver, OwedUnmarkedWarning(), fmt.Errorf("mark owed the sessions no saver saw end: %w", err))
+			return nil
 		}
-	} else if err := p.Restore.MarkOwed(ctx); err != nil {
-		p.leaveUnfinished(stepEnsureSaver, OwedUnmarkedWarning(), fmt.Errorf("mark owed the sessions no saver saw end: %w", err))
-		return nil
 	}
-	var fatal *FatalError
 	err := p.Saver.EnsureSaver(ctx, func(ctx context.Context) error {
-		if fatal = p.judge(ctx, true); fatal != nil || p.unfinished {
+		if fatal = p.judgeMade(ctx); fatal != nil || p.unfinished {
 			return errJudged
 		}
 		return nil
@@ -279,6 +294,30 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 	return nil
 }
 
+// keepFound judges the saver session it finds, and reports whether one runs
+// that the pass keeps. One that speaks Portal's protocol is kept, judged; one
+// it can't judge is kept, the restore left unfinished; one Portal can't use is
+// ended, so the pass goes on as if none ran, and is fatal only when it can't
+// be ended.
+func (p *pass) keepFound(ctx context.Context) (bool, *FatalError) {
+	if !p.saverPresent(ctx) {
+		return false, nil
+	}
+	unusable, err := p.judge(ctx)
+	switch {
+	case err != nil:
+		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), err)
+		return true, nil
+	case unusable == nil:
+		p.judged = true
+		return true, nil
+	case !p.end(ctx, unusable):
+		return true, unusable
+	}
+	p.logger.Info("saver ended", "detail", unusable.Cause.Error())
+	return false, nil
+}
+
 // saverPresent reports whether the saver session is there. One whose
 // presence can't be read counts as there: it may have watched sessions end,
 // so none is marked owed, and a session the user ended never comes back on a
@@ -292,40 +331,53 @@ func (p *pass) saverPresent(ctx context.Context) bool {
 	return present
 }
 
-// judge is decision 63's judgement of the saver session's daemon. One that
-// speaks Portal's protocol is judged; one that speaks another, or answers an
-// older zmx's framing, is fatal, a saver made ended as it goes; one that
-// answers neither leaves the restore unfinished.
-func (p *pass) judge(ctx context.Context, made bool) *FatalError {
-	speaks, err := p.Saver.Protocol(ctx)
-	var fatal *FatalError
+// judgeMade judges the saver EnsureSaver made: one Portal can't use is ended,
+// and fatal; one gone at once is a saver down, the restore left unfinished, as
+// it is by one that answers neither protocol.
+func (p *pass) judgeMade(ctx context.Context) *FatalError {
+	unusable, err := p.judge(ctx)
 	switch {
-	case errors.Is(err, ErrOlderZmx):
-		fatal = NewFatal("Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1.", err)
+	case errors.Is(err, ErrSaverGone):
+		p.warn(stepEnsureSaver, SaverDownWarning(), err)
+		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), err)
 	case err != nil:
-		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), fmt.Errorf("judge the saver's zmx protocol: %w", err))
-		return nil
-	case speaks != p.Protocol:
-		fatal = NewFatal(fmt.Sprintf("Portal can't use this zmx: its sessions speak protocol %d, and Portal speaks %d. Upgrade Portal, or install the zmx release it supports.", speaks, p.Protocol),
-			fmt.Errorf("the saver's daemon speaks zmx protocol %d, not %d", speaks, p.Protocol))
+		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), err)
+	case unusable != nil:
+		p.end(ctx, unusable)
+		return unusable
 	default:
 		p.judged = true
-		return nil
 	}
-	if made {
-		p.endMade(ctx, fatal)
-	}
-	return fatal
+	return nil
 }
 
-// endMade ends the saver this pass made on a zmx Portal can't use, recording
-// in fatal's cause whether it went.
-func (p *pass) endMade(ctx context.Context, fatal *FatalError) {
-	if err := p.Saver.End(ctx); err != nil {
-		fatal.Cause = fmt.Errorf("%w; the saver Portal made on it is left: %w", fatal.Cause, err)
-		return
+// judge is decision 63's judgement of the saver session's daemon: nil for
+// one that speaks Portal's protocol; the fatal for one Portal can't use, that
+// speaks another or answers an older zmx's framing; and an error for one that
+// answers neither.
+func (p *pass) judge(ctx context.Context) (*FatalError, error) {
+	speaks, err := p.Saver.Protocol(ctx)
+	switch {
+	case errors.Is(err, ErrOlderZmx):
+		return NewFatal("Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1.", err), nil
+	case err != nil:
+		return nil, fmt.Errorf("judge the saver's zmx protocol: %w", err)
+	case speaks != p.Protocol:
+		return NewFatal(fmt.Sprintf("Portal can't use this zmx: its sessions speak protocol %d, and Portal speaks %d. Upgrade Portal, or install the zmx release it supports.", speaks, p.Protocol),
+			fmt.Errorf("the saver's daemon speaks zmx protocol %d, not %d", speaks, p.Protocol)), nil
 	}
-	fatal.Cause = fmt.Errorf("%w; Portal ended the saver it made on it", fatal.Cause)
+	return nil, nil
+}
+
+// end ends a saver Portal can't use, recording in unusable's cause whether it
+// went, and reports whether it did.
+func (p *pass) end(ctx context.Context, unusable *FatalError) bool {
+	if err := p.Saver.End(ctx); err != nil {
+		unusable.Cause = fmt.Errorf("%w; Portal couldn't end the saver running on it, which is left: %w", unusable.Cause, err)
+		return false
+	}
+	unusable.Cause = fmt.Errorf("%w; Portal ended the saver running on it", unusable.Cause)
+	return true
 }
 
 // saverWarning words the cause of a saver that isn't running this binary's
@@ -340,9 +392,15 @@ func saverWarning(err error) Warning {
 	return SaverDownWarning()
 }
 
-// restore leaves the restore unfinished when the backend can't be listed or
-// ctx ends while it runs: the sessions it didn't make are still owed.
+// restore raises the restoring flag just before restore's first create, the
+// saver judged and the owed marks written, and lowers it once restore
+// returns, finished or cut short, when none of its creates is in flight. It
+// leaves the restore unfinished when the backend can't be listed or ctx ends
+// while it runs: the sessions it didn't make are still owed.
 func (p *pass) restore(ctx context.Context) *FatalError {
+	if err := p.Restoring.Raise(); err != nil {
+		return NewFatal("Portal failed to raise the restoring flag: "+err.Error(), err)
+	}
 	if sink, ok := p.Restore.(RestoreProgressSink); ok && p.emit != nil {
 		sink.SetProgress(func(n, m int) {
 			p.progress(StepEvent{Index: indexRestore, Name: stepRestore, RestoreN: n, RestoreM: m})
@@ -362,16 +420,14 @@ func (p *pass) restore(ctx context.Context) *FatalError {
 	if ctx.Err() != nil {
 		p.unfinished = true
 	}
+	if _, err := p.Restoring.Lower(); err != nil {
+		return lowerFatal(err)
+	}
 	return nil
 }
 
-// lowerRestoring runs only once the restore has finished, so the flag a pass
-// cut short leaves raised tells the next command to finish it.
-func (p *pass) lowerRestoring(context.Context) *FatalError {
-	if err := p.Restoring.Lower(); err != nil {
-		return NewFatal("Portal failed to lower the restoring flag: "+err.Error(), err)
-	}
-	return nil
+func lowerFatal(err error) *FatalError {
+	return NewFatal("Portal failed to lower the restoring flag: "+err.Error(), err)
 }
 
 // writeLatch must stay the last step: the latch has to land before the

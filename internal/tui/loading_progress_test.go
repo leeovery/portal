@@ -12,7 +12,7 @@ const floatEps = 1e-9
 
 // bootstrapSteps is how many steps the bootstrap reports, as cmd/bootstrap
 // numbers them.
-const bootstrapSteps = 7
+const bootstrapSteps = 6
 
 func feed(acc tui.LoadingProgress, events ...tui.BootstrapProgressMsg) tui.LoadingProgress {
 	for _, e := range events {
@@ -46,13 +46,12 @@ func TestStepMapsToFriendlyLabel(t *testing.T) {
 		wantLabel string
 	}{
 		{"step 1 CheckZmx", tui.BootstrapProgressMsg{Index: 1}, tui.LabelCheckingZmx},
-		{"step 2 RaiseRestoring", tui.BootstrapProgressMsg{Index: 2}, tui.LabelStartingTheSaver},
+		{"step 2 RemoveLatch", tui.BootstrapProgressMsg{Index: 2}, tui.LabelStartingTheSaver},
 		{"step 3 Sweep", tui.BootstrapProgressMsg{Index: 3}, tui.LabelStartingTheSaver},
 		{"step 4 EnsureSaver", tui.BootstrapProgressMsg{Index: 4}, tui.LabelStartingTheSaver},
 		{"step 5 Restore, a session (M>0)", tui.BootstrapProgressMsg{Index: 5, RestoreN: 1, RestoreM: 3}, tui.LabelRestoringSessions},
 		{"step 5 Restore complete (M==0)", tui.BootstrapProgressMsg{Index: 5}, tui.LabelRestoringSessions},
-		{"step 6 LowerRestoring", tui.BootstrapProgressMsg{Index: 6}, tui.LabelRestoringSessions},
-		{"step 7 WriteLatch", tui.BootstrapProgressMsg{Index: 7}, tui.LabelRestoringSessions},
+		{"step 6 WriteLatch", tui.BootstrapProgressMsg{Index: 6}, tui.LabelRestoringSessions},
 	}
 
 	for _, tc := range cases {
@@ -157,8 +156,8 @@ func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
 	if got := labelState(through(4).View(), tui.LabelStartingTheSaver); got != tui.LabelDone {
 		t.Errorf("Starting the saver after step 4 = %v; want done", got)
 	}
-	if got := labelState(through(6).View(), tui.LabelRestoringSessions); got != tui.LabelActive {
-		t.Errorf("Restoring sessions after step 6 = %v; want active (the latch, step 7, not written)", got)
+	if got := labelState(through(5).View(), tui.LabelRestoringSessions); got != tui.LabelActive {
+		t.Errorf("Restoring sessions after step 5 = %v; want active (the latch, step 6, not written)", got)
 	}
 }
 
@@ -225,7 +224,7 @@ func TestIdempotentPerStepIndex(t *testing.T) {
 	}
 }
 
-func TestMappingCoversTheSevenStepsNoGaps(t *testing.T) {
+func TestMappingCoversTheSixStepsNoGaps(t *testing.T) {
 	valid := map[string]bool{
 		tui.LabelCheckingZmx:       true,
 		tui.LabelStartingTheSaver:  true,
@@ -241,7 +240,7 @@ func TestMappingCoversTheSevenStepsNoGaps(t *testing.T) {
 			t.Errorf("step %d resolved to unknown label %q", step, got)
 		}
 	}
-	for _, bad := range []int{0, 8, 10, 99} {
+	for _, bad := range []int{0, 7, 10, 99} {
 		if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: bad}); got != "" {
 			t.Errorf("out-of-range step %d mapped to label %q; want none", bad, got)
 		}

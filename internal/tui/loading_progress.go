@@ -16,7 +16,7 @@ const (
 
 // One increment per distinct completed step, not per label. Keep in lockstep
 // with stepLabelTable and cmd/bootstrap's step indices.
-const totalBootstrapSteps = 7
+const totalBootstrapSteps = 6
 
 type LabelState int
 
@@ -33,9 +33,8 @@ var labelOrder = []string{
 	LabelRestoringSessions,
 }
 
-// The bootstrap's seven steps under their labels: checking zmx; raising the
-// restoring flag, the sweep and the saver; then restore, lowering the flag
-// and the latch.
+// The bootstrap's six steps under their labels: checking zmx; removing the
+// latch, the sweep and the saver; then restore and the latch.
 var stepLabelTable = map[int]string{
 	1: LabelCheckingZmx,
 	2: LabelStartingTheSaver,
@@ -43,7 +42,6 @@ var stepLabelTable = map[int]string{
 	4: LabelStartingTheSaver,
 	5: LabelRestoringSessions,
 	6: LabelRestoringSessions,
-	7: LabelRestoringSessions,
 }
 
 // restoreStep's per-session events (RestoreM > 0) count its sessions, n of m,

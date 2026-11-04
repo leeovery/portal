@@ -44,6 +44,8 @@ func TestRefusingSocket_IsHeldByAProcessThatMayHoldItsSession(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Fatal(err)
 	}
+	renamed := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
+	renamed.Command = "zmx-0.9"
 
 	for _, tt := range []struct {
 		name string
@@ -64,6 +66,7 @@ func TestRefusingSocket_IsHeldByAProcessThatMayHoldItsSession(t *testing.T) {
 		{"its directory as zmx's default", zmxProcess([]string{"zmx", "attach", "dev"}, "XDG_RUNTIME_DIR="+runtimeDir)},
 		{"a relative directory, which may resolve to it", zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=zmx")},
 		{"a client on a terminal", client(41, []string{"zmx", "attach", "dev"}, inDir)},
+		{"a zmx the kernel names otherwise, renamed or wrapped", renamed},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := existsOver(t, dir, tt.proc)
@@ -83,11 +86,10 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 	inDir := "ZMX_DIR=" + dir
 	exiting := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
 	exiting.Err = fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone)
-	otherProgram := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
-	otherProgram.Command = "zsh"
-	unreadableOther := zmxProcess(nil)
-	unreadableOther.Command = "launchd"
-	unreadableOther.Err = errors.New("operation not permitted")
+	otherVerb := zmxProcess([]string{"tmux", "new-session", "dev"}, inDir)
+	otherVerb.Command = "tmux"
+	hardenedOnAnotherName := zmxProcess([]string{"/opt/homebrew/bin/tart", "run", "kit-vm"})
+	hardenedOnAnotherName.Command = "tart"
 
 	for _, tt := range []struct {
 		name  string
@@ -103,8 +105,8 @@ func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) 
 		{"zmx attach answered with help", []zmx.Process{zmxProcess([]string{"zmx", "attach", "-h", "dev"}, inDir)}},
 		{"zmx run answered with help", []zmx.Process{zmxProcess([]string{"zmx", "run", "--help"}, inDir)}},
 		{"a zmx exiting as it is read", []zmx.Process{exiting}},
-		{"another program run as zmx attach", []zmx.Process{otherProgram}},
-		{"another program it can't read", []zmx.Process{unreadableOther}},
+		{"another program naming it after a verb that starts nothing", []zmx.Process{otherVerb}},
+		{"a program of that argv shape on a name it can't end with, whose environment the kernel doesn't show", []zmx.Process{hardenedOnAnotherName}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got, err := existsOver(t, dir, tt.procs...); got || err != nil {
@@ -122,7 +124,11 @@ func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
 	refusing(t, dir, "dev")
 	unreadable := zmxProcess(nil)
 	unreadable.Err = errors.New("read arguments of process 40: invalid argument")
+	unreadableOther := zmxProcess(nil)
+	unreadableOther.Command = "launchd"
+	unreadableOther.Err = errors.New("operation not permitted")
 	hidingItsEnvironment := zmxProcess([]string{"zmx", "attach", "dev"})
+	hidingItsPrefix := zmxProcess([]string{"zmx", "attach", "v"})
 
 	for _, tt := range []struct {
 		name  string
@@ -130,7 +136,9 @@ func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
 		err   error
 	}{
 		{"a zmx it can't read", []zmx.Process{unreadable}, nil},
+		{"any process it can't read, as its name proves nothing", []zmx.Process{unreadableOther}, nil},
 		{"a zmx attach on its name whose environment the kernel doesn't show", []zmx.Process{hidingItsEnvironment}, nil},
+		{"a zmx attach on a name it ends with, whose environment, and so prefix, the kernel doesn't show", []zmx.Process{hidingItsPrefix}, nil},
 		{"a process table it can't list", nil, errors.New("sysctl failed")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

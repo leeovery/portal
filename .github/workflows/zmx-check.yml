@@ -2,7 +2,9 @@ name: zmx check
 
 # Portal's formula depends on official zmx, which Homebrew upgrades freely, so
 # this runs the zmx-backed tests against zmx's latest release and its main
-# branch: every test that runs a real zmx. zmxtest.Binary fails a test these
+# branch: every test that runs a real zmx. Each leg builds zmx 0.8.1 too, the
+# release before Portal's protocol, for the tests of how Portal treats one
+# (zmxtest.OlderBinary, through PORTAL_TEST_ZMX_OLDER_BINARY). zmxtest.Binary fails a test these
 # lines don't run, and reads them strictly (internal/zmxtest/weeklycheck.go):
 # keep each to -tags integration, -p 1, -timeout, one single-quoted -run and
 # ./ packages, in a run: | block holding nothing else, and set neither Go's
@@ -28,6 +30,7 @@ jobs:
         leg: [release, main]
     env:
       GH_TOKEN: ${{ github.token }}
+      OLDER_ZMX: v0.8.1
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -58,6 +61,32 @@ jobs:
           echo "zmx $ref is $commit, built with Zig $zig"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "zig=$zig" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve zmx 0.8.1
+        id: older
+        if: steps.zmx.outputs.skip != 'true'
+        run: |
+          zig=$(gh api "repos/neurosnap/zmx/contents/build.zig.zon?ref=$OLDER_ZMX" -H 'Accept: application/vnd.github.raw' \
+            | sed -n 's/.*\.minimum_zig_version *= *"\([^"]*\)".*/\1/p')
+          if [ -z "$zig" ]; then
+            echo "::error::no minimum_zig_version in zmx $OLDER_ZMX build.zig.zon"
+            exit 1
+          fi
+          echo "zmx $OLDER_ZMX is built with Zig $zig"
+          echo "zig=$zig" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Zig for zmx 0.8.1
+        if: steps.zmx.outputs.skip != 'true'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.older.outputs.zig }}
+          use-cache: false
+
+      - name: Build zmx 0.8.1
+        if: steps.zmx.outputs.skip != 'true'
+        run: |
+          binary=$(scripts/zmx-build "$OLDER_ZMX")
+          echo "PORTAL_TEST_ZMX_OLDER_BINARY=$binary" >> "$GITHUB_ENV"
 
       - name: Setup Zig
         if: steps.zmx.outputs.skip != 'true'

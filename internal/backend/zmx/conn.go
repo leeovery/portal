@@ -181,13 +181,17 @@ func (b *Backend) dialFailure(entry string, err error) error {
 	return err
 }
 
-// refused tells a stale socket from a session not answering. A daemon whose
-// listen backlog is full refuses as a dead one does, so a refusal alone is no
-// proof the session has gone. A socket made before this boot, whose daemon
-// cannot be running now, is stale; one made since is stale only once the
-// process table proves no process holds it, a read paid for on a refusal
-// alone.
+// refused tells a stale socket from a session not answering. On Linux a
+// refusal proves no listener, a full backlog failing with EAGAIN instead, so
+// the socket is stale. On macOS a daemon whose listen backlog is full refuses
+// as a dead one does, so a refusal alone is no proof the session has gone. A
+// socket made before this boot, whose daemon cannot be running now, is stale;
+// one made since is stale only once the process table proves no process holds
+// it, a read paid for on a refusal alone.
 func (b *Backend) refused(entry string, err error) error {
+	if refusalProvesNoListener {
+		return fmt.Errorf("%w: %w", err, errStale)
+	}
 	info, statErr := os.Stat(b.path(entry))
 	boot, bootErr := b.booted()
 	if statErr == nil && bootErr == nil && info.ModTime().Before(boot) {

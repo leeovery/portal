@@ -131,9 +131,10 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 // records that creation. It changes nothing in an entry that no longer
 // records the creation restore read, one a claim has taken over for another
 // creation since: that is no longer restore's to overwrite. A created of zero
-// records no creation, so the entry keeps the one it was saved with for a
-// later claim to take over. It consults no rule, so restore is its only
-// caller, which a guard holds to.
+// records no creation, so the entry keeps the one it was saved with, and its
+// owed mark, for a later claim to take over: the claim rule adopts an owed
+// entry whatever creation it records. It consults no rule, so restore is its
+// only caller, which a guard holds to.
 func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
 	i := idx.indexOf(read.Name)
 	if i < 0 {
@@ -141,17 +142,16 @@ func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
 	}
 	e := idx.sessions[i]
 	same := e.SameCreation(created, pid)
-	if !same && !e.recordsCreationOf(read) {
-		return false
-	}
-	idx.repay(i, restoreMadeIt)
 	switch {
-	case same:
-		return true
+	case !same && !e.recordsCreationOf(read):
+		return false
 	case created.IsZero():
 		return false
 	}
-	idx.adopt(i, created, pid, "restored", restoreMadeIt)
+	idx.repay(i, restoreMadeIt)
+	if !same {
+		idx.adopt(i, created, pid, "restored", restoreMadeIt)
+	}
 	return true
 }
 

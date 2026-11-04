@@ -28,7 +28,7 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
 		FailedStep: 2,
-		Message:    "Portal failed to raise the restoring flag: permission denied",
+		Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 		Err:        errFatalSentinel,
 	})
 
@@ -38,7 +38,7 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("error state missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to raise the restoring flag") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("error state missing the one-line fatal message:\n%s", visible)
 	}
 	if !strings.Contains(visible, tui.LabelStartingTheSaver) {

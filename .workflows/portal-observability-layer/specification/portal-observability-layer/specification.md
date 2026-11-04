@@ -164,7 +164,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | Component | Owns |
 |---|---|
 | `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
-| `bootstrap` | The seven-step bootstrap orchestrator, its gate and `bootstrap.lock`: a DEBUG `bootstrap owed` (`reason`: `latch`, `restoring`, with `error` when the flag can't be read, `no saver`, `saver unknown` with `error`) when a command owes one; an INFO `step skipped` (`step`, `detail`) for each step that finishes the restore (Restore, LowerRestoring, WriteLatch) when an earlier step left it unfinished, so `restoring` stays raised; an INFO `bootstrap skipped` (`detail`, `took`) when one that waited out another finds nothing owed; an ERROR `bootstrap.lock unavailable` (`error`, `took`) when the lock can't be had within its bound. Bound again in `internal/state` for the `bootstrapped` latch: a WARN `latch unsynced` (`error`, `error_class` `write-failed-fsync`) when the directory sync after the latch's rename fails, the latch landed all the same |
+| `bootstrap` | The six-step bootstrap orchestrator, its gate and `bootstrap.lock`: a DEBUG `bootstrap owed` (`reason`: `latch`, `no saver`, `saver unknown` with `error`) when a command owes one; an INFO `restoring flag lowered` (`detail`) when the latch's removal finds `restoring` left raised by a restore cut short; an INFO `saver ended` (`detail` the verdict on it, and its end) when a saver found that Portal can't use is ended, the bootstrap going on as if none ran; an INFO `step skipped` (`step`, `detail`) for each step that finishes the restore (Restore, WriteLatch) when an earlier step left it unfinished, so no latch is written; an INFO `bootstrap skipped` (`detail`, `took`) when one that waited out another finds nothing owed; an ERROR `bootstrap.lock unavailable` (`error`, `took`) when the lock can't be had within its bound. Bound again in `internal/state` for the `bootstrapped` latch: a WARN `latch unsynced` (`error`, `error_class` `write-failed-fsync`) when the directory sync after the latch's rename fails, the latch landed all the same |
 | `restore` | On zmx, `internal/restore`, under the logger its caller binds: once a bootstrap, the restore of every saved session the backend doesn't list. One INFO `restore complete` (`restored`, `failed`, `anomalous`, `took`). Per session: a DEBUG `session skipped` (`session`, `reason` ∈ {`it is live`, `it is one of Portal's own`, `it ended this boot`}), a DEBUG `session restored` (`session`, `path` the directory it started in), and a WARN per anomaly, each counted in `anomalous`: `restore session failed` (`session`, `error`), `record session creation failed` (`session`, `error`), `clear hydrating flag failed` (`session`, `error`) and `scrollback file refused` (`session`, `path`, `error`). Once a run: a WARN `sessions.json unreadable` (`error`) or `list sessions failed` (`error`), either restoring nothing, and a WARN `restore cancelled` (`detail` how many sessions it left, `error` the cause) when its context ends between sessions |
 | `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
 | `notify` | Notification helpers |
@@ -863,7 +863,7 @@ Every cycle in portal emits ONE INFO summary at completion, with per-item events
 
 A "cycle" is a function or method whose body matches one of these shapes:
 1. **Loop cycle** — a `for` loop iterating distinct items (sessions, panes, files, entries, orphans).
-2. **Sequence cycle** — an orchestrator running discrete named steps (the seven-step bootstrap orchestrator, the two-phase restore engine).
+2. **Sequence cycle** — an orchestrator running discrete named steps (the six-step bootstrap orchestrator, the two-phase restore engine).
 3. **Tick cycle** — a periodic loop driven by a ticker (the daemon's 1 Hz capture loop).
 
 For every cycle, the function/method MUST:
@@ -897,7 +897,7 @@ Where:
 |---|---|---|
 | Daemon poll (the saver's poll, every 5 s on the 1 Hz tick) | `capture` | `capture: poll complete claimed=N dropped=N captured=N reaped=N took=T`, only for a poll that claimed, dropped, captured or removed something: a quiet poll, or one that only recorded a working directory, logs nothing at INFO |
 | Daemon final flush (shutdown) | `capture` | `capture: flush complete captured=N took=T`, only for a flush that captured something |
-| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=7 warnings=N took=T` |
+| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=6 warnings=N took=T` |
 | Each bootstrap step | `bootstrap` | `bootstrap: step complete step=<StepName> took=T` |
 | Restore (once a bootstrap) | `restore` | `restore: restore complete restored=N failed=N anomalous=N took=T` |
 | Orphan FIFO sweep | `clean` | `clean: orphan-fifo sweep complete reaped=N skipped=N took=T` |

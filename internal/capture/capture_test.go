@@ -159,7 +159,7 @@ func TestLoadingErrorFixture(t *testing.T) {
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
 		FailedStep: 2,
-		Message:    "Portal failed to raise the restoring flag: permission denied",
+		Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 		Err:        errors.New("permission denied"),
 	})
 
@@ -175,7 +175,7 @@ func TestLoadingErrorFixture(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("loading-error frame missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to raise the restoring flag") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("loading-error frame missing the one-line fatal message:\n%s", visible)
 	}
 	if !strings.Contains(visible, "quit") {

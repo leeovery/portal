@@ -412,21 +412,31 @@ func TestRestored(t *testing.T) {
 		}
 	})
 
-	for name, at := range map[string]time.Time{"already records the creation": liveCreation, "is restored with no creation": {}} {
-		t.Run("an owed entry that "+name+" is owed no more: restore made its session", func(t *testing.T) {
-			held := owed(keeping(beforeBoot, 1717))
-			if !at.IsZero() {
-				held = owed(keeping(at, 4242))
-			}
-			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+	t.Run("an owed entry that already records the creation is owed no more: restore made its session", func(t *testing.T) {
+		held := owed(keeping(liveCreation, 4242))
+		idx := sessionindex.IndexOf([]sessionindex.Entry{held})
 
-			idx.Restored(held, at, 4242)
+		idx.Restored(held, liveCreation, 4242)
 
-			if got, _ := idx.Lookup("a"); got.Owed {
-				t.Errorf("entry = %+v, want it owed no more", got)
-			}
-		})
-	}
+		if got, _ := idx.Lookup("a"); got.Owed {
+			t.Errorf("entry = %+v, want it owed no more", got)
+		}
+	})
+
+	// The claim rule adopts an owed entry whatever creation it records, so
+	// the mark is what lets the saver take over a session restore made but
+	// couldn't read the creation of.
+	t.Run("an owed entry restored with no creation keeps its mark", func(t *testing.T) {
+		held := owed(keeping(earlierThisBoot, 1717))
+		idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+
+		if idx.Restored(held, time.Time{}, 4242) {
+			t.Error("Restored = true, want false: nothing was recorded")
+		}
+		if got, _ := idx.Lookup("a"); !sameEntry(got, held) {
+			t.Errorf("entry = %+v, want it untouched and owed, %+v", got, held)
+		}
+	})
 
 	t.Run("an owed entry taken over for another creation since restore read it keeps its mark", func(t *testing.T) {
 		since := owed(keeping(earlierThisBoot, 7))

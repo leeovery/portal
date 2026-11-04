@@ -1,7 +1,8 @@
 package zmx
 
 import (
-	"errors"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/leeovery/portal/internal/proctable"
@@ -39,15 +40,24 @@ func FakeProcesses(b *Backend, procs []Process, err error) {
 	FakeProcessesFrom(b, func() ([]Process, error) { return procs, err })
 }
 
-// FakeProcessesFrom has the Backend read, at each read, the processes table
-// returns, or fail the listing with table's error.
+// FakeProcessesFrom has the Backend read, at each listing, the processes
+// table returns, or fail the listing with table's error. A process's
+// arguments are read as the listing last taken shows them, and a process it
+// doesn't show is gone.
 func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
+	var (
+		mu   sync.Mutex
+		last []Process
+	)
 	b.processes = processTable{
 		list: func() ([]proctable.Process, error) {
 			procs, err := table()
 			if err != nil {
 				return nil, err
 			}
+			mu.Lock()
+			last = procs
+			mu.Unlock()
 			list := make([]proctable.Process, len(procs))
 			for i, p := range procs {
 				list[i] = p.Process
@@ -55,13 +65,14 @@ func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
 			return list, nil
 		},
 		readArgs: func(pid int) (proctable.Args, error) {
-			procs, _ := table()
-			for _, p := range procs {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, p := range last {
 				if p.PID == pid {
 					return p.Args, p.Err
 				}
 			}
-			return proctable.Args{}, errors.New("no such process")
+			return proctable.Args{}, fmt.Errorf("read arguments of process %d: %w", pid, proctable.ErrGone)
 		},
 	}
 }

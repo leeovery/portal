@@ -12,10 +12,12 @@ import (
 
 var uninstallDeps *UninstallDeps
 
-// UninstallDeps overrides the saver's stop; production leaves uninstallDeps
-// nil and stops the saver over the session backend.
+// UninstallDeps overrides the saver's stop and the end of a saver Portal
+// can't use; production leaves uninstallDeps nil, stops the saver over the
+// session backend and ends one as the bootstrap does.
 type UninstallDeps struct {
-	Saver saverStopper
+	Saver  saverStopper
+	Daemon unusableSaver
 }
 
 // saverStopper stops the saver, reporting whether there was one.
@@ -23,19 +25,27 @@ type saverStopper interface {
 	Stop(ctx context.Context) (bool, error)
 }
 
-func uninstallStopper() (saverStopper, error) {
+// unusableSaver is the saver session's daemon as uninstall ends one whose zmx
+// protocol Portal can't use, and so can't read to stop.
+type unusableSaver interface {
+	unusable(ctx context.Context) bool
+	End(ctx context.Context) error
+}
+
+func uninstallSaver() (saverStopper, unusableSaver, error) {
 	if uninstallDeps != nil {
-		return uninstallDeps.Saver, nil
+		return uninstallDeps.Saver, uninstallDeps.Daemon, nil
 	}
 	b, err := sessionBackend()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	dir, err := state.Dir()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return newSaverHost(b, dir)
+	host, err := newSaverHost(b, dir)
+	return host, newSaverDaemon(), err
 }
 
 // Uninstall stops the saver and nothing more: it keeps the bootstrapped
@@ -59,13 +69,22 @@ var uninstallCmd = &cobra.Command{
 	},
 }
 
-// stopSaver stops the saver, and reports whether there was one.
+// stopSaver stops the saver, and reports whether there was one. A saver the
+// stop fails on whose daemon speaks a zmx protocol Portal can't use is ended
+// as the bootstrap ends one.
 func stopSaver(ctx context.Context) (bool, error) {
-	stopper, err := uninstallStopper()
+	stopper, daemon, err := uninstallSaver()
 	if err != nil {
 		return false, err
 	}
-	return stopper.Stop(ctx)
+	stopped, err := stopper.Stop(ctx)
+	if err == nil || !daemon.unusable(ctx) {
+		return stopped, err
+	}
+	if endErr := daemon.End(ctx); endErr != nil {
+		return false, fmt.Errorf("%w; its daemon speaks a zmx protocol Portal can't use, and ending it failed: %w", err, endErr)
+	}
+	return true, nil
 }
 
 // uninstallReport says what uninstall did, where the saved sessions and

@@ -194,7 +194,7 @@ func TestLoadingScreen_TickRowsLeftAlignedWithinList(t *testing.T) {
 func errorFrameView() LoadingProgressView {
 	var p LoadingProgress
 	p = p.Apply(BootstrapProgressMsg{Index: 1})
-	return p.FailedView(2, "Portal failed to raise the restoring flag: permission denied")
+	return p.FailedView(2, "Portal failed to remove the bootstrapped latch: permission denied")
 }
 
 func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
@@ -203,7 +203,7 @@ func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
 	lines := strings.Split(block, "\n")
 	blockWidth := lipgloss.Width(block)
 
-	msgLine := firstLineContaining(lines, "Portal failed to raise")
+	msgLine := firstLineContaining(lines, "Portal failed to remove")
 	if msgLine == "" {
 		t.Fatalf("error block missing the fatal message:\n%s", ansi.Strip(block))
 	}

@@ -8,14 +8,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func failedRaisingRestoring() LoadingProgressView {
+func failedRemovingLatch() LoadingProgressView {
 	var p LoadingProgress
 	p = p.Apply(BootstrapProgressMsg{Index: 1})
-	return p.FailedView(2, "Portal failed to raise the restoring flag: permission denied")
+	return p.FailedView(2, "Portal failed to remove the bootstrapped latch: permission denied")
 }
 
 func TestErrorFrame_FailedRowIsRedCross(t *testing.T) {
-	view := failedRaisingRestoring()
+	view := failedRemovingLatch()
 	out := renderLoadingScreen(view, 80, 24, testDarkTheme(t), false)
 	visible := ansi.Strip(out)
 
@@ -29,13 +29,13 @@ func TestErrorFrame_FailedRowIsRedCross(t *testing.T) {
 	if !strings.Contains(visible, LabelStartingTheSaver) {
 		t.Errorf("error frame missing the failed label:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to raise the restoring flag") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("error frame missing the one-line message:\n%s", visible)
 	}
 }
 
 func TestErrorFrame_StepStatesAroundFailure(t *testing.T) {
-	view := failedRaisingRestoring()
+	view := failedRemovingLatch()
 	out := renderLoadingScreen(view, 80, 24, testDarkTheme(t), false)
 	visible := ansi.Strip(out)
 
@@ -50,7 +50,7 @@ func TestErrorFrame_StepStatesAroundFailure(t *testing.T) {
 }
 
 func TestErrorFrame_NeverOverflowsHeight(t *testing.T) {
-	view := failedRaisingRestoring()
+	view := failedRemovingLatch()
 	for _, dims := range [][2]int{{120, 40}, {80, 24}, {40, 12}, {30, 8}, {24, 7}, {20, 6}} {
 		out := renderLoadingScreen(view, dims[0], dims[1], testDarkTheme(t), false)
 		if h := lipgloss.Height(out); h > dims[1] {

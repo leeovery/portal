@@ -984,7 +984,7 @@ func loadingErrorFixture() *Fixture {
 		loadingEvents: events,
 		fatalEvent: tui.BootstrapFatalMsg{
 			FailedStep: 2,
-			Message:    "Portal failed to raise the restoring flag: permission denied",
+			Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 			Err:        errFixtureFatal,
 		},
 	}

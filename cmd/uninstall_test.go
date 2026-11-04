@@ -34,10 +34,29 @@ func (s *stopperFake) Stop(context.Context) (bool, error) {
 	return s.stopped, s.err
 }
 
+// daemonFake is the saver's daemon, one Portal can't use when unusable,
+// whose end fails with endErr, counting the judgements and ends asked of it.
+type daemonFake struct {
+	isUnusable bool
+	endErr     error
+	asks, ends int
+}
+
+func (d *daemonFake) unusable(context.Context) bool {
+	d.asks++
+	return d.isUnusable
+}
+
+func (d *daemonFake) End(context.Context) error {
+	d.ends++
+	return d.endErr
+}
+
 func TestUninstall(t *testing.T) {
 	t.Run("it stops the saver and says where the saved sessions and config are", func(t *testing.T) {
 		stop := &stopperFake{stopped: true}
-		withUninstallDeps(t, UninstallDeps{Saver: stop})
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: stop, Daemon: daemon})
 
 		stdout, _, err := runRootCmd(t, "uninstall")
 
@@ -49,6 +68,9 @@ func TestUninstall(t *testing.T) {
 		}
 		if stop.stops != 1 {
 			t.Errorf("stops = %d, want one", stop.stops)
+		}
+		if daemon.asks != 0 || daemon.ends != 0 {
+			t.Errorf("the daemon was judged %d times and ended %d, want neither past a stop that worked", daemon.asks, daemon.ends)
 		}
 	})
 
@@ -83,7 +105,8 @@ func TestUninstall(t *testing.T) {
 		"a saver whose daemon can't be read": {err: refused},
 	} {
 		t.Run(name+" fails the command with its reason, printing nothing", func(t *testing.T) {
-			withUninstallDeps(t, UninstallDeps{Saver: fake})
+			daemon := &daemonFake{}
+			withUninstallDeps(t, UninstallDeps{Saver: fake, Daemon: daemon})
 
 			stdout, _, err := runRootCmd(t, "uninstall")
 
@@ -96,8 +119,44 @@ func TestUninstall(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Errorf("stdout = %q, want nothing", stdout)
 			}
+			if daemon.ends != 0 {
+				t.Errorf("ends = %d, want none of a daemon Portal can use", daemon.ends)
+			}
 		})
 	}
+
+	// Decision 68: a saver whose daemon speaks a zmx protocol Portal can't
+	// use can't be read to stop, and is ended as the bootstrap ends one.
+	t.Run("a saver it can't read for its daemon's protocol is ended, and reported stopped", func(t *testing.T) {
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+		if want := "Portal's save daemon stopped. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
+		}
+		if daemon.ends != 1 {
+			t.Errorf("ends = %d, want one", daemon.ends)
+		}
+	})
+
+	t.Run("one it can't end fails the command with both reasons, printing nothing", func(t *testing.T) {
+		unproved := errors.New("no one process is proved the session's zmx daemon")
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: &daemonFake{isUnusable: true, endErr: unproved}})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if !errors.Is(err, refused) || !errors.Is(err, unproved) {
+			t.Fatalf("uninstall = %v, want the stop's and the end's failures", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
 
 	t.Run("a session backend that can't be bound fails the command the same way", func(t *testing.T) {
 		t.Setenv("ZMX_DIR", "relative/zmx")

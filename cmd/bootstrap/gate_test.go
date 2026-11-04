@@ -61,20 +61,16 @@ func TestGateOwed(t *testing.T) {
 		})
 	}
 
-	// decision 61: a raised flag is a bootstrap under way, or one cut short
-	// before it finished its restore.
-	t.Run("a bootstrap is owed with the latch current and the restoring flag raised, the saver unasked", func(t *testing.T) {
+	// Decision 67: restoring covers restore's creates alone. The latch, removed
+	// before a bootstrap's first change, is what records one unfinished.
+	t.Run("the restoring flag raised owes none, with the latch current", func(t *testing.T) {
 		dir := latched(t, running)
 		if err := state.Restoring.Set(dir); err != nil {
 			t.Fatal(err)
 		}
-		saver := &presence{present: true}
 
-		if !(Gate{StateDir: dir, Running: running, Present: saver.check}).Owed(t.Context()) {
-			t.Error("Owed = false, want a bootstrap owed")
-		}
-		if saver.asks != 0 {
-			t.Errorf("the saver was asked %d times, want none", saver.asks)
+		if (Gate{StateDir: dir, Running: running, Present: (&presence{present: true}).check}).Owed(t.Context()) {
+			t.Error("Owed = true, want the warm path: the flag is no record of a bootstrap")
 		}
 	})
 

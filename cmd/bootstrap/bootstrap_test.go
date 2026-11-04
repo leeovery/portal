@@ -26,9 +26,14 @@ type answer struct {
 type stepRecorder struct {
 	calls []string
 
-	ZmxErr, RaiseErr, OrphansErr, FlagsErr, LowerErr, LatchErr error
-	// SaverUp is a saver found present; Recycles has EnsureSaver make a new
-	// one in its place, as one that is absent always is.
+	ZmxErr, RemoveErr, RaiseErr, OrphansErr, FlagsErr, LatchErr error
+	// LowerErrs are the lowers' errors in turn, nil past the last.
+	LowerErrs []error
+	// Raised is the restoring flag, as a pass cut short may leave it.
+	Raised bool
+	// SaverUp is a saver found present, until End ends it; Recycles has
+	// EnsureSaver make a new one in its place, as one that is absent always
+	// is.
 	SaverUp, Recycles bool
 	// CreateErr fails EnsureSaver's create, so it makes no saver; EnsureErr
 	// fails it after.
@@ -43,6 +48,7 @@ type stepRecorder struct {
 	DuringRestore func()
 
 	protocolReads int
+	lowers        int
 	progress      func(n, m int)
 }
 
@@ -57,10 +63,39 @@ func (r *stepRecorder) record(call string) { r.calls = append(r.calls, call) }
 
 func (r *stepRecorder) called(call string) bool { return slices.Contains(r.calls, call) }
 
+func (r *stepRecorder) count(call string) int {
+	n := 0
+	for _, c := range r.calls {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *stepRecorder) CheckZmx(context.Context) error { r.record("CheckZmx"); return r.ZmxErr }
-func (r *stepRecorder) Raise() error                   { r.record("Raise"); return r.RaiseErr }
-func (r *stepRecorder) Lower() error                   { r.record("Lower"); return r.LowerErr }
+func (r *stepRecorder) RemoveLatch() error             { r.record("RemoveLatch"); return r.RemoveErr }
 func (r *stepRecorder) WriteLatch() error              { r.record("WriteLatch"); return r.LatchErr }
+
+func (r *stepRecorder) Raise() error {
+	r.record("Raise")
+	if r.RaiseErr != nil {
+		return r.RaiseErr
+	}
+	r.Raised = true
+	return nil
+}
+
+func (r *stepRecorder) Lower() (bool, error) {
+	r.record("Lower")
+	r.lowers++
+	if r.lowers <= len(r.LowerErrs) && r.LowerErrs[r.lowers-1] != nil {
+		return false, r.LowerErrs[r.lowers-1]
+	}
+	raised := r.Raised
+	r.Raised = false
+	return raised, nil
+}
 
 func (r *stepRecorder) SweepOrphanDaemons(context.Context) error {
 	r.record("SweepOrphanDaemons")
@@ -86,6 +121,7 @@ func (r *stepRecorder) EnsureSaver(ctx context.Context, made func(context.Contex
 		return r.CreateErr
 	}
 	r.record("Create")
+	r.SaverUp = true
 	if err := made(ctx); err != nil {
 		return err
 	}
@@ -99,7 +135,14 @@ func (r *stepRecorder) Protocol(context.Context) (int, error) {
 	return a.speaks, a.err
 }
 
-func (r *stepRecorder) End(context.Context) error { r.record("End"); return r.EndErr }
+func (r *stepRecorder) End(context.Context) error {
+	r.record("End")
+	if r.EndErr != nil {
+		return r.EndErr
+	}
+	r.SaverUp = false
+	return nil
+}
 
 func (r *stepRecorder) MarkOwed(context.Context) error { r.record("MarkOwed"); return r.MarkErr }
 
@@ -107,6 +150,9 @@ func (r *stepRecorder) SetProgress(fn func(n, m int)) { r.progress = fn }
 
 func (r *stepRecorder) Restore(context.Context) restore.Result {
 	r.record("Restore")
+	if !r.Raised {
+		r.record("Restore with the restoring flag lowered")
+	}
 	if r.progress != nil {
 		for n := 1; n <= r.Sessions; n++ {
 			r.progress(n, r.Sessions)
@@ -121,13 +167,13 @@ func (r *stepRecorder) Restore(context.Context) restore.Result {
 func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 	return &Orchestrator{
 		Zmx:           r,
+		Latch:         r,
 		Restoring:     r,
 		OrphanSweeper: r,
 		FlagSweeper:   r,
 		Saver:         r,
 		Protocol:      portalProtocol,
 		Restore:       r,
-		Latch:         r,
 		Logger:        logger,
 	}
 }
@@ -135,12 +181,12 @@ func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 // wantAllCalls is every seam call a bootstrap that finds its saver running
 // makes, in the order Run makes them.
 var wantAllCalls = []string{
-	"CheckZmx", "Raise", "SweepOrphanDaemons", "SweepStaleFlags",
-	"Present", "Protocol", "EnsureSaver", "Restore", "Lower", "WriteLatch",
+	"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+	"Present", "Protocol", "EnsureSaver", "Raise", "Restore", "Lower", "WriteLatch",
 }
 
-// stepNames is the seven steps, in order.
-var stepNames = []string{"CheckZmx", "RaiseRestoring", "Sweep", "EnsureSaver", "Restore", "LowerRestoring", "WriteLatch"}
+// stepNames is the six steps, in order.
+var stepNames = []string{"CheckZmx", "RemoveLatch", "Sweep", "EnsureSaver", "Restore", "WriteLatch"}
 
 var errBoom = errors.New("boom")
 
@@ -167,7 +213,7 @@ func fatalOf(t *testing.T, r *stepRecorder) *FatalError {
 	return fatal
 }
 
-func TestOrchestratorRun_RunsTheSevenStepsInOrder(t *testing.T) {
+func TestOrchestratorRun_RunsTheSixStepsInOrder(t *testing.T) {
 	t.Run("over a saver found running, it judges the saver before it ensures it", func(t *testing.T) {
 		r := newRecorder()
 
@@ -189,8 +235,8 @@ func TestOrchestratorRun_RunsTheSevenStepsInOrder(t *testing.T) {
 		runPass(t, r, &logtest.Sink{})
 
 		want := []string{
-			"CheckZmx", "Raise", "SweepOrphanDaemons", "SweepStaleFlags",
-			"Present", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Restore", "Lower", "WriteLatch",
+			"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+			"Present", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 		}
 		if !slices.Equal(r.calls, want) {
 			t.Errorf("calls = %v, want %v", r.calls, want)
@@ -209,8 +255,67 @@ func TestOrchestratorRun_RunsTheSevenStepsInOrder(t *testing.T) {
 	})
 }
 
-// decision 62: only a saver's absence proves none saw the sessions end.
-func TestOrchestratorRun_MarksOwedOnlyWhenItFindsNoSaver(t *testing.T) {
+// Decision 67: the latch is the record of a finished bootstrap, and the
+// restoring flag covers restore's creates alone.
+func TestOrchestratorRun_LatchAndRestoringFlag(t *testing.T) {
+	t.Run("it removes the latch before its first change", func(t *testing.T) {
+		r := newRecorder()
+
+		runPass(t, r, &logtest.Sink{})
+
+		if got := r.calls[:2]; !slices.Equal(got, []string{"CheckZmx", "RemoveLatch"}) {
+			t.Errorf("calls begin %v, want the latch removed straight after zmx is checked", got)
+		}
+	})
+
+	t.Run("it raises the restoring flag only for restore, and lowers it once restore returns", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+
+		runPass(t, r, &logtest.Sink{})
+
+		raise := slices.Index(r.calls, "Raise")
+		if raise < 0 || r.calls[raise+1] != "Restore" || r.calls[raise+2] != "Lower" {
+			t.Errorf("calls = %v, want Raise, Restore, Lower together", r.calls)
+		}
+		if raise < slices.Index(r.calls, "MarkOwed") || raise < slices.Index(r.calls, "Protocol") {
+			t.Errorf("calls = %v, want the flag raised only after the owed marks and the judgement", r.calls)
+		}
+		if r.called("Restore with the restoring flag lowered") || r.Raised {
+			t.Errorf("calls = %v, flag raised %v; want restore run under the flag, and the flag lowered after", r.calls, r.Raised)
+		}
+	})
+
+	t.Run("a restoring flag left raised by a pass cut short is lowered before anything else, and logged", func(t *testing.T) {
+		r := newRecorder()
+		r.Raised = true
+		sink := &logtest.Sink{}
+
+		runPass(t, r, sink)
+
+		if got := r.calls[:3]; !slices.Equal(got, []string{"CheckZmx", "RemoveLatch", "Lower"}) {
+			t.Errorf("calls begin %v, want the flag lowered with the latch removed", got)
+		}
+		rec := sink.Records().WithMessage("restoring flag lowered").AtExactLevel(slog.LevelInfo).Only(t, "the flag left raised")
+		if got := rec.AttrString(t, "detail"); got != "a restore cut short left it raised" {
+			t.Errorf("detail = %q", got)
+		}
+	})
+
+	t.Run("a pass that left no flag raised logs no lowering", func(t *testing.T) {
+		sink := &logtest.Sink{}
+
+		runPass(t, newRecorder(), sink)
+
+		if got := sink.Records().WithMessage("restoring flag lowered"); len(got) != 0 {
+			t.Errorf("records = %+v, want none: restore's own lowering is no flag left raised", got)
+		}
+	})
+}
+
+// decision 62: only a saver's absence proves none saw the sessions end, and
+// decision 68: a saver Portal can't use, ended, is as none.
+func TestOrchestratorRun_MarksOwedOnlyWhenNoSaverRuns(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		stage func(*stepRecorder)
@@ -219,6 +324,7 @@ func TestOrchestratorRun_MarksOwedOnlyWhenItFindsNoSaver(t *testing.T) {
 		{"a saver found running", func(*stepRecorder) {}, false},
 		{"no saver found", func(r *stepRecorder) { r.SaverUp = false }, true},
 		{"a saver that couldn't be told, which may have watched sessions end", func(r *stepRecorder) { r.PresentErr = errBoom }, false},
+		{"a saver found that Portal can't use, ended", func(r *stepRecorder) { r.Answers = []answer{{speaks: 2}, {speaks: portalProtocol}} }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRecorder()
@@ -250,25 +356,32 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 			calls:   wantAllCalls[:1],
 		},
 		{
-			name:    "raising the restoring flag",
-			stage:   func(r *stepRecorder) { r.RaiseErr = errBoom },
-			step:    indexRaiseRestoring,
-			message: "Portal failed to raise the restoring flag: boom",
+			name:    "removing the latch",
+			stage:   func(r *stepRecorder) { r.RemoveErr = errBoom },
+			step:    indexRemoveLatch,
+			message: "Portal failed to remove the bootstrapped latch: boom",
 			calls:   wantAllCalls[:2],
 		},
 		{
-			name:    "a saver speaking another protocol, before anything is made",
-			stage:   func(r *stepRecorder) { r.Answers = []answer{{speaks: 2}} },
-			step:    indexEnsureSaver,
-			message: "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports.",
-			calls:   wantAllCalls[:6],
+			name:    "lowering a restoring flag left raised",
+			stage:   func(r *stepRecorder) { r.LowerErrs = []error{errBoom} },
+			step:    indexRemoveLatch,
+			message: "Portal failed to lower the restoring flag: boom",
+			calls:   wantAllCalls[:3],
 		},
 		{
-			name:    "lowering the restoring flag",
-			stage:   func(r *stepRecorder) { r.LowerErr = errBoom },
-			step:    indexLowerRestoring,
-			message: "Portal failed to lower the restoring flag: boom",
+			name:    "raising the restoring flag",
+			stage:   func(r *stepRecorder) { r.RaiseErr = errBoom },
+			step:    indexRestore,
+			message: "Portal failed to raise the restoring flag: boom",
 			calls:   wantAllCalls[:9],
+		},
+		{
+			name:    "lowering the restoring flag after restore",
+			stage:   func(r *stepRecorder) { r.LowerErrs = []error{nil, errBoom} },
+			step:    indexRestore,
+			message: "Portal failed to lower the restoring flag: boom",
+			calls:   wantAllCalls[:11],
 		},
 	} {
 		t.Run(tc.name+" is fatal, and nothing runs after it, the latch least of all", func(t *testing.T) {
@@ -302,69 +415,165 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 // olderZmx is the fatal of a saver answering zmx 0.8.1's framing.
 const olderZmx = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1."
 
-// decision 63: the saver is judged before restore creates anything, with four
-// outcomes.
-func TestOrchestratorRun_JudgesTheSaversProtocol(t *testing.T) {
-	older := answer{err: fmt.Errorf("%w: no answer in 1s", ErrOlderZmx)}
-	another := answer{speaks: 2}
-	neither := answer{err: errBoom}
+// anotherProtocol is the fatal of a saver speaking protocol 2.
+const anotherProtocol = "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports."
 
-	for _, tc := range []struct {
-		name    string
-		found   bool
-		verdict answer
-		message string
-	}{
-		{"a saver found that speaks another protocol", true, another, "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports."},
-		{"a saver found that answers zmx 0.8.1's framing", true, older, olderZmx},
-		{"a saver made that speaks another protocol", false, another, "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports."},
-		{"a saver made that answers zmx 0.8.1's framing", false, older, olderZmx},
-	} {
-		t.Run(tc.name+" is fatal before restore creates anything", func(t *testing.T) {
+var (
+	older   = answer{err: fmt.Errorf("%w: no answer in 1s", ErrOlderZmx)}
+	another = answer{speaks: 2}
+	neither = answer{err: errBoom}
+	portals = answer{speaks: portalProtocol}
+)
+
+// decision 68: a saver found that Portal can't use is ended, and the pass
+// goes on as if no saver ran.
+func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
+	for name, verdict := range map[string]answer{"answers zmx 0.8.1's framing": older, "speaks another protocol": another} {
+		t.Run("one that "+name+" is ended, then sessions are marked owed, a saver made and judged, and restored", func(t *testing.T) {
 			r := newRecorder()
-			r.SaverUp = tc.found
-			r.Answers = []answer{tc.verdict}
+			r.Answers = []answer{verdict, portals}
+			sink := &logtest.Sink{}
 
-			fatal := fatalOf(t, r)
+			if warnings := runPass(t, r, sink); len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
 
-			if fatal.UserMessage != tc.message || fatal.Step != indexEnsureSaver {
-				t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, tc.message, indexEnsureSaver)
+			want := []string{
+				"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+				"Present", "Protocol", "End", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 			}
-			if r.called("Restore") || r.called("Lower") || r.called("WriteLatch") {
-				t.Errorf("calls = %v, want no restore, the flag left raised and no latch", r.calls)
+			if !slices.Equal(r.calls, want) {
+				t.Errorf("calls = %v, want %v", r.calls, want)
 			}
-			if tc.found && (r.called("Create") || r.called("EnsureSaver") || r.called("End")) {
-				t.Errorf("calls = %v, want nothing made, and the saver found left as it is", r.calls)
-			}
-			if !tc.found && !r.called("End") {
-				t.Errorf("calls = %v, want the saver it made ended", r.calls)
+			rec := sink.Records().WithMessage("saver ended").AtExactLevel(slog.LevelInfo).Only(t, "the saver ended")
+			if got := rec.AttrString(t, "detail"); !strings.Contains(got, "Portal ended the saver running on it") {
+				t.Errorf("detail = %q, want the saver's verdict and its end", got)
 			}
 		})
 	}
 
-	t.Run("a saver made it can't end is left, and the fatal's cause says so", func(t *testing.T) {
+	t.Run("one ended, with the zmx on PATH still one Portal can't use, ends the one it makes too, and is fatal", func(t *testing.T) {
 		r := newRecorder()
-		r.SaverUp = false
 		r.Answers = []answer{older}
-		r.EndErr = errors.New("zmx kill: no answer")
 
 		fatal := fatalOf(t, r)
 
-		if !strings.Contains(fatal.Cause.Error(), "left: zmx kill: no answer") || fatal.UserMessage != olderZmx {
+		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, olderZmx, indexEnsureSaver)
+		}
+		if got := r.count("End"); got != 2 || !r.called("MarkOwed") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
+			t.Errorf("calls = %v, want both savers ended, the owed marks written, and nothing restored", r.calls)
+		}
+		if !strings.Contains(fatal.Cause.Error(), "Portal ended the saver running on it") {
+			t.Errorf("cause = %v, want it to say the saver made was ended", fatal.Cause)
+		}
+	})
+
+	t.Run("one it can't end is fatal, nothing made, and the cause names the saver left", func(t *testing.T) {
+		r := newRecorder()
+		r.Answers = []answer{older}
+		r.EndErr = errors.New("no one process is proved the session's zmx daemon")
+
+		fatal := fatalOf(t, r)
+
+		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, olderZmx, indexEnsureSaver)
+		}
+		if !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver running on it, which is left: no one process") {
+			t.Errorf("cause = %v, want it to name the saver left", fatal.Cause)
+		}
+		for _, call := range []string{"MarkOwed", "EnsureSaver", "Create", "Raise", "Restore", "WriteLatch"} {
+			if r.called(call) {
+				t.Errorf("calls = %v, want no %s past a saver it couldn't end", r.calls, call)
+			}
+		}
+	})
+}
+
+// decision 63: the saver made is judged before restore creates anything.
+func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
+	for name, verdict := range map[string]answer{"answers zmx 0.8.1's framing": older, "speaks another protocol": another} {
+		t.Run("one that "+name+" is ended, and fatal before restore creates anything", func(t *testing.T) {
+			r := newRecorder()
+			r.SaverUp = false
+			r.Answers = []answer{verdict}
+
+			fatal := fatalOf(t, r)
+
+			if want := map[bool]string{true: olderZmx, false: anotherProtocol}[verdict == older]; fatal.UserMessage != want || fatal.Step != indexEnsureSaver {
+				t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, want, indexEnsureSaver)
+			}
+			if !r.called("End") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
+				t.Errorf("calls = %v, want the saver made ended, and no restore and no latch", r.calls)
+			}
+		})
+	}
+
+	t.Run("one it can't end is left, and the fatal's cause says so", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.Answers = []answer{older}
+		r.EndErr = errors.New("its socket outlived SIGTERM")
+
+		fatal := fatalOf(t, r)
+
+		if !strings.Contains(fatal.Cause.Error(), "which is left: its socket outlived SIGTERM") || fatal.UserMessage != olderZmx {
 			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
 		}
 	})
 
-	t.Run("a saver it recycles that answers zmx 0.8.1's framing is fatal, and ended", func(t *testing.T) {
+	t.Run("one it recycles that answers zmx 0.8.1's framing is fatal, and ended", func(t *testing.T) {
 		r := newRecorder()
 		r.Recycles = true
-		r.Answers = []answer{{speaks: portalProtocol}, older}
+		r.Answers = []answer{portals, older}
 
 		if fatal := fatalOf(t, r); fatal.UserMessage != olderZmx || !r.called("End") || r.called("Restore") {
 			t.Errorf("fatal = %q, calls %v; want the older-zmx fatal, the made saver ended, no restore", fatal.UserMessage, r.calls)
 		}
 	})
 
+	t.Run("one gone at once is a saver down, and leaves the restore unfinished", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.Answers = []answer{{err: fmt.Errorf("%w: no such session", ErrSaverGone)}}
+		sink := &logtest.Sink{}
+
+		warnings := runPass(t, r, sink)
+
+		if !equalWarnings(warnings, []Warning{SaverDownWarning(), UnjudgedWarning()}) {
+			t.Errorf("warnings = %v, want the saver's and the can't-judge warning", warnings)
+		}
+		assertUnfinished(t, r, sink)
+	})
+
+	t.Run("none made, its create failing, leaves the restore unfinished", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.CreateErr = errBoom
+		sink := &logtest.Sink{}
+
+		warnings := runPass(t, r, sink)
+
+		if !equalWarnings(warnings, []Warning{SaverDownWarning(), UnjudgedWarning()}) {
+			t.Errorf("warnings = %v, want the saver's and the can't-judge warning", warnings)
+		}
+		assertUnfinished(t, r, sink)
+	})
+
+	t.Run("one judged Portal's whose daemon then fails to come up still restores", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.EnsureErr = fmt.Errorf("%w within 10s", saverhost.ErrNotReady)
+
+		warnings := runPass(t, r, &logtest.Sink{})
+
+		if !equalWarnings(warnings, []Warning{SaverDownWarning()}) || !r.called("Restore") || !r.called("WriteLatch") {
+			t.Errorf("warnings = %v, calls %v; want the saver's warning, and the restore finished", warnings, r.calls)
+		}
+	})
+}
+
+func TestOrchestratorRun_LeavesASaverItCantJudgeBe(t *testing.T) {
 	for name, found := range map[string]bool{"found": true, "made": false} {
 		t.Run("a saver "+name+" that answers neither leaves the restore unfinished, with nothing more made", func(t *testing.T) {
 			r := newRecorder()
@@ -387,51 +596,38 @@ func TestOrchestratorRun_JudgesTheSaversProtocol(t *testing.T) {
 		})
 	}
 
-	t.Run("no saver to judge, its create failing, leaves the restore unfinished", func(t *testing.T) {
+	t.Run("a saver found gone by its judgement is kept as one that may have watched sessions end", func(t *testing.T) {
 		r := newRecorder()
-		r.SaverUp = false
-		r.CreateErr = errBoom
+		r.Answers = []answer{{err: fmt.Errorf("%w: no such session", ErrSaverGone)}}
 		sink := &logtest.Sink{}
 
 		warnings := runPass(t, r, sink)
 
-		if !equalWarnings(warnings, []Warning{SaverDownWarning(), UnjudgedWarning()}) {
-			t.Errorf("warnings = %v, want the saver's and the can't-judge warning", warnings)
+		if !equalWarnings(warnings, []Warning{UnjudgedWarning()}) || r.called("MarkOwed") {
+			t.Errorf("warnings = %v, calls %v; want the can't-judge warning alone, and no session marked owed", warnings, r.calls)
 		}
 		assertUnfinished(t, r, sink)
 	})
-
-	t.Run("a saver judged Portal's whose daemon then fails to come up still restores", func(t *testing.T) {
-		r := newRecorder()
-		r.SaverUp = false
-		r.EnsureErr = fmt.Errorf("%w within 10s", saverhost.ErrNotReady)
-
-		warnings := runPass(t, r, &logtest.Sink{})
-
-		if !equalWarnings(warnings, []Warning{SaverDownWarning()}) || !r.called("Restore") || !r.called("WriteLatch") {
-			t.Errorf("warnings = %v, calls %v; want the saver's warning, and the restore finished", warnings, r.calls)
-		}
-	})
 }
 
-// assertUnfinished checks a run left the restore unfinished: nothing
-// restored, the restoring flag raised, no latch, and each step skipped logged.
+// assertUnfinished checks a run left the restore unfinished: no latch
+// written, the restoring flag lowered, and each step skipped logged.
 func assertUnfinished(t *testing.T, r *stepRecorder, sink *logtest.Sink) {
 	t.Helper()
-	if r.called("Lower") || r.called("WriteLatch") {
-		t.Errorf("calls = %v, want the restoring flag left raised and no latch written", r.calls)
+	if r.called("WriteLatch") || r.Raised {
+		t.Errorf("calls = %v, flag raised %v; want no latch written and the flag lowered", r.calls, r.Raised)
 	}
 	var skipped []string
 	for _, rec := range sink.Records().WithMessage("step skipped").AtExactLevel(slog.LevelInfo) {
 		skipped = append(skipped, rec.AttrString(t, "step"))
 	}
-	if want := []string{"LowerRestoring", "WriteLatch"}; !slices.Equal(skipped[max(len(skipped)-2, 0):], want) {
+	if want := []string{"WriteLatch"}; !slices.Equal(skipped[max(len(skipped)-1, 0):], want) {
 		t.Errorf("steps skipped = %v, want them to end %v", skipped, want)
 	}
 }
 
-// decision 61: only a bootstrap that finished its restore lowers the flag, so
-// the next command finishes one cut short.
+// decision 67: only a bootstrap that finished its restore writes the latch,
+// so the next command finishes one cut short.
 func TestOrchestratorRun_LeavesAnUnfinishedRestoreForTheNextCommand(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -460,8 +656,8 @@ func TestOrchestratorRun_LeavesAnUnfinishedRestoreForTheNextCommand(t *testing.T
 			if !equalWarnings(warnings, tc.warnings) {
 				t.Errorf("warnings = %v, want %v", warnings, tc.warnings)
 			}
-			if r.called("Restore") != tc.restored {
-				t.Errorf("calls = %v, want Restore called %v", r.calls, tc.restored)
+			if r.called("Restore") != tc.restored || r.called("Raise") != tc.restored {
+				t.Errorf("calls = %v, want Restore, and the flag raised for it, %v", r.calls, tc.restored)
 			}
 			if !tc.restored && (r.called("EnsureSaver") || r.called("Create")) {
 				t.Errorf("calls = %v, want no saver made over sessions it couldn't mark owed", r.calls)
@@ -562,7 +758,7 @@ func TestOrchestratorRun_Logs(t *testing.T) {
 
 	t.Run("a pass that leaves the restore unfinished logs each step it skips instead", func(t *testing.T) {
 		r := newRecorder()
-		r.Answers = []answer{{err: errBoom}}
+		r.Answers = []answer{neither}
 		sink := &logtest.Sink{}
 
 		runPass(t, r, sink)
@@ -597,14 +793,13 @@ func TestOrchestratorRun_Progress(t *testing.T) {
 
 		want := []StepEvent{
 			{Index: 1, Name: "CheckZmx"},
-			{Index: 2, Name: "RaiseRestoring"},
+			{Index: 2, Name: "RemoveLatch"},
 			{Index: 3, Name: "Sweep"},
 			{Index: 4, Name: "EnsureSaver"},
 			{Index: 5, Name: "Restore", RestoreN: 1, RestoreM: 2},
 			{Index: 5, Name: "Restore", RestoreN: 2, RestoreM: 2},
 			{Index: 5, Name: "Restore"},
-			{Index: 6, Name: "LowerRestoring"},
-			{Index: 7, Name: "WriteLatch"},
+			{Index: 6, Name: "WriteLatch"},
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("events = %+v\nwant %+v", got, want)
@@ -613,7 +808,7 @@ func TestOrchestratorRun_Progress(t *testing.T) {
 
 	t.Run("it emits each step it skips, so the loading page runs to its end", func(t *testing.T) {
 		r := newRecorder()
-		r.Answers = []answer{{err: errBoom}}
+		r.Answers = []answer{neither}
 		var got []int
 		ctx := WithProgressEmitter(context.Background(), func(ev StepEvent) { got = append(got, ev.Index) })
 
@@ -621,14 +816,14 @@ func TestOrchestratorRun_Progress(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 
-		if want := []int{1, 2, 3, 4, 5, 6, 7}; !slices.Equal(got, want) {
+		if want := []int{1, 2, 3, 4, 5, 6}; !slices.Equal(got, want) {
 			t.Errorf("events = %v, want %v", got, want)
 		}
 	})
 
 	t.Run("a fatal step emits nothing for itself or after it", func(t *testing.T) {
 		r := newRecorder()
-		r.RaiseErr = errBoom
+		r.RemoveErr = errBoom
 		var got []StepEvent
 		ctx := WithProgressEmitter(context.Background(), func(ev StepEvent) { got = append(got, ev) })
 

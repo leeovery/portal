@@ -14,7 +14,9 @@ import (
 // closed at the constants declared with it.
 type Flag string
 
-// Restoring is present while a bootstrap restores sessions.
+// Restoring is present while a bootstrap's restore creates sessions, and
+// only then: the bootstrapped latch, not this flag, records a bootstrap
+// unfinished.
 const Restoring Flag = "restoring"
 
 // SessionFlag is a directory of flags in the state directory, one empty file

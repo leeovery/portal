@@ -23,9 +23,10 @@ const (
 	// the flags are judged by.
 	sweepRun = 2 * saverhost.ReadCeiling
 	// saverRun is the read of whether a saver runs; the judgement of one
-	// found, or the listing of the sessions to mark owed, whose write waits on
-	// commit.lock besides; then the wait for saver.lock, which an uninstall
-	// may hold, then the ensure's own run, which that wait outlasts.
+	// found, and the end of one Portal can't use; the listing of the sessions
+	// to mark owed, whose write waits on commit.lock besides; then the wait
+	// for saver.lock, which an uninstall may hold, then the ensure's own run,
+	// which that wait outlasts.
 	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
 	// restoreRun is restore's listing, before its first session.
 	restoreRun = saverhost.ReadCeiling

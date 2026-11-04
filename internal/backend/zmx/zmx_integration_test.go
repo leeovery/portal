@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -158,6 +159,33 @@ func fillBacklog(t *testing.T, socket string) (drain func()) {
 	return drain
 }
 
+// createHangingUp creates the session name running a program that writes
+// "hup" to the file it returns when it catches a SIGHUP, once the program has
+// set its trap. The program waits in wait, which a trapped signal interrupts
+// at once, where a foreground sleep holds the trap until it ends.
+func createHangingUp(t *testing.T, b *zmx.Backend, name string) (hup string) {
+	t.Helper()
+	hup = filepath.Join(t.TempDir(), "hup")
+	mustCreate(t, b, name, t.TempDir(), "sh", "-c", `trap 'echo hup > "$0"; exit 0' HUP; echo trap set; sleep 1000 & wait`, hup)
+	awaitHistory(t, b, name, "trap set")
+	return hup
+}
+
+// endDaemon ends the session name's daemon, every signal sent through
+// zmxtest.Signal, and returns them as "<pid> <signal>".
+func endDaemon(t *testing.T, b *zmx.Backend, name string) []string {
+	t.Helper()
+	var sent []string
+	err := b.EndDaemon(t.Context(), name, func(pid int, sig syscall.Signal) error {
+		sent = append(sent, fmt.Sprintf("%d %v", pid, sig))
+		return zmxtest.Signal(b, pid, sig)
+	})
+	if err != nil {
+		t.Fatalf("EndDaemon(%s) = %v", name, err)
+	}
+	return sent
+}
+
 // assertNotAnswering asserts that a session whose socket refuses is held, and
 // not answering: listed with only its name, every call on it ErrTimeout, and
 // its name refused by Create.
@@ -202,6 +230,35 @@ func varying(frame []byte) []byte {
 	clear(f[8+8 : 8+12])
 	clear(f[8+528 : 8+536])
 	return f
+}
+
+// zmx 0.8.1's daemons frame their messages as the release before the
+// protocol Portal speaks: Portal recognises one and ends one, and never
+// drives one.
+func TestOlderZmxDaemon(t *testing.T) {
+	older := zmxtest.OlderBinary(t)
+	b := zmxtest.New(t)
+	start := exec.Command(older, "attach", "older", "sleep", "1000")
+	start.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
+	start.Dir = t.TempDir()
+	if out, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("zmx 0.8.1 attach: %v\n%s", err, out)
+	}
+	ctx := t.Context()
+
+	if isOlder, err := b.OlderZmx(ctx, "older"); !isOlder || err != nil {
+		t.Errorf("OlderZmx = %v, %v; want true, nil", isOlder, err)
+	}
+	if _, err := b.ProtocolVersion(ctx, "older"); !errors.Is(err, backend.ErrTimeout) {
+		t.Errorf("ProtocolVersion = %v, want ErrTimeout: a 0.8.1 daemon answers Portal's protocol nothing", err)
+	}
+
+	if sent := endDaemon(t, b, "older"); len(sent) != 1 || !strings.HasSuffix(sent[0], " "+syscall.SIGTERM.String()) {
+		t.Errorf("signals = %v, want one SIGTERM", sent)
+	}
+	if _, err := os.Lstat(filepath.Join(b.Dir(), "older")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stat the socket after the end = %v; want it gone", err)
+	}
 }
 
 func TestInfoFixture(t *testing.T) {
@@ -686,8 +743,7 @@ func TestBackendAgainstZmx(t *testing.T) {
 	// and leaves no socket behind.
 	t.Run("a zmx kill from outside Portal hangs up the session's program and leaves no socket", func(t *testing.T) {
 		b := zmxtest.New(t)
-		hup := filepath.Join(t.TempDir(), "hup")
-		mustCreate(t, b, "killed", t.TempDir(), "sh", "-c", `trap 'echo hup > "$0"; exit 0' HUP; while :; do sleep 0.05; done`, hup)
+		hup := createHangingUp(t, b, "killed")
 
 		kill := exec.Command(zmxtest.Binary(t), "kill", "killed")
 		kill.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
@@ -721,16 +777,23 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("it ends a session with zmx's own kill, and frees its name", func(t *testing.T) {
+	t.Run("it ends a session's daemon by a proved SIGTERM, its program hung up, and frees its name", func(t *testing.T) {
 		b := zmxtest.New(t)
-		mustCreate(t, b, "ended", t.TempDir(), "sleep", "1000")
+		hup := createHangingUp(t, b, "ended")
+		daemon := zmxtest.Daemon(t, b, "ended")
 
-		if err := b.KillByCLI(t.Context(), "ended"); err != nil {
-			t.Fatalf("KillByCLI = %v, want nil", err)
+		sent := endDaemon(t, b, "ended")
+
+		if len(sent) != 1 || sent[0] != fmt.Sprintf("%d %v", daemon, syscall.SIGTERM) {
+			t.Errorf("signals = %v, want SIGTERM to the session's daemon, pid %d, alone", sent, daemon)
+		}
+		if got, err := os.ReadFile(hup); err != nil || string(got) != "hup\n" {
+			t.Errorf("the session's program caught %q, %v by the end's return; want its SIGHUP", got, err)
 		}
 		if got := listed(t, b); len(got) != 0 {
 			t.Errorf("List = %v, want nothing", got)
 		}
+		mustCreate(t, b, "ended", t.TempDir(), "sleep", "1000")
 	})
 
 	t.Run("it leaves out a SIGKILLed daemon's socket from before this boot, and zmx replaces it on Create", func(t *testing.T) {

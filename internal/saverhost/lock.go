@@ -26,8 +26,9 @@ const (
 )
 
 // JudgeRun bounds a judgement of the saver's protocol: a read in Portal's
-// protocol, a read in an older zmx's, and the kill of a saver judged
-// unusable. Ensure's caller keeps its judge of a saver made within it.
+// protocol, a read in an older zmx's, and the end of a saver judged
+// unusable, bounded as a kill. Ensure's caller keeps its judge of a saver
+// made within it.
 const JudgeRun = 2*ReadCeiling + KillCeiling
 
 // holderRun is the longest a holder of saver.lock runs, each wait at its

@@ -68,18 +68,16 @@ func TestProductionGate_WarmPathAsksTheBackendOnlyWhetherTheSaverIsThere(t *test
 	}
 }
 
-// decision 61: a raised restoring flag is a bootstrap under way or cut short.
-func TestProductionGate_RaisedRestoringFlagOwesTheBootstrap(t *testing.T) {
-	fake, dir := productionGate(t, true, true)
+// Decision 67: the restoring flag covers restore's creates alone. The latch,
+// removed before a bootstrap's first change, records one unfinished.
+func TestProductionGate_RaisedRestoringFlagOwesNoBootstrap(t *testing.T) {
+	_, dir := productionGate(t, true, true)
 	if err := state.Restoring.Set(dir); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := panicOf(func() { _, _, _ = runRootCmd(t, "list") }); !strings.Contains(got, "bootstrapExe reached") {
-		t.Errorf("portal list panicked with %q; want the bootstrap's exe seam reached", got)
-	}
-	if calls := fake.Calls(); len(calls) != 0 {
-		t.Errorf("backend calls = %+v, want none: the flag owes the bootstrap before the saver is asked", calls)
+	if runner, err := owedBootstrap(t.Context()); runner != nil || err != nil {
+		t.Errorf("owedBootstrap = %v, %v; want no bootstrap owed", runner, err)
 	}
 }
 
