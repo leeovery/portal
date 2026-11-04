@@ -233,7 +233,6 @@ type Model struct {
 	command           []string
 	commandPending    bool
 
-	bootstrapping     bool
 	minElapsed        bool
 	bootstrapComplete bool
 
@@ -252,9 +251,9 @@ type Model struct {
 	stagedMint    bool
 	stagedMintDir string
 
-	// One blocking receive re-issued per event, which preserves exact event order
-	// even under command batching. When set, the channel owns the terminal
-	// BootstrapCompleteMsg; when nil, Init synthesizes it.
+	// The bootstrap running behind the picker, nil when none runs: one blocking
+	// receive re-issued per event, which preserves exact event order even under
+	// command batching, ending in the terminal BootstrapCompleteMsg or a fatal.
 	progressReceiver tea.Cmd
 
 	// Zero value renders the all-pending loading screen.
@@ -486,7 +485,7 @@ func (m Model) ActivePage() page {
 }
 
 func (m Model) Bootstrapping() bool {
-	return m.bootstrapping
+	return m.progressReceiver != nil
 }
 
 func (m Model) MinElapsed() bool {
@@ -705,20 +704,16 @@ func WithAliasEditor(a AliasEditor) Option {
 	}
 }
 
-// WithBootstrapping opens the picker on its loading page while a bootstrap
-// runs behind it.
-func WithBootstrapping(bootstrapping bool) Option {
+// WithBootstrapping opens the picker on its loading page while the bootstrap
+// whose events receiver delivers runs behind it. A nil receiver is no
+// bootstrap, so the loading page never runs without one to dismiss it.
+func WithBootstrapping(receiver tea.Cmd) Option {
 	return func(m *Model) {
-		m.bootstrapping = bootstrapping
-		if bootstrapping {
-			m.activePage = PageLoading
+		if receiver == nil {
+			return
 		}
-	}
-}
-
-func WithProgressReceiver(receiver tea.Cmd) Option {
-	return func(m *Model) {
 		m.progressReceiver = receiver
+		m.activePage = PageLoading
 	}
 }
 
@@ -1698,13 +1693,9 @@ func (m Model) applySessionsMsg(msg SessionsMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, detectCmd, settleCmd)
 }
 
-// The cold-boot route's snapshot is stale: the orchestrator runs in a goroutine,
-// so Init's frame-one enumeration happened before Restore created the sessions.
-// The warm route returns nil — its snapshot is already post-restore.
+// The loading page's listing is stale: the bootstrap runs in a goroutine, so
+// Init's frame-one enumeration happened before restore created the sessions.
 func (m Model) refetchSessionsAfterRestore() tea.Cmd {
-	if m.progressReceiver == nil {
-		return nil
-	}
 	return func() tea.Msg {
 		sessions, pending, err := m.readSessionList()
 		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err, afterRestore: true}
@@ -1784,9 +1775,9 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	// Every branch subscribes from here, so a branch added later cannot silently
-	// drop the orchestrator's warnings and its fatal by omitting the rule. A nil
-	// receiver — a warm route, which has no bootstrap running behind this model —
-	// is dropped by Batch along with any other nil above it.
+	// drop the bootstrap's warnings and its fatal by omitting the rule. A nil
+	// receiver — a picker with no bootstrap behind it, so no loading page — is
+	// dropped by Batch along with any other nil above it.
 	cmds = append(cmds, m.progressReceiver)
 	return tea.Batch(cmds...)
 }
@@ -2067,8 +2058,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 // A picker whose bootstrap runs concurrently with it and has not yet completed.
 // A fatal leaves bootstrapComplete false, so a fatal'd picker reads as in flight
-// too: a caller that must exclude one checks fatalActive itself. The warm route
-// has no receiver: its bootstrap ran before Init.
+// too: a caller that must exclude one checks fatalActive itself. A picker that
+// owed no bootstrap has no receiver.
 func (m Model) bootstrapInFlight() bool {
 	return m.progressReceiver != nil && !m.bootstrapComplete
 }

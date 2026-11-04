@@ -38,28 +38,12 @@ func readSessionIndexIn(dir string) (sessionindex.Index, error) {
 	return idx, nil
 }
 
-// updateSessionIndex runs fn on the state directory's index under the commit
-// lock, writing it back when fn changed something, and makes the directory
-// first: the lock lives in it. Once the write has landed, and before the lock
-// is released, it forgets each entry the write removed or replaced. via is
-// cli, tui or internal.
-func updateSessionIndex(via string, fn func(*sessionindex.Index) error) error {
-	dir, err := state.EnsureDir()
-	if err != nil {
-		return err
-	}
-	return updateSessionIndexIn(dir, via, fn)
-}
-
-func updateSessionIndexIn(dir, via string, fn func(*sessionindex.Index) error) error {
-	return updateSessionIndexLanding(dir, via, fn, forgetting(dir, via, sessionindex.Outcome.Dropped))
-}
-
-// updateSessionIndexLanding is updateSessionIndexIn running landed in place of
-// its forgetting, under the same lock, once the update has landed: with what
-// it dropped, empty when it changed nothing. landed runs for no update that
+// updateSessionIndexLanding runs fn on the index in the state directory dir
+// under the commit lock, writing it back when fn changed something, then runs
+// landed under the same lock, once the update has landed: with what it
+// dropped, empty when it changed nothing. landed runs for no update that
 // failed, and an error it returns is the update's, whose write landed all the
-// same.
+// same. via is cli, tui or internal.
 func updateSessionIndexLanding(dir, via string, fn func(*sessionindex.Index) error, landed func(sessionindex.Outcome) error) error {
 	_, err := sessionindex.UpdateThen(dir, via, fn, landed)
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {

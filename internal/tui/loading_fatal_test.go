@@ -16,7 +16,7 @@ func fatalModelOnLoading(t *testing.T) tea.Model {
 	t.Helper()
 	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithBootstrapping(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model

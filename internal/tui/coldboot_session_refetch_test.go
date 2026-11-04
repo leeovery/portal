@@ -10,6 +10,10 @@ import (
 	"github.com/leeovery/portal/internal/project"
 )
 
+// idleBootstrap is a bootstrap behind the picker that sends nothing, for a
+// test that drives the loading page's messages itself.
+func idleBootstrap() tea.Msg { return nil }
+
 type coldBootStepLister struct {
 	steps [][]Session
 	calls int
@@ -145,8 +149,7 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	)
 
 	final := driveColdBootToSessions(t, m, stale)
@@ -173,8 +176,7 @@ func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	)
 
 	var model tea.Model = m
@@ -210,8 +212,7 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -226,38 +227,12 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 		fmt.Sprintf("expected all %d restored names visible", len(want)))
 }
 
-func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
-	sessions := []Session{{Name: "warm-already-live"}}
-	lister := &coldBootStepLister{steps: [][]Session{sessions}}
-
-	m := New(lister, WithBootstrapping(true))
-
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(SessionsMsg{Sessions: sessions})
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-
-	callsBefore := lister.calls
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-	if model.(Model).ActivePage() != PageSessions {
-		t.Fatalf("expected PageSessions after min+complete on warm route, got %v", model.(Model).ActivePage())
-	}
-	if completeCmd != nil {
-		t.Errorf("warm/synchronous route must NOT dispatch a post-complete re-fetch (or any cmd with no warnings); got non-nil cmd %T", completeCmd)
-		drainBatchToModel(t, model.(Model), completeCmd)
-	}
-	if lister.calls != callsBefore {
-		t.Errorf("warm/synchronous route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
-	}
-}
-
 func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
 	stale := []Session{}
 	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -278,8 +253,7 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	).WithInitialFilter("alpha")
 
@@ -308,30 +282,12 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 	}
 }
 
-func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]Session{{}}}
-
-	warm := New(lister, WithBootstrapping(true))
-	if cmd := warm.refetchSessionsAfterRestore(); cmd != nil {
-		t.Errorf("warm route (progressReceiver == nil) must return a nil refetch cmd, got non-nil")
-	}
-
-	cold := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
-	)
-	if cmd := cold.refetchSessionsAfterRestore(); cmd == nil {
-		t.Errorf("cold route (progressReceiver != nil) must return a non-nil refetch cmd, got nil")
-	}
-}
-
 func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 	sessions := []Session{{Name: "live-session"}}
 	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	).WithCommand([]string{"echo", "hi"})
 
 	if m.ActivePage() != PageProjects {
@@ -355,8 +311,7 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -389,8 +344,7 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -431,8 +385,7 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 func coldBootInterim(t *testing.T, stale []Session) Model {
 	t.Helper()
 	m := New(&coldBootStepLister{steps: [][]Session{stale}},
-		WithBootstrapping(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 

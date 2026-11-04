@@ -250,6 +250,10 @@ func shapeOfLanding(l pickerLanding) landingShape {
 	return shape
 }
 
+// idleBootstrap is a bootstrap behind the picker that sends nothing, for a
+// test that drives the loading page's messages itself.
+func idleBootstrap() tea.Msg { return nil }
+
 // driveLoadingGates satisfies both of the picker's loading gates and, when the
 // model answers by dispatching its search decision rather than dismissing,
 // runs that command and delivers its answer — the step a running Bubble Tea

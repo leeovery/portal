@@ -3,7 +3,6 @@ package tui_test
 import (
 	"fmt"
 	"maps"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -6184,9 +6183,9 @@ func TestHelpBarQuitBinding(t *testing.T) {
 }
 
 func TestLoadingPage(t *testing.T) {
-	t.Run("model with WithBootstrapping(true) starts on PageLoading", func(t *testing.T) {
+	t.Run("model with a bootstrap behind it starts on PageLoading", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("expected PageLoading, got %d", m.ActivePage())
 		}
@@ -6195,11 +6194,14 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("model with WithBootstrapping(false) starts on PageSessions", func(t *testing.T) {
+	t.Run("a nil receiver is no bootstrap, so no loading page", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(false))
+		m := tui.New(lister, tui.WithBootstrapping(nil))
 		if m.ActivePage() != tui.PageSessions {
 			t.Errorf("expected PageSessions, got %d", m.ActivePage())
+		}
+		if m.Bootstrapping() {
+			t.Error("expected Bootstrapping() to be false")
 		}
 	})
 
@@ -6213,7 +6215,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("loading view shows the honest loading screen (wordmark + step-list)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		view := ansi.Strip(model.View().Content)
@@ -6230,7 +6232,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("loading view no longer names tmux", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		view := model.View().Content
@@ -6241,7 +6243,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("loading view centers the block in terminal", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		lines := strings.Split(ansi.Strip(model.View().Content), "\n")
@@ -6265,7 +6267,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("loading view does not show session list chrome", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		view := model.View().Content
@@ -6276,7 +6278,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("loading view uses fallback dimensions when no WindowSizeMsg received", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		view := ansi.Strip(m.View().Content)
 		if !strings.Contains(view, "Restoring sessions") {
 			t.Errorf("expected the loading step-list with fallback dimensions, got:\n%s", view)
@@ -6289,7 +6291,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("Ctrl+C during loading page quits", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, cmd := model.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		if cmd == nil {
@@ -6310,7 +6312,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("Init schedules a single LoadingMinElapsedMsg via tea.Tick when on PageLoading", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		cmd := m.Init()
 		if cmd == nil {
 			t.Fatal("Init() returned nil, expected batch command")
@@ -6328,7 +6330,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("Init does not emit BootstrapCompleteMsg when not on PageLoading", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(false))
+		m := tui.New(lister)
 		cmd := m.Init()
 		if cmd == nil {
 			t.Fatal("Init() returned nil")
@@ -6356,7 +6358,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("Init does not poll ListSessions on a loading tick (no DefaultPollInterval)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6368,7 +6370,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("LoadingMinElapsedMsg sets minElapsed but stays on PageLoading when bootstrap not complete", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6385,7 +6387,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("BootstrapCompleteMsg sets bootstrapComplete but stays on PageLoading when minElapsed is false", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6402,7 +6404,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("transitions off PageLoading when both minElapsed and bootstrapComplete are true (min first)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6417,7 +6419,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("transitions off PageLoading when both minElapsed and bootstrapComplete are true (bootstrap first)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6432,7 +6434,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("other keys during loading are swallowed", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 
 		keys := []tea.KeyPressMsg{
@@ -6460,7 +6462,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("orphaned LoadingMinElapsedMsg after transition is harmless", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6478,7 +6480,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("orphaned BootstrapCompleteMsg after transition is harmless", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6496,7 +6498,7 @@ func TestLoadingPage(t *testing.T) {
 
 	t.Run("SessionsMsg during loading does not transition off PageLoading", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6515,7 +6517,7 @@ func TestLoadingPage(t *testing.T) {
 		}
 		lister := &mockSessionLister{sessions: []tui.Session{}}
 		m := tui.New(lister,
-			tui.WithBootstrapping(true),
+			tui.WithBootstrapping(idleBootstrap),
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(&mockSessionCreator{sessionName: "test"}),
 		)
@@ -6542,7 +6544,7 @@ func TestLoadingPage(t *testing.T) {
 func TestBootstrapWarningBuffering(t *testing.T) {
 	t.Run("BootstrapCompleteMsg.Warnings buffers into bufferedWarnings", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6567,7 +6569,7 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 
 	t.Run("it empties the staged set once the loading gate has taken it", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"saver down"}}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -6585,7 +6587,7 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 
 	t.Run("it buffers the staged set and the message's own, staged first", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"staged"}}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -6604,9 +6606,9 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 	})
 
-	t.Run("it buffers a warm route's staged set exactly once", func(t *testing.T) {
+	t.Run("it buffers the staged set exactly once", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		m.SetPendingBootstrapWarnings([]tui.BootstrapWarning{{Lines: []string{"saver down"}}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -6621,7 +6623,7 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 
 	t.Run("the buffered union does not share a backing array with the staged slice", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		staged := make([]tui.BootstrapWarning, 1, 4)
 		staged[0] = tui.BootstrapWarning{Lines: []string{"staged"}}
 		m.SetPendingBootstrapWarnings(staged)
@@ -6637,17 +6639,9 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		}
 	})
 
-	t.Run("transition flushes warnings via flushBufferedWarningsCmd (min first, bootstrap with warnings)", func(t *testing.T) {
-		var captured [][]string
-		restore := tui.SetFlushWarningsToStderrForTest(func(warnings []tui.BootstrapWarning) {
-			for _, w := range warnings {
-				captured = append(captured, append([]string{}, w.Lines...))
-			}
-		})
-		t.Cleanup(restore)
-
+	t.Run("transition surfaces warnings as a band (min first, bootstrap with warnings)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6657,143 +6651,64 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 			{Lines: []string{"saver down"}},
 			{Lines: []string{"corrupt", "see log"}},
 		}
-		var cmd tea.Cmd
-		model, cmd = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() == tui.PageLoading {
 			t.Error("expected transition off PageLoading after both gates with warnings")
 		}
-		if cmd == nil {
-			t.Fatal("expected non-nil flushBufferedWarningsCmd after transition with warnings")
-		}
-
-		drainSequence(cmd)
-
-		if len(captured) != 2 {
-			t.Fatalf("captured %d warnings, want 2", len(captured))
-		}
-		want := [][]string{{"saver down"}, {"corrupt", "see log"}}
-		for i, w := range want {
-			if !equalStrings(captured[i], w) {
-				t.Errorf("captured[%d] = %v, want %v", i, captured[i], w)
+		view := ansi.Strip(updated.View().Content)
+		for _, line := range []string{"saver down", "corrupt", "see log"} {
+			if !strings.Contains(view, line) {
+				t.Errorf("view lacks the warning line %q:\n%s", line, view)
 			}
 		}
-
 		if len(updated.BufferedWarnings()) != 0 {
-			t.Errorf("bufferedWarnings not cleared after flush; got %d", len(updated.BufferedWarnings()))
+			t.Errorf("bufferedWarnings not cleared once surfaced; got %d", len(updated.BufferedWarnings()))
 		}
 	})
 
-	t.Run("transition flushes warnings (bootstrap first, then minElapsed)", func(t *testing.T) {
-		var captured [][]string
-		restore := tui.SetFlushWarningsToStderrForTest(func(warnings []tui.BootstrapWarning) {
-			for _, w := range warnings {
-				captured = append(captured, append([]string{}, w.Lines...))
-			}
-		})
-		t.Cleanup(restore)
-
+	t.Run("transition surfaces warnings as a band (bootstrap first, then minElapsed)", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 		warnings := []tui.BootstrapWarning{{Lines: []string{"warn"}}}
 		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
-
-		var cmd tea.Cmd
-		model, cmd = model.Update(tui.LoadingMinElapsedMsg{})
-
-		if cmd == nil {
-			t.Fatal("expected non-nil flush cmd from LoadingMinElapsedMsg branch")
-		}
-		drainSequence(cmd)
-
-		if len(captured) != 1 || len(captured[0]) != 1 || captured[0][0] != "warn" {
-			t.Errorf("captured = %v, want [[warn]]", captured)
-		}
-
-		updated := model.(tui.Model)
-		if len(updated.BufferedWarnings()) != 0 {
-			t.Errorf("bufferedWarnings not cleared after flush; got %d", len(updated.BufferedWarnings()))
-		}
-	})
-
-	t.Run("transition with no warnings returns no flush command", func(t *testing.T) {
-		var called bool
-		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
-			called = true
-		})
-		t.Cleanup(restore)
-
-		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
-		var model tea.Model = m
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-		var cmd tea.Cmd
-		model, cmd = model.Update(tui.BootstrapCompleteMsg{Warnings: nil})
 
 		updated := model.(tui.Model)
-		if updated.ActivePage() == tui.PageLoading {
-			t.Error("expected transition off PageLoading")
+		if view := ansi.Strip(updated.View().Content); !strings.Contains(view, "warn") {
+			t.Errorf("view lacks the warning line:\n%s", view)
 		}
-		if cmd != nil {
-			t.Errorf("expected nil flush cmd when warnings empty (avoids spurious alt-screen toggle); got %T", cmd)
-		}
-		if called {
-			t.Error("flushWarningsToStderr must not be called when warnings empty")
+		if len(updated.BufferedWarnings()) != 0 {
+			t.Errorf("bufferedWarnings not cleared once surfaced; got %d", len(updated.BufferedWarnings()))
 		}
 	})
 
 	t.Run("repeat transitions do not re-emit buffered warnings", func(t *testing.T) {
-		var calls int
-		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
-			calls++
-		})
-		t.Cleanup(restore)
-
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		warnings := []tui.BootstrapWarning{{Lines: []string{"warn"}}}
-		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
-		var cmd tea.Cmd
-		model, cmd = model.Update(tui.LoadingMinElapsedMsg{})
-		if cmd != nil {
-			drainSequence(cmd)
-		}
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
-		model, cmd = model.Update(tui.BootstrapCompleteMsg{
+		model, _ = model.Update(tui.BootstrapCompleteMsg{
 			Warnings: []tui.BootstrapWarning{{Lines: []string{"second"}}},
 		})
-		if cmd != nil {
-			t.Errorf("orphaned BootstrapCompleteMsg after transition produced flush cmd")
-		}
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 
-		_, cmd = model.Update(tui.LoadingMinElapsedMsg{})
-		if cmd != nil {
-			t.Errorf("orphaned LoadingMinElapsedMsg produced flush cmd")
-		}
-
-		if calls != 1 {
-			t.Errorf("flushWarningsToStderr called %d times, want exactly 1", calls)
+		if view := ansi.Strip(model.View().Content); strings.Contains(view, "second") {
+			t.Errorf("an orphaned BootstrapCompleteMsg surfaced its warning:\n%s", view)
 		}
 	})
 
 	t.Run("orphaned BootstrapCompleteMsg after transition does not buffer warnings", func(t *testing.T) {
-		var calls int
-		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
-			calls++
-		})
-		t.Cleanup(restore)
-
 		lister := &mockSessionLister{sessions: []tui.Session{}}
-		m := tui.New(lister, tui.WithBootstrapping(true))
+		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -6807,9 +6722,6 @@ func TestBootstrapWarningBuffering(t *testing.T) {
 		updated := model.(tui.Model)
 		if got := updated.BufferedWarnings(); len(got) != 0 {
 			t.Errorf("orphaned warnings populated bufferedWarnings = %#v, want empty", got)
-		}
-		if calls != 0 {
-			t.Errorf("flushWarningsToStderr called %d times for orphaned warnings, want 0", calls)
 		}
 	})
 
@@ -6838,45 +6750,9 @@ func TestWriteWarningsToWriter(t *testing.T) {
 	})
 }
 
-// tea.Sequence yields an unexported sequenceMsg ([]tea.Cmd); without the runtime,
-// reflection walks the slice and invokes each sub-cmd.
-func drainSequence(cmd tea.Cmd) {
-	if cmd == nil {
-		return
-	}
-	msg := cmd()
-	if seq, ok := msg.(tea.BatchMsg); ok {
-		for _, sub := range seq {
-			if sub == nil {
-				continue
-			}
-			_ = sub()
-		}
-		return
-	}
-	v := reflect.ValueOf(msg)
-	if v.Kind() != reflect.Slice {
-		return
-	}
-	for i := 0; i < v.Len(); i++ {
-		elem := v.Index(i).Interface()
-		if sub, ok := elem.(tea.Cmd); ok && sub != nil {
-			_ = sub()
-		}
-	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+// idleBootstrap is a bootstrap behind the picker that sends nothing, for a
+// test that drives the loading page's messages itself.
+func idleBootstrap() tea.Msg { return nil }
 
 // The list computes its matches in a tea.Cmd, batched with whatever else the
 // keypress produced; its FilterMatchesMsg has to be fed back before the visible

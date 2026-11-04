@@ -1397,7 +1397,7 @@ func TestBuildTUIModel(t *testing.T) {
 func TestBuildTUIModel_Bootstrapping(t *testing.T) {
 	t.Run("bootstrapping starts on loading page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.bootstrapping = true
+		cfg.progressReceiver = idleBootstrap
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
@@ -1411,7 +1411,6 @@ func TestBuildTUIModel_Bootstrapping(t *testing.T) {
 
 	t.Run("not bootstrapping starts on sessions page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.bootstrapping = false
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
@@ -1436,7 +1435,7 @@ func TestBuildTUIModel_Bootstrapping(t *testing.T) {
 	t.Run("bootstrapping preserves other options", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 		cfg.currentSession = "dev"
-		cfg.bootstrapping = true
+		cfg.progressReceiver = idleBootstrap
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 

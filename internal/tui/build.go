@@ -72,12 +72,10 @@ type Deps struct {
 
 	InitialFilter string
 	Command       []string
-	// Bootstrapping opens the picker on its loading page, which a bootstrap
-	// running behind it dismisses.
-	Bootstrapping bool
 	// CurrentSession is the session the picker runs inside, empty outside one.
 	CurrentSession string
-	// ProgressReceiver non-nil selects the concurrent cold-boot path.
+	// ProgressReceiver is the bootstrap running behind the picker: non-nil
+	// opens it on its loading page, which the bootstrap's events dismiss.
 	ProgressReceiver tea.Cmd
 	// NoColor is read by the cmd layer so internal/tui stays env-free.
 	NoColor bool
@@ -129,11 +127,8 @@ func Build(deps Deps) Model {
 	if deps.Home != "" {
 		opts = append(opts, WithHome(deps.Home))
 	}
-	if deps.Bootstrapping {
-		opts = append(opts, WithBootstrapping(true))
-	}
 	if deps.ProgressReceiver != nil {
-		opts = append(opts, WithProgressReceiver(deps.ProgressReceiver))
+		opts = append(opts, WithBootstrapping(deps.ProgressReceiver))
 	}
 	if deps.ProjectEditor != nil {
 		opts = append(opts, WithProjectEditor(deps.ProjectEditor))

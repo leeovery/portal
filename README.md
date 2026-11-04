@@ -2,14 +2,13 @@
 
 # 🌀 Portal
 
-**Interactive session picker for tmux**
+**Interactive session picker for zmx**
 
 Fast, fuzzy session management from a bare shell, with project memory,
 <br>path aliases, reboot-safe restoration, and a keyboard-driven TUI.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
-[![tmux](https://img.shields.io/badge/tmux-3.0+-1BB91F.svg)](https://github.com/tmux/tmux)
 [![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
 
 [Install](#install) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration)
@@ -22,29 +21,29 @@ Fast, fuzzy session management from a bare shell, with project memory,
 
 ---
 
-Portal runs at a bare shell, before you enter tmux, and gives you an interactive TUI for picking, creating, and managing sessions. It remembers your projects, resolves paths via aliases and zoxide, auto-detects git roots, and restarts the tmux server and restores your saved sessions after a reboot.
+Portal runs at a bare shell and gives you an interactive TUI for picking, creating, and managing [zmx](https://github.com/neurosnap/zmx) sessions. It remembers your projects, resolves paths via aliases and zoxide, auto-detects git roots, and restores your saved sessions after a reboot.
 
 After [shell setup](#shell-integration) you drive it through two functions: **`x`** (the picker and opener) and **`xctl`** (subcommands like `list`, `kill`, `alias`). Both names are configurable with `--cmd`.
 
 ## Why Portal?
 
-tmux keeps sessions alive; getting back into the right one is the chore. Finding it means `tmux ls` and a name you half remember. Starting one in the right place means a `cd`, a `new-session` and a name to invent. A reboot takes the lot — and the plugins that bring sessions back bring every command back with them, all at once, whether you still need it or not.
+zmx keeps sessions alive; getting back into the right one is the chore. Finding it means `zmx list` and a name you half remember. Starting one in the right place means a `cd`, a `zmx attach` and a name to invent. A reboot takes the lot, and bringing sessions back by hand brings every command back with them, all at once, whether you still need it or not.
 
 Portal folds that into two shell functions and a picker:
 
 - **One verb to get anywhere.** Jump to a project by path, alias, or zoxide (`x work`), attach an existing session by name or glob (`x api`, `x 'api-*'`), or search your live sessions by name or directory (`x /api`), with git-root resolution and project memory built in.
-- **Reboot-safe sessions.** Portal starts the tmux server and restores structure, layout, working dirs, and ANSI scrollback after a reboot. Replaces tmux-resurrect / tmux-continuum.
-- **Commands come back when you ask.** Per-pane commands return via resume hooks: each pane comes back holding a panel showing its command, which runs when you answer it, so a reboot doesn't start every dev server you ever left open.
+- **Reboot-safe sessions.** Portal brings your sessions back after a reboot, each in its last working directory with its ANSI scrollback.
+- **Commands come back when you ask.** Per-session commands return via resume hooks: each session comes back holding a panel showing its command, which runs when you answer it, so a reboot doesn't start every dev server you ever left open.
 - **A keyboard-driven picker.** A colourful picker that owns its own canvas, with an in-app `?` keymap on every page. Six themes ship — Tokyo Night, Tokyo Night Day, Nord, Nord Wave, GitLab Dark Grey, and Horizon — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
 - **Session grouping and tags.** Flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
-- **Scrollback preview.** Hit `Space` for a read-only peek at any session's saved scrollback, cycling windows and panes without attaching.
+- **Scrollback preview.** Hit `Space` for a read-only peek at any session's screen and scrollback, read live, without attaching.
 - **Multi-window open.** Name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 
 ## Install
 
 ### Requirements
 
-- **tmux ≥ 3.0** (released Feb 2020). Older versions are refused with a clear upgrade message.
+- **[zmx](https://github.com/neurosnap/zmx)** newer than 0.8.1: one speaking zmx's socket protocol 1, which no zmx release carries yet, so build zmx from its main branch. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
 - **Go** (to build from source), **macOS or Linux**.
 
 **macOS**
@@ -76,11 +75,11 @@ x ~/Code/api -e "make dev"             # ...with a command running in it
 x /api                                 # later: search live sessions by name or directory
 xctl alias set work ~/Code/work        # alias a path...
 x work                                 # ...then open it by name
-xctl hook set --on-resume "make dev"   # in a pane: bring its command back after a reboot
+xctl hook set --on-resume "make dev"   # in a session: bring its command back after a reboot
 xctl doctor                            # save daemon running? state sane? anything stale?
 ```
 
-Your sessions are saved as you work. After a reboot the first `x` starts tmux and rebuilds them — see [How It Works](#how-it-works).
+Your sessions are saved as you work. After a reboot the first `x` rebuilds them — see [How It Works](#how-it-works).
 
 ## Screenshots
 
@@ -108,17 +107,17 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
           x <path | alias | zox>  ──▶  new session at the git root
 
   SAVE    _portal-saver ──▶ save daemon ──▶ state/sessions.json + scrollback/*.bin
-                            every second, whatever changed
+                            every 5 seconds, whatever changed
 
-  REBOOT  first x ──▶ start tmux ──▶ rebuild sessions ─┬─▶ layout · cwd · scrollback
-                                                       └─▶ resume hooks wait on a panel
+  REBOOT  first x ──▶ start the saver ──▶ rebuild sessions ─┬─▶ cwd · scrollback
+                                                            └─▶ resume hooks wait on a panel
 ```
 
 - **Opening.** Portal runs `zmx attach` itself and stays running while you're attached, watching for [its own keys](#keys-in-a-session); inside a session it switches the terminal you typed in, so sessions never nest. See [`x` (open)](#x-open).
-- **Saving.** A daemon in a hidden `_portal-saver` session re-reads tmux every second and writes what changed — structure, layout, zoom, working directories, and ANSI scrollback — under `state/` (see [Configuration](#configuration)).
-- **Restoring.** After a reboot, the first command that needs tmux starts the server and rebuilds every saved session that isn't already live. See [Automatic Server Bootstrap & Restoration](#automatic-server-bootstrap--restoration).
+- **Saving.** A daemon in a hidden `_portal-saver` session reads zmx's sessions every 5 seconds and writes what changed — the sessions there are, each one's working directory and, at most once a minute, its ANSI scrollback — under `state/` (see [Configuration](#configuration)).
+- **Restoring.** After a reboot, the first command that needs your sessions brings the saver back and rebuilds every saved session that isn't already live. See [Automatic Bootstrap & Restoration](#automatic-bootstrap--restoration).
 - **Resuming.** A session with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` sends the terminal back to the picker and leaves it waiting.
-- **Two sessions you didn't make.** `_portal-saver` hosts the daemon and `_portal-bootstrap` keeps a freshly started server alive. Both show in a raw `tmux ls`; the picker and `xctl list` hide them.
+- **A session you didn't make.** `_portal-saver` hosts the daemon. It shows in a raw `zmx list`; the picker and `xctl list` hide it.
 
 ## Shell Integration
 
@@ -181,7 +180,7 @@ The term is matched **case-folded, as a contiguous run**, against each live sess
 - **several** — the picker opens pre-filtered by the term, cursor on the first match;
 - **none** — the picker opens on the term with nothing surviving it. That is a filter result, not an error: press `Esc` and your sessions are there.
 
-In a picker a search opened, every row shows its recorded directory beside the session name, so a row that matched on its directory says why it is there; the column stays for that picker's life, however you edit the filter afterwards. A session list tmux cannot read is not a zero match: the search reports tmux's error and exits non-zero rather than opening an empty picker that would suggest your sessions are gone.
+In a picker a search opened, every row shows its recorded directory beside the session name, so a row that matched on its directory says why it is there; the column stays for that picker's life, however you edit the filter afterwards. A session list zmx cannot give is not a zero match: the search reports the error and exits non-zero rather than opening an empty picker that would suggest your sessions are gone.
 
 `x /` — the slash with no term — opens the picker with the filter empty, focused and ready to type. It is not an error, and it does not mean "mint at root".
 
@@ -228,7 +227,7 @@ xctl list --short                    # names only
 
 ### `xctl kill`
 
-Kill a tmux session by name.
+Kill a session by name.
 
 ```bash
 xctl kill myproject
@@ -269,11 +268,11 @@ xctl hook list                                   # list hooks: key, event, comma
 `--resume-mode` takes `eager` or `lazy` and nothing else; any other value is refused and nothing is written. A registration carries eager, lazy or nothing, and carrying nothing means it follows the install-wide setting in `prefs.json`. The flag's zero value is "names no mode" rather than "keep what was there", so a `hook set` that does not pass it writes a registration carrying no mode whatever its predecessor carried — re-pass the mode alongside the command to keep a pin.
 
 **When hooks fire:** a resume hook is only ever offered — as the panel, or fired outright
-under `eager` — when Portal recreates a pane from saved state after a reboot, once the
-tmux server has started fresh. Nothing happens on an ordinary detach and reattach within
-the same server lifetime, because the pane and its process are still alive; bringing the
-command back then would launch a second copy of a long-running command such as a dev
-server.
+under `eager` — when Portal recreates a session from saved state: after a reboot, or once
+a logout or crash has ended your sessions along with the saver. Nothing happens on an
+ordinary detach and reattach, because the session and its process are still alive;
+bringing the command back then would launch a second copy of a long-running command such
+as a dev server.
 
 ### `xctl doctor`
 
@@ -509,24 +508,20 @@ discards saved work: it just backs out the current edit or closes the modal. Onl
 directories already opened in Portal are taggable, so open a directory once before
 tagging it.
 
-## Automatic Server Bootstrap & Restoration
+## Automatic Bootstrap & Restoration
 
-Whenever you run a command that needs tmux, Portal checks that the server is running and
-starts it if it is not. In the same step it re-creates any saved sessions that are not
-already live, so after a reboot your sessions come back with their structure, layout,
-zoom, and working directories intact. Scrollback (including ANSI colour) loads as you
-attach, and each recreated pane carrying a resume hook comes back holding the resume
-panel, which runs the command when you answer it.
+Whenever you run a command that needs your sessions, Portal checks that its save daemon is
+running and brings it back if it is not. In the same step it re-creates the saved sessions
+that are not live: after a reboot every one, and after a logout or crash that ended your
+sessions along with the saver, those too. Each comes back under its own name, in its last
+working directory, with its scrollback (including ANSI colour) replayed, and each carrying
+a resume hook comes back holding the resume panel, which runs the command when you answer
+it. While that runs, the picker shows its loading page.
 
-Only a kill is final. Killing a session — `k` in the picker, `xctl kill`, `tmux kill-session`,
-or exiting its last program — removes its saved state, scrollback and resume hooks for
-good. Detaching, `tmux kill-server` and shutting down or rebooting the machine all leave
-your sessions restorable, with nothing to run first. One gap remains: a pane whose program
-was started directly rather than from a shell can be ended by the shutdown signal before
-tmux goes, and a session left with no surviving pane is then saved as closed.
-
-This replaces tmux-continuum and tmux-resurrect for session persistence. If you have
-either installed, remove it (or set `@continuum-restore off`) to avoid restoring twice.
+Only a kill is final. Killing a session — `k` in the picker, `xctl kill`, `zmx kill`, or
+exiting its program — removes its saved state, scrollback and resume hook for good.
+Detaching, logging out and shutting down or rebooting the machine all leave your sessions
+restorable, with nothing to run first.
 
 Pair restoration with [resume hooks](#xctl-hook) to bring commands such as dev
 servers and editors back after a reboot — on a panel you answer per session, or fired
@@ -592,11 +587,11 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 |---|---|---|
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
-| `hooks.json` | Per-pane resume hooks (pane → event → registration). An event's value is either the command as a string or an object carrying the command alongside its settings; both shapes are permanently valid, neither deprecates the other, and there is no migration between them — the writer picks by whether there is anything to carry, so an entry that is only a command stays a plain string and a hand-edited file goes on looking as it does today. Portal creates an empty `hooks.json.lock` beside it on the first change, which it locks to keep concurrent writers from overwriting each other, and never removes. | `PORTAL_HOOKS_FILE` |
+| `hooks.json` | Per-session resume hooks (session name → event → registration). An event's value is either the command as a string or an object carrying the command alongside its settings; both shapes are permanently valid, neither deprecates the other, and there is no migration between them — the writer picks by whether there is anything to carry, so an entry that is only a command stays a plain string and a hand-edited file goes on looking as it does today. Portal creates an empty `hooks.json.lock` beside it on the first change, which it locks to keep concurrent writers from overwriting each other, and never removes. | `PORTAL_HOOKS_FILE` |
 | `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits; and `keys`, the [keys in a session](#keys-in-a-session) | `PORTAL_PREFS_FILE` |
 | `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `themes/` | Drop-in theme files (`<slug>.theme`); see [docs/theming.md](docs/theming.md). Portal never creates it — no directory simply means no drop-ins. | `PORTAL_THEMES_DIR` |
-| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `runners/` (an entry and a control socket per attached Portal, for switching and new windows), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
+| `state/` | Saved sessions + scrollback for automatic restoration on reboot. Contains: `sessions.json` (the session index: each session's label, directories and creation), `scrollback/*.bin` (each session's saved scrollback, a file per creation), `daemon.pid` + `daemon.version` (liveness markers), `bootstrapped` (the record that the last bootstrap finished), `restoring`, `hydrating/` and `resume-pending/` (flags), the `*.lock` files, `runners/` (an entry and a control socket per attached Portal, for switching and new windows), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 
@@ -615,7 +610,7 @@ Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_S
 - **Rotation:** a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
 - **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl doctor --fix` forces a sweep on demand.
 - **Level:** defaults to `info` (a few lines per meaningful event). Set `PORTAL_LOG_LEVEL=debug` to capture full reconstruction detail when investigating an issue.
-- **After a reboot:** `grep -E 'session dropped|backed off' portal.log` shows what shutdown did to your saved state. `session dropped session=<name>` names each session removed from it (a rename is not a drop); `<stage> backed off: tmux stopped answering` means a save was in flight as tmux went down and wrote nothing, leaving the previous save in place.
+- **After a reboot:** `grep -E 'session dropped|drops-held' portal.log` shows what the saver did to your saved state. `session dropped session=<name>` names each session removed from it (a relabel is not a drop); `drops-held` means many sessions went missing at once, as in a crash or a zmx upgrade, and the saver kept every one of them for the next restore.
 
 | Env var | Purpose | Default |
 |---|---|---|
@@ -625,33 +620,30 @@ Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_S
 
 ## Privacy Considerations
 
-Portal persists pane scrollback to `~/.config/portal/state/` (override via
+Portal persists session scrollback to `~/.config/portal/state/` (override via
 `PORTAL_STATE_DIR`) so it can rehydrate sessions after a reboot. Files are written
 mode `0600`, directories `0700`.
 
 - Same local-filesystem trust model as your shell history: anything visible in
   your terminal can end up in the saved state.
-- **No encryption at rest.** If a pane displays secrets (tokens, credentials,
+- **No encryption at rest.** If a session displays secrets (tokens, credentials,
   diffs of sensitive files), they will be captured.
-- **`portal.log` records config changes verbatim.** It does not contain pane
+- **`portal.log` records config changes verbatim.** It does not contain session
   scrollback, but config-mutation breadcrumbs and exec handoffs are logged as-is:
   a `xctl hook set --on-resume "<cmd>"` command string, a resume command
   discarded from the resume panel, alias values, and project paths appear in
   the log. Redact manually if you share it in a bug report.
-- **Mitigations:** for sensitive panes, run `tmux set-option -w history-limit 0`
-  to prevent scrollback from accumulating, or `tmux clear-history` on demand
-  (run before the next save, which lands at most ~30s later).
-- v1 has no per-session opt-out; the tmux-native workarounds above are the
-  supported path.
+- There is no per-session opt-out: a session's scrollback is saved whenever it
+  changes, at most once a minute.
 
 ## Uninstall
 
 Two paths depending on whether you want to keep your saved state:
 
 - **Just remove the binary:** `brew uninstall portal` or `rm $(which portal)`.
-  Portal's tmux hooks check for the binary before they run, so tmux keeps working
-  normally once it is gone. Your saved state is preserved, and reinstalling picks
-  up where it left off.
+  Your sessions keep running in zmx, and a save daemon already running keeps
+  running until its `_portal-saver` session ends. Your saved state is preserved,
+  and reinstalling picks up where it left off.
 - **Explicit teardown:** run `portal uninstall`, which stops the save daemon
   once it has saved. It touches **none of your files** — saved sessions and
   all config are left in place, and running `x` again brings the daemon back. To remove

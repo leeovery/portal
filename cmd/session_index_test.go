@@ -207,15 +207,15 @@ func TestReadShownIndex(t *testing.T) {
 	})
 }
 
-func TestUpdateSessionIndex(t *testing.T) {
+func TestUpdateSessionIndexLanding(t *testing.T) {
 	t.Run("it writes a change to the index in the state directory", func(t *testing.T) {
 		dir := isolateStateDir(t)
 
-		err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+		err := updateSessionIndexLanding(dir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel("api-x7Kd9a", "api")
-		})
+		}, landedNothing)
 		if err != nil {
-			t.Fatalf("updateSessionIndex: %v", err)
+			t.Fatalf("updateSessionIndexLanding: %v", err)
 		}
 		idx, err := sessionindex.Read(dir)
 		if err != nil {
@@ -233,9 +233,9 @@ func TestUpdateSessionIndex(t *testing.T) {
 			t.Fatalf("seed legacy index: %v", err)
 		}
 
-		err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
+		err := updateSessionIndexLanding(dir, "cli", func(idx *sessionindex.Index) error {
 			return idx.SetLabel("api-x7Kd9a", "api")
-		})
+		}, landedNothing)
 		if !errors.Is(err, sessionindex.ErrLegacyIndex) || !strings.Contains(err.Error(), "portal migrate") {
 			t.Fatalf("err = %v, want the legacy-index refusal naming portal migrate", err)
 		}
@@ -249,21 +249,21 @@ func TestUpdateSessionIndex(t *testing.T) {
 	})
 }
 
-func TestUpdateSessionIndexMakesTheStateDir(t *testing.T) {
+func landedNothing(sessionindex.Outcome) error { return nil }
+
+func TestIndexWritesMakeTheStateDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	err := updateSessionIndex("cli", func(idx *sessionindex.Index) error {
-		return idx.SetLabel("api-x7Kd9a", "api")
-	})
+	err := claimSession("cli", claimed{Name: "api-x7Kd9a", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
 	if err != nil {
-		t.Fatalf("updateSessionIndex with no state dir yet: %v", err)
+		t.Fatalf("claimSession with no state dir yet: %v", err)
 	}
 	idx, err := sessionindex.Read(dir)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if got, _ := idx.Lookup("api-x7Kd9a"); got.Label != "api" {
-		t.Errorf("label = %q, want %q", got.Label, "api")
+	if _, ok := idx.Lookup("api-x7Kd9a"); !ok {
+		t.Errorf("index %+v holds no entry for api-x7Kd9a", idx)
 	}
 }

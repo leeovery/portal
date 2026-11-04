@@ -234,7 +234,7 @@ func TestShouldRunConcurrentBootstrap(t *testing.T) {
 
 func TestWithBootstrapping_GatesLoadingPage(t *testing.T) {
 	t.Run("warm (no bootstrap) starts on PageSessions, never PageLoading", func(t *testing.T) {
-		m := tui.New(fakePickerLister(), tui.WithBootstrapping(false))
+		m := tui.New(fakePickerLister())
 
 		if m.ActivePage() == tui.PageLoading {
 			t.Error("warm path landed on PageLoading; want PageSessions")
@@ -245,7 +245,7 @@ func TestWithBootstrapping_GatesLoadingPage(t *testing.T) {
 	})
 
 	t.Run("cold (bootstrapping) starts on PageLoading", func(t *testing.T) {
-		m := tui.New(fakePickerLister(), tui.WithBootstrapping(true))
+		m := tui.New(fakePickerLister(), tui.WithBootstrapping(idleBootstrap))
 
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)

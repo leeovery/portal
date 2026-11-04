@@ -28,7 +28,7 @@ var killCmd = &cobra.Command{
 // killSession kills the session and forgets it: its index entry, and what
 // Portal keeps beside it. A session already gone keeps nothing either; one
 // that may still be running keeps everything. via is the surface asking, as
-// updateSessionIndex records it.
+// the index write records it.
 func killSession(ctx context.Context, b backend.Backend, name, via string) error {
 	killed := b.Kill(ctx, name)
 	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {

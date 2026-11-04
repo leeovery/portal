@@ -43,12 +43,6 @@ type bootstrapProgressPipe struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 	unwindWait time.Duration
-
-	// Written by the goroutine before it closes the channel and read only after
-	// the program exits, so the close the receiver observed is the ordering edge
-	// and no further synchronisation is needed.
-	warnings []bootstrap.Warning
-	err      error
 }
 
 func newBootstrapProgressPipe() *bootstrapProgressPipe {
@@ -75,8 +69,6 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 		defer close(p.done)
 		defer close(p.ch)
 		warnings, err := runner.Run(emitCtx)
-		p.warnings = warnings
-		p.err = err
 		p.send(ctx, bootstrapProgress{
 			Done:       true,
 			Warnings:   warnings,
@@ -160,7 +152,3 @@ func fatalMsgFromEvent(ev bootstrapProgress) tui.BootstrapFatalMsg {
 		Err:        ev.Fatal,
 	}
 }
-
-func (p *bootstrapProgressPipe) Warnings() []bootstrap.Warning { return p.warnings }
-
-func (p *bootstrapProgressPipe) Err() error { return p.err }
