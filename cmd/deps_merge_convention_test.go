@@ -9,12 +9,14 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/spawn"
 )
 
@@ -62,6 +64,15 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		}
 		if deps.Resolve == nil {
 			t.Error("Resolve = nil; an unset seam must fall through to its production default")
+		}
+		if deps.Saver == nil {
+			t.Error("Saver = nil; an unset seam must fall through to its production default")
+		}
+		if deps.Version != Version() {
+			t.Errorf("Version = %q; want this binary's %q", deps.Version, Version())
+		}
+		if deps.DaemonSettle != saverhost.ReadyWait {
+			t.Errorf("DaemonSettle = %v; want saverhost.ReadyWait, %v", deps.DaemonSettle, saverhost.ReadyWait)
 		}
 	})
 
@@ -136,6 +147,7 @@ func doctorSeamCases() []seamCase {
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
 	sentinelPrefsStore := prefs.NewStore("/sentinel/prefs.json")
 	sentinelDetector := fakeTerminalDetector{id: spawn.NewIdentity("com.sentinel.term", "Sentinel")}
+	sentinelSaver := &saverAnswers{present: true, pid: 77}
 
 	return []seamCase{
 		{
@@ -232,6 +244,33 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got := resolveDoctorDeps().Detector.Detect(); got != sentinelDetector.id {
 					t.Errorf("Detector.Detect() = %#v; want the injected identity %#v", got, sentinelDetector.id)
+				}
+			},
+		},
+		{
+			field:  "Saver",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Saver: sentinelSaver}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().Saver; got != sentinelSaver {
+					t.Errorf("Saver = %v; want the injected %v", got, sentinelSaver)
+				}
+			},
+		},
+		{
+			field:  "Version",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Version: "9.9.9-sentinel"}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().Version; got != "9.9.9-sentinel" {
+					t.Errorf("Version = %q; want the injected 9.9.9-sentinel", got)
+				}
+			},
+		},
+		{
+			field:  "DaemonSettle",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{DaemonSettle: 7 * time.Millisecond}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().DaemonSettle; got != 7*time.Millisecond {
+					t.Errorf("DaemonSettle = %v; want the injected 7ms", got)
 				}
 			},
 		},

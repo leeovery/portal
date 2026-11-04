@@ -77,7 +77,7 @@ x /api                                 # later: search live sessions by name or 
 xctl alias set work ~/Code/work        # alias a path...
 x work                                 # ...then open it by name
 xctl hook set --on-resume "make dev"   # in a pane: bring its command back after a reboot
-xctl doctor                            # save daemon running? hooks registered? state sane?
+xctl doctor                            # save daemon running? state sane? anything stale?
 ```
 
 Your sessions are saved as you work. After a reboot the first `x` starts tmux and rebuilds them — see [How It Works](#how-it-works).
@@ -277,14 +277,16 @@ server.
 
 ### `xctl doctor`
 
-A read-only health report across Portal's resurrection machinery — daemon alive, global hooks registered without duplicates, `_portal-saver` up, state dir sane, `sessions.json` valid, no stale entries, the detected host terminal, and the [key config](#keys-in-a-session). It starts nothing (a down runtime is reported honestly, not silently started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code, nor does the key-config line, which names any binding that falls back to its default.
+A read-only health report across Portal's resurrection machinery — zmx present and every session answering, `_portal-saver` up, its save daemon alive, state dir sane, `sessions.json` valid, no stale entries, sessions waiting to resume, the [key config](#keys-in-a-session), and the detected host terminal. It starts nothing and signals nothing (a saver that isn't running is reported, not started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code, nor does the key-config line, which names any binding that falls back to its default.
 
 ```bash
 xctl doctor              # health report (subsumes the retired `state status`)
 xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 ```
 
-`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resume line reports how many panes are holding a resume decision, and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
+`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resumes line reports how many live sessions are waiting on their [resume panel](#resume-panel), and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
+
+The daemon passes when `daemon.pid` names the process `_portal-saver` runs and that process is Portal's save daemon, recorded at this Portal's version. A daemon still starting, not yet recorded in `daemon.pid`, is given the time Portal gives it to come up before it is judged. A daemon recording another version still saves; its line reports it rather than failing, and the next `x` after an upgrade, or any other command that runs Portal's bootstrap, replaces it. Any line doctor can't judge — a saver, `daemon.pid` or daemon process it can't read, a state directory it can't resolve, sessions it can't list — reads not evaluable, never failing, and says why.
 
 While the stale hooks can't be counted, the stale-hooks line reads not evaluable, never failing, and says why: `restore in progress`, `could not read the restoring flag`, `could not resolve the state directory`, `could not list sessions`, `could not read sessions.json` (unreadable, corrupt, or written by an older or newer Portal) or `no sessions listed or saved`. `--fix` then removes nothing and prints `Skipped stale hook prune:` with the same reason, or with `hooks.json is locked` when another writer held it too long, `could not read hooks.json`, `hooks.json holds malformed JSON` or `the sweep could not complete`. Otherwise it names each hook it removed, one to a line:
 
@@ -356,7 +358,7 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 
 The TUI has three views: session list, project picker, and scrollback preview. It paints its own canvas in the colours of the active theme — press `t` for the theme picker, or name a theme in `prefs.json` (see [Configuration](#configuration) and [docs/theming.md](docs/theming.md)); `NO_COLOR` gives a colourless render.
 
-A session row ends in up to two status dots, packed to the right: the attached dot when a client is attached to the session, and a warm-coloured pending dot when any pane in it is waiting on its [resume panel](#resume-panel). Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on the sessions list carries the legend.
+A session row ends in up to two status dots, packed to the right: the attached dot when a client is attached to the session, and a warm-coloured pending dot when the session is waiting on its [resume panel](#resume-panel). Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on the sessions list carries the legend.
 
 ### Scrollback Preview
 
@@ -566,9 +568,9 @@ and the command's own process starts only for the work you go back to.
   the panel stays until you press a key that means something, and a reboot draws it
   again. Your other sessions stay fully live, and while it waits Portal holds the
   session's saved scrollback at what it was when the session was restored.
-- **It repaints when you arrive.** Attaching to a session, or switching to it, redraws
-  each of its waiting panels, so a panel drawn days ago at restore shows the theme —
-  and the light or dark half of a pair — that is in force now.
+- **It repaints when you arrive.** Opening a waiting session, or switching to it, redraws
+  its panel, so a panel drawn days ago at restore shows the theme — and the light or dark
+  half of a pair — that is in force now.
 - **A failed answer says so.** If an answer can't be carried out — `hooks.json`
   unreadable or locked on a discard, say — the panel states the reason on its own row
   and the session keeps waiting, so the key can be pressed again.

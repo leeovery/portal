@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
@@ -20,6 +21,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
@@ -73,6 +75,15 @@ type DoctorDeps struct {
 	PrefsStore      *prefs.Store
 	Detector        TerminalDetector
 	Resolve         spawn.AdapterResolver
+	// Saver reads the saver session and its daemon. Unset, it is read over
+	// the driver bound on ZmxDir, through a host that signals nothing.
+	Saver doctorSaver
+	// Version is the version a daemon of this Portal records; empty is this
+	// binary's.
+	Version string
+	// DaemonSettle is how long a daemon still starting is waited for; zero is
+	// saverhost.ReadyWait, the wait the saver's own ensure gives it.
+	DaemonSettle time.Duration
 }
 
 var doctorDeps *DoctorDeps
@@ -92,6 +103,9 @@ func resolveDoctorDeps() *DoctorDeps {
 	}
 	if deps.LookPath == nil {
 		deps.LookPath = exec.LookPath
+	}
+	if deps.Version == "" {
+		deps.Version = Version()
 	}
 	if deps.ListSessions == nil || deps.ProtocolVersion == nil {
 		list, protocolVersion := zmxSessionReads(deps.ZmxDir)
@@ -115,6 +129,13 @@ func resolveDoctorDeps() *DoctorDeps {
 		if deps.Resolve == nil {
 			deps.Resolve = seams.Resolve
 		}
+	}
+
+	if deps.Saver == nil {
+		deps.Saver = readOnlySaver(deps)
+	}
+	if deps.DaemonSettle == 0 {
+		deps.DaemonSettle = saverhost.ReadyWait
 	}
 
 	// Each best-effort load is constructed only for a seam left unset, so an
@@ -369,10 +390,13 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
+		checkSaver(ctx, deps.Saver),
+		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle),
 		checkStateDirSane(dir, dirErr),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
+		checkPendingResumes(dir, dirErr, sessions, listErr),
 		checkKeyConfig(deps.PrefsStore),
 	}
 	if deps.Detector != nil && deps.Resolve != nil {

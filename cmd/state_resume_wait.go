@@ -49,9 +49,9 @@ type resumeWaitConfig struct {
 
 	// Winch and Settle are the redraw pair: a SIGWINCH arms the settle window
 	// and each further one restarts it, so a drag of any length costs at most
-	// one redraw. A SIGWINCH is the session's tty announcing a new size or
-	// Portal asking for a repaint, so a panel painted at restore is repainted in
-	// the theme as it is now, and nothing tells the two apart, so the window a
+	// one redraw. A SIGWINCH is the session's tty announcing a new size or zmx
+	// attaching a client, so a panel painted at restore is repainted in the
+	// theme as it is now, and nothing tells the two apart, so the window a
 	// SIGWINCH opens redraws at whatever size it settles. Size reads the session
 	// at start-up, and again when the window that start-up opened elapses.
 	Winch  <-chan os.Signal
@@ -208,7 +208,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 
 	settled := resumeStartupSettle(cfg)
 	// Only the window start-up opened compares the size before it redraws: a
-	// SIGWINCH may be a repaint request at an unchanged size.
+	// SIGWINCH may be zmx attaching a client at an unchanged size.
 	signalled := false
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	cfg.InputArriving = false

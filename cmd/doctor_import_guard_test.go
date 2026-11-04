@@ -224,3 +224,132 @@ func TestOnlyDoctorFixRunsTheHookRepair(t *testing.T) {
 		})
 	}
 }
+
+const saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
+
+// doctorSaverReads are the saverhost Host methods a doctor source may reach:
+// the reads. Every other method of the host takes saver.lock, signals or
+// creates, so a method it gains is one of those until it is named here.
+var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
+
+// doctorSignallers are cmd's ways to a process and the hosts that signal
+// through one.
+var doctorSignallers = []string{"signalProcess", "newSaverHost", "saverHostSignalling"}
+
+// doctorSaverReaches reports each "<file>:<line>: <reach>" a doctor source
+// makes past the saver's reads. The host doctor is given exposes the reads
+// alone, which TestReadOnlySaverHostOnlyReads pins, so this is the way round
+// it: a host doctor builds or holds, any method of it but a read, or one of
+// cmd's signallers.
+func doctorSaverReaches(pkg sourceguardtest.TypedPackage) []string {
+	return reachesIn(pkg, doctorSaverReach)
+}
+
+func doctorSaverReach(pkg sourceguardtest.TypedPackage, ident *ast.Ident, _ string) string {
+	obj := pkg.Object(ident)
+	if obj == nil || obj.Pkg() == nil {
+		return ""
+	}
+	if fn, ok := obj.(*types.Func); ok && isHostMethod(fn) && !slices.Contains(doctorSaverReads, fn.Name()) {
+		return "saver method " + fn.Name()
+	}
+	if obj.Pkg().Name() == "cmd" && obj.Parent() == obj.Pkg().Scope() && slices.Contains(doctorSignallers, obj.Name()) {
+		return obj.Name()
+	}
+	return ""
+}
+
+// isHostMethod reports whether fn is a method of saverhost's Host.
+func isHostMethod(fn *types.Func) bool {
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		return false
+	}
+	t := recv.Type()
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return false
+	}
+	return named.Obj().Pkg().Path() == saverhostPkgPath && named.Obj().Name() == "Host"
+}
+
+func runDoctorSaverReadsGuard(t harnesstest.TestingT, pkg sourceguardtest.TypedPackage) {
+	t.Helper()
+	if len(pkg.Sources) == 0 {
+		t.Fatalf("no doctor*.go source in the cmd package; the guard is scanning nothing")
+	}
+	for _, found := range doctorSaverReaches(pkg) {
+		t.Errorf("%s; doctor only reads the saver, and signals nothing", found)
+	}
+}
+
+func TestDoctorOnlyReadsTheSaver(t *testing.T) {
+	checker := sourceguardtest.NewTypeChecker(t, ".")
+
+	t.Run("it finds doctor reaching the saver's reads alone", func(t *testing.T) {
+		runDoctorSaverReadsGuard(t, doctorSources(checker.Package(t)))
+	})
+
+	t.Run("it fails when it scans nothing", func(t *testing.T) {
+		rec := &harnesstest.Recorder{}
+		rec.Run(func() { runDoctorSaverReadsGuard(rec, sourceguardtest.TypedPackage{}) })
+		if !rec.Failed() {
+			t.Error("the guard passed over no sources")
+		}
+	})
+
+	for _, tc := range []struct {
+		name, body string
+		want       []string
+	}{
+		{"a stop through the host", `import (
+	"context"
+
+	"github.com/leeovery/portal/internal/saverhost"
+)
+
+func checkSaver(ctx context.Context, h *saverhost.Host) { _, _ = h.Stop(ctx) }`,
+			[]string{"doctor.go:9: saver method Stop"}},
+		{"the host's ensure as a method expression", `import "github.com/leeovery/portal/internal/saverhost"
+
+var ensurer = (*saverhost.Host).Ensurer`,
+			[]string{"doctor.go:5: saver method Ensurer"}},
+		{"a signal sent", `import "syscall"
+
+var signalProcess = syscall.Kill
+
+func checkDaemon() { _ = signalProcess(1, syscall.SIGTERM) }`,
+			[]string{"doctor.go:5: signalProcess", "doctor.go:7: signalProcess"}},
+		{"the reads, through the host and doctorSaver", `import (
+	"context"
+
+	"github.com/leeovery/portal/internal/saverhost"
+)
+
+type doctorSaver interface {
+	Present(ctx context.Context) (bool, error)
+	SaverPID(ctx context.Context) (int, bool, error)
+	Prove(pid int) error
+}
+
+var _ doctorSaver = (*saverhost.Host)(nil)
+
+func checkSaver(ctx context.Context, s doctorSaver, h *saverhost.Host) {
+	_, _ = s.Present(ctx)
+	_, _, _ = s.SaverPID(ctx)
+	_ = s.Prove(1)
+	_, _ = h.Present(ctx)
+}`,
+			nil},
+	} {
+		t.Run("it judges "+tc.name, func(t *testing.T) {
+			src := "package cmd\n\n" + tc.body + "\n"
+			if got := doctorSaverReaches(checker.Sources(t, map[string]string{"doctor.go": src})); !slices.Equal(got, tc.want) {
+				t.Errorf("doctorSaverReaches = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

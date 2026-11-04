@@ -232,7 +232,7 @@ func TestThemeAdvisories_UnresolvedDirDegrades(t *testing.T) {
 		if strings.Contains(out, "⚠") {
 			t.Errorf("report carries an advisory line with no themes directory to scan:\n%s", out)
 		}
-		if !strings.HasSuffix(out, "\n  8 checks passed\n") {
+		if !strings.HasSuffix(out, "\n  10 checks passed\n") {
 			t.Errorf("report does not close with the full all-passed summary:\n%s", out)
 		}
 	})
@@ -434,7 +434,7 @@ func TestThemeAdvisories_ReachTheDoctorReport(t *testing.T) {
 	want := "" +
 		"  ⚠ theme a-missing: missing tokens — missing text.primary\n" +
 		"  ⚠ theme b-colour: bad colour — canvas = blue\n" +
-		"  8 checks passed · 2 advisories\n"
+		"  10 checks passed · 2 advisories\n"
 	if !strings.HasSuffix(out, want) {
 		t.Errorf("report does not close with the advisory block and its summary:\n%s", out)
 	}
@@ -454,7 +454,7 @@ func TestThemeAdvisories_ReachTheDoctorReport(t *testing.T) {
 		out := outBuf.String()
 		want := "" +
 			"  ⚠ theme a-missing: missing tokens — missing text.primary\n" +
-			"  8 checks passed · 1 advisory\n"
+			"  10 checks passed · 1 advisory\n"
 		if !strings.HasSuffix(out, want) {
 			t.Errorf("report does not close with the resolved directory's advisory:\n%s", out)
 		}

@@ -4,15 +4,19 @@ package cmd_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -60,24 +64,27 @@ func leaveRefusingSocket(t *testing.T, dir, name string) {
 }
 
 func TestPortalDoctorAgainstZmx(t *testing.T) {
-	env, _ := portaltest.IsolateStateForTest(t)
-	b := zmxtest.New(t)
 	binary := buildPortalBinary(t)
+	d := portaltest.StartSaverDaemon(t, binary)
+	b := d.Backend
 	zmxBinary := zmxtest.Binary(t)
 
 	if _, err := b.Create(t.Context(), "api-x7Kd9a", t.TempDir(), []string{"sleep", "1000"}); err != nil {
 		t.Fatalf("Create(api-x7Kd9a): %v", err)
 	}
+	if err := state.ResumePending.Set(d.StateDir, "api-x7Kd9a"); err != nil {
+		t.Fatal(err)
+	}
 
-	env = append(env,
+	env := append(slices.Clone(d.Env),
 		"ZMX_DIR="+b.Dir(),
 		"PATH="+filepath.Dir(zmxBinary)+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	doctor := func(t *testing.T) (string, int) {
 		t.Helper()
-		cmd := exec.Command(binary, "doctor")
-		cmd.Env = env
-		out, err := cmd.Output()
+		run := exec.Command(binary, "doctor")
+		run.Env = env
+		out, err := run.Output()
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return string(out), exitErr.ExitCode()
 		}
@@ -95,7 +102,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 		}
 	}
 
-	t.Run("it passes every check with every session answering", func(t *testing.T) {
+	t.Run("it passes every check with every session answering and the saver's daemon proved", func(t *testing.T) {
 		out, code := doctor(t)
 		if code != 0 {
 			t.Errorf("exit code = %d, want 0:\n%s", code, out)
@@ -103,9 +110,17 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 		assertLines(t, out,
 			"✓ zmx: "+zmxBinary,
 			"✓ zmx dir: "+b.Dir(),
-			"✓ sessions: 1 session answering",
-			"8 checks passed",
+			"✓ sessions: 2 sessions answering",
+			"✓ saver: _portal-saver up",
+			"  pending resumes: 1 session waiting to resume",
+			"10 checks passed",
 		)
+		if want := fmt.Sprintf("\n  ✓ daemon: running (pid %d, version ", d.PID); !strings.Contains(out, want) {
+			t.Errorf("report missing %q:\n%s", want, out)
+		}
+		if d.Signal(0) != nil {
+			t.Error("the saver's daemon is gone after doctor")
+		}
 	})
 
 	t.Run("it names a refusing socket, a protocol-2 daemon and a silent one, and exits non-zero", func(t *testing.T) {
@@ -121,9 +136,33 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 			t.Errorf("exit code = %d, want 1:\n%s", code, out)
 		}
 		assertLines(t, out,
-			"✗ sessions: 3 of 4 not answering: crashed-9 (refuses connections: its daemon has crashed; `zmx list` clears its socket), "+
+			"✗ sessions: 3 of 5 not answering: crashed-9 (refuses connections: its daemon has crashed; `zmx list` clears its socket), "+
 				"future-2 (speaks protocol 2; Portal speaks 1), wedged-Lp4s (no answer)",
-			"7 of 8 checks passed",
+			"9 of 10 checks passed",
 		)
 	})
+}
+
+// The host doctor reads the saver through reads a real saver as the
+// lifecycle's host does: its session, the process it runs, proved its daemon.
+func TestDoctorsSaverHostReadsTheSaverAgainstZmx(t *testing.T) {
+	binary := buildPortalBinary(t)
+	d := portaltest.StartSaverDaemon(t, binary)
+	host, err := cmd.ReadOnlySaverHost(d.Backend, d.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if present, err := host.Present(t.Context()); err != nil || !present {
+		t.Errorf("Present = %v, %v; want the saver found", present, err)
+	}
+	if pid, present, err := host.SaverPID(t.Context()); err != nil || !present || pid != d.PID {
+		t.Errorf("SaverPID = %d, %v, %v; want the daemon's %d", pid, present, err, d.PID)
+	}
+	if err := host.Prove(d.PID); err != nil {
+		t.Errorf("Prove(%d) = %v; want the saver's daemon proved", d.PID, err)
+	}
+	if d.Signal(0) != nil {
+		t.Error("the daemon is gone")
+	}
 }
