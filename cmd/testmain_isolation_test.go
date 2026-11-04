@@ -24,12 +24,26 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 // testBoot is the boot the package's claims judge by: before every creation
 // a fixture records, unless it means one saved before the boot.
 var testBoot = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+// testClaimRuleRestoring is the rule the package's claims judge by: entries
+// by testBoot, adopting by restoring when given, and, as state.ClaimRule
+// does, the hydrating flags in dir and the names names refuses.
+func testClaimRuleRestoring(dir string, names func(string) error, restoring func(string) bool) sessionindex.Rule {
+	return sessionindex.NewRule(testBoot, restoring).
+		ReadingHydrating(func(name string) bool { return state.Hydrating.Raised(dir, name) }).
+		RefusingNames(names)
+}
+
+func testClaimRule(dir string, names func(string) error) sessionindex.Rule {
+	return testClaimRuleRestoring(dir, names, nil)
+}
 
 // pinToolchainCaches re-exports the cache locations the Go toolchain would
 // otherwise derive from HOME, so a subprocess `go build` keeps using the
@@ -116,9 +130,10 @@ func TestMain(m *testing.M) {
 	// a test reaching loadPrefsStore would leave a write racing its own teardown.
 	persistTranslation = func(*prefs.Store, string) {}
 	// Fixed package-wide, so what a fixture's dates make of an entry is the
-	// same on every machine, whenever it booted. state.ClaimRule's own suite
-	// pins the flags this rule leaves out.
-	claimRule = func(string) sessionindex.Rule { return sessionindex.NewRule(testBoot, nil) }
+	// same on every machine, whenever it booted. It reads the hydrating flag
+	// and the names as state.ClaimRule does; that rule's own suite pins the
+	// adoption by flags this one leaves out.
+	claimRule = testClaimRule
 	// A test reaching the exit seam unfaked would end the whole test binary, its
 	// cleanups unrun; it panics here instead.
 	osExit = func(code int) {

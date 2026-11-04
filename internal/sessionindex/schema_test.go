@@ -184,7 +184,7 @@ func TestUpdate_KeepsUnknownFields(t *testing.T) {
 			return nil
 		},
 		"the entry is adopted by a claim": func(idx *sessionindex.Index) error {
-			idx.Claim("a", "", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "a", "", liveCreation, 4242)
 			return nil
 		},
 	} {
@@ -214,7 +214,7 @@ func TestUpdate_KeepsUnknownFields(t *testing.T) {
 		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","created_at":"2026-11-04T09:00:00Z","extra":true}]}`)
 
 		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "a", "/a", liveCreation, 4242)
 			return nil
 		}); err != nil {
 			t.Fatalf("Update: %v", err)

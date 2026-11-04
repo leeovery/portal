@@ -81,7 +81,9 @@ func (w *restoreWorld) saveEntry(t *testing.T) {
 		t.Fatalf("the saved creation %v must fall well after this boot (%v, %v), or the claim rule adopts it for that alone", saved, booted, err)
 	}
 	if _, err := sessionindex.Update(w.stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(restoredSession, w.work, saved, 0, state.ClaimRule(w.stateDir))
+		if _, err := idx.Claim(restoredSession, w.work, saved, 0, state.ClaimRule(w.stateDir, w.b.ValidateName)); err != nil {
+			return err
+		}
 		return idx.SetLabel(restoredSession, restoredLabel)
 	}); err != nil {
 		t.Fatalf("save the session's entry: %v", err)

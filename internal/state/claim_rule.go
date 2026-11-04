@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -37,10 +38,29 @@ var warnedNoBootTime atomic.Bool
 //   - An entry whose session is being restored, its hydrating or
 //     resume-pending flag raised, is adopted. A flag that can't be looked for
 //     counts as raised.
+//   - A session whose hydrating flag is raised, or can't be looked for, has a
+//     restore its helper hasn't finished: no claim repays its entry, and the
+//     saver drops none of it.
+//   - A name names refuses is refused. names is the backend's Create rule, so
+//     no entry is kept that restore could never make again. A nil names
+//     refuses every name: a caller that claims gives the backend's, and one
+//     that only looks entries up, as LookupLive does, needs none.
 //
-// A boot time that can't be read gives the zero Rule, under which every claim
-// adopts, losing nothing.
-func ClaimRule(dir string) sessionindex.Rule {
+// A boot time that can't be read leaves the rule judging no boot, under which
+// every claim adopts, losing nothing; it reads the flags and the names all
+// the same.
+func ClaimRule(dir string, names func(name string) error) sessionindex.Rule {
+	if names == nil {
+		names = refuseEveryName
+	}
+	return judgedByBoot(dir).
+		ReadingHydrating(func(name string) bool { return Hydrating.Raised(dir, name) }).
+		RefusingNames(names)
+}
+
+// judgedByBoot is the rule's judgement of entries by the boot: the zero Rule
+// when the boot time can't be read.
+func judgedByBoot(dir string) sessionindex.Rule {
 	booted, err := bootTime()
 	if err != nil {
 		if !warnedNoBootTime.Swap(true) {
@@ -51,15 +71,14 @@ func ClaimRule(dir string) sessionindex.Rule {
 	return sessionindex.NewRule(booted.Add(bootTolerance), func(name string) bool { return Flagged(dir, name) })
 }
 
+var errNoNameRule = errors.New("no name rule to judge it by")
+
+func refuseEveryName(string) error { return errNoNameRule }
+
 // Flagged reports whether the session's hydrating or resume-pending flag is
 // raised in the state directory dir, a flag that can't be looked for counting
 // as raised: Portal is restoring the session, and what its screen shows is a
 // replay or the resume panel, not the session's own.
 func Flagged(dir, name string) bool {
-	for _, raised := range []func(dir, name string) (bool, error){Hydrating.Exists, ResumePending.Exists} {
-		if up, err := raised(dir, name); up || err != nil {
-			return true
-		}
-	}
-	return false
+	return Hydrating.Raised(dir, name) || ResumePending.Raised(dir, name)
 }

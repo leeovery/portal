@@ -258,7 +258,9 @@ func TestClaim_KeepsAnEntryRestoreRecordedNoCreationFor(t *testing.T) {
 		fake, _ := stageRename(t)
 		dir := os.Getenv("PORTAL_STATE_DIR")
 		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
-			idx.Claim(saved.Name, saved.Dir, saved.CreatedAt, saved.PID, claimRule(dir))
+			if _, err := idx.Claim(saved.Name, saved.Dir, saved.CreatedAt, saved.PID, claimRule(dir, acceptName)); err != nil {
+				return err
+			}
 			if err := idx.SetLabel(saved.Name, saved.Label); err != nil {
 				return err
 			}
@@ -283,6 +285,7 @@ func TestClaim_KeepsAnEntryRestoreRecordedNoCreationFor(t *testing.T) {
 		t.Helper()
 		want := saved
 		want.Label, want.CreatedAt, want.PID, want.ScrollbackFile = label, renameCreated, renamePID, keptScrollback(t, currentSessionName)
+		want.Owed = true // its hydrating flag is up: its restore is unfinished until its helper's claim
 		if got := entryOf(t, dir, currentSessionName); !got.CreatedAt.Equal(want.CreatedAt) || !sameButCreation(got, want) {
 			t.Errorf("entry = %+v\nwant %+v", got, want)
 		}
@@ -343,9 +346,11 @@ func (b bareReadback) Create(ctx context.Context, name, dir string, command []st
 	return backend.Session{Name: name}, nil
 }
 
-// A session minted with no creation read back has an entry recording none,
-// which a later claim takes over: a hook set on it survives a rename.
-func TestClaim_KeepsTheHookOfASessionMintedWithNoCreation(t *testing.T) {
+// decision 74: a mint never records an entry without a creation. A session
+// minted with none read back is warned of and left unrecorded, for a claim to
+// record once it reports one: a hook set on it survives a rename.
+func TestMint_RecordsNoEntryForASessionReportingNoCreation(t *testing.T) {
+	sink := logtest.Install(t)
 	fake := backendtest.New()
 	stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
 	withBackendDeps(t, BackendDeps{Backend: fake})
@@ -353,8 +358,13 @@ func TestClaim_KeepsTheHookOfASessionMintedWithNoCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateFromDir: %v", err)
 	}
-	if e := entryOf(t, stateDir, minted); !e.CreatedAt.IsZero() {
-		t.Fatalf("minted entry = %+v, want it to record no creation", e)
+	if idx := readIndex(t, stateDir); idx.Len() != 0 {
+		e, _ := idx.Lookup(minted)
+		t.Fatalf("minted entry = %+v, want none recorded without a creation", e)
+	}
+	r := sink.Records().Matching("sessions", "unrecorded").AtExactLevel(slog.LevelWarn).Only(t, "unrecorded warning")
+	if err := r.ErrorAttr(t, "error"); !errors.Is(err, sessionindex.ErrNoCreation) {
+		t.Errorf("unrecorded error = %v, want it to name the missing creation", err)
 	}
 	fake.SetCurrent(minted)
 	_, hooksFile := hooksFileInTempDir(t, nil)
@@ -370,8 +380,8 @@ func TestClaim_KeepsTheHookOfASessionMintedWithNoCreation(t *testing.T) {
 		t.Errorf("hook = %q, want it kept through the rename", got)
 	}
 	held, _ := fake.Held(minted)
-	if e := entryOf(t, stateDir, minted); e.Label != "api work" || !e.CreatedAt.Equal(held.Created) || e.PID != held.PID || e.Dir == "" {
-		t.Errorf("entry = %+v, want the label on the live creation, the minted dir kept", e)
+	if e := entryOf(t, stateDir, minted); e.Label != "api work" || !e.CreatedAt.Equal(held.Created) || e.PID != held.PID {
+		t.Errorf("entry = %+v, want the label on the live creation", e)
 	}
 }
 
@@ -383,7 +393,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		stageKept(t, dir, "api-x7Kd9a", "web-Qm3pLz")
 		store, _ := stageHooks(t, "api-x7Kd9a", "web-Qm3pLz")
 
-		err := claimSession("tui", claimed{Name: "api-x7Kd9a", Dir: "/work/api", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
+		err := claimSession("tui", acceptName, claimed{Name: "api-x7Kd9a", Dir: "/work/api", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
 		if err != nil {
 			t.Fatalf("claimSession: %v", err)
 		}
@@ -406,7 +416,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = claimSession("cli", claimed{Name: "api-x7Kd9a", Created: created, PID: 4242}, func(idx *sessionindex.Index) error {
+		err = claimSession("cli", acceptName, claimed{Name: "api-x7Kd9a", Created: created, PID: 4242}, func(idx *sessionindex.Index) error {
 			idx.SetScrollback("api-x7Kd9a", later)
 			return nil
 		}, nil)
@@ -432,7 +442,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		sink := logtest.Install(t)
 
 		live := claimed{Name: "a", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}
-		if err := claimSession("cli", live, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }, nil); err != nil {
+		if err := claimSession("cli", acceptName, live, func(idx *sessionindex.Index) error { return idx.SetLabel("a", "Alpha") }, nil); err != nil {
 			t.Fatalf("claimSession: %v", err)
 		}
 

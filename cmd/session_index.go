@@ -73,19 +73,22 @@ type claimed struct {
 }
 
 // claimSession claims the live session's entry by the one rule every claim
-// judges by, then runs then, when given, on the index in the same write, so
-// what then changes is this creation's. Once the write has landed and what it
-// dropped is forgotten, it runs afterward, when given, still under the commit
-// lock, so no kill or claim lands between the claim and what afterward writes
-// beside the entry.
-func claimSession(via string, live claimed, then func(*sessionindex.Index) error, afterward func() error) error {
+// judges by, names the backend's rule for the names Create takes, then runs
+// then, when given, on the index in the same write, so what then changes is
+// this creation's. A claim the rule refuses writes nothing and is the error.
+// Once the write has landed and what it dropped is forgotten, it runs
+// afterward, when given, still under the commit lock, so no kill or claim
+// lands between the claim and what afterward writes beside the entry.
+func claimSession(via string, names func(string) error, live claimed, then func(*sessionindex.Index) error, afterward func() error) error {
 	dir, err := state.EnsureDir()
 	if err != nil {
 		return err
 	}
-	rule := claimRule(dir)
+	rule := claimRule(dir, names)
 	return updateSessionIndexLanding(dir, via, func(idx *sessionindex.Index) error {
-		idx.Claim(live.Name, live.Dir, live.Created, live.PID, rule)
+		if _, err := idx.Claim(live.Name, live.Dir, live.Created, live.PID, rule); err != nil {
+			return err
+		}
 		if then == nil {
 			return nil
 		}

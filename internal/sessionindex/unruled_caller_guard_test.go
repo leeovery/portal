@@ -23,12 +23,15 @@ const (
 // fn is empty.
 type unruledCaller struct{ pkg, fn string }
 
-// Remove, Restored and Owe change an entry with no claim rule consulted:
-// Remove drops one, Restored adopts whatever creation an entry records, and
-// Owe keeps one from every drop. Anywhere else, the first two would stand for
-// a replace the rule never judged, and Owe would bring back a session the
-// saver saw end. Remove's callers are kill and the saver's drop of a session
-// that ended. Restored's and Owe's are restore.
+// Remove, Restored, Owe and Hydrated change an entry with no claim rule
+// consulted: Remove drops one, Restored adopts whatever creation an entry
+// records, Owe keeps one from every drop, and Hydrated ends the restore that
+// kept it. Anywhere else, the first two would stand for a replace the rule
+// never judged, Owe would bring back a session the saver saw end, and
+// Hydrated would let a session whose helper never finished its replay be
+// dropped as a kill. Remove's callers are kill and the saver's drop of a
+// session that ended. Restored's and Owe's are restore. Hydrated's is the
+// hydrate helper's claim.
 var unruledCallers = map[string][]unruledCaller{
 	"Remove": {
 		{pkg: modulePath + "/cmd", fn: "forgetSession"},
@@ -36,6 +39,7 @@ var unruledCallers = map[string][]unruledCaller{
 	},
 	"Restored": {{pkg: modulePath + "/internal/restore"}},
 	"Owe":      {{pkg: modulePath + "/internal/restore"}},
+	"Hydrated": {{pkg: modulePath + "/cmd", fn: "claimCreation"}},
 }
 
 // guardLane is a build the guard scans.
@@ -163,6 +167,18 @@ func mark(idx *sessionindex.Index) {
 	idx.Owe("a")
 }
 `
+	const hydrates = `package fixture
+
+import "github.com/leeovery/portal/internal/sessionindex"
+
+func claimCreation(idx *sessionindex.Index) {
+	func() { idx.Hydrated("a", at, 0) }()
+}
+
+func elsewhere(idx *sessionindex.Index) {
+	idx.Hydrated("a", at, 0)
+}
+`
 	const methodNamedAsAllowed = `package fixture
 
 import "github.com/leeovery/portal/internal/sessionindex"
@@ -249,6 +265,16 @@ func elsewhere(s store, r remover) {
 		{
 			name: "it allows Owe anywhere in internal/restore",
 			pkg:  modulePath + "/internal/restore", src: owes,
+		},
+		{
+			name: "it allows Hydrated from the hydrate helper's claimCreation alone in cmd",
+			pkg:  modulePath + "/cmd", src: hydrates,
+			want: []string{"fixture.go:10: Hydrated in elsewhere"},
+		},
+		{
+			name: "it reports Hydrated from a package not named, restore's and the saver's among them",
+			pkg:  modulePath + "/internal/restore", src: hydrates,
+			want: []string{"fixture.go:6: Hydrated in claimCreation", "fixture.go:10: Hydrated in elsewhere"},
 		},
 		{
 			name: "it reports a Remove promoted through an embedded index",

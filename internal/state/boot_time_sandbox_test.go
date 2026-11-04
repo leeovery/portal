@@ -39,7 +39,7 @@ func TestBootTimeSandbox(t *testing.T) {
 	t.Run("the claim rule judges by it", func(t *testing.T) {
 		saved := sessionindex.Entry{Name: "work", CreatedAt: time.Now()}
 		t.Setenv(BootTimeEnv, time.Now().Add(time.Hour).Format(time.RFC3339Nano))
-		if !ClaimRule(t.TempDir()).MayPredateBoot(saved) {
+		if !ClaimRule(t.TempDir(), nil).MayPredateBoot(saved) {
 			t.Error("an entry created before the boot named is judged from this boot")
 		}
 	})

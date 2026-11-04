@@ -30,7 +30,8 @@ var (
 
 // world is a restore over a Fake backend, watched by a flagWitness, and a
 // state directory of the test's own, its log captured. Its restorer sleeps not
-// at all, recording each wait.
+// at all, recording each wait, and reads a clock each wait moves on by its
+// length and nothing else does.
 type world struct {
 	dir     string
 	fake    *backendtest.Fake
@@ -38,6 +39,7 @@ type world struct {
 	sink    *logtest.Sink
 	r       *restore.Restorer
 	slept   []time.Duration
+	clock   time.Time
 	// asleep, when set, runs in each wait.
 	asleep func()
 }
@@ -61,12 +63,15 @@ func newWorldJudgingByState(t *testing.T, live ...backend.Session) *world {
 	if err != nil {
 		t.Fatalf("restore.New: %v", err)
 	}
+	w.clock = booted.Add(time.Hour)
 	restore.SleepWith(r, func(d time.Duration) {
 		w.slept = append(w.slept, d)
+		w.clock = w.clock.Add(d)
 		if w.asleep != nil {
 			w.asleep()
 		}
 	})
+	restore.ClockWith(r, func() time.Time { return w.clock })
 	w.sink, w.r = sink, r
 	return w
 }

@@ -216,7 +216,11 @@ func TestMarkOwed(t *testing.T) {
 }
 
 func TestRestore_OwedEntries(t *testing.T) {
-	t.Run("it restores an owed entry of this boot with the rest, and it is owed no more", func(t *testing.T) {
+	// decision 72: a restore completes at its helper's claim, so until then
+	// the mark keeps the entry from a drop and brings it back should the
+	// helper die. An entry from before the boot records a creation of this
+	// boot once restore has made it, so it is marked too.
+	t.Run("it restores an owed entry of this boot with the rest, each owed until its helper finishes", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, owing(thisBoot(t, "since")), entry(t, "before"))
 
@@ -228,8 +232,33 @@ func TestRestore_OwedEntries(t *testing.T) {
 		if got := w.created(); !slices.Equal(got, []string{"since", "before"}) {
 			t.Errorf("created %q, want both", got)
 		}
-		if got, _ := w.lookup(t, "since"); got.Owed {
-			t.Errorf("since = %+v, want it owed no more once restore made it", got)
+		for _, name := range []string{"since", "before"} {
+			if got, _ := w.lookup(t, name); !got.Owed {
+				t.Errorf("%s = %+v, want it owed until its helper's claim", name, got)
+			}
+		}
+	})
+
+	t.Run("a session whose helper never finished is made again by the next restore once it has ended", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.r.Restore(t.Context())
+		w.fake.Remove("work")
+		if _, err := state.Hydrating.Clear(w.dir, "work"); err != nil {
+			t.Fatal(err)
+		}
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made by each restore", got)
+		}
+		made, _ := w.fake.Held("work")
+		if got, _ := w.lookup(t, "work"); !got.Owed || got.PID != made.PID || !got.CreatedAt.Equal(made.Created) {
+			t.Errorf("work = %+v, want the second creation, %+v, recorded and owed until its helper's claim", got, made)
 		}
 	})
 
@@ -550,14 +579,19 @@ func (w *world) assertRestoredWithoutWarning(t *testing.T, saved sessionindex.En
 	if !ok {
 		t.Fatalf("%s is not held", saved.Name)
 	}
-	want := saved
-	want.CreatedAt, want.PID = live.Created, live.PID
-	if got, _ := w.lookup(t, saved.Name); !sameEntry(got, want) {
-		t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, want)
+	if got, _ := w.lookup(t, saved.Name); !sameEntry(got, restoredAs(saved, live)) {
+		t.Errorf("entry = %+v, want the helper's creation recorded, owed until it finishes, %+v", got, restoredAs(saved, live))
 	}
 	if warnings := w.warnings(); len(warnings) > 0 {
 		t.Errorf("a session restore made logged %v, want no warning", warnings)
 	}
+}
+
+// restoredAs is saved as restore records it once it has made live: live's
+// creation, owed a restore until live's helper finishes it.
+func restoredAs(saved sessionindex.Entry, live backend.Session) sessionindex.Entry {
+	saved.CreatedAt, saved.PID, saved.Owed = live.Created, live.PID, true
+	return saved
 }
 
 // failureLogged checks one WARN names the session that failed and the summary
@@ -603,25 +637,46 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 		}
 	})
 
-	t.Run("a session no ask finds fails once both have", func(t *testing.T) {
+	t.Run("a session no ask finds fails once both have, on each try", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
 		w.fake.Fail(backendtest.OpCreate, errRefused)
 
 		w.r.Restore(t.Context())
 
-		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 2 || !slices.Equal(w.slept, []time.Duration{time.Second}) {
-			t.Errorf("asked %d times, waiting %v; want twice, a second apart", asks, w.slept)
+		var asks []string
+		for _, call := range w.fake.Calls() {
+			if call.Op == backendtest.OpCreate || call.Op == backendtest.OpSession {
+				asks = append(asks, string(call.Op))
+			}
+		}
+		create, ask := string(backendtest.OpCreate), string(backendtest.OpSession)
+		tries := len(w.created())
+		want := []string{create, ask, ask}
+		for range tries - 1 {
+			want = append(want, ask, create, ask, ask)
+		}
+		if !slices.Equal(asks, want) {
+			t.Errorf("calls = %q, want each of the %d tries' Create followed by two asks, each retry asking first", asks, tries)
+		}
+		if len(w.slept) == 0 || w.slept[0] != time.Second {
+			t.Errorf("waited %v, want the first try's asks a second apart", w.slept)
 		}
 		if w.hydrating(t, "work") {
 			t.Error("the hydrating flag this run raised is left up")
 		}
 	})
 
+	// The second ask's wait outlives a cancelled bootstrap, which leaves
+	// nothing to try again.
 	t.Run("New's restorer waits out the second", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
-		w.fake.Fail(backendtest.OpCreate, errRefused)
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(context.Context, string, string, []string) (backend.Session, error) {
+			cancel(errors.New("bootstrap abandoned"))
+			return backend.Session{}, errRefused
+		})
 		r, err := restore.New(restore.Config{Backend: w.witness, StateDir: w.dir, Exe: exe})
 		if err != nil {
 			t.Fatal(err)
@@ -629,7 +684,7 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 		restore.JudgeByBoot(r, booted)
 		start := time.Now()
 
-		r.Restore(t.Context())
+		r.Restore(ctx)
 
 		if took := time.Since(start); took < time.Second {
 			t.Errorf("Restore took %v, want at least the second between the asks", took)
@@ -680,11 +735,12 @@ func TestRestore_CountsEveryWarningAsAnomalous(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
 		flags := filepath.Join(w.dir, string(state.Hydrating))
-		w.createWith(func(context.Context, string, string, []string) (backend.Session, error) {
+		w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
 			if err := os.Chmod(flags, 0o500); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(flags, 0o700) })
+			w.fake.Add(backend.Session{Name: name, Command: "vim notes.md"})
 			return backend.Session{}, errRefused
 		})
 
@@ -776,10 +832,8 @@ func TestRestore_StopsOnceItsContextEnds(t *testing.T) {
 			t.Error("a's hydrating flag is down: its helper runs, and lowers it")
 		}
 		live, _ := w.fake.Held("a")
-		want := saved
-		want.CreatedAt, want.PID = live.Created, live.PID
-		if got, _ := w.lookup(t, "a"); !sameEntry(got, want) {
-			t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, want)
+		if got, _ := w.lookup(t, "a"); !sameEntry(got, restoredAs(saved, live)) {
+			t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, restoredAs(saved, live))
 		}
 		w.assertCancelled(t, cause)
 	})
@@ -996,14 +1050,14 @@ func TestRestore_RecordsTheCreation(t *testing.T) {
 		if !ok {
 			t.Fatal("work was not made")
 		}
-		want := e
-		want.CreatedAt, want.PID = live.Created, live.PID
-		if got, _ := w.lookup(t, "work"); !sameEntry(got, want) {
-			t.Errorf("entry = %+v, want %+v", got, want)
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, restoredAs(e, live)) {
+			t.Errorf("entry = %+v, want %+v", got, restoredAs(e, live))
 		}
 	})
 
-	t.Run("a creation Create read none of changes nothing", func(t *testing.T) {
+	// The second ask of an unconfirmed Create reads no creation either, as a
+	// session the backend never answers for: the helper's claim records it.
+	t.Run("a creation no ask reads changes nothing", func(t *testing.T) {
 		w := newWorld(t)
 		w.fake.Now = func() time.Time { return time.Time{} }
 		saved := entry(t, "work")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -175,10 +176,18 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
+	each := saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling + commitlock.Bound()
+
 	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
-		each := saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling + commitlock.Bound()
 		if got := LockWait(20) - LockWait(0); got != 20*each {
 			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)
+		}
+	})
+
+	t.Run("it holds restore's retries, and the try that starts as their budget ends, as one term", func(t *testing.T) {
+		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
+		if got, want := LockWait(0)-rest, restore.RetryBudget+each; got != want {
+			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}
 	})
 }

@@ -50,7 +50,8 @@ type Result struct {
 	// restored.
 	ListErr error
 	// Restored counts the sessions made again. Failed counts those that
-	// couldn't be, whose entries stay for the next bootstrap to retry.
+	// couldn't be, retries and all, whose entries stay for the next bootstrap
+	// to retry.
 	Restored, Failed int
 }
 
@@ -61,9 +62,11 @@ type Restorer struct {
 	exe      string
 	logger   *slog.Logger
 	progress func(n, m int)
-	// claimRule and sleep are state.ClaimRule and time.Sleep but in tests.
+	// claimRule, now and wait are state.ClaimRule over the backend's names,
+	// time.Now and a wait on a timer but in tests.
 	claimRule func(dir string) sessionindex.Rule
-	sleep     func(time.Duration)
+	now       func() time.Time
+	wait      func(ctx context.Context, d time.Duration) error
 }
 
 // exeName is the base name of every portal binary, as the daemon's identity
@@ -72,9 +75,19 @@ type Restorer struct {
 // go test -c build may.
 const exeName = "portal"
 
-// recheckAfter is how long a failed Create's session is given to answer before
-// it is asked for again: a probe's ceiling, the second zmx gives one.
+// recheckAfter is how long a session a Create may have made is given to
+// answer before it is asked for again: a probe's ceiling, the second zmx
+// gives one.
 const recheckAfter = time.Second
+
+// RetryBudget bounds, in all, a restore's retries of the sessions its first
+// pass couldn't make for a reason that may pass, as a pty the burst of
+// creates couldn't have: the waits between them, and every retry started
+// within it. A retry started inside it runs to its end.
+const RetryBudget = 15 * time.Second
+
+// retryBackoff is the wait before each round of retries, the last repeating.
+var retryBackoff = []time.Duration{time.Second, 3 * time.Second}
 
 // New returns a Restorer over cfg. It refuses a Config with no Backend or no
 // StateDir, and an Exe that is not an absolute path to a binary named portal.
@@ -91,8 +104,21 @@ func New(cfg Config) (*Restorer, error) {
 	}
 	return &Restorer{
 		backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger),
-		claimRule: state.ClaimRule, sleep: time.Sleep,
+		claimRule: func(dir string) sessionindex.Rule { return state.ClaimRule(dir, cfg.Backend.ValidateName) },
+		now:       time.Now, wait: pause,
 	}, nil
+}
+
+// pause waits d, or until ctx ends, returning its cause then.
+func pause(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-timer.C:
+		return nil
+	}
 }
 
 // SetProgress has Restore report each session it takes up: the nth of the m
@@ -104,7 +130,8 @@ func (r *Restorer) SetProgress(fn func(n, m int)) { r.progress = fn }
 // saver running calls it before any saver can commit: the saver's world ended
 // with those sessions, by a logout, every zmx daemon dying or a crash, so no
 // saver saw them end, and each restore brings them back, this boot's
-// included, until one is made again or found live. It fails, marking nothing,
+// included, until the helper of one restore makes finishes, or a claim finds
+// one live with no restore of it unfinished. It fails, marking nothing,
 // when the backend can't be listed or the marks can't be written. An index it
 // can't read holds nothing a saver could drop, so it marks nothing there and
 // leaves the failure for Restore to report.
@@ -132,24 +159,32 @@ func (r *Restorer) MarkOwed(ctx context.Context) error {
 // backend doesn't list, Portal's own aside, that is owed a restore or may
 // predate this boot. It skips any other entry from this boot, whose session
 // ended while a saver watched and is the saver's to drop; with no boot time
-// to judge by, every entry may predate the boot. A session it can't make
-// keeps its entry for the next bootstrap. It asks the backend nothing when
-// sessions.json can't be read, makes nothing when the backend can't be
-// listed, and makes no further session once ctx ends.
+// to judge by, every entry may predate the boot. A session it couldn't make
+// for a reason that may pass it tries again, within RetryBudget, once every
+// other has had its first try. A session it can't make keeps its entry for
+// the next bootstrap. It asks the backend nothing when sessions.json can't be
+// read, makes nothing when the backend can't be listed, and makes no further
+// session once ctx ends.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
-	pass := &run{Restorer: r}
+	pass := &run{Restorer: r, raised: map[string]bool{}}
 	pass.restore(ctx)
 	r.logger.Info("restore complete", "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
 	return pass.res
 }
 
-// run is one Restore: what it did, and how many warnings its sessions drew.
+// run is one Restore: what it did, how many warnings its sessions drew, and
+// the sessions whose hydrating flag it raised.
 type run struct {
 	*Restorer
 	res       Result
 	anomalous int
+	raised    map[string]bool
 }
+
+// retried is the detail of a failure restore tries again within the
+// bootstrap.
+const retried = "tried again within this bootstrap"
 
 func (r *run) restore(ctx context.Context) {
 	idx, err := sessionindex.Read(r.dir)
@@ -168,16 +203,96 @@ func (r *run) restore(ctx context.Context) {
 		return
 	}
 	due := r.due(idx.Entries(), live)
+	var again []sessionindex.Entry
 	for i, e := range due {
 		if ctx.Err() != nil {
-			r.logger.Warn("restore cancelled", "detail", fmt.Sprintf("%d of %d sessions left for the next bootstrap", len(due)-i, len(due)), "error", context.Cause(ctx))
+			r.cancelled(ctx, fmt.Sprintf("%d of %d sessions left for the next bootstrap", len(due)-i, len(due)))
+			r.res.Failed += len(again)
 			return
 		}
 		if r.progress != nil {
 			r.progress(i+1, len(due))
 		}
-		r.restoreOne(ctx, e)
+		if r.firstTry(ctx, e) {
+			again = append(again, e)
+		}
 	}
+	r.res.Failed += len(r.retry(ctx, again))
+}
+
+// firstTry restores e, logging a failure, and reports whether it failed for a
+// reason a retry may clear.
+func (r *run) firstTry(ctx context.Context, e sessionindex.Entry) bool {
+	err := r.restoreOne(ctx, e)
+	switch {
+	case err == nil:
+		return false
+	case isForGood(err):
+		r.res.Failed++
+		r.warn("restore session failed", e.Name, "error", err)
+		return false
+	}
+	r.warn("restore session failed", e.Name, "error", err, "detail", retried)
+	return true
+}
+
+// retry tries the sessions left again, in rounds retryBackoff apart, starting
+// a round only while RetryBudget, counted from the first pass's end, has room
+// for its wait, and a session's try only while it lasts. It returns those
+// still unmade but for good, which retryRound counts, and stops once ctx ends.
+func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
+	deadline := r.now().Add(RetryBudget)
+	for round := 0; len(left) > 0; round++ {
+		backoff := retryBackoff[min(round, len(retryBackoff)-1)]
+		if !r.now().Add(backoff).Before(deadline) {
+			break
+		}
+		if err := r.wait(ctx, backoff); err != nil {
+			r.cancelled(ctx, fmt.Sprintf("%d sessions it was trying again left for the next bootstrap", len(left)))
+			break
+		}
+		left = r.retryRound(ctx, left, deadline)
+	}
+	return left
+}
+
+// retryRound tries each session left once more, and returns those that failed
+// again for a reason a retry may clear, with those it had no time or context
+// left to try. One failing for good is counted failed here.
+func (r *run) retryRound(ctx context.Context, left []sessionindex.Entry, deadline time.Time) []sessionindex.Entry {
+	var still []sessionindex.Entry
+	for i, e := range left {
+		if ctx.Err() != nil || !r.now().Before(deadline) {
+			return append(still, left[i:]...)
+		}
+		err := r.tryAgain(ctx, e)
+		switch {
+		case err == nil:
+			continue
+		case isForGood(err):
+			r.res.Failed++
+		default:
+			still = append(still, e)
+		}
+		r.logger.Debug("restore retry failed", "session", e.Name, "error", err)
+	}
+	return still
+}
+
+// tryAgain restores e once more. A session an earlier try made after all,
+// running restore's helper, is restored as it stands: its flag raised again
+// would outlive a helper that has lowered it already, keeping the saver off
+// the session for good.
+func (r *run) tryAgain(ctx context.Context, e sessionindex.Entry) error {
+	if live, err := r.backend.Session(ctx, e.Name); err == nil && r.RunsHelper(live) {
+		r.restored(e, live, startDir(e))
+		return nil
+	}
+	return r.restoreOne(ctx, e)
+}
+
+func (r *run) cancelled(ctx context.Context, detail string) {
+	r.logger.Warn("restore cancelled", "detail", detail, "error", context.Cause(ctx))
 }
 
 // due is the entries to restore.
@@ -219,60 +334,95 @@ func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rul
 	return ""
 }
 
-// restoreOne makes the entry's session again. A name Create refuses is never
+// restoreOne makes the entry's session again, and says why it couldn't,
+// marked forGood when no retry can help. A name Create refuses is never
 // tried. The session's hydrating flag goes up first, keeping the saver off it
 // until the helper has replayed its transcript, and a session whose flag can't
 // be looked for or raised is not made.
-func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
+func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) error {
 	if err := r.backend.ValidateName(e.Name); err != nil {
-		r.failed(e.Name, fmt.Errorf("its name is one the backend can never create: %w", err))
-		return
+		return forGood(fmt.Errorf("its name is one the backend can never create: %w", err))
 	}
-	raisedBefore, err := state.Hydrating.Exists(r.dir, e.Name)
-	if err == nil {
-		err = state.Hydrating.Set(r.dir, e.Name)
-	}
-	if err != nil {
-		r.failed(e.Name, fmt.Errorf("raise its hydrating flag: %w", err))
-		return
+	if err := r.raise(e.Name); err != nil {
+		return fmt.Errorf("raise its hydrating flag: %w", err)
 	}
 	dir, argv := startDir(e), r.command(e)
 	s, err := r.backend.Create(ctx, e.Name, dir, argv)
+	switch {
+	case err != nil:
+		s, err = r.madeAnyway(ctx, e.Name, err)
+	case s.Created.IsZero():
+		s, err = r.unconfirmed(ctx, e.Name)
+	}
 	if err != nil {
-		if s, err = r.madeAnyway(ctx, e.Name, raisedBefore, err); err != nil {
-			r.failed(e.Name, err)
-			return
-		}
+		return err
 	}
 	r.restored(e, s, dir)
+	return nil
+}
+
+// raise raises the session's hydrating flag, remembered as this run's unless
+// it was up already: one raised before the run is another restore's.
+func (r *run) raise(name string) error {
+	up, err := state.Hydrating.Exists(r.dir, name)
+	if err != nil || up {
+		return err
+	}
+	if err := state.Hydrating.Set(r.dir, name); err != nil {
+		return err
+	}
+	r.raised[name] = true
+	return nil
 }
 
 // madeAnyway looks up the session a Create that failed may have made all the
-// same, as one that timed out waiting for it to answer has. A session running
-// restore's helper for the name is restored, its flag the helper's to lower.
-// Any other session holding the name is not restore's, so its flag comes down
-// whoever raised it: left up, it would keep the saver off that session for
-// good. With no session under the name, only a flag this run raised comes
-// down, as one raised before is another restore's. A session that can't be
-// looked up may be the helper's, so its flag stays.
-func (r *run) madeAnyway(ctx context.Context, name string, raisedBefore bool, createErr error) (backend.Session, error) {
+// same, as one that timed out waiting for it to answer has, and judges it.
+func (r *run) madeAnyway(ctx context.Context, name string, createErr error) (backend.Session, error) {
 	live, err := r.holder(context.WithoutCancel(ctx), name)
+	return r.judge(name, live, err, createErr)
+}
+
+// errUnconfirmed is a Create that said it made its session but read no
+// creation of it.
+var errUnconfirmed = errors.New("zmx reported the session made, but it never answered")
+
+// unconfirmed looks up, a probe's ceiling on, the session a Create reported
+// made but read no creation of, and judges it. zmx reports a session made
+// before its daemon has the session's pty, so one that couldn't have it was
+// never made.
+func (r *run) unconfirmed(ctx context.Context, name string) (backend.Session, error) {
+	ctx = context.WithoutCancel(ctx)
+	_ = r.wait(ctx, recheckAfter)
+	live, err := r.backend.Session(ctx, name)
+	return r.judge(name, live, err, errUnconfirmed)
+}
+
+// judge settles a session a Create may have made, by the session the lookup
+// found holding its name, live, or the error it gave, cause saying why the
+// Create alone couldn't. A session running restore's helper for the name is
+// restored, its flag the helper's to lower. Any other session holding the name
+// is not restore's, so that is a failure for good, and its flag comes down
+// whoever raised it: left up, it would keep the saver off that session for
+// good. With no session under the name the failure may pass, and only a flag
+// this run raised comes down. A session that can't be looked up may be the
+// helper's, so its flag stays.
+func (r *run) judge(name string, live backend.Session, err, cause error) (backend.Session, error) {
 	switch {
 	case err == nil && r.RunsHelper(live):
 		return live, nil
 	case err == nil:
 		r.lowerHydrating(name)
-		return backend.Session{}, fmt.Errorf("%w; the session holding its name runs %q, not restore's helper", createErr, live.Command)
+		return backend.Session{}, forGood(fmt.Errorf("%w; the session holding its name runs %q, not restore's helper", cause, live.Command))
 	case heldAs(err):
 		r.lowerHydrating(name)
-		return backend.Session{}, fmt.Errorf("%w; %w", createErr, err)
+		return backend.Session{}, forGood(fmt.Errorf("%w; %w", cause, err))
 	case errors.Is(err, backend.ErrNoSuchSession):
-		if !raisedBefore {
+		if r.raised[name] {
 			r.lowerHydrating(name)
 		}
-		return backend.Session{}, createErr
+		return backend.Session{}, cause
 	}
-	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", createErr, err)
+	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", cause, err)
 }
 
 // holder is the session holding the name, asked for a second time a probe's
@@ -282,10 +432,23 @@ func (r *run) madeAnyway(ctx context.Context, name string, raisedBefore bool, cr
 func (r *run) holder(ctx context.Context, name string) (backend.Session, error) {
 	live, err := r.backend.Session(ctx, name)
 	if errors.Is(err, backend.ErrNoSuchSession) && !heldAs(err) {
-		r.sleep(recheckAfter)
+		_ = r.wait(ctx, recheckAfter)
 		live, err = r.backend.Session(ctx, name)
 	}
 	return live, err
+}
+
+// forGoodError marks a failure no retry within the bootstrap can clear: a name
+// Create refuses, or one another session holds.
+type forGoodError struct{ error }
+
+func (e forGoodError) Unwrap() error { return e.error }
+
+func forGood(err error) error { return forGoodError{err} }
+
+func isForGood(err error) bool {
+	_, ok := errors.AsType[forGoodError](err)
+	return ok
 }
 
 // heldAs reports whether err is the backend's answer that it holds the name
@@ -296,8 +459,9 @@ func heldAs(err error) bool {
 }
 
 // restored records the session's creation as the entry's own, under the
-// commit lock every writer of the index holds. A session reporting no
-// creation records none: the hydrate helper's claim records it.
+// commit lock every writer of the index holds, still owed a restore until its
+// helper finishes. A session reporting no creation records none: the hydrate
+// helper's claim records it.
 func (r *run) restored(e sessionindex.Entry, s backend.Session, dir string) {
 	r.res.Restored++
 	if _, err := sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
@@ -307,11 +471,6 @@ func (r *run) restored(e sessionindex.Entry, s backend.Session, dir string) {
 		r.warn("record session creation failed", e.Name, "error", err)
 	}
 	r.logger.Debug("session restored", "session", e.Name, "path", dir)
-}
-
-func (r *run) failed(name string, err error) {
-	r.res.Failed++
-	r.warn("restore session failed", name, "error", err)
 }
 
 func (r *run) lowerHydrating(name string) {

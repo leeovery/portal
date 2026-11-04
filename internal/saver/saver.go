@@ -171,7 +171,7 @@ func (s *Saver) list(ctx context.Context) (listing, error) {
 // write and the forgetting that goes with it. One that held the lock first
 // finishes, within the bound.
 func (s *Saver) commit(ctx context.Context, l listing, captures []capture) (Result, error) {
-	rule := state.ClaimRule(s.dir)
+	rule := state.ClaimRule(s.dir, s.backend.ValidateName)
 	var result Result
 	var written *sessionindex.Index
 	var named []capture

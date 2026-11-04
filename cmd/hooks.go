@@ -119,7 +119,7 @@ func setResumeHook(ctx context.Context, b backend.Backend, name string, registra
 	if err != nil {
 		return err
 	}
-	return claimSession("cli", live, nil, func() error {
+	return claimSession("cli", b.ValidateName, live, nil, func() error {
 		store, err := loadHookStore()
 		if err != nil {
 			return err

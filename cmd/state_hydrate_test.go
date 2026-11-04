@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -80,6 +81,12 @@ func (w *hydrateWorld) seedIndex(t *testing.T, entries ...sessionindex.Entry) {
 	if err := os.WriteFile(sessionindex.Path(w.stateDir), indexJSON(t, entries), 0o600); err != nil {
 		t.Fatalf("seed sessions.json: %v", err)
 	}
+}
+
+// restored is the session's entry as restore records it: the live creation,
+// owed until the helper's claim.
+func (w *hydrateWorld) restored() sessionindex.Entry {
+	return sessionindex.Entry{Name: hydrateSession, Label: "api work", CreatedAt: w.live.Created, PID: w.live.PID, Owed: true}
 }
 
 // entry is the session's index entry as sessions.json holds it now.
@@ -368,48 +375,93 @@ func TestHydrate_ReplayRecordsACloseItCannotRead(t *testing.T) {
 	}
 }
 
+// keptNotice is the line telling a session the transcript at path it couldn't
+// replay is kept.
+func keptNotice(path string) string {
+	return fmt.Sprintf(replayFailedNotice, path) + "\r\n"
+}
+
+// assertRestoreUnfinished fails unless the helper left the session's restore
+// for the next one: its hydrating flag raised, its entry recording the live
+// creation and still owed, the keeping of the transcript at path recorded,
+// and the session handed on.
+func (w *hydrateWorld) assertRestoreUnfinished(t *testing.T, exec *stubExecShell, body, path string) {
+	t.Helper()
+	if !w.hydrating(t) {
+		t.Error("the hydrating flag came down, want it kept raised so the saver neither captures nor drops the session")
+	}
+	if got, _ := w.entry(t); !got.Owed || !w.recordsLiveCreation(t) {
+		t.Errorf("entry = %+v, want the live creation recorded and still owed", got)
+	}
+	if !exec.called {
+		t.Error("the session was never handed on")
+	}
+	info := execLogLine(t, body, "INFO", "scrollback kept for the next restore")
+	for _, attr := range []string{"session=" + hydrateSession, "path=" + path} {
+		if !strings.Contains(info, attr) {
+			t.Errorf("INFO %q does not carry %s", info, attr)
+		}
+	}
+}
+
+// decision 73: a transcript that can't be replayed is kept for the next
+// restore, and the session says so in one line.
 func TestHydrate_TranscriptUnreadable(t *testing.T) {
-	cases := []struct {
-		name string
-		file func(t *testing.T) string
-		warn string
-	}{
-		{name: "missing", file: func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.bin") }, warn: "scrollback file not found"},
-		{name: "unreadable", file: func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") }, warn: "scrollback file unreadable (permission denied)"},
-	}
-	for _, tc := range cases {
-		t.Run("a "+tc.name+" transcript writes nothing and hands the session on as any other", func(t *testing.T) {
-			w := newHydrateWorld(t)
-			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-			stdout := new(bytes.Buffer)
-			exec := &stubExecShell{}
-			cfg := w.config(exec)
-			cfg.File, cfg.Stdout, cfg.Logger = tc.file(t), stdout, logger
-			cfg.HookStore = hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Eager)
-			t.Setenv("SHELL", "/bin/zsh")
-
-			runHydrate(t.Context(), cfg)
-
-			if stdout.Len() != 0 {
-				t.Errorf("stdout = %q, want nothing written", stdout.String())
-			}
-			if want := []string{"sh", "-c", "trap : TERM; echo hi; exec '/bin/zsh' -l"}; !reflect.DeepEqual(exec.args, want) {
-				t.Errorf("exec args = %q, want the eager hook %q", exec.args, want)
-			}
-			warn := execLogLine(t, sink.Body(), "WARN", tc.warn)
-			for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File} {
-				if !strings.Contains(warn, attr) {
-					t.Errorf("WARN %q does not carry %s", warn, attr)
-				}
-			}
-			if w.hydrating(t) || !w.recordsLiveCreation(t) {
-				t.Errorf("hydrating still raised = %v, creation recorded = %v; want the restore ended as any other", w.hydrating(t), w.recordsLiveCreation(t))
-			}
-		})
-	}
-
-	t.Run("a transcript failing at its first read writes nothing and logs the cause", func(t *testing.T) {
+	t.Run("a missing transcript writes nothing, keeps nothing and ends the restore as any other", func(t *testing.T) {
 		w := newHydrateWorld(t)
+		w.seedIndex(t, w.restored())
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		stdout := new(bytes.Buffer)
+		cfg := w.config(&stubExecShell{})
+		cfg.File, cfg.Stdout, cfg.Logger = filepath.Join(t.TempDir(), "absent.bin"), stdout, logger
+
+		runHydrate(t.Context(), cfg)
+
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing written", stdout.String())
+		}
+		warn := execLogLine(t, sink.Body(), "WARN", "scrollback file not found")
+		for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File} {
+			if !strings.Contains(warn, attr) {
+				t.Errorf("WARN %q does not carry %s", warn, attr)
+			}
+		}
+		if got, _ := w.entry(t); w.hydrating(t) || got.Owed || !w.recordsLiveCreation(t) {
+			t.Errorf("hydrating still raised = %v, entry = %+v; want the restore ended as any other", w.hydrating(t), got)
+		}
+	})
+
+	t.Run("an unreadable transcript is kept, said so in one line, and the session handed on as any other", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		w.seedIndex(t, w.restored())
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		stdout := new(bytes.Buffer)
+		exec := &stubExecShell{}
+		cfg := w.config(exec)
+		cfg.File, cfg.Stdout, cfg.Logger = unreadableTranscript(t, "HIDDEN"), stdout, logger
+		cfg.HookStore = hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Eager)
+		t.Setenv("SHELL", "/bin/zsh")
+
+		runHydrate(t.Context(), cfg)
+
+		if want := keptNotice(cfg.File); stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout.String(), want)
+		}
+		if want := []string{"sh", "-c", "trap : TERM; echo hi; exec '/bin/zsh' -l"}; !reflect.DeepEqual(exec.args, want) {
+			t.Errorf("exec args = %q, want the eager hook %q", exec.args, want)
+		}
+		warn := execLogLine(t, sink.Body(), "WARN", "scrollback file unreadable (permission denied)")
+		for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File} {
+			if !strings.Contains(warn, attr) {
+				t.Errorf("WARN %q does not carry %s", warn, attr)
+			}
+		}
+		w.assertRestoreUnfinished(t, exec, sink.Body(), cfg.File)
+	})
+
+	t.Run("a transcript failing at its first read is kept, said so in one line, and logs the cause", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		w.seedIndex(t, w.restored())
 		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 		stdout := new(bytes.Buffer)
 		exec := &stubExecShell{}
@@ -419,16 +471,14 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 
 		runHydrate(t.Context(), cfg)
 
-		if stdout.Len() != 0 {
-			t.Errorf("stdout = %q, want nothing written", stdout.String())
+		if want := keptNotice(cfg.File); stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout.String(), want)
 		}
 		warn := execLogLine(t, sink.Body(), "WARN", "scrollback file I/O error")
 		if !strings.Contains(warn, "error=") {
 			t.Errorf("WARN %q carries no cause", warn)
 		}
-		if !exec.called {
-			t.Error("the session was never handed on")
-		}
+		w.assertRestoreUnfinished(t, exec, sink.Body(), cfg.File)
 	})
 
 	// A part-read is cut as a whole one is: the modes it opened with, and the
@@ -436,8 +486,9 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 	// cursor, so the cut takes nothing else.
 	const lead, rows, closer = "\x1b[?1004h\x1b[?2004h", "$ claude\r\n\x1b[1mworking on it\x1b[0m\r\n$ ", "\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\"
 	for name, read := range map[string]string{"before its close": lead + rows, "after its close": lead + rows + closer} {
-		t.Run("a transcript failing part way, "+name+", is cut, closed and settled as a whole one is, and logged as cut short", func(t *testing.T) {
+		t.Run("a transcript failing part way, "+name+", is cut, closed and settled as a whole one is, logged as cut short, and kept", func(t *testing.T) {
 			w := newHydrateWorld(t)
+			w.seedIndex(t, w.restored())
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 			stdout := new(bytes.Buffer)
 			settled := false
@@ -451,7 +502,7 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 
 			runHydrate(t.Context(), cfg)
 
-			if want := hydrateResetPreamble + rows + hydrateResetPostamble; stdout.String() != want {
+			if want := hydrateResetPreamble + rows + hydrateResetPostamble + keptNotice(cfg.File); stdout.String() != want {
 				t.Errorf("stdout = %q, want %q", stdout.String(), want)
 			}
 			if !settled {
@@ -469,9 +520,7 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 					t.Errorf("a part-read was recorded as %q: %q", msg, body)
 				}
 			}
-			if !exec.called {
-				t.Error("the session was never handed on")
-			}
+			w.assertRestoreUnfinished(t, exec, body, cfg.File)
 		})
 	}
 }

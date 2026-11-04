@@ -158,8 +158,8 @@ func TestHydrate_RecordsTheSessionsCreation(t *testing.T) {
 	// claim made while the hydrating flag is up keeps the label.
 	t.Run("it claims while the session is flagged hydrating, so an entry of this boot is adopted, never replaced", func(t *testing.T) {
 		w := newHydrateWorld(t)
-		withFuncSeam(t, &claimRule, func(dir string) sessionindex.Rule {
-			return sessionindex.NewRule(testBoot, func(name string) bool { return state.Flagged(dir, name) })
+		withFuncSeam(t, &claimRule, func(dir string, names func(string) error) sessionindex.Rule {
+			return testClaimRuleRestoring(dir, names, func(name string) bool { return state.Flagged(dir, name) })
 		})
 		thisBoot := saved
 		thisBoot.CreatedAt = testBoot.Add(30 * time.Minute)
@@ -180,8 +180,8 @@ func TestHydrate_RecordsTheSessionsCreation(t *testing.T) {
 	// judged as any claim is, and an entry of this boot replaced.
 	t.Run("with its hydrating flag proved down it claims nothing, with one DEBUG, and hands the session on", func(t *testing.T) {
 		w := newHydrateWorld(t)
-		withFuncSeam(t, &claimRule, func(dir string) sessionindex.Rule {
-			return sessionindex.NewRule(testBoot, func(name string) bool { return state.Flagged(dir, name) })
+		withFuncSeam(t, &claimRule, func(dir string, names func(string) error) sessionindex.Rule {
+			return testClaimRuleRestoring(dir, names, func(name string) bool { return state.Flagged(dir, name) })
 		})
 		thisBoot := saved
 		thisBoot.CreatedAt = testBoot.Add(30 * time.Minute)
@@ -319,6 +319,34 @@ func TestHydrate_EndsTheSessionsRestore(t *testing.T) {
 
 		if w.hydrating(t) {
 			t.Error("the hydrating flag is still raised")
+		}
+	})
+
+	// decision 72: a restore completes at its helper's claim, and at no other.
+	t.Run("its claim repays the entry restore left owed, once it has replayed", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		w.seedIndex(t, w.restored())
+		cfg := w.config(&stubExecShell{})
+		cfg.File = transcript(t, "BEFORE REBOOT")
+
+		runHydrate(t.Context(), cfg)
+
+		want := w.restored()
+		want.Owed = false
+		if got, _ := w.entry(t); got != want {
+			t.Errorf("entry = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a claim that fails leaves the entry owed and still lowers the flag, for the saver to repay", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		w.seedIndex(t, w.restored())
+		w.backend.Fail(backendtest.OpSession, errors.New("session is gone"))
+
+		runHydrate(t.Context(), w.config(&stubExecShell{}))
+
+		if got, _ := w.entry(t); !got.Owed || w.hydrating(t) {
+			t.Errorf("entry = %+v, hydrating = %v; want it owed and the flag down", got, w.hydrating(t))
 		}
 	})
 
