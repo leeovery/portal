@@ -1,4 +1,7 @@
-package state
+// Package legacyindex decodes the tmux version's sessions.json (schema version
+// 1), which `portal migrate` reads from state-tmux/. It is decode-only: nothing
+// writes this schema any more.
+package legacyindex
 
 import (
 	"encoding/json"
@@ -7,10 +10,10 @@ import (
 	"time"
 )
 
-// SchemaVersion is bumped on any schema-breaking change.
+// SchemaVersion is the only version DecodeIndex accepts.
 const SchemaVersion = 1
 
-// Index is the root document persisted to sessions.json.
+// Index is the root document of a version 1 sessions.json.
 type Index struct {
 	Version  int       `json:"version"`
 	SavedAt  time.Time `json:"saved_at"`
@@ -32,10 +35,9 @@ type Window struct {
 	Panes  []Pane `json:"panes"`
 }
 
-// Pane's ScrollbackFile is relative to the state directory. PortalPaneID
-// persists the pane's durable identity token across a reboot — the tmux pane
-// user-option holding it does not outlive the server. It decodes to "" for a
-// pane that has never been stamped, which is the ordinary case.
+// Pane's ScrollbackFile is relative to the state directory. PortalPaneID is
+// the pane's durable identity token, which keyed its hook in hooks.json. It
+// decodes to "" for a pane that was never stamped, which is the ordinary case.
 type Pane struct {
 	Index          int    `json:"index"`
 	CWD            string `json:"cwd"`
@@ -43,38 +45,6 @@ type Pane struct {
 	CurrentCommand string `json:"current_command"`
 	ScrollbackFile string `json:"scrollback_file"`
 	PortalPaneID   string `json:"portal_pane_id"`
-}
-
-// Canonicalize replaces nil slices and maps so they encode as [] and {} rather
-// than null. It mutates the receiver.
-func (idx *Index) Canonicalize() {
-	idx.Version = SchemaVersion
-
-	if idx.Sessions == nil {
-		idx.Sessions = []Session{}
-	}
-	for i := range idx.Sessions {
-		s := &idx.Sessions[i]
-		if s.Environment == nil {
-			s.Environment = map[string]string{}
-		}
-		if s.Windows == nil {
-			s.Windows = []Window{}
-		}
-		for j := range s.Windows {
-			w := &s.Windows[j]
-			if w.Panes == nil {
-				w.Panes = []Pane{}
-			}
-		}
-	}
-}
-
-// EncodeIndex serialises idx to canonical indented JSON without mutating it.
-func EncodeIndex(idx Index) ([]byte, error) {
-	local := idx
-	local.Canonicalize()
-	return json.MarshalIndent(local, "", "  ")
 }
 
 // DecodeIndex errors on malformed JSON, a missing version field, and a version

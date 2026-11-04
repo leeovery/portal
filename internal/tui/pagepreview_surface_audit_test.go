@@ -160,6 +160,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"hooks":           {},
 		"hookstest":       {},
 		"hooksweep":       {},
+		"legacyindex":     {},
 		"log":             {},
 		"logtest":         {},
 		"nanoid":          {},
