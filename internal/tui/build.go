@@ -28,9 +28,9 @@ type Deps struct {
 	// back to for a session with no recorded directory.
 	DirRunner     resolver.CommandRunner
 	PendingReader PendingResumeReader
-	// SkeletonMarkers keeps the cold route re-reading the pending set until no
-	// restored pane is still hydrating, for at most PendingSettleBound.
-	SkeletonMarkers    SkeletonMarkerReader
+	// Hydrating keeps the cold route re-reading the pending set until no
+	// restored session is still hydrating, for at most PendingSettleBound.
+	Hydrating          HydratingReader
 	PendingSettleBound time.Duration
 	ModePersister      ModePersister
 	ThemePersister     ThemePersister
@@ -150,8 +150,8 @@ func Build(deps Deps) Model {
 	if deps.PendingReader != nil {
 		opts = append(opts, WithPendingResumeReader(deps.PendingReader))
 	}
-	if deps.SkeletonMarkers != nil {
-		opts = append(opts, WithPendingSettle(deps.SkeletonMarkers, deps.PendingSettleBound))
+	if deps.Hydrating != nil {
+		opts = append(opts, WithPendingSettle(deps.Hydrating, deps.PendingSettleBound))
 	}
 	if deps.Search != nil {
 		opts = append(opts, WithSearchForm(deps.Search.Term), WithSearchDecision(deps.Search.Decide))

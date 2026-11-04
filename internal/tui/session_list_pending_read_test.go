@@ -227,6 +227,21 @@ func TestSessionListLoad_DropsADotForASessionNoLongerPending(t *testing.T) {
 	assertDots(t, m, map[string]bool{"alpha": false, "bravo": true})
 }
 
+// A flag outlives its session until something clears it, so the pending set
+// can name a session that is no longer live.
+func TestSessionListLoad_DotsOnlyALiveSession(t *testing.T) {
+	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
+	reader := &pendingReaderStub{steps: [][]string{{"alpha", "gone-x7Kd9a"}}}
+	m := pendingReadModel(t, prefs.ModeFlat, nil, lister, reader)
+
+	m, _ = loadSessions(t, m, m.fetchSessionsCmd())
+
+	assertDots(t, m, map[string]bool{"alpha": true, "bravo": false})
+	if shown := ansi.Strip(m.sessionList.View()); strings.Contains(shown, "gone-x7Kd9a") {
+		t.Errorf("a session that isn't live got a row:\n%s", shown)
+	}
+}
+
 func TestSessionListLoad_RendersTheListWithNoDotsWhenThePendingReadFails(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{pendingReadSessions}}
 	reader := &pendingReaderStub{steps: [][]string{{"alpha"}}}

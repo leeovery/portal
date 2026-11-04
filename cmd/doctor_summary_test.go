@@ -25,7 +25,7 @@ func TestDoctorSummary_AllChecksPassed(t *testing.T) {
 		t.Fatalf("Execute err = %v; want nil when every check passes", err)
 	}
 
-	const want = "\n  8 checks passed\n"
+	const want = "\n  10 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -40,7 +40,7 @@ func TestDoctorSummary_PartialForm(t *testing.T) {
 		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)
 	}
 
-	const want = "\n  7 of 8 checks passed\n"
+	const want = "\n  9 of 10 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -74,7 +74,7 @@ func TestDoctorSummary_NotEvaluableOutsideCounts(t *testing.T) {
 		t.Fatalf("Execute err = %v; want nil — a not-evaluable check must not drive the exit code", err)
 	}
 
-	const want = "\n  7 checks passed\n"
+	const want = "\n  9 checks passed\n"
 	if out := outBuf.String(); !strings.HasSuffix(out, want) {
 		t.Errorf("report does not end with %q:\n%s", want, out)
 	}
@@ -179,10 +179,10 @@ func TestDoctorSummary_FixPathRendersTwo(t *testing.T) {
 	if n := strings.Count(out, " checks passed\n"); n != 2 {
 		t.Errorf("summary line count = %d; want 2 (one per renderDoctorReport call):\n%s", n, out)
 	}
-	if n := strings.Count(out, "\n  7 of 8 checks passed\n"); n != 1 {
-		t.Errorf("pre-repair summary missing or repeated (want exactly one \"7 of 8 checks passed\"):\n%s", out)
+	if n := strings.Count(out, "\n  9 of 10 checks passed\n"); n != 1 {
+		t.Errorf("pre-repair summary missing or repeated (want exactly one \"9 of 10 checks passed\"):\n%s", out)
 	}
-	if !strings.HasSuffix(out, "\n  8 checks passed\n") {
+	if !strings.HasSuffix(out, "\n  10 checks passed\n") {
 		t.Errorf("post-repair report does not end with the all-passed summary:\n%s", out)
 	}
 }

@@ -9,10 +9,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// markerReaderStub answers each read with the next step's marker keys, holding
-// on the last step once the script runs out. With err set, the read numbered
-// errStep fails with it instead.
-type markerReaderStub struct {
+// hydratingReaderStub answers each read with the next step's hydrating
+// sessions, holding on the last step once the script runs out. With err set,
+// the read numbered errStep fails with it instead.
+type hydratingReaderStub struct {
 	steps   [][]string
 	err     error
 	errStep int
@@ -20,11 +20,11 @@ type markerReaderStub struct {
 	log     *[]string
 }
 
-func (r *markerReaderStub) ListSkeletonMarkers() (map[string]struct{}, error) {
+func (r *hydratingReaderStub) ListHydratingSessions() (map[string]struct{}, error) {
 	idx := r.calls
 	r.calls++
 	if r.log != nil {
-		*r.log = append(*r.log, "markers")
+		*r.log = append(*r.log, "hydrating")
 	}
 	if r.err != nil && idx == r.errStep {
 		return nil, r.err
@@ -44,11 +44,11 @@ var settleSessions = []Session{
 
 const generousSettleBound = time.Minute
 
-func coldSettleModel(lister SessionLister, pending PendingResumeReader, markers SkeletonMarkerReader, bound time.Duration) Model {
+func coldSettleModel(lister SessionLister, pending PendingResumeReader, hydrating HydratingReader, bound time.Duration) Model {
 	return Build(Deps{
 		Lister:             lister,
 		PendingReader:      pending,
-		SkeletonMarkers:    markers,
+		Hydrating:          hydrating,
 		PendingSettleBound: bound,
 		Bootstrapping:      true,
 		ProgressReceiver:   func() tea.Msg { return nil },
@@ -96,11 +96,11 @@ func settleStep(t *testing.T, m Model) (Model, tea.Cmd) {
 	return updated.(Model), next
 }
 
-func TestPendingSettle_ColdRoute_GainsTheDotWithNoKeypressOnceTheHelperMarksThePane(t *testing.T) {
+func TestPendingSettle_ColdRoute_GainsTheDotWithNoKeypressOnceTheHelperRaisesItsFlag(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}}}
-	markers := &markerReaderStub{steps: [][]string{{}}}
-	m := coldSettleModel(lister, pending, markers, generousSettleBound)
+	hydrating := &hydratingReaderStub{steps: [][]string{{}}}
+	m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -112,11 +112,11 @@ func TestPendingSettle_ColdRoute_GainsTheDotWithNoKeypressOnceTheHelperMarksTheP
 	assertDots(t, final, map[string]bool{"alpha": true, "bravo": false, "charlie": false})
 }
 
-func TestPendingSettle_ColdRoute_EachPaneGainsItsDotAsItIsMarked(t *testing.T) {
+func TestPendingSettle_ColdRoute_EachSessionGainsItsDotAsItIsFlagged(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}, {"alpha", "bravo"}}}
-	markers := &markerReaderStub{steps: [][]string{{"bravo:0.0"}, {}}}
-	m := coldSettleModel(lister, pending, markers, generousSettleBound)
+	hydrating := &hydratingReaderStub{steps: [][]string{{"bravo"}, {}}}
+	m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 
 	m, next := driveToPostRestoreRefetch(t, m)
 	assertDots(t, m, map[string]bool{"alpha": false, "bravo": false, "charlie": false})
@@ -127,34 +127,34 @@ func TestPendingSettle_ColdRoute_EachPaneGainsItsDotAsItIsMarked(t *testing.T) {
 	m, next = settleStep(t, m)
 	assertDots(t, m, map[string]bool{"alpha": true, "bravo": false, "charlie": false})
 	if next == nil {
-		t.Fatal("a reading with a marker remaining scheduled no further re-read")
+		t.Fatal("a reading with a session still hydrating scheduled no further re-read")
 	}
 
 	m, next = settleStep(t, m)
 	assertDots(t, m, map[string]bool{"alpha": true, "bravo": true, "charlie": false})
 	if next != nil {
-		t.Error("a reading with no marker remaining scheduled a further re-read")
+		t.Error("a reading with no session hydrating scheduled a further re-read")
 	}
 }
 
-func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeARead(t *testing.T) {
+func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastSessionStopsHydratingBeforeARead(t *testing.T) {
 	tests := []struct {
-		name    string
-		pending [][]string
-		markers [][]string
-		steps   int
+		name      string
+		pending   [][]string
+		hydrating [][]string
+		steps     int
 	}{
 		{
-			name:    "between the refetch and the first re-read",
-			pending: [][]string{{}, {"alpha", "charlie"}},
-			markers: [][]string{{}},
-			steps:   1,
+			name:      "between the refetch and the first re-read",
+			pending:   [][]string{{}, {"alpha", "charlie"}},
+			hydrating: [][]string{{}},
+			steps:     1,
 		},
 		{
-			name:    "between two re-reads",
-			pending: [][]string{{}, {"alpha"}, {"alpha", "charlie"}},
-			markers: [][]string{{"charlie:0.0"}, {}},
-			steps:   2,
+			name:      "between two re-reads",
+			pending:   [][]string{{}, {"alpha"}, {"alpha", "charlie"}},
+			hydrating: [][]string{{"charlie"}, {}},
+			steps:     2,
 		},
 	}
 	for _, tt := range tests {
@@ -162,8 +162,8 @@ func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeA
 			var log []string
 			lister := &stepListerStub{steps: [][]Session{settleSessions}}
 			pending := &pendingReaderStub{steps: tt.pending, log: &log}
-			markers := &markerReaderStub{steps: tt.markers, log: &log}
-			m := coldSettleModel(lister, pending, markers, generousSettleBound)
+			hydrating := &hydratingReaderStub{steps: tt.hydrating, log: &log}
+			m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 
 			m, _ = driveToPostRestoreRefetch(t, m)
 			var next tea.Cmd
@@ -172,54 +172,54 @@ func TestPendingSettle_ColdRoute_SettlesOnEveryDotWhenTheLastMarkerClearsBeforeA
 			}
 
 			if next != nil {
-				t.Error("the picker kept re-reading after finding no marker")
+				t.Error("the picker kept re-reading after finding no session hydrating")
 			}
 			assertDots(t, m, map[string]bool{"alpha": true, "bravo": false, "charlie": true})
 			want := []string{"pending"}
 			for range tt.steps {
-				want = append(want, "markers", "pending")
+				want = append(want, "hydrating", "pending")
 			}
 			if !slices.Equal(log, want) {
-				t.Errorf("reads = %v, want %v (each marker read ahead of its pending read)", log, want)
+				t.Errorf("reads = %v, want %v (each hydrating read ahead of its pending read)", log, want)
 			}
 		})
 	}
 }
 
-func TestPendingSettle_ColdRoute_AFailedMarkerReadCountsAsMarkersRemaining(t *testing.T) {
+func TestPendingSettle_ColdRoute_AFailedHydratingReadCountsAsSessionsStillHydrating(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {}, {"alpha"}}}
-	markers := &markerReaderStub{steps: [][]string{{}}, err: errors.New("show-options: server busy"), errStep: 0}
-	m := coldSettleModel(lister, pending, markers, generousSettleBound)
+	hydrating := &hydratingReaderStub{steps: [][]string{{}}, err: errors.New("read hydrating flags: permission denied"), errStep: 0}
+	m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 
 	m, _ = driveToPostRestoreRefetch(t, m)
 
 	m, next := settleStep(t, m)
 	if next == nil {
-		t.Fatal("a failed marker read ended the settle, want it to schedule a further re-read")
+		t.Fatal("a failed hydrating read ended the settle, want it to schedule a further re-read")
 	}
 	assertDots(t, m, map[string]bool{"alpha": false, "bravo": false, "charlie": false})
 
 	m, next = settleStep(t, m)
 	if next != nil {
-		t.Error("a reading with no marker remaining scheduled a further re-read")
+		t.Error("a reading with no session hydrating scheduled a further re-read")
 	}
 	assertDots(t, m, map[string]bool{"alpha": true, "bravo": false, "charlie": false})
-	if markers.calls != 2 || pending.calls != 3 {
-		t.Errorf("reads: markers = %d, pending = %d, want 2 and 3", markers.calls, pending.calls)
+	if hydrating.calls != 2 || pending.calls != 3 {
+		t.Errorf("reads: hydrating = %d, pending = %d, want 2 and 3", hydrating.calls, pending.calls)
 	}
 }
 
-func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoMarkerRemains(t *testing.T) {
+func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoSessionIsHydrating(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"alpha"}}}
-	markers := &markerReaderStub{steps: [][]string{{}}}
-	m := coldSettleModel(lister, pending, markers, generousSettleBound)
+	hydrating := &hydratingReaderStub{steps: [][]string{{}}}
+	m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 
 	m, _ = driveToPostRestoreRefetch(t, m)
 	m, next := settleStep(t, m)
 	if next != nil {
-		t.Fatal("a reading with no marker remaining scheduled a further re-read")
+		t.Fatal("a reading with no session hydrating scheduled a further re-read")
 	}
 
 	updated, stray := m.Update(pendingSettleTickMsg{})
@@ -227,8 +227,8 @@ func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoMarkerRemains(t *testin
 	if stray != nil {
 		t.Error("a tick arriving after the settle ended scheduled a read")
 	}
-	if markers.calls != 1 || pending.calls != 2 {
-		t.Errorf("reads after settling: markers = %d, pending = %d, want 1 and 2", markers.calls, pending.calls)
+	if hydrating.calls != 1 || pending.calls != 2 {
+		t.Errorf("reads after settling: hydrating = %d, pending = %d, want 1 and 2", hydrating.calls, pending.calls)
 	}
 
 	m.sessionKiller = &killerStub{}
@@ -243,16 +243,16 @@ func TestPendingSettle_ColdRoute_TakesNoFurtherReadOnceNoMarkerRemains(t *testin
 			}
 		}
 	}
-	if markers.calls != 1 || pending.calls != 3 {
-		t.Errorf("reads after a kill: markers = %d, pending = %d, want 1 and 3", markers.calls, pending.calls)
+	if hydrating.calls != 1 || pending.calls != 3 {
+		t.Errorf("reads after a kill: hydrating = %d, pending = %d, want 1 and 3", hydrating.calls, pending.calls)
 	}
 }
 
-func TestPendingSettle_ColdRoute_StopsAtTheBoundWhenAMarkerNeverClears(t *testing.T) {
+func TestPendingSettle_ColdRoute_StopsAtTheBoundWhenASessionNeverStopsHydrating(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{}, {"bravo"}}}
-	markers := &markerReaderStub{steps: [][]string{{"alpha:0.0"}}}
-	m := coldSettleModel(lister, pending, markers, time.Nanosecond)
+	hydrating := &hydratingReaderStub{steps: [][]string{{"alpha"}}}
+	m := coldSettleModel(lister, pending, hydrating, time.Nanosecond)
 
 	m, _ = driveToPostRestoreRefetch(t, m)
 	time.Sleep(time.Millisecond)
@@ -299,8 +299,8 @@ func TestPendingSettle_ColdRoute_ReReadChangesOnlyWhichRowsCarryTheDot(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			lister := &stepListerStub{steps: [][]Session{settleSessions}}
 			pending := &pendingReaderStub{steps: [][]string{{}, {"charlie"}}}
-			markers := &markerReaderStub{steps: [][]string{{}}}
-			m := coldSettleModel(lister, pending, markers, generousSettleBound)
+			hydrating := &hydratingReaderStub{steps: [][]string{{}}}
+			m := coldSettleModel(lister, pending, hydrating, generousSettleBound)
 			m, _ = driveToPostRestoreRefetch(t, m)
 			m = tt.setup(t, m)
 
@@ -324,11 +324,11 @@ func TestPendingSettle_ColdRoute_ReReadChangesOnlyWhichRowsCarryTheDot(t *testin
 	}
 }
 
-func TestPendingSettle_WarmRoute_TakesNoMarkerRead(t *testing.T) {
+func TestPendingSettle_WarmRoute_TakesNoHydratingRead(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{"alpha"}}}
-	markers := &markerReaderStub{steps: [][]string{{"alpha:0.0"}}}
-	m := Build(Deps{Lister: lister, PendingReader: pending, SkeletonMarkers: markers, PendingSettleBound: generousSettleBound})
+	hydrating := &hydratingReaderStub{steps: [][]string{{"alpha"}}}
+	m := Build(Deps{Lister: lister, PendingReader: pending, Hydrating: hydrating, PendingSettleBound: generousSettleBound})
 	m.sessionList.SetSize(80, 24)
 
 	updated, next := m.Update(m.fetchSessionsCmd()())
@@ -339,8 +339,8 @@ func TestPendingSettle_WarmRoute_TakesNoMarkerRead(t *testing.T) {
 		}
 	}
 
-	if markers.calls != 0 {
-		t.Errorf("warm route took %d skeleton-marker reads, want 0", markers.calls)
+	if hydrating.calls != 0 {
+		t.Errorf("warm route took %d hydrating reads, want 0", hydrating.calls)
 	}
 	if lister.calls != 1 || pending.calls != 1 {
 		t.Errorf("warm route reads: sessions = %d, pending = %d, want 1 each", lister.calls, pending.calls)
@@ -348,7 +348,7 @@ func TestPendingSettle_WarmRoute_TakesNoMarkerRead(t *testing.T) {
 	assertDots(t, m, map[string]bool{"alpha": true, "bravo": false, "charlie": false})
 }
 
-func TestPendingSettle_ColdRoute_UnwiredMarkerSeamSchedulesNoReRead(t *testing.T) {
+func TestPendingSettle_ColdRoute_UnwiredHydratingSeamSchedulesNoReRead(t *testing.T) {
 	lister := &stepListerStub{steps: [][]Session{settleSessions}}
 	pending := &pendingReaderStub{steps: [][]string{{"alpha"}}}
 	m := coldSettleModel(lister, pending, nil, generousSettleBound)
@@ -357,7 +357,7 @@ func TestPendingSettle_ColdRoute_UnwiredMarkerSeamSchedulesNoReRead(t *testing.T
 
 	for _, msg := range drainAll(next) {
 		if _, ok := msg.(pendingSettleTickMsg); ok {
-			t.Error("an unwired marker seam scheduled a settle re-read")
+			t.Error("an unwired hydrating seam scheduled a settle re-read")
 		}
 	}
 	if pending.calls != 1 {
