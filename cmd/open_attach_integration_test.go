@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
@@ -156,8 +157,26 @@ func (w *portalWorld) openProject(t *testing.T) (*portalTerm, string) {
 	}
 	p := w.portal(t, "open", "-p", work)
 	name := w.awaitOneSession(t)
-	w.awaitClients(t, name, 1)
+	p.awaitLeading(t, name)
 	return p, name
+}
+
+// awaitLeading waits for p's portal to be the one runner on session, its own
+// zmx client leading it: the runner catches the signals that end an attach
+// before it starts that client. A client count can't tell, since the zmx
+// attach Create runs is a client of the session while it lasts.
+func (p *portalTerm) awaitLeading(t *testing.T, session string) {
+	t.Helper()
+	p.awaitRunner(t, session)
+	token := p.token(t)
+	var leader runnertoken.Leader
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		var err error
+		leader, err = runnertoken.ReadLeader(t.Context(), p.b, session)
+		return err == nil && token != "" && leader.Token == token
+	}) {
+		t.Fatalf("session %s is led by token %q, want portal %d's %q", session, leader.Token, p.cmd.Process.Pid, token)
+	}
 }
 
 func (p *portalTerm) record() {
