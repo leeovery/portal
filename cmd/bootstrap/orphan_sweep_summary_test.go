@@ -46,13 +46,14 @@ func TestSweepOrphanDaemons_ExcludesSkippedAndFailedFromKilled(t *testing.T) {
 	f := &sweepFakes{
 		failed:     map[int]error{3001: errNotTheSaversDaemon},
 		signalErrs: map[int]error{3002: syscall.ESRCH},
+		exitErrs:   map[int]error{3004: errors.New("pid 3004 still hadn't finished exiting 2s later")},
 	}
 
-	run(t, f.sweep([]int{3001, 3002, 3003}, f.saver(0, false, nil), log.For("bootstrap")))
+	run(t, f.sweep([]int{3001, 3002, 3003, 3004}, f.saver(0, false, nil), log.For("bootstrap")))
 
 	rec := sink.Records().Matching("clean", "orphan-daemon sweep complete").Only(t, "clean orphan-daemon sweep complete record")
 	if got := rec.IntAttr(t, "killed"); got != 1 {
-		t.Errorf("killed = %d, want 1 (excludes the skip and the failed kill)", got)
+		t.Errorf("killed = %d, want 1 (excludes the skip, the failed kill and the orphan still exiting)", got)
 	}
 }
 

@@ -17,9 +17,10 @@ type UninstallDeps struct {
 	Saver saverStopper
 }
 
-// saverStopper stops the saver, reporting whether one was running.
+// saverStopper reads the saver's daemon, and stops the one it read.
 type saverStopper interface {
-	Stop(ctx context.Context) (bool, error)
+	SaverPID(ctx context.Context) (pid int, present bool, err error)
+	Stop(ctx context.Context, pid int) error
 }
 
 func uninstallStopper() (saverStopper, error) {
@@ -43,11 +44,7 @@ var uninstallCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		stopper, err := uninstallStopper()
-		if err != nil {
-			return err
-		}
-		stopped, err := stopper.Stop(cmd.Context())
+		stopped, err := stopSaver(cmd.Context())
 		if err != nil {
 			return fmt.Errorf("couldn't stop Portal's save daemon: %w", err)
 		}
@@ -56,8 +53,22 @@ var uninstallCmd = &cobra.Command{
 	},
 }
 
-// uninstallReport says what uninstall did, and where the saved sessions and
-// config it left are.
+// stopSaver stops the saver's daemon, the one pid it reads, and reports
+// whether there was one.
+func stopSaver(ctx context.Context) (bool, error) {
+	stopper, err := uninstallStopper()
+	if err != nil {
+		return false, err
+	}
+	pid, present, err := stopper.SaverPID(ctx)
+	if err != nil || !present {
+		return false, err
+	}
+	return true, stopper.Stop(ctx, pid)
+}
+
+// uninstallReport says what uninstall did, where the saved sessions and
+// config it left are, and how to remove them too.
 func uninstallReport(stopped bool) string {
 	done := "Portal's save daemon isn't running."
 	if stopped {
@@ -65,9 +76,11 @@ func uninstallReport(stopped bool) string {
 	}
 	dir, err := xdg.PortalDir(xdg.OSEnv)
 	if err != nil {
-		return done + " Saved sessions and config are untouched."
+		return done + " Saved sessions and config are untouched.\n" +
+			"To remove Portal completely, uninstall the binary and delete Portal's config directory."
 	}
-	return done + " Saved sessions and config are untouched at " + resolver.AbbreviateHome(resolver.ProcessHome(), dir) + "/."
+	return done + " Saved sessions and config are untouched at " + resolver.AbbreviateHome(resolver.ProcessHome(), dir) + "/.\n" +
+		"To remove Portal completely, uninstall the binary and delete that directory."
 }
 
 func init() {

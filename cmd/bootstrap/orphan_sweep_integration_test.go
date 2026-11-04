@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/proctable"
@@ -74,7 +75,7 @@ func sweepWith(t *testing.T, marks []string, pgrep func() ([]int, error), held .
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := &bootstrap.OrphanSweepCore{Pgrep: pgrep, SaverPID: stopper.SaverPID, Prove: stopper.Prove, Signal: signal}
+	core := &bootstrap.OrphanSweepCore{Pgrep: pgrep, SaverPID: stopper.SaverPID, Prove: stopper.Prove, Signal: signal, AwaitExit: stopper.AwaitExit}
 	if err := core.SweepOrphanDaemons(t.Context()); err != nil {
 		t.Fatalf("SweepOrphanDaemons = %v, want nil", err)
 	}
@@ -171,8 +172,15 @@ func TestSweepOrphanDaemons_Integration_KillsOnlyTheMarkedDaemon(t *testing.T) {
 		t.Fatalf("PgrepPortalDaemons = %v, %v; want both daemons, %d and %d", pids, err, orphan.PID(), unmarked.PID())
 	}
 
+	sink := logtest.Install(t)
+
 	sweepWith(t, marks, state.PgrepPortalDaemons, orphan, unmarked)
 
+	// Counted only once it has finished exiting, a zombie the test holds.
+	summary := sink.Records().Matching("clean", "orphan-daemon sweep complete").Only(t, "the sweep's summary")
+	if killed := summary.IntAttr(t, "killed"); killed != 1 {
+		t.Errorf("killed = %d, want the orphan, once it has exited", killed)
+	}
 	select {
 	case <-orphan.Exited():
 	case <-time.After(daemonSettle):

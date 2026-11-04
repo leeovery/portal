@@ -18,13 +18,13 @@ type OrphanSweeper interface {
 	SweepOrphanDaemons(ctx context.Context) error
 }
 
-// OrphanSweepCore SIGKILLs every orphaned saver daemon: a pid pgrep found
-// that Prove proves, read just before its kill, the saver's daemon of this
-// backend's sessions, and that is neither the saver session's own process
-// nor this one. Argv alone never kills: a dev build's sweep would otherwise
-// kill the installed tmux Portal's daemon, which carries none of the saver
-// session's marks. Every field must be supplied; a sweep missing one kills
-// nothing.
+// OrphanSweepCore SIGKILLs every orphaned saver daemon, and waits for each to
+// finish exiting. An orphan is a pid pgrep found that Prove proves, read just
+// before its kill, the saver's daemon of this backend's sessions, and that is
+// neither the saver session's own process nor this one. Argv alone never
+// kills: a dev build's sweep would otherwise kill the installed tmux Portal's
+// daemon, which carries none of the saver session's marks. Every field must
+// be supplied; a sweep missing one kills nothing.
 type OrphanSweepCore struct {
 	// Pgrep finds the candidates. No default: shelling out would pull
 	// os/exec into this pure-orchestration package.
@@ -43,6 +43,11 @@ type OrphanSweepCore struct {
 	// pid it has just proved.
 	Signal func(pid int, sig syscall.Signal) error
 
+	// AwaitExit waits, bounded, for a pid sent SIGKILL to finish exiting, as
+	// saverhost.Stopper.AwaitExit does, so the saver started next meets no
+	// orphan still holding daemon.lock.
+	AwaitExit func(ctx context.Context, pid int) error
+
 	Logger *slog.Logger
 }
 
@@ -53,7 +58,7 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 // state on the way out.
 func (c *OrphanSweepCore) SweepOrphanDaemons(ctx context.Context) error {
 	logger := log.OrDiscard(c.Logger)
-	if c.Pgrep == nil || c.SaverPID == nil || c.Prove == nil || c.Signal == nil {
+	if c.Pgrep == nil || c.SaverPID == nil || c.Prove == nil || c.Signal == nil || c.AwaitExit == nil {
 		logger.Warn("sweep: not wired, nothing killed")
 		return nil
 	}
@@ -85,7 +90,7 @@ func (c *OrphanSweepCore) sweep(ctx context.Context, logger *slog.Logger, candid
 	}
 	var killed int
 	for _, pid := range candidates {
-		if !spared[pid] && c.killOrphan(logger, pid) {
+		if !spared[pid] && c.killOrphan(ctx, logger, pid) {
 			killed++
 		}
 	}
@@ -108,8 +113,9 @@ func (c *OrphanSweepCore) spared(ctx context.Context) (map[int]bool, error) {
 }
 
 // killOrphan sends pid SIGKILL once proved an orphaned saver daemon, with
-// nothing between the proof and the signal, and reports whether it did.
-func (c *OrphanSweepCore) killOrphan(logger *slog.Logger, pid int) bool {
+// nothing between the proof and the signal, and reports whether it has
+// finished exiting.
+func (c *OrphanSweepCore) killOrphan(ctx context.Context, logger *slog.Logger, pid int) bool {
 	if err := c.Prove(pid); err != nil {
 		if errors.Is(err, saverhost.ErrUnreadable) {
 			logger.Warn("sweep: pid unprovable, skipping", "target_pid", pid, "error", err)
@@ -118,7 +124,11 @@ func (c *OrphanSweepCore) killOrphan(logger *slog.Logger, pid int) bool {
 		}
 		return false
 	}
-	if err := c.Signal(pid, syscall.SIGKILL); err != nil {
+	err := c.Signal(pid, syscall.SIGKILL)
+	if err == nil {
+		err = c.AwaitExit(ctx, pid)
+	}
+	if err != nil {
 		logger.Warn("sweep: kill failed", "target_pid", pid, "error", err)
 		return false
 	}

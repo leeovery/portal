@@ -21,6 +21,8 @@ import (
 const (
 	exe       = "/opt/homebrew/Cellar/portal/0.13.0/bin/portal"
 	release   = "0.13.0"
+	older     = "0.12.6"
+	dev       = "dev-754e31b498e0-modified-20261103T231632.195584591Z"
 	readyWait = 150 * time.Millisecond
 )
 
@@ -37,7 +39,7 @@ func writeDaemon(t *testing.T, dir string, pid int, version string) {
 }
 
 // startingDaemon is the Fake whose saver session's process comes up as
-// `portal state daemon` does, holding the lock in dir as version.
+// `portal state daemon` does, holding the lock in dir and recording version.
 type startingDaemon struct {
 	*backendtest.Fake
 	t       *testing.T
@@ -53,12 +55,41 @@ func (b *startingDaemon) Create(ctx context.Context, name, dir string, command [
 	return s, err
 }
 
+// slowToRecord is the Fake whose saver session's daemon holds the lock as it
+// is made and records version only after a while.
+type slowToRecord struct {
+	*backendtest.Fake
+	t       *testing.T
+	dir     string
+	version string
+}
+
+func (b *slowToRecord) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command)
+	if err != nil {
+		return s, err
+	}
+	if err := state.WritePIDFile(b.dir, s.PID); err != nil {
+		b.t.Fatal(err)
+	}
+	recorded := make(chan struct{})
+	b.t.Cleanup(func() { <-recorded })
+	time.AfterFunc(readyWait/3, func() {
+		defer close(recorded)
+		if err := state.WriteVersionFile(b.dir, b.version, nil); err != nil {
+			b.t.Error(err)
+		}
+	})
+	return s, nil
+}
+
 // beatenToIt is the Fake where another process creates the saver, its daemon
-// coming up, just before this one's create.
+// coming up as version, just before this one's create.
 type beatenToIt struct {
 	*backendtest.Fake
-	t   *testing.T
-	dir string
+	t       *testing.T
+	dir     string
+	version string
 }
 
 func (b *beatenToIt) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
@@ -66,7 +97,7 @@ func (b *beatenToIt) Create(ctx context.Context, name, dir string, command []str
 	if err != nil {
 		b.t.Fatal(err)
 	}
-	writeDaemon(b.t, b.dir, theirs.PID, release)
+	writeDaemon(b.t, b.dir, theirs.PID, b.version)
 	return b.Fake.Create(ctx, name, dir, command)
 }
 
@@ -82,9 +113,14 @@ func (b *refusingDaemon) Create(ctx context.Context, name, dir string, command [
 	return s, err
 }
 
+func ensurerConfig(t *testing.T, b backend.Backend, p *procs, d saverhost.Daemon) saverhost.EnsurerConfig {
+	t.Helper()
+	return saverhost.EnsurerConfig{Backend: b, Stopper: newStopper(t, b, p), Daemon: d, ReadyWait: readyWait, Poll: poll}
+}
+
 func newEnsurer(t *testing.T, b backend.Backend, p *procs, dir, version string) *saverhost.Ensurer {
 	t.Helper()
-	e, err := saverhost.NewEnsurer(newStopper(t, b, p), saverhost.Daemon{Exe: exe, Version: version, StateDir: dir, ReadyWait: readyWait})
+	e, err := saverhost.NewEnsurer(ensurerConfig(t, b, p, saverhost.Daemon{Exe: exe, Version: version, StateDir: dir}))
 	if err != nil {
 		t.Fatalf("NewEnsurer: %v", err)
 	}
@@ -136,8 +172,8 @@ func TestEnsureSaver(t *testing.T) {
 		for _, path := range []string{exe, "/opt/homebrew/bin/portal", "/Users/someone/go/bin/portal", "/var/folders/x/T/go-build1/b001/exe/portal"} {
 			dir := t.TempDir()
 			fake := backendtest.New()
-			e, err := saverhost.NewEnsurer(newStopper(t, &startingDaemon{fake, t, dir, release}, newProcs(nil)),
-				saverhost.Daemon{Exe: path, Version: release, StateDir: dir, ReadyWait: readyWait})
+			e, err := saverhost.NewEnsurer(ensurerConfig(t, &startingDaemon{fake, t, dir, release}, newProcs(nil),
+				saverhost.Daemon{Exe: path, Version: release, StateDir: dir}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,8 +181,8 @@ func TestEnsureSaver(t *testing.T) {
 				t.Fatalf("EnsureSaver: %v", err)
 			}
 
-			argv := strings.Join(fake.CallsTo(backendtest.OpCreate)[0].Command, " ")
-			if !pattern.MatchString(argv) {
+			argv := fake.CallsTo(backendtest.OpCreate)[0].Command
+			if !pattern.MatchString(strings.Join(argv, " ")) || !state.IsDaemonArgv(argv) {
 				t.Errorf("PortalDaemonArgvPattern does not match the saver's argv %q", argv)
 			}
 		}
@@ -180,15 +216,9 @@ func TestEnsureSaver(t *testing.T) {
 		seed    func(t *testing.T, dir string)
 		reason  string
 	}{
-		"its daemon records another version": {release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID, "0.12.6") }, "version"},
-		"this is a dev build, of its version too": {
-			"dev-754e31b498e0-modified-20261103T231632.195584591Z",
-			func(t *testing.T, dir string) {
-				writeDaemon(t, dir, daemonPID, "dev-754e31b498e0-modified-20261103T231632.195584591Z")
-			},
-			"dev",
-		},
-		"daemon.pid names another process": {release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID+1, release) }, "unknown"},
+		"its daemon records another version":      {release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID, older) }, "version"},
+		"this is a dev build, of its version too": {dev, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID, dev) }, "dev"},
+		"daemon.pid names another process":        {release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID+1, release) }, "unknown"},
 		"its daemon records no version": {release, func(t *testing.T, dir string) {
 			if err := state.WritePIDFile(dir, daemonPID); err != nil {
 				t.Fatal(err)
@@ -225,7 +255,7 @@ func TestEnsureSaver(t *testing.T) {
 
 	t.Run("a recycle whose stop is refused creates nothing", func(t *testing.T) {
 		dir := t.TempDir()
-		writeDaemon(t, dir, daemonPID, "0.12.6")
+		writeDaemon(t, dir, daemonPID, older)
 		fake := withSaver(daemonPID)
 		foreign := daemon(nil)
 		foreign.env = nil
@@ -241,12 +271,32 @@ func TestEnsureSaver(t *testing.T) {
 		}
 	})
 
-	t.Run("a saver another process creates first counts, once its daemon holds the lock", func(t *testing.T) {
+	t.Run("it stops the daemon it judged, and a saver replaced since is judged as one created elsewhere", func(t *testing.T) {
+		dir := t.TempDir()
+		writeDaemon(t, dir, daemonPID, older)
+		fake := withSaver(daemonPID)
+		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM)), daemonPID + 1: daemon(exitsOn(syscall.SIGTERM))})
+		// Another process's recycle, between this one's read and its stop.
+		replaced := &replacedBeforeItsStop{Fake: fake, t: t, dir: dir}
+
+		if err := newEnsurer(t, replaced, p, dir, release).EnsureSaver(t.Context()); err != nil {
+			t.Fatalf("EnsureSaver: %v", err)
+		}
+
+		if got := p.signals(); len(got) != 0 {
+			t.Errorf("signals = %q, want none: the saver now running is the other process's", got)
+		}
+		if got := kills(fake); len(got) != 0 {
+			t.Errorf("kills = %q, want the other process's saver left", got)
+		}
+	})
+
+	t.Run("a saver another process creates first counts, once its daemon holds the lock at this version", func(t *testing.T) {
 		dir := t.TempDir()
 		fake := backendtest.New()
 		p := newProcs(nil)
 
-		if err := newEnsurer(t, &beatenToIt{fake, t, dir}, p, dir, release).EnsureSaver(t.Context()); err != nil {
+		if err := newEnsurer(t, &beatenToIt{fake, t, dir, release}, p, dir, release).EnsureSaver(t.Context()); err != nil {
 			t.Fatalf("EnsureSaver: %v", err)
 		}
 
@@ -256,6 +306,53 @@ func TestEnsureSaver(t *testing.T) {
 		}
 		if got := kills(fake); len(got) != 0 {
 			t.Errorf("kills = %q, want none", got)
+		}
+	})
+
+	t.Run("a saver another process creates first at another version fails once ReadyWait has passed", func(t *testing.T) {
+		dir := t.TempDir()
+
+		err := newEnsurer(t, &beatenToIt{backendtest.New(), t, dir, older}, newProcs(nil), dir, release).EnsureSaver(t.Context())
+
+		if !errors.Is(err, saverhost.ErrNotReady) {
+			t.Errorf("EnsureSaver = %v, want ErrNotReady", err)
+		}
+	})
+
+	t.Run("it waits for its daemon to record its version as well as hold the lock", func(t *testing.T) {
+		dir := t.TempDir()
+
+		if err := newEnsurer(t, &slowToRecord{backendtest.New(), t, dir, release}, newProcs(nil), dir, release).EnsureSaver(t.Context()); err != nil {
+			t.Fatalf("EnsureSaver: %v", err)
+		}
+
+		if v, err := state.ReadVersionFile(dir); err != nil || v != release {
+			t.Errorf("daemon.version = %q, %v at return; want %s recorded first", v, err, release)
+		}
+	})
+
+	t.Run("a daemon that records another version fails once ReadyWait has passed", func(t *testing.T) {
+		dir := t.TempDir()
+
+		err := newEnsurer(t, &startingDaemon{backendtest.New(), t, dir, older}, newProcs(nil), dir, release).EnsureSaver(t.Context())
+
+		if !errors.Is(err, saverhost.ErrNotReady) {
+			t.Errorf("EnsureSaver = %v, want ErrNotReady", err)
+		}
+	})
+
+	t.Run("a daemon.pid still naming the daemon it replaced is no readiness", func(t *testing.T) {
+		dir := t.TempDir()
+		// The old daemon's files, at the dev version this build records too:
+		// only the pid tells them from the new daemon's.
+		writeDaemon(t, dir, daemonPID, dev)
+		fake := withSaver(daemonPID)
+		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
+
+		err := newEnsurer(t, fake, p, dir, dev).EnsureSaver(t.Context())
+
+		if !errors.Is(err, saverhost.ErrNotReady) {
+			t.Errorf("EnsureSaver = %v, want ErrNotReady", err)
 		}
 	})
 
@@ -313,22 +410,98 @@ func TestEnsureSaver(t *testing.T) {
 	})
 }
 
+// replacedBeforeItsStop is the Fake where another process replaces the saver,
+// its new daemon up at this version, as this one's stop reads the session.
+type replacedBeforeItsStop struct {
+	*backendtest.Fake
+	t     *testing.T
+	dir   string
+	reads int
+}
+
+func (b *replacedBeforeItsStop) Session(ctx context.Context, name string) (backend.Session, error) {
+	// The first read is EnsureSaver's own; the next is its stop's.
+	if b.reads++; b.reads == 2 {
+		b.Add(backend.Session{Name: saver.SessionName, PID: daemonPID + 1})
+		writeDaemon(b.t, b.dir, daemonPID+1, release)
+	}
+	return b.Fake.Session(ctx, name)
+}
+
+func TestEnsureRunning(t *testing.T) {
+	t.Run("a live saver is kept whatever it runs, even by a dev build, and nothing is read of it", func(t *testing.T) {
+		sink := logtest.Install(t)
+		dir := t.TempDir()
+		writeDaemon(t, dir, daemonPID, older)
+		fake := withSaver(daemonPID)
+		p := newProcs(map[int]*proc{daemonPID: daemon(exitsOn(syscall.SIGTERM))})
+
+		if err := newEnsurer(t, fake, p, dir, dev).EnsureRunning(t.Context()); err != nil {
+			t.Fatalf("EnsureRunning: %v", err)
+		}
+
+		if got := ops(fake); len(got) != 0 || len(p.events) != 0 {
+			t.Errorf("calls = %q, events = %q; want none", got, p.events)
+		}
+		if got := sink.Records().Matching("saver", "recycle"); len(got) != 0 {
+			t.Errorf("recycles = %v, want none", got)
+		}
+	})
+
+	t.Run("with no saver it creates one and waits for its daemon to hold the lock, whatever version it records", func(t *testing.T) {
+		dir := t.TempDir()
+		fake := backendtest.New()
+
+		if err := newEnsurer(t, &startingDaemon{fake, t, dir, older}, newProcs(nil), dir, release).EnsureRunning(t.Context()); err != nil {
+			t.Fatalf("EnsureRunning: %v", err)
+		}
+
+		creates := fake.CallsTo(backendtest.OpCreate)
+		if len(creates) != 1 || !slices.Equal(creates[0].Command, []string{exe, "state", "daemon"}) {
+			t.Errorf("creates = %+v, want the saver running %s state daemon", creates, exe)
+		}
+	})
+
+	t.Run("a daemon.pid naming another process is no readiness", func(t *testing.T) {
+		dir := t.TempDir()
+		writeDaemon(t, dir, daemonPID, release)
+
+		err := newEnsurer(t, backendtest.New(), newProcs(nil), dir, release).EnsureRunning(t.Context())
+
+		if !errors.Is(err, saverhost.ErrNotReady) {
+			t.Errorf("EnsureRunning = %v, want ErrNotReady", err)
+		}
+	})
+
+	t.Run("a saver that doesn't answer is an error, and nothing is created", func(t *testing.T) {
+		fake := withSaver(daemonPID)
+		fake.StopAnswering(saver.SessionName)
+
+		if err := newEnsurer(t, fake, newProcs(nil), t.TempDir(), release).EnsureRunning(t.Context()); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("EnsureRunning = %v, want ErrTimeout", err)
+		}
+		if got := ops(fake); len(got) != 0 {
+			t.Errorf("calls = %q, want none", got)
+		}
+	})
+}
+
 func TestNewEnsurer(t *testing.T) {
-	stopper := newStopper(t, backendtest.New(), newProcs(nil))
+	b := backendtest.New()
+	stopper := newStopper(t, b, newProcs(nil))
 	dir := t.TempDir()
-	for name, tc := range map[string]struct {
-		stopper *saverhost.Stopper
-		daemon  saverhost.Daemon
-	}{
-		"no stopper":           {nil, saverhost.Daemon{Exe: exe, Version: release, StateDir: dir}},
-		"no exe":               {stopper, saverhost.Daemon{Version: release, StateDir: dir}},
-		"an exe found on PATH": {stopper, saverhost.Daemon{Exe: "portal", Version: release, StateDir: dir}},
-		"a relative exe":       {stopper, saverhost.Daemon{Exe: "bin/portal", Version: release, StateDir: dir}},
-		"no version":           {stopper, saverhost.Daemon{Exe: exe, StateDir: dir}},
-		"no state directory":   {stopper, saverhost.Daemon{Exe: exe, Version: release}},
+	daemon := saverhost.Daemon{Exe: exe, Version: release, StateDir: dir}
+	for name, cfg := range map[string]saverhost.EnsurerConfig{
+		"no backend":           {Stopper: stopper, Daemon: daemon},
+		"no stopper":           {Backend: b, Daemon: daemon},
+		"no exe":               {Backend: b, Stopper: stopper, Daemon: saverhost.Daemon{Version: release, StateDir: dir}},
+		"an exe found on PATH": {Backend: b, Stopper: stopper, Daemon: saverhost.Daemon{Exe: "portal", Version: release, StateDir: dir}},
+		"a relative exe":       {Backend: b, Stopper: stopper, Daemon: saverhost.Daemon{Exe: "bin/portal", Version: release, StateDir: dir}},
+		"no version":           {Backend: b, Stopper: stopper, Daemon: saverhost.Daemon{Exe: exe, StateDir: dir}},
+		"no state directory":   {Backend: b, Stopper: stopper, Daemon: saverhost.Daemon{Exe: exe, Version: release}},
 	} {
 		t.Run("it refuses "+name, func(t *testing.T) {
-			if e, err := saverhost.NewEnsurer(tc.stopper, tc.daemon); err == nil {
+			if e, err := saverhost.NewEnsurer(cfg); err == nil {
 				t.Errorf("NewEnsurer = %v, want a refusal", e)
 			}
 		})

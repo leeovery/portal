@@ -39,6 +39,13 @@ const PortalDaemonArgvPattern = `^` + portalProgram + ` state daemon( |$)`
 
 var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
 
+// IsDaemonArgv reports whether argv, as a process exec'd it, is a portal state
+// daemon's: its words joined by spaces, as ps shows them, match
+// PortalDaemonArgvPattern.
+func IsDaemonArgv(argv []string) bool {
+	return daemonArgvPattern.MatchString(strings.Join(argv, " "))
+}
+
 var identifyPS = defaultIdentifyPS
 
 func defaultIdentifyPS(pid int) (string, error) {

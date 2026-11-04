@@ -23,6 +23,9 @@ const daemonPID = 4242
 
 var marks = []string{"ZMX_SESSION=_portal-saver", "ZMX_DIR=/tmp/zx-saverhost"}
 
+// daemonArgv is the argv the saver's daemon runs.
+var daemonArgv = []string{"/opt/homebrew/bin/portal", "state", "daemon"}
+
 // The bounds every Stopper a test makes waits by.
 const (
 	termWait = 40 * time.Millisecond
@@ -34,9 +37,12 @@ const (
 type proc struct {
 	verdict     state.IdentifyResult
 	identifyErr error
-	env         []string
-	envErr      error
-	exited      bool
+	argv, env   []string
+	argsErr     error
+	// exited is a process every read finds gone; it runs on through lingers
+	// more reads of whether it is running, still exiting.
+	exited  bool
+	lingers int
 	// onSignal is what a signal does to it; nil leaves it running.
 	onSignal func(p *proc, sig syscall.Signal)
 }
@@ -45,9 +51,16 @@ type proc struct {
 func daemon(onSignal func(*proc, syscall.Signal)) *proc {
 	return &proc{
 		verdict:  state.IdentifyIsPortalDaemon,
+		argv:     daemonArgv,
 		env:      append([]string{"PATH=/usr/bin", "HOME=/nonexistent"}, marks...),
 		onSignal: onSignal,
 	}
+}
+
+// exiting is a process every read finds gone, still exiting for lingers
+// reads of whether it is running.
+func exiting(lingers int) *proc {
+	return &proc{exited: true, lingers: lingers}
 }
 
 // exitsOn ends a process at any of sigs.
@@ -82,18 +95,25 @@ func (p *procs) identify(pid int) (state.IdentifyResult, error) {
 	return pr.verdict, pr.identifyErr
 }
 
-func (p *procs) environ(pid int) ([]string, error) {
-	p.events = append(p.events, fmt.Sprintf("environ %d", pid))
+func (p *procs) args(pid int) (proctable.Args, error) {
+	p.events = append(p.events, fmt.Sprintf("args %d", pid))
 	pr, ok := p.live(pid)
 	if !ok {
-		return nil, fmt.Errorf("read arguments of process %d: %w", pid, proctable.ErrGone)
+		return proctable.Args{}, fmt.Errorf("read arguments of process %d: %w", pid, proctable.ErrGone)
 	}
-	return pr.env, pr.envErr
+	return proctable.Args{Argv: pr.argv, Env: pr.env}, pr.argsErr
 }
 
-func (p *procs) alive(pid int) bool {
-	_, ok := p.live(pid)
-	return ok
+func (p *procs) running(pid int) bool {
+	pr, ok := p.table[pid]
+	switch {
+	case !ok:
+		return false
+	case pr.exited && pr.lingers > 0:
+		pr.lingers--
+		return true
+	}
+	return !pr.exited
 }
 
 func (p *procs) signal(pid int, sig syscall.Signal) error {
@@ -119,20 +139,32 @@ func (p *procs) signals() []string {
 	return sent
 }
 
-// newStopper is a Stopper over b that reads and signals p alone.
-func newStopper(t *testing.T, b backend.Backend, p *procs) *saverhost.Stopper {
-	t.Helper()
-	s, err := saverhost.NewStopper(saverhost.Config{
+// config is a Config over b that reads and signals p alone, at the tests'
+// bounds.
+func config(b backend.Backend, p *procs) saverhost.Config {
+	return saverhost.Config{
 		Backend:  b,
 		Marks:    marks,
 		Signal:   p.signal,
 		Identify: p.identify,
-		Environ:  p.environ,
-		Alive:    p.alive,
+		Args:     p.args,
+		Running:  p.running,
 		TermWait: termWait,
 		KillWait: killWait,
 		Poll:     poll,
-	})
+	}
+}
+
+// newStopper is a Stopper over b that reads and signals p alone.
+func newStopper(t *testing.T, b backend.Backend, p *procs) *saverhost.Stopper {
+	t.Helper()
+	return stopperOf(t, config(b, p))
+}
+
+// stopperOf is the Stopper cfg binds, failing the test on a refusal.
+func stopperOf(t *testing.T, cfg saverhost.Config) *saverhost.Stopper {
+	t.Helper()
+	s, err := saverhost.NewStopper(cfg)
 	if err != nil {
 		t.Fatalf("NewStopper: %v", err)
 	}

@@ -933,19 +933,19 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
 | Bootstrap observes a saver pane's host process has exited (e.g. during the kill-barrier exit-poll) | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
 
-The rows above are the tmux version's. On zmx the saver's lifecycle is `internal/saverhost`'s, for the bootstrap's EnsureSaver and for `portal uninstall`, which share one stop:
+The rows above are the tmux version's. On zmx the saver's lifecycle is `internal/saverhost`'s: EnsureSaver (the cold bootstrap's), EnsureRunning (the warm path's, which creates the saver only when there is none), and the stop EnsureSaver and `portal uninstall` share:
 
 | Site | msg | Required attrs |
 |---|---|---|
-| EnsureSaver creates `_portal-saver` running `<exe> state daemon` | `session created` | `target_pid` (the session's process, the daemon) |
-| EnsureSaver finds `daemon.pid` naming the session's process | `daemon ready` | `target_pid`, `took` |
+| EnsureSaver or EnsureRunning creates `_portal-saver` running `<exe> state daemon` | `session created` | `target_pid` (the session's process, the daemon) |
+| EnsureSaver or EnsureRunning finds `daemon.pid` naming the session's process, and for EnsureSaver `daemon.version` holding its version | `daemon ready` | `target_pid`, `took` |
 | EnsureSaver finds the saver running at this version (INFO: the operator sees a recycle considered and declined) | `daemon kept` | `target_pid` |
 | EnsureSaver decides to replace the running saver, which it stops before creating another | `recycle` | `target_pid`, `reason` ∈ {`dev`, `version`, `unknown`} |
 | The stop sends its proved SIGTERM | `stop started` | `target_pid` |
 | The stop's wait for the daemon's exit runs out, and it sends its re-proved SIGKILL | `stop escalated` | `target_pid`, `reason="term-timeout"` |
-| The stop finds the daemon gone, just before it kills the session | `daemon exited` | `target_pid`, `took` (from the stop's start) |
+| The stop finds the daemon finished exiting, just before it kills the session | `daemon exited` | `target_pid`, `took` (from the stop's start) |
 
-Beside them, not INFO: a WARN `stop refused` (`target_pid`, `error`) when the proof before a signal fails or can't be read, so nothing is sent and the stop fails; and a DEBUG `session created elsewhere` (`error`) when another process created `_portal-saver` first, which EnsureSaver counts as success.
+Beside them, not INFO: a WARN `stop refused` (`target_pid`, `error`) when the proof before a signal fails or can't be read, so that signal is not sent and the stop fails; and a DEBUG `session created elsewhere` (`error`) when another process created `_portal-saver` first, which counts once its daemon is ready.
 
 **Daemon lifecycle events (component: `daemon`):**
 
@@ -964,7 +964,7 @@ Beside them, not INFO: a WARN `stop refused` (`target_pid`, `error`) when the pr
 
 - `kill-barrier escalated reason`: `kill-session-timeout` (only value today; new values require amendment).
 - `placeholder died reason`: `signal` / `exit` / `unknown`.
-- `recycle reason`: `dev` (a dev build always replaces the saver) / `version` (the daemon records another version) / `unknown` (`daemon.pid` names another process, or the daemon's version can't be read).
+- `recycle reason`: `dev` (a dev build always replaces the saver) / `version` (the daemon records another version) / `unknown` (no `daemon.pid`, one naming another process, or a daemon version that can't be read).
 - `stop escalated reason`: `term-timeout` (only value today).
 - `daemon shutdown reason`: `sighup` / `signal` / `exit`. (`self-eject` is **not** a `daemon: shutdown` reason — the self-eject path emits `daemon: self-eject` + `process: exit` instead, see *Defensive invariants* § sanctioned exception.)
 

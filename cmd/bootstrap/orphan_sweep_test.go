@@ -22,11 +22,13 @@ var (
 	errGoneBeforeItsProof = fmt.Errorf("pid: %w", saverhost.ErrGone)
 )
 
-// sweepFakes proves and signals for a sweep, recording each in order. A pid
-// with no entry in failed proves.
+// sweepFakes proves, signals and waits for exits for a sweep, recording each
+// in order. A pid with no entry in failed proves; one with no entry in
+// exitErrs finishes exiting once sent SIGKILL.
 type sweepFakes struct {
 	failed     map[int]error
 	signalErrs map[int]error
+	exitErrs   map[int]error
 	saverReads int
 	events     []string
 }
@@ -39,6 +41,11 @@ func (f *sweepFakes) prove(pid int) error {
 func (f *sweepFakes) signal(pid int, sig syscall.Signal) error {
 	f.events = append(f.events, fmt.Sprintf("%s %d", unix.SignalName(sig), pid))
 	return f.signalErrs[pid]
+}
+
+func (f *sweepFakes) awaitExit(_ context.Context, pid int) error {
+	f.events = append(f.events, fmt.Sprintf("await %d", pid))
+	return f.exitErrs[pid]
 }
 
 // killed is every pid sent SIGKILL, in order.
@@ -63,11 +70,12 @@ func (f *sweepFakes) saver(pid int, present bool, err error) func(context.Contex
 
 func (f *sweepFakes) sweep(candidates []int, saverPID func(context.Context) (int, bool, error), logger *slog.Logger) *OrphanSweepCore {
 	return &OrphanSweepCore{
-		Pgrep:    func() ([]int, error) { return candidates, nil },
-		SaverPID: saverPID,
-		Prove:    f.prove,
-		Signal:   f.signal,
-		Logger:   logger,
+		Pgrep:     func() ([]int, error) { return candidates, nil },
+		SaverPID:  saverPID,
+		Prove:     f.prove,
+		Signal:    f.signal,
+		AwaitExit: f.awaitExit,
+		Logger:    logger,
 	}
 }
 
@@ -81,12 +89,12 @@ func run(t *testing.T, c *OrphanSweepCore) {
 func TestSweepOrphanDaemons(t *testing.T) {
 	const saverPID = 1000
 
-	t.Run("it kills each proved orphan, proving each just before its kill", func(t *testing.T) {
+	t.Run("it kills each proved orphan, proving each just before its kill and waiting for it to exit after", func(t *testing.T) {
 		f := &sweepFakes{}
 
 		run(t, f.sweep([]int{2001, 2002}, f.saver(saverPID, true, nil), nil))
 
-		if want := []string{"prove 2001", "SIGKILL 2001", "prove 2002", "SIGKILL 2002"}; !slices.Equal(f.events, want) {
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001", "prove 2002", "SIGKILL 2002", "await 2002"}; !slices.Equal(f.events, want) {
 			t.Errorf("events = %q, want %q", f.events, want)
 		}
 	})
@@ -96,7 +104,7 @@ func TestSweepOrphanDaemons(t *testing.T) {
 
 		run(t, f.sweep([]int{saverPID, 2001}, f.saver(saverPID, true, nil), nil))
 
-		if want := []string{"prove 2001", "SIGKILL 2001"}; !slices.Equal(f.events, want) {
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001"}; !slices.Equal(f.events, want) {
 			t.Errorf("events = %q, want %q: the saver's process passed over", f.events, want)
 		}
 	})
@@ -106,7 +114,7 @@ func TestSweepOrphanDaemons(t *testing.T) {
 
 		run(t, f.sweep([]int{os.Getpid(), 2001}, f.saver(0, false, nil), nil))
 
-		if want := []string{"prove 2001", "SIGKILL 2001"}; !slices.Equal(f.events, want) {
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001"}; !slices.Equal(f.events, want) {
 			t.Errorf("events = %q, want %q: this process passed over", f.events, want)
 		}
 	})
@@ -163,7 +171,7 @@ func TestSweepOrphanDaemons(t *testing.T) {
 
 		run(t, f.sweep([]int{5001}, f.saver(0, false, nil), nil))
 
-		if want := []string{"prove 5001", "SIGKILL 5001"}; !slices.Equal(f.events, want) {
+		if want := []string{"prove 5001", "SIGKILL 5001", "await 5001"}; !slices.Equal(f.events, want) {
 			t.Errorf("events = %q, want %q", f.events, want)
 		}
 	})
@@ -232,11 +240,28 @@ func TestSweepOrphanDaemons(t *testing.T) {
 		}
 	})
 
+	t.Run("an orphan that doesn't finish exiting warns, and the sweep goes on", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		stillExiting := errors.New("pid 8001 still hadn't finished exiting 2s later")
+		f := &sweepFakes{exitErrs: map[int]error{8001: stillExiting}}
+
+		run(t, f.sweep([]int{8001, 8002}, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap")))
+
+		if want := []string{"prove 8001", "SIGKILL 8001", "await 8001", "prove 8002", "SIGKILL 8002", "await 8002"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q", f.events, want)
+		}
+		warn := sink.Records().WithMessage("sweep: kill failed").AtExactLevel(slog.LevelWarn).Only(t, "the kill WARN")
+		if pid := warn.IntAttr(t, "target_pid"); pid != 8001 {
+			t.Errorf("kill failed target_pid = %d, want 8001", pid)
+		}
+	})
+
 	for name, unwire := range map[string]func(*OrphanSweepCore){
-		"Pgrep":    func(c *OrphanSweepCore) { c.Pgrep = nil },
-		"SaverPID": func(c *OrphanSweepCore) { c.SaverPID = nil },
-		"Prove":    func(c *OrphanSweepCore) { c.Prove = nil },
-		"Signal":   func(c *OrphanSweepCore) { c.Signal = nil },
+		"Pgrep":     func(c *OrphanSweepCore) { c.Pgrep = nil },
+		"SaverPID":  func(c *OrphanSweepCore) { c.SaverPID = nil },
+		"Prove":     func(c *OrphanSweepCore) { c.Prove = nil },
+		"Signal":    func(c *OrphanSweepCore) { c.Signal = nil },
+		"AwaitExit": func(c *OrphanSweepCore) { c.AwaitExit = nil },
 	} {
 		t.Run("a sweep with no "+name+" kills nothing", func(t *testing.T) {
 			sink := &logtest.Sink{}

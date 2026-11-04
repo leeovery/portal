@@ -322,6 +322,33 @@ func TestPortalDaemonArgvPattern(t *testing.T) {
 	}
 }
 
+func TestIsDaemonArgv(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		argv := []string{tc.program, "state", "daemon"}
+		if got := IsDaemonArgv(argv); got != tc.daemon {
+			t.Errorf("IsDaemonArgv(%q) = %v; want %v", argv, got, tc.daemon)
+		}
+	}
+	for _, argv := range [][]string{
+		{"/x/y/portal", "state", "daemon", "--flag"},
+	} {
+		if !IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = false; want true", argv)
+		}
+	}
+	for _, argv := range [][]string{
+		nil,
+		{"/bin/sh", "-c", "/x/y/portal state daemon"},
+		{"/x/y/portal", "state"},
+		{"/x/y/portal", "state", "daemon-foo"},
+		{"/x/y/portal", "state", "hydrate"},
+	} {
+		if IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = true; want false", argv)
+		}
+	}
+}
+
 func TestIdentifyDaemon_TransientErrorPreservesUnderlyingErrorViaWrap(t *testing.T) {
 	sentinel := errors.New("ps boom")
 	withIdentifyPSFake(t, func(pid int) (string, error) {

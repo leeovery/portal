@@ -14,19 +14,18 @@ import (
 // are no processes of the test's.
 var signalProcess = syscall.Kill
 
-// saverMarks are the entries the environment of every process b's saver
-// session runs carries, and no other process's does: the session's name,
-// which zmx sets, and b's directory, which every zmx run the driver makes
-// sets.
-func saverMarks(b backend.Backend) []string {
-	return append([]string{zmx.SessionEntry(saver.SessionName)}, b.ReachEnv()...)
-}
-
-// newSaverStopper stops b's saver, signalling through signalProcess.
+// newSaverStopper stops b's saver, proving its daemon by the marks of b's
+// saver session and signalling through signalProcess. It refuses a b whose
+// reach names no directory, by whose saver session's name alone a saver in
+// any directory would be proved.
 func newSaverStopper(b backend.Backend) (*saverhost.Stopper, error) {
+	marks, err := zmx.SessionMarks(saver.SessionName, b.ReachEnv())
+	if err != nil {
+		return nil, err
+	}
 	return saverhost.NewStopper(saverhost.Config{
 		Backend: b,
-		Marks:   saverMarks(b),
+		Marks:   marks,
 		Signal:  func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
 	})
 }

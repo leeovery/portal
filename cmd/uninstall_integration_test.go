@@ -44,7 +44,8 @@ func TestUninstallAgainstZmx(t *testing.T) {
 	logged := portaltest.ReadPortalLogSafe(d.StateDir)
 
 	t.Run("it says the daemon stopped, and where the saved sessions and config are", func(t *testing.T) {
-		want := "Portal's save daemon stopped. Saved sessions and config are untouched at " + configDir + "/.\n"
+		want := "Portal's save daemon stopped. Saved sessions and config are untouched at " + configDir + "/.\n" +
+			"To remove Portal completely, uninstall the binary and delete that directory.\n"
 		if string(out) != want {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -91,7 +92,7 @@ func TestUninstallRefusesAnUnprovedSaverAgainstZmx(t *testing.T) {
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); !ok || exitErr.ExitCode() != 1 {
 		t.Fatalf("portal uninstall = %v, want exit 1\n%s", err, out)
 	}
-	if want := "couldn't stop Portal's save daemon: the saver session's process is not sent SIGTERM: "; !strings.HasPrefix(string(out), want) {
+	if want := fmt.Sprintf("couldn't stop Portal's save daemon: pid %d isn't confirmed as the save daemon, so nothing was sent to it: ", d.PID); !strings.HasPrefix(string(out), want) {
 		t.Errorf("output = %q, want it to begin %q", out, want)
 	}
 	if err := d.Signal(0); err != nil {
