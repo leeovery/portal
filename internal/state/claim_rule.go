@@ -15,7 +15,13 @@ import (
 // misjudged the other way it would be replaced, losing it.
 const bootTolerance = 10 * time.Second
 
-var bootTime = bootid.BootTime
+// BootTimeEnv names the boot time, in RFC 3339, that an integration build's
+// ClaimRule judges by in place of the kernel's: a test can't reboot, so it
+// moves the boot past the entries it saved. Nothing in a production build
+// reads it.
+const BootTimeEnv = "PORTAL_TEST_BOOT_TIME"
+
+var bootTime = sandboxBootTime(bootid.BootTime)
 
 // warnedNoBootTime holds the warning to one per process: every claim and every
 // listing builds the rule, and a boot time that can't be read fails each time.

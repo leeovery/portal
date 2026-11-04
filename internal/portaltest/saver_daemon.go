@@ -55,13 +55,22 @@ type SaverDaemon struct {
 // directory's own teardown runs next, then the state directory goes.
 func StartSaverDaemon(t *testing.T, binary string) *SaverDaemon {
 	t.Helper()
-	if !filepath.IsAbs(binary) {
-		t.Fatalf("portaltest: StartSaverDaemon wants an absolute path to portal, got %q", binary)
-	}
 	env, stateDir := isolate(t)
 	env = append(env, loggingEnv()...)
 	RegisterStateDirTeardownGuard(t, stateDir)
-	b := zmxtest.New(t, zmxtest.WithEnv(env...))
+	return StartSaverDaemonIn(t, binary, zmxtest.New(t, zmxtest.WithEnv(env...)), env, stateDir)
+}
+
+// StartSaverDaemonIn runs binary as StartSaverDaemon does, in the saver
+// session of b, a zmx directory of the test's own made with env, over
+// stateDir, a state directory StartSaverDaemon isolated: a saver of the boot
+// after another's, as a bootstrap after a reboot starts one over the state the
+// saver before it kept.
+func StartSaverDaemonIn(t *testing.T, binary string, b *zmx.Backend, env []string, stateDir string) *SaverDaemon {
+	t.Helper()
+	if !filepath.IsAbs(binary) {
+		t.Fatalf("portaltest: a saver daemon wants an absolute path to portal, got %q", binary)
+	}
 	if _, err := b.Create(t.Context(), saver.SessionName, t.TempDir(), []string{binary, "state", "daemon"}); err != nil {
 		t.Fatalf("portaltest: create %s: %v", saver.SessionName, err)
 	}

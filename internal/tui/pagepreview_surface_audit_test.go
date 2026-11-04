@@ -173,6 +173,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"proctest":        {},
 		"project":         {},
 		"resolver":        {},
+		"restore":         {},
 		"resumekeys":      {},
 		"resumemode":      {},
 		"runner":          {},

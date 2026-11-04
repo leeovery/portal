@@ -329,6 +329,28 @@ func TestPoll_LeavesSessionsThatDontAnswerAndPortalsOwnAlone(t *testing.T) {
 	})
 }
 
+// A session made outside Portal under a name Create refuses could never be
+// restored, so saving it would only leave an entry restore must fail.
+func TestPoll_SavesNoSessionUnderANameCreateRefuses(t *testing.T) {
+	w := newWorld(t)
+	for i, name := range []string{"foo*", "-x", "logs", "api"} {
+		w.live(name, i)
+		w.fake.SetHistory(name, []byte("the screen of "+name))
+	}
+
+	w.poll()
+	w.after(5 * time.Second)
+
+	if got := w.names(); !slices.Equal(got, []string{"api"}) {
+		t.Errorf("entries = %v, want api alone", got)
+	}
+	for _, call := range w.fake.CallsTo(backendtest.OpHistory) {
+		if call.Name != "api" {
+			t.Errorf("History asked of %q, want nothing of a session never saved", call.Name)
+		}
+	}
+}
+
 func TestPoll_RecordsWhereEachSessionWorks(t *testing.T) {
 	t.Run("a session that moves has its new directory recorded", func(t *testing.T) {
 		w := newWorld(t)

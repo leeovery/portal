@@ -81,6 +81,32 @@ func TestAcquire(t *testing.T) {
 	})
 }
 
+// A test holding the lock beside a process that commits in the same dir, such
+// as a saver daemon, finds it held now and then.
+func TestHoldForTest_WaitsOutAHolder(t *testing.T) {
+	dir := t.TempDir()
+	other, err := commitlock.Acquire(dir)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = other.Close()
+	}()
+
+	held := commitlock.HoldForTest(t, dir)
+
+	probe, err := os.OpenFile(commitlock.Path(dir), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open probe: %v", err)
+	}
+	defer func() { _ = probe.Close() }()
+	if err := unix.Flock(int(probe.Fd()), unix.LOCK_EX|unix.LOCK_NB); !errors.Is(err, unix.EWOULDBLOCK) {
+		t.Errorf("probe flock while held = %v, want EWOULDBLOCK", err)
+	}
+	_ = held.Close()
+}
+
 func TestCommitlockPackage_ImportsNoInternalPackage(t *testing.T) {
 	for _, lane := range sourceguardtest.Lanes() {
 		sourceguardtest.AssertDepsWithin(t, "github.com/leeovery/portal/internal/commitlock", nil, lane)
