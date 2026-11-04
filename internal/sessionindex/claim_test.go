@@ -345,3 +345,50 @@ func TestRestored(t *testing.T) {
 		}
 	})
 }
+
+func TestSameCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		held    sessionindex.Entry
+		created time.Time
+		pid     int
+		want    bool
+	}{
+		{"the same time and pid", keeping(liveCreation, 4242), liveCreation, 4242, true},
+		{"the same time in another zone", keeping(liveCreation, 4242), liveCreation.In(time.FixedZone("BST", 3600)), 4242, true},
+		{"the same time with no pid given", keeping(liveCreation, 4242), liveCreation, 0, true},
+		{"the same time on an entry recording no pid", keeping(liveCreation, 0), liveCreation, 4242, true},
+		{"the same time with another pid", keeping(liveCreation, 1717), liveCreation, 4242, false},
+		{"another time with the same pid", keeping(earlierThisBoot, 4242), liveCreation, 4242, false},
+		{"an entry recording no creation", keeping(time.Time{}, 0), time.Time{}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.held.SameCreation(tc.created, tc.pid); got != tc.want {
+				t.Errorf("SameCreation = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRule_MayPredateBoot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		held sessionindex.Entry
+		rule sessionindex.Rule
+		want bool
+	}{
+		{"an entry recording no creation may", keeping(time.Time{}, 0), ruleRestoring(), true},
+		{"an entry saved before this boot does", keeping(beforeBoot, 1717), ruleRestoring(), true},
+		{"an entry saved a second before this boot does", keeping(thisBoot.Add(-time.Second), 1717), ruleRestoring(), true},
+		{"under the zero rule an entry of this boot may", keeping(earlierThisBoot, 1717), sessionindex.Rule{}, true},
+		{"an entry created at this boot's instant does not", keeping(thisBoot, 1717), ruleRestoring(), false},
+		{"an entry of this boot does not", keeping(earlierThisBoot, 1717), ruleRestoring(), false},
+		{"an entry of this boot whose session is restoring does not", keeping(earlierThisBoot, 1717), ruleRestoring("a"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.rule.MayPredateBoot(tc.held); got != tc.want {
+				t.Errorf("MayPredateBoot = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

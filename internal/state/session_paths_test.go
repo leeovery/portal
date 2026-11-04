@@ -2,6 +2,7 @@ package state_test
 
 import (
 	"errors"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,6 +64,38 @@ func TestSessionScrollbackFile(t *testing.T) {
 		t.Run("the name "+strconv.Quote(name)+" is refused", func(t *testing.T) {
 			if _, err := state.SessionScrollbackFile(name, apiCreated, 4242); !errors.Is(err, state.ErrUnsafeName) {
 				t.Errorf("SessionScrollbackFile = %v, want ErrUnsafeName", err)
+			}
+		})
+	}
+}
+
+func TestIsSessionScrollbackFile(t *testing.T) {
+	for what, base := range map[string]string{
+		"a creation's file":                    path.Base(scrollbackFile(t, "api-x7Kd9a", apiCreated, 4242)),
+		"a creation's file to the nanosecond":  path.Base(scrollbackFile(t, "api-x7Kd9a", apiCreated.Add(500*time.Millisecond), 4242)),
+		"a name holding the stem's separators": path.Base(scrollbackFile(t, "a-b-20261104T100000Z-1", apiCreated, 0)),
+	} {
+		t.Run("it recognises "+what, func(t *testing.T) {
+			if !state.IsSessionScrollbackFile(base) {
+				t.Errorf("IsSessionScrollbackFile(%q) = false, want true", base)
+			}
+		})
+	}
+
+	for what, base := range map[string]string{
+		"a legacy file named by the name alone": "api-x7Kd9a.bin",
+		"a stem whose hash is not its name's":   "api-x7Kd9a-000000000000-20261104T100000Z-4242.bin",
+		"a stem with no creation":               apiStem + "-.bin",
+		"a stem with a bad creation":            apiStem + "-soon-4242.bin",
+		"a stem with no pid":                    apiStem + "-20261104T100000Z.bin",
+		"a file not ending .bin":                apiStem + "-20261104T100000Z-4242.txt",
+		"a creation's file kept aside":          apiStem + "-20261104T100000Z-4242.bin.old",
+		"an atomic write's temp file":           ".atomic-123.tmp",
+		"no name at all":                        "",
+	} {
+		t.Run("it refuses "+what, func(t *testing.T) {
+			if state.IsSessionScrollbackFile(base) {
+				t.Errorf("IsSessionScrollbackFile(%q) = true, want false", base)
 			}
 		})
 	}

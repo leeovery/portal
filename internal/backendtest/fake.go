@@ -52,7 +52,8 @@ type Call struct {
 // holds; Fail makes a method return an error before it changes anything, and
 // a call with an ended context fails with its cause.
 type Fake struct {
-	// Now stamps Created on the sessions Create makes; nil is time.Now.
+	// Now stamps Created on the sessions Create makes, to the whole second as
+	// zmx records it; nil is time.Now.
 	Now func() time.Time
 	// Validate replaces Create's name rule, zmx's own without the length
 	// limit, which depends on a directory the Fake has none of. Per-session
@@ -267,7 +268,7 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string) (
 		Answered: true,
 		Dir:      resolved(dir),
 		PID:      f.lastPID,
-		Created:  f.now(),
+		Created:  f.now().Truncate(time.Second),
 		Command:  zmx.DisplayCommand(command),
 	}
 	f.sessions[name] = s

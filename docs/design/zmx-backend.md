@@ -75,10 +75,9 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
 - **Index.** Polled every 5 s; committed when it changes. Portal records the created time and pid of every session it creates, restore included; zmx keeps created time in whole seconds, so the pair tells a recreated session apart (see Names).
 - **Scrollback.** Captured at most once a minute per session, and only when its content has changed. Sessions flagged hydrating or resume-pending are skipped.
 - **Drops.**
-  - A session missing from two polls at least 10 s apart is dropped. A reboot stops the saver before that, so nothing is dropped by mistake.
-  - If at least half the sessions, and at least three, vanish in one poll, nothing is dropped and a WARN is logged. That covers a zmx upgrade or a mass crash.
+  - A session missing from two polls at least 10 s apart is dropped. An entry created before this boot, or recording no creation, is never dropped, so a session whose restore failed comes back at the next bootstrap.
+  - If at least three of the index's entries, and at least half of them, go missing in one poll, the saver drops none of those while it runs, unless one is listed again, and logs a WARN. That covers a zmx upgrade or a mass crash.
   - A kill from inside Portal commits at once.
-- **Triggers.** Portal's own create, kill and rename request an immediate save. Changes made outside Portal are picked up by the poll.
 - **Removed, because they only existed for tmux:**
   - the "own server answers" check and the empty-capture check,
   - positional pane keys, pane tokens and the re-filing of moved transcripts,

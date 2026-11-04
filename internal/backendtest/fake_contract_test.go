@@ -1,6 +1,7 @@
 package backendtest_test
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -42,6 +43,18 @@ func (s fakeSubject) SetCurrent(name string) { s.f.SetCurrent(name) }
 // client to mark.
 func (s fakeSubject) Lead(_ *testing.T, session, variable, value string) {
 	s.f.SetLeaderEnv(session, backend.ClientEnv{{Name: variable, Value: value}})
+}
+
+// Program names the program of the command Create made the session holding
+// pid with: the Fake runs no process, so a session's pid stands for its
+// command's.
+func (s fakeSubject) Program(_ *testing.T, pid int) string {
+	for _, c := range s.f.CallsTo(backendtest.OpCreate) {
+		if held, ok := s.f.Held(c.Name); ok && held.PID == pid && len(c.Command) > 0 {
+			return filepath.Base(c.Command[0])
+		}
+	}
+	return ""
 }
 
 func (s fakeSubject) Lacks(b backendtest.Behaviour) string {

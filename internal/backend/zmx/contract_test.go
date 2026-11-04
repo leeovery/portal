@@ -63,6 +63,13 @@ func (s *daemonSubject) leader(session string) []byte {
 	return s.leaders[session]
 }
 
+// Program is never asked: the subject lacks Creating, and a fake daemon's
+// session runs no process of its own.
+func (s *daemonSubject) Program(t *testing.T, pid int) string {
+	t.Fatalf("Program(%d) asked of a subject with no session processes", pid)
+	return ""
+}
+
 func (s *daemonSubject) Lacks(b backendtest.Behaviour) string {
 	if b == backendtest.Creating {
 		return "the daemon run has no zmx to create a session with"

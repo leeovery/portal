@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -79,6 +80,22 @@ func (s *zmxSubject) Lead(t *testing.T, session, variable, value string) {
 	}
 	zmxtest.Run(t, s.b.Track(attach, variable, value))
 	awaitLeader(t, s.b, session)
+}
+
+// Program names the file pid exec'd as the kernel keeps it: zmx for the
+// daemon's own child until it execs the session's command.
+func (s *zmxSubject) Program(t *testing.T, pid int) string {
+	t.Helper()
+	procs, err := proctable.List()
+	if err != nil {
+		t.Fatalf("list processes: %v", err)
+	}
+	for _, p := range procs {
+		if p.PID == pid {
+			return p.Command
+		}
+	}
+	return ""
 }
 
 func (s *zmxSubject) Lacks(b backendtest.Behaviour) string {

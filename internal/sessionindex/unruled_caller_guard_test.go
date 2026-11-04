@@ -26,10 +26,13 @@ type unruledCaller struct{ pkg, fn string }
 // Remove and Restored change an entry with no claim rule consulted: Remove
 // drops one, and Restored adopts whatever creation an entry records. Anywhere
 // else, either would stand for a replace the rule never judged. Remove's
-// caller is kill; the saver's drop of a session that ended names its own
-// function when it lands. Restored's is restore.
+// callers are kill and the saver's drop of a session that ended. Restored's
+// is restore.
 var unruledCallers = map[string][]unruledCaller{
-	"Remove":   {{pkg: modulePath + "/cmd", fn: "forgetSession"}},
+	"Remove": {
+		{pkg: modulePath + "/cmd", fn: "forgetSession"},
+		{pkg: modulePath + "/internal/saver", fn: "drop"},
+	},
 	"Restored": {{pkg: modulePath + "/internal/restore"}},
 }
 
@@ -124,6 +127,20 @@ func restore[T interface{ Restored(string, time.Time, int) bool }](x T) {
 	x.Restored("a", at, 0)
 }
 `
+	const savesDrop = `package fixture
+
+import "github.com/leeovery/portal/internal/sessionindex"
+
+func drop(idx *sessionindex.Index, names []string) {
+	for _, name := range names {
+		idx.Remove(name)
+	}
+}
+
+func claim(idx *sessionindex.Index) {
+	idx.Remove("a")
+}
+`
 	const methodNamedAsAllowed = `package fixture
 
 import "github.com/leeovery/portal/internal/sessionindex"
@@ -172,6 +189,11 @@ func elsewhere(s store, r remover) {
 				"fixture.go:12: Restored in elsewhere",
 				"fixture.go:13: Remove in elsewhere",
 			},
+		},
+		{
+			name: "it allows Remove from the saver's drop alone in internal/saver",
+			pkg:  modulePath + "/internal/saver", src: savesDrop,
+			want: []string{"fixture.go:12: Remove in claim"},
 		},
 		{
 			name: "it allows a method named forgetSession nothing, only the package-level func",
