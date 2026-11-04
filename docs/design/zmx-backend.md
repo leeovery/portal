@@ -66,7 +66,7 @@ Names follow zmx's limits. A socket path is capped at 104 bytes, which leaves ab
   - `spawn-acks/`: one empty file, `<batch>-<token>`, per window a burst opened, written by that window once its attach has begun. The burst removes its own, and any an hour old, as a burst that died leaves them. The directory is 0700 and each file 0600.
   - `runners/` (see Attach runner)
 - `hooks.json` stays where it is, keyed by session name. `prefs.json`, projects and aliases are unchanged.
-- Every file Portal replaces is replaced durably: the temp file is synced before its rename and the directory after it, `F_FULLFSYNC` on darwin. That costs about 10 ms a write on an M1 Max's internal SSD.
+- Every file Portal replaces is replaced in order: the temp file is synced before its rename and the directory after it, so after a power loss each file is its old version or its new one, never empty, and no later write persists ahead of a rename. On darwin both syncs are `F_BARRIERFSYNC`, which orders without flushing the drive's cache (fsync where a filesystem has no barriers); on linux, fsync. That costs about 0.5 ms a write on an M1 Max's internal SSD, where `F_FULLFSYNC` cost 10 ms.
 - Before switch-over, a dev build runs beside the installed tmux Portal with `PORTAL_STATE_DIR` and `PORTAL_HOOKS_FILE` pointed at scratch paths.
 
 ## Saver

@@ -40,7 +40,7 @@ func (r *syncRecorder) held() string {
 	return string(data)
 }
 
-func TestAtomicWrite_Durable(t *testing.T) {
+func TestAtomicWrite_Ordered(t *testing.T) {
 	t.Run("it syncs the temp file before the rename and the directory after it", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "sessions.json")
@@ -115,11 +115,11 @@ func TestAtomicWrite_Durable(t *testing.T) {
 	})
 }
 
-// BenchmarkAtomicWrite measures what durability costs a write of a
+// BenchmarkAtomicWrite measures what ordering costs a write of a
 // sessions.json-sized file, against the same write without its syncs.
 func BenchmarkAtomicWrite(b *testing.B) {
 	data := make([]byte, 4096)
-	for name, nosync := range map[string]bool{"durable": false, "without syncs": true} {
+	for name, nosync := range map[string]bool{"with its syncs": false, "without syncs": true} {
 		b.Run(name, func(b *testing.B) {
 			if nosync {
 				fileutil.SetSyncsForTest(b, func(*os.File) error { return nil }, func(string) error { return nil })
