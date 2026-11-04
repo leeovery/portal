@@ -27,8 +27,10 @@ const saverDaemonSettle = 10 * time.Second
 type SaverDaemon struct {
 	// Backend reaches the zmx directory whose sessions the daemon saves.
 	Backend *zmx.Backend
-	// Env is the isolated environment the daemon runs with. A process run
-	// with it reaches the daemon's sessions once it appends Backend.ReachEnv.
+	// Env is the isolation the daemon runs with, IsolateStateForTest's alone:
+	// its session adds only the minimal set zmxtest passes every session. A
+	// process run with it reaches the daemon's sessions once it appends
+	// Backend.ReachEnv.
 	Env []string
 	// StateDir is the daemon's state directory.
 	StateDir string
@@ -39,8 +41,9 @@ type SaverDaemon struct {
 // StartSaverDaemon isolates the test's state, makes it a zmx directory, and
 // runs binary, an absolute path to a portal built through portalbintest, as
 // `state daemon` in that directory's saver session, with IsolateStateForTest's
-// environment, whose sandbox registers the state directory. It returns once
-// the daemon holds its lock, daemon.pid naming the session's process.
+// isolation, whose sandbox registers the state directory, and nothing else of
+// this process's environment. It returns once the daemon holds its lock,
+// daemon.pid naming the session's process.
 //
 // At cleanup it kills the session, which ends the daemon through its final
 // flush, and SIGKILLs a daemon still running past the flush's bound. Every
@@ -51,7 +54,7 @@ func StartSaverDaemon(t *testing.T, binary string) *SaverDaemon {
 	if !filepath.IsAbs(binary) {
 		t.Fatalf("portaltest: StartSaverDaemon wants an absolute path to portal, got %q", binary)
 	}
-	env, stateDir := IsolateStateForTest(t)
+	env, stateDir := isolate(t)
 	RegisterStateDirTeardownGuard(t, stateDir)
 	b := zmxtest.New(t, zmxtest.WithEnv(env...))
 	if _, err := b.Create(t.Context(), saver.SessionName, t.TempDir(), []string{binary, "state", "daemon"}); err != nil {

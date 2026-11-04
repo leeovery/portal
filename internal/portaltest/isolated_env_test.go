@@ -10,24 +10,41 @@ import (
 
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/xdg"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
-// TestMain poisons ZMX_DIR, so a zmx run that misses a test's own directory
-// fails loudly rather than reaching the developer's live sessions, and drops
-// ZMX_SESSION and ZMX_SESSION_PREFIX, which would turn an attach into a
-// switch or rename every session a test names.
+// TestMain poisons every Portal path, as cmd's does, so a test that misses
+// its isolation fails loudly rather than writing to the developer's files. It
+// poisons ZMX_DIR too, so a zmx run that misses a test's own directory never
+// reaches the developer's live sessions, and drops ZMX_SESSION and
+// ZMX_SESSION_PREFIX, which would turn an attach into a switch or rename
+// every session a test names.
 func TestMain(m *testing.M) {
-	for _, err := range []error{
+	errs := []error{
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
-	} {
+	}
+	for _, name := range portalPathVars() {
+		errs = append(errs, os.Setenv(name, poisonedPath(name)))
+	}
+	for _, err := range errs {
 		if err != nil {
 			panic(err)
 		}
 	}
 	os.Exit(runInSelfSandbox(m.Run))
+}
+
+// portalPathVars is every variable a Portal file or directory resolves from,
+// the config base aside.
+func portalPathVars() []string {
+	return slices.DeleteFunc(xdg.Variables(), func(name string) bool { return name == "XDG_CONFIG_HOME" })
+}
+
+func poisonedPath(name string) string {
+	return "/nonexistent/portal-test-must-isolate-" + name
 }
 
 // runInSelfSandbox redirects HOME and XDG_CONFIG_HOME at a temp sandbox for the
@@ -383,6 +400,36 @@ func under(path, dir string) bool {
 // A subprocess carries no zmx session of the developer's: their exported
 // ZMX_DIR is poisoned, and running go test inside one of their sessions puts
 // none of its names in the env.
+func TestPointsEveryPortalPathIntoTheScratchConfig(t *testing.T) {
+	for _, name := range portalPathVars() {
+		t.Setenv(name, "/Users/dev/.config/portal/exported-"+name)
+	}
+
+	env, stateDir := portaltest.IsolateStateForTest(t)
+
+	config, _ := envValue(env, "XDG_CONFIG_HOME")
+	for _, name := range portalPathVars() {
+		t.Run(name, func(t *testing.T) {
+			got, _ := envValue(env, name)
+			if n := envCount(env, name); n != 1 {
+				t.Errorf("%s appears %d times in the slice, want once", name, n)
+			}
+			if !strings.HasPrefix(got, filepath.Join(config, "portal")+string(filepath.Separator)) {
+				t.Errorf("slice %s = %q, want a path in the scratch config %s", name, got, config)
+			}
+			if proc := os.Getenv(name); proc != got {
+				t.Errorf("process %s = %q, want the slice's %q", name, proc, got)
+			}
+		})
+	}
+	if got, _ := envValue(env, "PORTAL_STATE_DIR"); got != stateDir {
+		t.Errorf("PORTAL_STATE_DIR = %q, want the state dir %q", got, stateDir)
+	}
+	if got, _ := envValue(env, "PORTAL_HOOKS_FILE"); got != filepath.Join(config, "portal", "hooks.json") {
+		t.Errorf("PORTAL_HOOKS_FILE = %q, want hooks.json where the scratch config's default resolve finds it", got)
+	}
+}
+
 func TestPoisonsTheZmxEnv(t *testing.T) {
 	t.Setenv("ZMX_DIR", "/Users/dev/.local/state/zmx")
 	t.Setenv("ZMX_SESSION", "dotfiles-PpaTER")
