@@ -15,11 +15,19 @@ import (
 // The calls and the env var the rule is expressed in.
 const (
 	isolateCall  = "portaltest.IsolateStateForTest"
-	serverCall   = "tmuxtest.New"
 	guardCall    = "portaltest.RegisterStateDirTeardownGuard"
 	stateDirEnv  = "PORTAL_STATE_DIR"
 	guardPIDCall = "portaltest.RegisterStateDirTeardownGuardWithPIDSource"
 )
+
+// The calls that start a session server whose cleanup ends its sessions: a
+// zmxtest directory's daemons, or a tmuxtest server.
+const (
+	zmxServerCall  = "zmxtest.New"
+	tmuxServerCall = "tmuxtest.New"
+)
+
+var serverCalls = []string{zmxServerCall, tmuxServerCall}
 
 // fixtureCalls records where one function makes the calls the rule is expressed
 // in. A line of zero means the scope does not make that call at all; a recorded
@@ -73,7 +81,7 @@ func (f scannedFunc) aggregate() fixtureCalls {
 }
 
 // qualifies reports whether the function is subject to the rule: it drives a
-// live tmux server against a state directory, whether it named that directory
+// live session server against a state directory, whether it named that directory
 // itself or took one from the isolation helper.
 func (c fixtureCalls) qualifies() bool {
 	return c.ServerLine != 0 && (c.NamesStateDir || c.IsolateLine != 0)
@@ -84,11 +92,11 @@ func (c fixtureCalls) qualifies() bool {
 func (c fixtureCalls) presenceDefect() string {
 	switch {
 	case c.IsolateLine == 0 && c.GuardLine == 0:
-		return fmt.Sprintf("starts a tmux server at line %d, calling neither %s nor %s", c.ServerLine, isolateCall, guardCall)
+		return fmt.Sprintf("starts a session server at line %d, calling neither %s nor %s", c.ServerLine, isolateCall, guardCall)
 	case c.IsolateLine == 0:
-		return fmt.Sprintf("starts a tmux server at line %d without calling %s", c.ServerLine, isolateCall)
+		return fmt.Sprintf("starts a session server at line %d without calling %s", c.ServerLine, isolateCall)
 	case c.GuardLine == 0:
-		return fmt.Sprintf("starts a tmux server at line %d without calling %s", c.ServerLine, guardCall)
+		return fmt.Sprintf("starts a session server at line %d without calling %s", c.ServerLine, guardCall)
 	}
 	return ""
 }
@@ -96,17 +104,17 @@ func (c fixtureCalls) presenceDefect() string {
 // orderDefect renders an inverted order within one scope, or "" when the order
 // holds or the scope makes too few of the calls to judge. Order is part of the
 // rule, not a nicety: cleanups run LIFO, so a guard registered after the server
-// runs its quiescence wait before kill-server rather than between kill-server
-// and the TempDir RemoveAll it protects.
+// runs its quiescence wait before the server's cleanup ends its sessions rather
+// than between that and the TempDir RemoveAll it protects.
 func (c fixtureCalls) orderDefect() string {
 	if c.ServerLine == 0 {
 		return ""
 	}
 	switch {
 	case c.IsolateLine != 0 && c.ServerLine < c.IsolateLine:
-		return fmt.Sprintf("starts a tmux server at line %d before isolating at line %d", c.ServerLine, c.IsolateLine)
+		return fmt.Sprintf("starts a session server at line %d before isolating at line %d", c.ServerLine, c.IsolateLine)
 	case c.GuardLine != 0 && c.ServerLine < c.GuardLine:
-		return fmt.Sprintf("starts a tmux server at line %d before registering the teardown guard at line %d", c.ServerLine, c.GuardLine)
+		return fmt.Sprintf("starts a session server at line %d before registering the teardown guard at line %d", c.ServerLine, c.GuardLine)
 	}
 	return ""
 }
@@ -137,11 +145,12 @@ func (c fixtureCalls) throughLocalArrange(pkg map[string]fixtureCalls) fixtureCa
 }
 
 // TestTeardownGuardCoversEveryServerHostingFixture polices the rule that a test
-// function pairing a state directory with a live tmux server must isolate that
+// function pairing a state directory with a live session server must isolate that
 // directory and register the teardown guard over it, both before it starts the
 // server. Such a server can host writers into the state dir — a saver daemon's
-// SIGHUP flush, a session-closed hook subprocess, a hydrate helper — and those
-// outlive kill-server, so without the guard the TempDir RemoveAll races them and
+// shutdown flush, a hydrate helper, a resume chain — and those outlive the
+// server's own cleanup (a zmxtest directory's daemons killed, or kill-server),
+// so without the guard the TempDir RemoveAll races them and
 // fails the test with "directory not empty" after its assertions have already
 // passed. Without the isolation the fixture is writing somewhere it does not own
 // at all, and with the calls made in the wrong order the guard waits at the
@@ -248,7 +257,7 @@ func scopesIn(fset *token.FileSet, body *ast.BlockStmt) []fixtureCalls {
 			}
 		case *ast.CallExpr:
 			switch selectorName(node) {
-			case serverCall:
+			case zmxServerCall, tmuxServerCall:
 				record(&calls.ServerLine, node.Pos())
 			case isolateCall:
 				record(&calls.IsolateLine, node.Pos())
@@ -343,13 +352,13 @@ func arrangesByPackage(funcs []scannedFunc) map[string]map[string]fixtureCalls {
 func coverageFailure(scanned int, defects []string) string {
 	if scanned == 0 {
 		return fmt.Sprintf("no function pairs %s with either %s or %s; the guard has stopped looking rather than passed",
-			serverCall, stateDirEnv, isolateCall)
+			strings.Join(serverCalls, " or "), stateDirEnv, isolateCall)
 	}
 	if len(defects) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("%d of %d state-dir fixtures leave their state dir unguarded:\n  %s\n"+
-		"  a server can host writers into that state dir past kill-server, so the TempDir\n"+
+		"  a server can host writers into that state dir past its own cleanup, so the TempDir\n"+
 		"  RemoveAll races them; isolate the dir and register the guard, both before %s",
-		len(defects), scanned, strings.Join(defects, "\n  "), serverCall)
+		len(defects), scanned, strings.Join(defects, "\n  "), strings.Join(serverCalls, " or "))
 }

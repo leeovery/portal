@@ -19,6 +19,9 @@ const tmuxPkgPath = "github.com/leeovery/portal/internal/tmux"
 // with internal/tmux in phase 5.
 const tmuxTestOnlyPackage = "internal/tmuxtest"
 
+// Beyond the move itself, the binary must hold no path to the tmux bootstrap:
+// its kill-barrier would take down the installed tmux Portal's _portal-saver,
+// and its hook registration would rewrite that Portal's global hooks.
 func TestNoProductionSourceImportsTmux(t *testing.T) {
 	for _, source := range scanTmuxImports(t) {
 		t.Errorf("%s imports internal/tmux; Portal runs on zmx, and nothing tmux-shaped survives above the driver", source)

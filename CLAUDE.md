@@ -75,7 +75,7 @@ Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2, over zmx (see `docs/design/zmx-back
 3. for `open`, the zmx binary lookup;
 4. `bootstrapFor`.
 
-`bootstrapFor` runs the bootstrap a command owes (see Server bootstrap). Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). No production source imports `internal/tmux` (`internal/tmux/no_production_import_guard_test.go`), and `cmd/no_tmux_bootstrap_guard_test.go` pins that the tmux saver and hook entry points stay out of the binary: either would take down the installed tmux Portal's saver or rewrite its global hooks. Across the module, only `cmd/state_daemon.go` (the idle-tick sweep) and `cmd/doctor.go` (the count, and `--fix`'s prune) may reach `hooksweep` or `(*hooks.Store).CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, judged by type-checked object).
+`bootstrapFor` runs the bootstrap a command owes (see Server bootstrap). Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). No production source imports `internal/tmux` (`internal/tmux/no_production_import_guard_test.go`), so the tmux saver and hook entry points stay out of the binary: either would take down the installed tmux Portal's saver or rewrite its global hooks. Across the module, only `cmd/state_daemon.go` (the idle-tick sweep) and `cmd/doctor.go` (the count, and `--fix`'s prune) may reach `hooksweep` or `(*hooks.Store).CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, judged by type-checked object).
 
 ### Commands
 
