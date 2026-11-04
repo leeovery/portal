@@ -166,6 +166,7 @@ func (w *waitingWorld) leftAtTermSize(t *testing.T) *portalTerm {
 	t.Helper()
 	p := w.portal(t, "open", waitingSession)
 	w.awaitClients(t, waitingSession, 1)
+	p.awaitRunner(t, waitingSession)
 	w.awaitWaiterAt(t, portalTermCols, portalTermRows)
 	mark := p.mark()
 	p.typeIn(t, "\x1b")
@@ -187,6 +188,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 		w.awaitPanel(t)
 		p := w.portal(t, "open", waitingSession)
 		w.awaitClients(t, waitingSession, 1)
+		p.awaitRunner(t, waitingSession)
 		w.awaitWaiterAt(t, portalTermCols, portalTermRows)
 
 		mark := p.mark()
