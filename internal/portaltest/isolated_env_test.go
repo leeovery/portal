@@ -13,7 +13,20 @@ import (
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
+// TestMain poisons ZMX_DIR, so a zmx run that misses a test's own directory
+// fails loudly rather than reaching the developer's live sessions, and drops
+// ZMX_SESSION and ZMX_SESSION_PREFIX, which would turn an attach into a
+// switch or rename every session a test names.
 func TestMain(m *testing.M) {
+	for _, err := range []error{
+		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
+		os.Unsetenv("ZMX_SESSION"),
+		os.Unsetenv("ZMX_SESSION_PREFIX"),
+	} {
+		if err != nil {
+			panic(err)
+		}
+	}
 	os.Exit(runInSelfSandbox(m.Run))
 }
 
