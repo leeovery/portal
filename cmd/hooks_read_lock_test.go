@@ -66,12 +66,11 @@ func TestHydrateLookupDegradedRead(t *testing.T) {
 
 		exec := &stubExecShell{}
 		sink := logtest.Install(t)
-		execLookedUpRegistration(hydrateCfg(t, hydrateCfgOpts{
-			HookKey:   hookstest.SubjectSeedA,
-			OpenFIFO:  unexpectedOpenFIFO(t),
+		execLookedUpRegistration(hydrateConfig{
+			Session:   hookstest.SubjectSeedA,
 			HookStore: store,
 			ExecShell: exec.fn(),
-		}))
+		})
 
 		if !exec.called {
 			t.Fatal("the hydrate helper never reached its exec — a busy lock must not drop the pane")

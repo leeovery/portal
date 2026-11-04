@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // The flags the resume chain's subcommands are addressed by. --session names
@@ -148,16 +151,57 @@ func execHandOff(logger *slog.Logger, execShell func(prog string, args []string)
 
 // handOffToHookOrShell gives a session answered on the panel or recovered by
 // the tail the same invocation as one that never waited. An empty command
-// means no registration.
+// means no registration. A session handed /bin/sh gets it as its $SHELL too,
+// as the backstop's tail has it, so one handed it in place of a $SHELL that
+// can't be found, and whatever it starts, inherit a $SHELL that runs: the exec
+// hands on this process's environment.
 func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args []string), command string) {
-	shell := resolveShell()
+	shell := resolveShell(logger)
+	if shell == fallbackShell {
+		// Setenv fails only for a malformed name.
+		_ = os.Setenv("SHELL", fallbackShell)
+	}
 	if command == "" {
-		execHandOff(logger, execShell, shell, []string{shell}, false)
+		execHandOff(logger, execShell, shell, loginShellArgv(shell), false)
 		return
 	}
 	prog, args := hookExecArgs(command, shell)
 	execHandOff(logger, execShell, prog, args, true)
 }
+
+// fallbackShell is the shell a session is handed when $SHELL names none: the
+// one zmx starts a fresh session's with.
+const fallbackShell = "/bin/sh"
+
+// resolveShell is the shell a session is handed: $SHELL, or else /bin/sh, as
+// zmx picks a fresh session's. A $SHELL naming no path is found on PATH, as
+// zmx's execvpe finds it: the exec it is handed to searches nothing. One that
+// can't be found, at its path or on PATH, is /bin/sh, with one WARN: an exec
+// that failed would end the session, and the saver would drop it and its
+// transcript with it.
+func resolveShell(logger *slog.Logger) string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		return fallbackShell
+	}
+	found, err := exec.LookPath(shell)
+	if err != nil {
+		logger.Warn("shell not found, so the session gets the fallback shell", "path", shell, "target", fallbackShell, "error", err)
+		return fallbackShell
+	}
+	return found
+}
+
+// loginShellArgv is the argv a session's shell is exec'd with: a login shell,
+// as zmx starts a fresh session's, named by its base name after a dash.
+func loginShellArgv(shell string) []string {
+	return []string{"-" + filepath.Base(shell)}
+}
+
+// loginShellFlag asks for a login shell where a shell script execs one: sh
+// has no way to set the dash argv[0] zmx starts a session's shell with, and
+// every shell that can log in takes this flag.
+const loginShellFlag = "-l"
 
 // resumeRegistrationOrLog answers the zero value for a registration carrying no
 // command as it does for a miss, so a session with nothing to run never waits.
@@ -196,9 +240,9 @@ const hookShellTrap = "trap : TERM; "
 // hookExecArgs composes the argv a session's registered command is run as. The
 // command is spliced into the -c script unquoted, so sh's own parser handles
 // any embedded quotes, and the trailing exec leaves the session on its own
-// shell, so it closes on the first exit.
+// login shell, so it closes on the first exit.
 func hookExecArgs(command, shell string) (prog string, args []string) {
-	return "/bin/sh", []string{"sh", "-c", hookShellTrap + command + "; exec " + shell}
+	return "/bin/sh", []string{"sh", "-c", hookShellTrap + command + "; exec " + shellquote.Single(shell) + " " + loginShellFlag}
 }
 
 // A session whose kill keys could not be given back is still handed on: a

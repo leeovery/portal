@@ -56,28 +56,13 @@ func hookShellRoutes() []hookShellRoute {
 
 func eagerHookArgv(t *testing.T, command string) (string, []string) {
 	t.Helper()
-	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-work__0.0.fifo")
-	scrollback := filepath.Join(dir, "sb")
-	if err := os.WriteFile(scrollback, nil, 0o600); err != nil {
-		t.Fatalf("stage the scrollback file: %v", err)
-	}
-	signalFIFOAsync(t, fifo)
-
 	execStub := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		FIFO:      fifo,
-		File:      scrollback,
-		HookKey:   samplePayload().Session,
-		OpenFIFO:  openFIFOWithTimeout,
-		HookStore: hydrateStoreWithMode(t, samplePayload().Session, command, resumemode.Eager),
-		ExecShell: execStub.fn(),
-	})
-	if err := runHydrate(cfg); err != nil {
-		t.Fatalf("runHydrate: %v", err)
-	}
+	cfg := newHydrateWorld(t).config(execStub)
+	cfg.File = transcript(t, "")
+	cfg.HookStore = hydrateStoreWithMode(t, hydrateSession, command, resumemode.Eager)
+	runHydrate(t.Context(), cfg)
 	if !execStub.called {
-		t.Fatal("the hydrate helper handed the pane to nothing")
+		t.Fatal("the hydrate helper handed the session to nothing")
 	}
 	return execStub.target, execStub.args
 }

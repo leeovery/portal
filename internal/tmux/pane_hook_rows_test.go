@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -94,8 +93,8 @@ func TestListAllPaneHookKeys_Rows(t *testing.T) {
 		if !strings.HasPrefix(got, "list-panes -a -F ") {
 			t.Errorf("enumeration argv = %q, want a list-panes -a -F read", got)
 		}
-		if !strings.Contains(got, "#{"+state.PortalPaneIDOption+"}") {
-			t.Errorf("enumeration format %q does not read %q", got, state.PortalPaneIDOption)
+		if !strings.Contains(got, "#{"+tmux.PortalPaneIDOption+"}") {
+			t.Errorf("enumeration format %q does not read %q", got, tmux.PortalPaneIDOption)
 		}
 	})
 }
