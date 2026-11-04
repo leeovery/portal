@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -216,6 +217,84 @@ func TestPoll_CapturesScrollback(t *testing.T) {
 		w.after(time.Minute)
 		if got, _ := w.read(scrollbackFile(t, api)); got != "the screen" {
 			t.Errorf("scrollback once it can be written = %q, want the history", got)
+		}
+	})
+}
+
+// inVim is a history as zmx gives it for a session in vim: led by the modes
+// vim set, the alternate screen among them, then that screen alone.
+const inVim = "\x1b[?1h\x1b[?66h\x1b[?1049halt line\r\n\x1b[0m\x1b[38;5;12m~\x1b[0m\x1b[2;1H\x1b[0m"
+
+func TestPoll_NeverSavesTheAlternateScreen(t *testing.T) {
+	t.Run("a history of the alternate screen keeps the transcript the index names, skipped at DEBUG", func(t *testing.T) {
+		w := newWorld(t)
+		api := stageCaptured(w, "the main screen")
+		file := scrollbackFile(t, api)
+		w.fake.SetHistory("api", []byte(inVim))
+		sink := logtest.Install(t)
+
+		got := w.after(time.Minute)
+
+		if text, _ := w.read(file); text != "the main screen" {
+			t.Errorf("scrollback = %q, want the main screen's transcript kept", text)
+		}
+		if e, _ := w.entry("api"); e.ScrollbackFile != file {
+			t.Errorf("ScrollbackFile = %q, want it still naming %q", e.ScrollbackFile, file)
+		}
+		if got.Captured != 0 {
+			t.Errorf("Captured = %d, want none", got.Captured)
+		}
+		rec := sink.Records().Matching("capture", "capture skipped").AtExactLevel(slog.LevelDebug).Only(t, "the alternate screen's skip")
+		if name := rec.AttrString(t, "session"); name != "api" {
+			t.Errorf("capture skipped session = %q, want api", name)
+		}
+		if err := rec.AttrString(t, "error"); !strings.Contains(err, "alternate screen") {
+			t.Errorf("capture skipped error = %q, want it saying the session is on the alternate screen", err)
+		}
+	})
+
+	t.Run("the creation stays due, so the next poll saves the main screen once the session is back on it", func(t *testing.T) {
+		w := newWorld(t)
+		api := stageCaptured(w, "the main screen")
+		w.fake.SetHistory("api", []byte(inVim))
+		w.after(time.Minute)
+		w.fake.SetHistory("api", []byte("back on the main screen"))
+
+		w.after(5 * time.Second)
+
+		if text, _ := w.read(scrollbackFile(t, api)); text != "back on the main screen" {
+			t.Errorf("scrollback = %q, want the main screen saved at the next poll", text)
+		}
+	})
+
+	t.Run("the skip records no hash: back on the screen the index named, nothing is written", func(t *testing.T) {
+		w := newWorld(t)
+		api := stageCaptured(w, "the main screen")
+		file := scrollbackFile(t, api)
+		w.fake.SetHistory("api", []byte(inVim))
+		w.after(time.Minute)
+		w.write(file, "marker")
+		w.fake.SetHistory("api", []byte("the main screen"))
+
+		w.after(5 * time.Second)
+
+		if text, _ := w.read(file); text != "marker" {
+			t.Errorf("scrollback = %q, want the named transcript not written again", text)
+		}
+	})
+
+	t.Run("the final flush skips it too", func(t *testing.T) {
+		w := newWorld(t)
+		api := stageCaptured(w, "the main screen")
+		w.fake.SetHistory("api", []byte(inVim))
+
+		got := w.flush(t.Context())
+
+		if text, _ := w.read(scrollbackFile(t, api)); text != "the main screen" {
+			t.Errorf("scrollback = %q, want the main screen's transcript kept", text)
+		}
+		if got.Captured != 0 {
+			t.Errorf("Captured = %d, want none", got.Captured)
 		}
 	})
 }

@@ -1,6 +1,7 @@
 package saver
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -104,8 +107,7 @@ func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bo
 		}
 		memo := sb.creations[file]
 		if ctx.Err() == nil && ask(memo) && !state.Flagged(sb.dir, live.Name) {
-			memo.asked = l.at
-			if c, ok := sb.save(ctx, live, file, memo); ok {
+			if c, ok := sb.save(ctx, live, file, &memo, l.at); ok {
 				written = append(written, c)
 			}
 		}
@@ -117,8 +119,17 @@ func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bo
 
 // save asks for the session's history and writes it to file, unless it is
 // the history the index last named the file with, reporting what it wrote.
-func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo creation) (capture, bool) {
+// The ask marks the creation asked at at, unless the session is on the
+// alternate screen: that history holds none of the main screen and its
+// scrollback, so it never replaces a saved transcript, and the creation
+// stays due, saved once the session is back on its main screen.
+func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo *creation, at time.Time) (capture, bool) {
 	vt, err := sb.backend.History(ctx, live.Name, 0)
+	if err == nil && alternateScreen(vt) {
+		skipped(live.Name, errAlternateScreen)
+		return capture{}, false
+	}
+	memo.asked = at
 	if err != nil {
 		skipped(live.Name, err)
 		return capture{}, false
@@ -135,17 +146,61 @@ func (sb *scrollback) save(ctx context.Context, live backend.Session, file strin
 	return capture{session: live, file: file, sum: sum}, true
 }
 
-// skipped logs a history the session didn't give: at DEBUG when it had no
-// screen to give, didn't answer in time or has ended, as the next poll it is
-// due asks again, and at WARN for any other failure.
+// errAlternateScreen skips the history of a session on the alternate screen.
+var errAlternateScreen = errors.New("the session is on the alternate screen, whose history holds none of its main screen")
+
+// skipped logs a history the saver didn't save: at DEBUG when the session had
+// no screen to give, didn't answer in time, has ended or is on the alternate
+// screen, as the next poll it is due asks again, and at WARN for any other
+// failure.
 func skipped(session string, err error) {
-	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrTimeout, backend.ErrNoSuchSession} {
+	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrTimeout, backend.ErrNoSuchSession, errAlternateScreen} {
 		if errors.Is(err, skip) {
 			captureLogger.Debug("capture skipped", "session", session, "error", err)
 			return
 		}
 	}
 	captureLogger.Warn("capture failed", "session", session, "error", err)
+}
+
+// alternateScreenModes are the DEC private modes that put a terminal on its
+// alternate screen.
+var alternateScreenModes = []string{"47", "1047", "1049"}
+
+// alternateScreen reports whether vt, a session's history, is that of a
+// session on the alternate screen. zmx leads a history with the modes that
+// differ from a terminal's defaults, each a DECSET or DECRST of its own
+// (ESC [ ? n h, or l), ahead of the screen's first cell; on the alternate
+// screen 47, 1047 or 1049 is set among them, and the history holds that
+// screen alone. Only the lead is read, so a mode sequence later in a
+// history is never taken for one.
+func alternateScreen(vt []byte) bool {
+	for {
+		params, set, rest, ok := leadingMode(vt)
+		if !ok {
+			return false
+		}
+		if set && slices.ContainsFunc(strings.Split(params, ";"), func(mode string) bool {
+			return slices.Contains(alternateScreenModes, mode)
+		}) {
+			return true
+		}
+		vt = rest
+	}
+}
+
+// leadingMode is the DEC private mode sequence vt starts with: its
+// parameters, whether it sets them (h) or resets them (l), and what follows.
+func leadingMode(vt []byte) (params string, set bool, rest []byte, ok bool) {
+	body, ok := bytes.CutPrefix(vt, []byte("\x1b[?"))
+	if !ok {
+		return "", false, nil, false
+	}
+	end := bytes.IndexFunc(body, func(r rune) bool { return r != ';' && (r < '0' || r > '9') })
+	if end < 0 || body[end] != 'h' && body[end] != 'l' {
+		return "", false, nil, false
+	}
+	return string(body[:end]), body[end] == 'h', body[end+1:], true
 }
 
 // write replaces the file target with vt, making the scrollback directory
