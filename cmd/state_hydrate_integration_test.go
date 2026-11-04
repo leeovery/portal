@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/creack/pty"
+	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/internal/bootid"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
@@ -24,8 +27,10 @@ import (
 const (
 	restoredSession = "proj-r3st"
 	restoredLabel   = "proj · restored"
-	// savedLine is a line of the session's saved transcript.
+	// savedLine is a row of the session's saved transcript.
 	savedLine = "saved before the reboot"
+	// promptMark is the row a world's login shell draws its prompt as.
+	promptMark = "prompt-mark$"
 	// altScreenEnter is the sequence a program sends to switch the terminal to
 	// its alternate screen. zmx's history of a session on that screen holds
 	// it, among the modes it leads with.
@@ -34,7 +39,7 @@ const (
 
 // restoreWorld is a world part way through a restore: the sessions it makes
 // run the hydrate helper, as restore's do, each with its hydrating flag raised
-// before it is created.
+// before it is created. Its login shell's prompt is promptMark.
 type restoreWorld struct {
 	*portalWorld
 	work string
@@ -42,7 +47,15 @@ type restoreWorld struct {
 
 func newRestoreWorld(t *testing.T, binary string) *restoreWorld {
 	t.Helper()
-	return &restoreWorld{portalWorld: newPortalWorld(t, binary), work: realPath(t, t.TempDir())}
+	w := &restoreWorld{portalWorld: newPortalWorld(t, binary), work: realPath(t, t.TempDir())}
+	// An interactive sh reads $ENV last, after the login files that set the
+	// system's prompt.
+	env := filepath.Join(t.TempDir(), "env.sh")
+	if err := os.WriteFile(env, []byte("PS1='"+promptMark+" '\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.env = append(w.env, "ENV="+env)
+	return w
 }
 
 // register stages hooks.json holding seed, a value for each hook key.
@@ -74,6 +87,34 @@ func (w *restoreWorld) saveEntry(t *testing.T) {
 	}
 }
 
+// capture runs script in a session of its own until its screen shows last,
+// and returns the session's History: the transcript a save of it writes.
+func (w *restoreWorld) capture(t *testing.T, name, script, last string) []byte {
+	t.Helper()
+	if _, err := w.b.Create(t.Context(), name, w.work, []string{"/bin/sh", "-c", script + "; exec sleep 600"}); err != nil {
+		t.Fatalf("create the session to save: %v", err)
+	}
+	return []byte(w.awaitHistory(t, name, "what it saves", func(history string) bool {
+		return strings.Contains(ansi.Strip(history), last)
+	}))
+}
+
+// run creates the session name running prelude, then argv in the world's
+// environment, isolated. env -i would clear the ZMX_SESSION zmx gives the
+// session, so the session's shell passes that on.
+func (w *restoreWorld) run(t *testing.T, name, prelude string, argv ...string) {
+	t.Helper()
+	script := `exec /usr/bin/env -i ZMX_SESSION="$ZMX_SESSION" "$@"`
+	if prelude != "" {
+		script = prelude + "; " + script
+	}
+	command := append([]string{"/bin/sh", "-c", script, "sh"}, w.env...)
+	command = append(command, argv...)
+	if _, err := w.b.Create(t.Context(), name, w.work, command); err != nil {
+		t.Fatalf("create the session: %v", err)
+	}
+}
+
 // restore creates the session name running the helper on transcript, as
 // restore does: its hydrating flag raised first.
 func (w *restoreWorld) restore(t *testing.T, name string, transcript []byte) {
@@ -85,14 +126,7 @@ func (w *restoreWorld) restore(t *testing.T, name string, transcript []byte) {
 	if err := state.Hydrating.Set(w.stateDir, name); err != nil {
 		t.Fatalf("raise the session's hydrating flag: %v", err)
 	}
-	// env -i keeps the helper to the world's environment, and would clear the
-	// ZMX_SESSION zmx gives the session, so the session's shell passes that on.
-	command := []string{"/bin/sh", "-c", `exec /usr/bin/env -i ZMX_SESSION="$ZMX_SESSION" "$@"`, "sh"}
-	command = append(command, w.env...)
-	command = append(command, w.binary, "state", "hydrate", "--session", name, "--file", file)
-	if _, err := w.b.Create(t.Context(), name, w.work, command); err != nil {
-		t.Fatalf("create the session: %v", err)
-	}
+	w.run(t, name, "", w.binary, "state", "hydrate", "--session", name, "--file", file)
 }
 
 func (w *restoreWorld) awaitHydrated(t *testing.T, name string) {
@@ -118,6 +152,29 @@ func (w *restoreWorld) awaitHistory(t *testing.T, name, what string, shows func(
 		t.Fatalf("session %s never showed %s; its history is %q", name, what, history)
 	}
 	return history
+}
+
+// screenRows is a history's rows as its session shows them, escapes and
+// trailing blanks gone.
+func screenRows(history string) []string {
+	rows := strings.Split(ansi.Strip(history), "\r\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
+	}
+	return rows
+}
+
+// awaitPromptBelow waits for the session's shell to draw its prompt, then
+// checks it drew it on the row below the last of rows, every one of them
+// intact above it.
+func (w *restoreWorld) awaitPromptBelow(t *testing.T, name string, rows []string) {
+	t.Helper()
+	shown := screenRows(w.awaitHistory(t, name, "its prompt", func(history string) bool {
+		return slices.Contains(screenRows(history), promptMark)
+	}))
+	if want := append(slices.Clone(rows), promptMark); !slices.Equal(shown, want) {
+		t.Errorf("session %s shows %q, want %q: every row intact, the prompt below the last", name, shown, want)
+	}
 }
 
 // awaitLoginShell waits for the session's process to be its login shell, as
@@ -166,26 +223,31 @@ func (w *restoreWorld) hookRan() bool {
 	return err == nil
 }
 
+// shownRows is what a saved transcript showed, row by row.
+func shownRows(transcript []byte) []string { return screenRows(string(transcript)) }
+
 func showsSavedLine(history string) bool { return strings.Contains(ansi.Strip(history), savedLine) }
 
 func TestHydrateAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
-	transcript := []byte("$ make\r\n" + savedLine + "\r\n")
+	const saveScript = `printf '$ make\r\n` + savedLine + `\r\n$ '`
 
 	t.Run("a session with no resume command shows its transcript at its login shell", func(t *testing.T) {
 		w := newRestoreWorld(t, binary)
+		transcript := w.capture(t, "saved", saveScript, savedLine)
 		w.saveEntry(t)
 
 		w.restore(t, restoredSession, transcript)
 
 		w.awaitHydrated(t, restoredSession)
-		w.awaitHistory(t, restoredSession, "its transcript", showsSavedLine)
+		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
 		w.awaitLoginShell(t, restoredSession)
 		w.creationRecorded(t)
 	})
 
 	t.Run("an eager resume command runs after the transcript", func(t *testing.T) {
 		w := newRestoreWorld(t, binary)
+		transcript := w.capture(t, "saved", saveScript, savedLine)
 		w.register(t, map[string]any{restoredSession: map[string]any{
 			hooks.EventOnResume.String(): map[string]string{"command": "touch " + hookMark, "resume": "eager"},
 		}})
@@ -197,12 +259,13 @@ func TestHydrateAgainstZmx(t *testing.T) {
 			t.Fatal("the resume command never ran")
 		}
 		w.awaitHydrated(t, restoredSession)
-		w.awaitHistory(t, restoredSession, "its transcript", showsSavedLine)
+		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
 		w.creationRecorded(t)
 	})
 
 	t.Run("a lazy resume command parks the session on its panel", func(t *testing.T) {
 		w := newRestoreWorld(t, binary)
+		transcript := w.capture(t, "saved", saveScript, savedLine)
 		w.register(t, map[string]any{restoredSession: map[string]string{hooks.EventOnResume.String(): "touch " + hookMark}})
 		w.saveEntry(t)
 
@@ -227,6 +290,101 @@ func TestHydrateAgainstZmx(t *testing.T) {
 	})
 }
 
+// A save places the cursor on the screen it captured, so a replay that kept
+// that placement would leave the prompt among the rows whenever they land
+// elsewhere: after a clear that kept the scrollback, or in a taller terminal.
+func TestHydrateReplaysWhateverTheScreenAgainstZmx(t *testing.T) {
+	binary := buildPortalBinary(t)
+
+	t.Run("the prompt lands below a transcript saved after a clear that kept the scrollback", func(t *testing.T) {
+		w := newRestoreWorld(t, binary)
+		// Ctrl-L in bash or zsh: home, then erase the screen.
+		script := `i=1; while [ $i -le 40 ]; do printf 'line-%d\r\n' $i; i=$((i+1)); done; printf '\033[H\033[2J$ ls\r\nafter-clear-output\r\n$ '`
+		transcript := w.capture(t, "cleared", script, "after-clear-output")
+		if !strings.HasPrefix(ansi.Strip(string(transcript)), "line-1\r\n") || !strings.HasSuffix(string(transcript), "\x1b[3;3H\x1b[0m") {
+			t.Fatalf("the saved transcript %q is not scrollback above a cleared screen, its cursor on that screen's third row", transcript)
+		}
+
+		w.restore(t, restoredSession, transcript)
+
+		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
+	})
+
+	t.Run("the prompt lands below a transcript replayed into a taller terminal", func(t *testing.T) {
+		w := newRestoreWorld(t, binary)
+		script := `until [ "$(stty size)" = "10 120" ]; do sleep 0.05; done; i=1; while [ $i -le 30 ]; do printf 'line-%d\r\n' $i; i=$((i+1)); done; printf '$ '`
+		if _, err := w.b.Create(t.Context(), "short", w.work, []string{"/bin/sh", "-c", script + "; exec sleep 600"}); err != nil {
+			t.Fatalf("create the session to save: %v", err)
+		}
+		attach, err := w.b.AttachCommand(t.Context(), "short")
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := w.startIn(t, attach.Env, attach.Argv...)
+		w.awaitClients(t, "short", 1)
+		if err := pty.Setsize(client.tty, &pty.Winsize{Rows: 10, Cols: 120}); err != nil {
+			t.Fatalf("shrink the saved session's terminal: %v", err)
+		}
+		transcript := []byte(w.awaitHistory(t, "short", "its rows", func(history string) bool {
+			return strings.Contains(history, "line-30")
+		}))
+		if !strings.HasSuffix(string(transcript), "\x1b[10;3H\x1b[0m") {
+			t.Fatalf("the saved transcript %q does not leave its cursor on the tenth row of its terminal", transcript)
+		}
+
+		w.restore(t, restoredSession, transcript)
+
+		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
+	})
+}
+
+// The resume chain's reset leaves the panel's screen, but runs on the main
+// screen too when the panel was never drawn. There it must leave the cursor
+// where the rows above left it.
+func TestResumeResetOnTheMainScreenAgainstZmx(t *testing.T) {
+	binary := buildPortalBinary(t)
+	const rows = `printf 'row-1\r\nrow-2\r\n'`
+
+	t.Run("the tail's prompt lands below the rows before it", func(t *testing.T) {
+		w := newRestoreWorld(t, binary)
+		if err := state.ResumePending.Set(w.stateDir, restoredSession); err != nil {
+			t.Fatal(err)
+		}
+
+		w.run(t, restoredSession, rows, binary, "state", "resume-recover", "--session", restoredSession)
+
+		w.awaitPromptBelow(t, restoredSession, []string{"row-1", "row-2"})
+	})
+
+	t.Run("the backstop's prompt lands below the errors of a chain whose binary is gone", func(t *testing.T) {
+		w := newRestoreWorld(t, binary)
+		if err := state.ResumePending.Set(w.stateDir, restoredSession); err != nil {
+			t.Fatal(err)
+		}
+		flag, err := state.ResumePending.Path(w.stateDir, restoredSession)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A short path, so each step's error fits a row.
+		chain := cmd.ParkedResumeChain("/nonexistent-portal", flag, "touch "+hookMark, restoredSession)
+
+		w.run(t, restoredSession, rows, "/bin/sh", "-c", chain)
+
+		shown := screenRows(w.awaitHistory(t, restoredSession, "its prompt", func(history string) bool {
+			return slices.Contains(screenRows(history), promptMark)
+		}))
+		errors := shown[2 : len(shown)-1]
+		if !slices.Equal(shown[:2], []string{"row-1", "row-2"}) || len(errors) != 2 || shown[len(shown)-1] != promptMark {
+			t.Fatalf("session shows %q, want the rows, the draw's and the tail's errors, then the prompt", shown)
+		}
+		for _, line := range errors {
+			if !strings.Contains(line, "No such file or directory") {
+				t.Errorf("row %q, want a chain step's error intact", line)
+			}
+		}
+	})
+}
+
 // A session whose program has switched to the alternate screen, as an editor
 // or a pager does, saves that screen alone. Replayed, it is drawn on the
 // alternate screen and gone when the helper leaves it, and the restored
@@ -238,26 +396,17 @@ func TestHydrateAltScreenTranscriptAgainstZmx(t *testing.T) {
 		mainLine = "on the main screen"
 		altLine  = "on the alternate screen"
 	)
-	program := `printf '` + mainLine + `\n'; printf '\033[?1049h\033[H\033[2J` + altLine + `'; exec sleep 600`
-	if _, err := w.b.Create(t.Context(), "editing", w.work, []string{"/bin/sh", "-c", program}); err != nil {
-		t.Fatalf("create the editing session: %v", err)
-	}
-
-	saved := w.awaitHistory(t, "editing", "its alternate screen", func(history string) bool {
-		return strings.Contains(history, altLine)
-	})
-	if !strings.Contains(saved, altScreenEnter) || strings.Contains(saved, mainLine) {
+	program := `printf '` + mainLine + `\n'; printf '\033[?1049h\033[H\033[2J` + altLine + `'`
+	saved := w.capture(t, "editing", program, altLine)
+	if !strings.Contains(string(saved), altScreenEnter) || strings.Contains(string(saved), mainLine) {
 		t.Fatalf("history = %q, want the alternate screen alone, led by its switch to it", saved)
 	}
 
-	w.restore(t, restoredSession, []byte(saved))
+	w.restore(t, restoredSession, saved)
 	w.awaitHydrated(t, restoredSession)
 	w.awaitLoginShell(t, restoredSession)
 
-	restored := w.awaitHistory(t, restoredSession, "its main screen", func(string) bool { return true })
-	if strings.Contains(restored, altScreenEnter) || strings.Contains(restored, altLine) {
-		t.Errorf("history = %q, want the main screen, the replayed alternate screen left", restored)
-	}
+	w.awaitPromptBelow(t, restoredSession, []string{""})
 	c := zmxtest.Attach(t, w.b, restoredSession)
 	w.awaitClients(t, restoredSession, 1)
 	c.Type(t, "echo usable-$((40+2))\r")

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
@@ -28,17 +29,20 @@ import (
 // entry is their pair: a second one written to a session already on the
 // alternate screen does not nest, so a redraw may re-write it.
 //
-// The postamble saves the cursor before it leaves. zmx's terminal, told to
-// leave an alternate screen it is not on, restores the main screen's saved
-// cursor, home when none was saved, and the prompt would overwrite the
-// transcript from its second line. Each screen keeps a saved cursor of its
-// own, so a transcript ending on the alternate screen still leaves it for the
-// place it entered it from.
+// The reset saves the cursor before it leaves. zmx's terminal, told to leave
+// an alternate screen it is not on, restores the main screen's saved cursor,
+// home when none was saved, and the prompt would land among the rows above.
+// Each screen keeps a saved cursor of its own, so a reset written on the
+// alternate screen still leaves it for the place it entered it from.
 const (
 	hydrateAltScreenEnter = "\x1b[?1049h\x1b[?25l"
-	hydrateResetPreamble  = "\x1b[?25h\x1b[?1049l\x1b[0m"
-	hydrateResetPostamble = "\x1b[?25h\x1b7\x1b[?1049l\x1b[0m\r\n"
+	hydrateResetPreamble  = "\x1b[?25h\x1b7\x1b[?1049l\x1b[0m"
+	hydrateResetPostamble = hydrateResetPreamble + "\r\n"
 	hydrateSettleSleep    = 100 * time.Millisecond
+	// hydrateStateWindow is how much of a transcript's end the replay holds
+	// back to find the screen state zmx closed its capture with: many times
+	// what that state takes.
+	hydrateStateWindow = 16 << 10
 	// hydrateSessionBound bounds the read of the session's creation for its
 	// claim, so the hand-off waits on the backend no longer.
 	hydrateSessionBound = 2 * time.Second
@@ -57,7 +61,9 @@ type hydrateConfig struct {
 	// environment: Session itself, or the helper acts for no session.
 	Current string
 	// File is the session's saved transcript, empty when it saved none.
-	File string
+	// OpenTranscript opens it; unset, it is os.Open.
+	File           string
+	OpenTranscript func(path string) (io.ReadCloser, error)
 
 	Stdout    io.Writer
 	Logger    *slog.Logger
@@ -147,45 +153,112 @@ func sessionNameRefusal(session, current string) error {
 }
 
 // replayTranscript writes the session's saved transcript to its terminal
-// between the reset sequences, then lets the terminal take it in. A session
-// that saved none has nothing replayed. One whose file can't be read is
-// handed on as any other, the cause recorded; its preamble is already
-// written, so the preamble goes out before the open.
+// between the reset sequences, then lets the terminal take it in. The
+// transcript goes without the screen state zmx closed its capture with, so the
+// cursor ends where its last row does and the prompt lands below it, whatever
+// the terminal's height. Only a transcript with something in it is replayed:
+// one that saved none, an empty one and one that can't be read write nothing
+// at all. One failing part way is closed as a whole one is, so the shell
+// inherits nothing its bytes set; its cause is recorded.
 func replayTranscript(cfg hydrateConfig) {
 	if cfg.File == "" {
 		return
 	}
-	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
-	n, took, err := copyTranscript(cfg)
+	open := cfg.OpenTranscript
+	if open == nil {
+		open = func(path string) (io.ReadCloser, error) { return os.Open(path) }
+	}
+	file, err := open(cfg.File)
 	if err != nil {
 		logTranscriptUnreadable(cfg, err)
 		return
 	}
-	_, _ = io.WriteString(cfg.Stdout, hydrateResetPostamble)
-	settle := cfg.Settle
-	if settle == nil {
-		settle = func() { time.Sleep(hydrateSettleSleep) }
-	}
-	settle()
-	cfg.Logger.Info("scrollback replayed", "bytes", n, "took", took)
-}
-
-// copyTranscript streams the file verbatim, reporting how many bytes it
-// wrote and how long the copy took. A copy failing part way leaves what it
-// wrote in place.
-func copyTranscript(cfg hydrateConfig) (int64, time.Duration, error) {
-	sb, err := os.Open(cfg.File)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer func() { _ = sb.Close() }()
+	defer func() { _ = file.Close() }()
 	start := time.Now()
-	n, err := io.Copy(cfg.Stdout, sb)
-	return n, time.Since(start), err
+	out := &replayWriter{w: cfg.Stdout}
+	err = copyTranscriptContent(out, file)
+	took := time.Since(start)
+	if out.started {
+		_, _ = io.WriteString(cfg.Stdout, hydrateResetPostamble)
+		settleReplay(cfg)
+	}
+	switch {
+	case err == nil:
+		cfg.Logger.Info("scrollback replayed", "bytes", out.n, "took", took)
+	case out.started:
+		cfg.Logger.Warn("scrollback replay cut short", "session", cfg.Session, "path", cfg.File, "bytes", out.n, "error", err)
+	default:
+		logTranscriptUnreadable(cfg, err)
+	}
 }
 
-// logTranscriptUnreadable records why the transcript was not replayed: the
-// file was gone, refused, or failed part way.
+func settleReplay(cfg hydrateConfig) {
+	if cfg.Settle != nil {
+		cfg.Settle()
+		return
+	}
+	time.Sleep(hydrateSettleSleep)
+}
+
+// copyTranscriptContent copies the transcript to w without the screen state
+// zmx closed it with, holding back the end that state sits in until the read
+// is done. A read failing part way never reached that end, so what it held
+// back goes out whole.
+func copyTranscriptContent(w io.Writer, r io.Reader) error {
+	held := &heldEnd{w: w}
+	_, err := io.Copy(held, r)
+	end := held.end
+	if err == nil {
+		end = zmx.HistoryContent(end)
+	}
+	if _, writeErr := w.Write(end); err == nil {
+		err = writeErr
+	}
+	return err
+}
+
+// heldEnd passes what is written to it on to w, but for the last
+// hydrateStateWindow bytes, which it holds.
+type heldEnd struct {
+	w   io.Writer
+	end []byte
+}
+
+func (h *heldEnd) Write(p []byte) (int, error) {
+	h.end = append(h.end, p...)
+	if over := len(h.end) - hydrateStateWindow; over > 0 {
+		if _, err := h.w.Write(h.end[:over]); err != nil {
+			return 0, err
+		}
+		h.end = h.end[over:]
+	}
+	return len(p), nil
+}
+
+// replayWriter writes the reset preamble ahead of a transcript's first byte,
+// so a transcript with nothing to replay writes nothing, and counts the bytes
+// replayed.
+type replayWriter struct {
+	w       io.Writer
+	n       int64
+	started bool
+}
+
+func (r *replayWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !r.started {
+		r.started = true
+		_, _ = io.WriteString(r.w, hydrateResetPreamble)
+	}
+	n, err := r.w.Write(p)
+	r.n += int64(n)
+	return n, err
+}
+
+// logTranscriptUnreadable records why no transcript was replayed: the file
+// was gone, refused, or failed before a byte of it was read.
 func logTranscriptUnreadable(cfg hydrateConfig, cause error) {
 	switch {
 	case errors.Is(cause, fs.ErrNotExist):
@@ -293,10 +366,30 @@ func markResumePending(cfg hydrateConfig) (parkedChain, error) {
 // saver would replace once the flag is down. An entry already recording this
 // creation is left as it is. A failure is the helper's to record, never to
 // wait on: the session is handed on regardless.
+//
+// A session whose flag is proved down, as when the helper is run by hand,
+// claims nothing: the rule would judge its entry as any claim's, and could
+// replace it.
 func recordCreation(ctx context.Context, cfg hydrateConfig) {
+	if !stillHydrating(cfg.Session) {
+		cfg.Logger.Debug("session creation not claimed: its hydrating flag is down", "session", cfg.Session)
+		return
+	}
 	if err := claimCreation(ctx, cfg); err != nil {
 		cfg.Logger.Warn("record session creation failed", "session", cfg.Session, "error", err)
 	}
+}
+
+// stillHydrating reports whether the session's hydrating flag is raised, a
+// flag that can't be looked for counting as raised, as the claim rule counts
+// it.
+func stillHydrating(session string) bool {
+	dir, err := state.Dir()
+	if err != nil {
+		return true
+	}
+	raised, err := state.Hydrating.Exists(dir, session)
+	return raised || err != nil
 }
 
 func claimCreation(ctx context.Context, cfg hydrateConfig) error {
@@ -337,7 +430,6 @@ func lowerHydrating(cfg hydrateConfig) {
 // Only a session the mark step returned parks; any other runs the
 // registration's command, whatever mode it resolved to.
 func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, parked *parkedChain) {
-	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	if parked != nil {
 		execResumeChainAndExit(cfg, registration.Command, *parked)
 		return

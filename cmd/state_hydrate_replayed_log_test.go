@@ -12,25 +12,29 @@ import (
 func TestHydrateReplayedLog(t *testing.T) {
 	// NUL, non-UTF8 and escape bytes, so the count is the byte length rather
 	// than a rune count.
-	for name, body := range map[string]string{
-		"a populated transcript": "line1\r\nline2\x00\xff\x1b[31mred\x1b[0m",
-		"an empty transcript":    "",
-		"a 5MB transcript":       string(bytes.Repeat([]byte("A"), 5*1024*1024)),
+	for _, tc := range []struct {
+		name, body string
+		replayed   int
+	}{
+		{name: "a populated transcript", body: "line1\r\nline2\x00\xff\x1b[31mred\x1b[0m", replayed: len("line1\r\nline2\x00\xff\x1b[31mred\x1b[0m")},
+		{name: "an empty transcript", body: "", replayed: 0},
+		{name: "a 5MB transcript", body: string(bytes.Repeat([]byte("A"), 5*1024*1024)), replayed: 5 * 1024 * 1024},
+		{name: "a capture zmx closed with its screen state", body: "row-1\r\nrow-2\x1b[2;6H\x1b[0m", replayed: 12},
 	} {
-		t.Run("it records the bytes a replay of "+name+" wrote", func(t *testing.T) {
+		t.Run("it records the bytes a replay of "+tc.name+" wrote", func(t *testing.T) {
 			w := newHydrateWorld(t)
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 			cfg := w.config(&stubExecShell{})
-			cfg.File, cfg.Logger = transcript(t, body), logger
+			cfg.File, cfg.Logger = transcript(t, tc.body), logger
 
 			runHydrate(t.Context(), cfg)
 
 			rec := sink.Records().Matching("hydrate", "scrollback replayed").Only(t, "the replay's record")
-			if got := rec.IntAttr(t, "bytes"); got != int64(len(body)) {
-				t.Errorf("bytes = %d, want %d", got, len(body))
+			if got := rec.IntAttr(t, "bytes"); got != int64(tc.replayed) {
+				t.Errorf("bytes = %d, want %d", got, tc.replayed)
 			}
-			if info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed"); !strings.Contains(info, fmt.Sprintf("bytes=%d", len(body))) {
-				t.Errorf("INFO %q does not render bytes=%d", info, len(body))
+			if info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed"); !strings.Contains(info, fmt.Sprintf("bytes=%d", tc.replayed)) {
+				t.Errorf("INFO %q does not render bytes=%d", info, tc.replayed)
 			}
 		})
 	}
@@ -77,9 +81,9 @@ func TestHydrateReplayedLog(t *testing.T) {
 
 func TestHydrateFileMissingLog(t *testing.T) {
 	cases := map[string]func(t *testing.T) string{
-		"missing":          func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.bin") },
-		"refused":          func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") },
-		"failing part way": func(t *testing.T) string { return t.TempDir() },
+		"missing":                   func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.bin") },
+		"refused":                   func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") },
+		"failing at its first read": func(t *testing.T) string { return t.TempDir() },
 	}
 	for name, file := range cases {
 		t.Run("a transcript "+name+" records one scrollback missing INFO naming the file, before the exec INFO", func(t *testing.T) {

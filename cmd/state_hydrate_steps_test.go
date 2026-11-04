@@ -176,6 +176,53 @@ func TestHydrate_RecordsTheSessionsCreation(t *testing.T) {
 		}
 	})
 
+	// A helper run by hand, or by a restore that never raised the flag, would be
+	// judged as any claim is, and an entry of this boot replaced.
+	t.Run("with its hydrating flag proved down it claims nothing, with one DEBUG, and hands the session on", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		withFuncSeam(t, &claimRule, func(dir string) sessionindex.Rule {
+			return sessionindex.NewRule(testBoot, func(name string) bool { return state.Flagged(dir, name) })
+		})
+		thisBoot := saved
+		thisBoot.CreatedAt = testBoot.Add(30 * time.Minute)
+		w.seedIndex(t, thisBoot)
+		if _, err := state.Hydrating.Clear(w.stateDir, hydrateSession); err != nil {
+			t.Fatal(err)
+		}
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		exec := &stubExecShell{}
+		cfg := w.config(exec)
+		cfg.Logger = logger
+
+		runHydrate(t.Context(), cfg)
+
+		if got, _ := w.entry(t); got != thisBoot {
+			t.Errorf("entry = %+v, want it untouched: %+v", got, thisBoot)
+		}
+		if n := countLogLines(sink.Body(), "DEBUG", "session creation not claimed: its hydrating flag is down"); n != 1 {
+			t.Errorf("got %d DEBUGs for the skipped claim, want 1: %q", n, sink.Body())
+		}
+		if !exec.called {
+			t.Error("the session was never handed on")
+		}
+	})
+
+	t.Run("a hydrating flag that can't be looked for counts as raised, so it claims", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		flags := filepath.Join(w.stateDir, string(state.Hydrating))
+		if err := os.Chmod(flags, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(flags, 0o700) })
+
+		runHydrate(t.Context(), w.config(&stubExecShell{}))
+
+		if !w.recordsLiveCreation(t) {
+			got, _ := w.entry(t)
+			t.Errorf("entry = %+v, want one recording the live creation", got)
+		}
+	})
+
 	t.Run("an entry already recording the creation is left as it is", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		recorded := saved

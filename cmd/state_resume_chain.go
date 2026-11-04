@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -162,11 +163,18 @@ func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args 
 }
 
 // resolveShell is the shell a session is handed: $SHELL, or else /bin/sh, as
-// zmx picks a fresh session's.
+// zmx picks a fresh session's. A $SHELL naming no path is found on PATH, as
+// zmx's execvpe finds it: the exec it is handed to searches nothing. One PATH
+// doesn't hold is left as named, so its exec fails as zmx's would.
 func resolveShell() string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/sh"
+		return "/bin/sh"
+	}
+	if !strings.Contains(shell, "/") {
+		if found, err := exec.LookPath(shell); err == nil {
+			return found
+		}
 	}
 	return shell
 }

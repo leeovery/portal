@@ -3,11 +3,13 @@ package cmd
 import (
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 )
 
@@ -220,6 +222,47 @@ func TestHandOffToHookOrShell(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The exec a session's shell is handed to searches no PATH, while zmx's
+// execvpe does, so a $SHELL naming no path is found on PATH first.
+func TestHandOffToHookOrShell_FindsABareShellOnPath(t *testing.T) {
+	bin := t.TempDir()
+	shell := filepath.Join(bin, "myshell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+
+	handOff := func(t *testing.T, command string) (string, []string) {
+		t.Helper()
+		var prog string
+		var args []string
+		handOffToHookOrShell(log.Discard(), func(p string, a []string) { prog, args = p, a }, command)
+		return prog, args
+	}
+
+	t.Run("it hands a session with no command the shell PATH finds, still a login shell", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		if prog, args := handOff(t, ""); prog != shell || !slices.Equal(args, []string{"-myshell"}) {
+			t.Errorf("handed %q %q, want %q %q", prog, args, shell, []string{"-myshell"})
+		}
+	})
+
+	t.Run("it follows a command with the shell PATH finds", func(t *testing.T) {
+		t.Setenv("SHELL", "myshell")
+		want := []string{"sh", "-c", "trap : TERM; make dev; exec '" + shell + "' -l"}
+		if _, args := handOff(t, "make dev"); !slices.Equal(args, want) {
+			t.Errorf("handed argv %q, want %q", args, want)
+		}
+	})
+
+	t.Run("it leaves a shell PATH doesn't hold as named, so its exec fails as zmx's would", func(t *testing.T) {
+		t.Setenv("SHELL", "nosuchshell")
+		if prog, _ := handOff(t, ""); prog != "nosuchshell" {
+			t.Errorf("handed %q, want the name left as it was", prog)
+		}
+	})
 }
 
 // wantLoginShell is the argv a session's shell is handed with: run as a login

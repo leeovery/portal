@@ -15,7 +15,7 @@ func TestDisplayCommand(t *testing.T) {
 		}{
 			{nil, ""},
 			{[]string{"sleep", "1000"}, "sleep 1000"},
-			{[]string{"portal", "state", "hydrate", "--file", "/a/b.bin", "--hook-key=x_y.z"}, "portal state hydrate --file /a/b.bin --hook-key=x_y.z"},
+			{[]string{"portal", "state", "hydrate", "--session", "x_y.z", "--file", "/a/b.bin"}, "portal state hydrate --session x_y.z --file /a/b.bin"},
 			{[]string{"sh", "-c", "echo a b"}, "sh -c 'echo a b'"},
 			{[]string{"echo", ""}, "echo ''"},
 			{[]string{"echo", "it's"}, `echo 'it'\''s'`},

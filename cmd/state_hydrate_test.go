@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -179,13 +180,34 @@ func TestHydrate_Replay(t *testing.T) {
 		if !strings.HasSuffix(hydrateResetPostamble, "\r\n") {
 			t.Errorf("postamble %q does not end on CRLF, so the prompt would not land at column 0", hydrateResetPostamble)
 		}
-		saved, left := strings.Index(hydrateResetPostamble, "\x1b7"), strings.Index(hydrateResetPostamble, "\x1b[?1049l")
-		if saved < 0 || saved > left {
-			t.Errorf("postamble %q does not save the cursor before it leaves the alternate screen, so a transcript ending on the main screen sends the prompt home", hydrateResetPostamble)
+	})
+
+	// A reset written on the main screen restores its saved cursor; one saved
+	// first leaves the cursor where it stands.
+	t.Run("each reset saves the cursor before it leaves the alternate screen", func(t *testing.T) {
+		for name, reset := range map[string]string{"preamble": hydrateResetPreamble, "postamble": hydrateResetPostamble} {
+			saved, left := strings.Index(reset, "\x1b7"), strings.Index(reset, "\x1b[?1049l")
+			if saved < 0 || saved > left {
+				t.Errorf("%s %q leaves the alternate screen with no cursor saved first", name, reset)
+			}
 		}
 	})
 
-	t.Run("it streams a large transcript whole", func(t *testing.T) {
+	t.Run("it replays a capture without the screen state zmx closed it with, so the prompt lands below its rows", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		const rows = "line-1\r\n\x1b[1mline-2\x1b[0m\r\n$ ls\r\n$"
+		stdout := new(bytes.Buffer)
+		cfg := w.config(&stubExecShell{})
+		cfg.File, cfg.Stdout = transcript(t, rows+"\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\"), stdout
+
+		runHydrate(t.Context(), cfg)
+
+		if want := hydrateResetPreamble + rows + hydrateResetPostamble; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout.String(), want)
+		}
+	})
+
+	t.Run("it streams a large transcript whole, but for the state closing it", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		body := make([]byte, 5*1024*1024)
 		for i := range body {
@@ -193,7 +215,7 @@ func TestHydrate_Replay(t *testing.T) {
 		}
 		stdout := new(bytes.Buffer)
 		cfg := w.config(&stubExecShell{})
-		cfg.File, cfg.Stdout = transcript(t, string(body)), stdout
+		cfg.File, cfg.Stdout = transcript(t, string(body)+"\x1b[24;120H\x1b[0m"), stdout
 
 		runHydrate(t.Context(), cfg)
 
@@ -205,6 +227,27 @@ func TestHydrate_Replay(t *testing.T) {
 			t.Error("the streamed transcript does not match the file")
 		}
 	})
+
+	for name, body := range map[string]string{"an empty transcript": "", "a capture of a blank screen": "\x1b[1;1H\x1b[0m"} {
+		t.Run("it writes nothing for "+name+", not even the reset sequences", func(t *testing.T) {
+			w := newHydrateWorld(t)
+			stdout := new(bytes.Buffer)
+			settled := false
+			exec := &stubExecShell{}
+			cfg := w.config(exec)
+			cfg.File, cfg.Stdout = transcript(t, body), stdout
+			cfg.Settle = func() { settled = true }
+
+			runHydrate(t.Context(), cfg)
+
+			if stdout.Len() != 0 || settled {
+				t.Errorf("stdout = %q, settled = %v; want nothing written and nothing to settle", stdout.String(), settled)
+			}
+			if !exec.called {
+				t.Error("the session was never handed on")
+			}
+		})
+	}
 
 	t.Run("it replays nothing for a session that saved no transcript", func(t *testing.T) {
 		w := newHydrateWorld(t)
@@ -264,16 +307,15 @@ func (f writerFunc) Write(p []byte) (int, error) {
 
 func TestHydrate_TranscriptUnreadable(t *testing.T) {
 	cases := []struct {
-		name   string
-		file   func(t *testing.T) string
-		warn   string
-		hidden string
+		name string
+		file func(t *testing.T) string
+		warn string
 	}{
 		{name: "missing", file: func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.bin") }, warn: "scrollback file not found"},
-		{name: "unreadable", file: func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") }, warn: "scrollback file unreadable (permission denied)", hidden: "HIDDEN"},
+		{name: "unreadable", file: func(t *testing.T) string { return unreadableTranscript(t, "HIDDEN") }, warn: "scrollback file unreadable (permission denied)"},
 	}
 	for _, tc := range cases {
-		t.Run("a "+tc.name+" transcript writes the preamble alone and hands the session on as any other", func(t *testing.T) {
+		t.Run("a "+tc.name+" transcript writes nothing and hands the session on as any other", func(t *testing.T) {
 			w := newHydrateWorld(t)
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 			stdout := new(bytes.Buffer)
@@ -285,11 +327,8 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 
 			runHydrate(t.Context(), cfg)
 
-			if stdout.String() != hydrateResetPreamble {
-				t.Errorf("stdout = %q, want the preamble alone", stdout.String())
-			}
-			if tc.hidden != "" && strings.Contains(stdout.String(), tc.hidden) {
-				t.Errorf("stdout carries the refused transcript: %q", stdout.String())
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing written", stdout.String())
 			}
 			if want := []string{"sh", "-c", "trap : TERM; echo hi; exec '/bin/zsh' -l"}; !reflect.DeepEqual(exec.args, want) {
 				t.Errorf("exec args = %q, want the eager hook %q", exec.args, want)
@@ -306,7 +345,7 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 		})
 	}
 
-	t.Run("a transcript failing part way leaves what it wrote, with no postamble, and logs the cause", func(t *testing.T) {
+	t.Run("a transcript failing at its first read writes nothing and logs the cause", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 		stdout := new(bytes.Buffer)
@@ -317,8 +356,8 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 
 		runHydrate(t.Context(), cfg)
 
-		if stdout.String() != hydrateResetPreamble {
-			t.Errorf("stdout = %q, want the preamble alone", stdout.String())
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing written", stdout.String())
 		}
 		warn := execLogLine(t, sink.Body(), "WARN", "scrollback file I/O error")
 		if !strings.Contains(warn, "error=") {
@@ -328,7 +367,51 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 			t.Error("the session was never handed on")
 		}
 	})
+
+	// What a part-read set, a pen or the alternate screen among it, must not
+	// reach the shell, and a state that looks like zmx's closing one is no
+	// end the read reached.
+	t.Run("a transcript failing part way is closed and settled as a whole one is, and logged as cut short", func(t *testing.T) {
+		w := newHydrateWorld(t)
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		stdout := new(bytes.Buffer)
+		settled := false
+		exec := &stubExecShell{}
+		cfg := w.config(exec)
+		const read = "row-1\x1b[?1049h\x1b[31mrow-2\x1b[2;6H\x1b[0m"
+		cfg.File, cfg.Stdout, cfg.Logger = "/saved/proj-a1b2.bin", stdout, logger
+		cfg.OpenTranscript = func(string) (io.ReadCloser, error) {
+			return io.NopCloser(io.MultiReader(strings.NewReader(read), failingReader{errors.New("device went away")})), nil
+		}
+		cfg.Settle = func() { settled = true }
+
+		runHydrate(t.Context(), cfg)
+
+		if want := hydrateResetPreamble + read + hydrateResetPostamble; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout.String(), want)
+		}
+		if !settled {
+			t.Error("the part replayed was never let settle")
+		}
+		warn := execLogLine(t, sink.Body(), "WARN", "scrollback replay cut short")
+		for _, attr := range []string{"session=" + hydrateSession, "path=" + cfg.File, "bytes=" + strconv.Itoa(len(read)), "error=device went away"} {
+			if !strings.Contains(warn, attr) {
+				t.Errorf("WARN %q does not carry %s", warn, attr)
+			}
+		}
+		if body := sink.Body(); strings.Contains(body, "scrollback missing") || strings.Contains(body, "scrollback replayed") {
+			t.Errorf("a part-read was recorded as a missing or a whole replay: %q", body)
+		}
+		if !exec.called {
+			t.Error("the session was never handed on")
+		}
+	})
 }
+
+// failingReader fails every read with its error.
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 // The causes arrive as the open and the copy return them, so the record keys
 // off the error they wrap, never its text.
