@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -111,6 +112,11 @@ func TestMain(m *testing.M) {
 	// cleanups unrun; it panics here instead.
 	osExit = func(code int) {
 		panic(fmt.Sprintf("cmd tests: osExit(%d) reached without withOsExitFake", code))
+	}
+	// A test's backend reports pids that are live processes on the
+	// developer's machine, none of them the test's.
+	signalProcess = func(pid int, sig syscall.Signal) error {
+		panic(fmt.Sprintf("cmd tests: signalProcess(%d, %v) reached without withFuncSeam", pid, sig))
 	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed

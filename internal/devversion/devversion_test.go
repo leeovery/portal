@@ -32,3 +32,32 @@ func TestString(t *testing.T) {
 		}
 	})
 }
+
+func TestIs(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		dev     bool
+	}{
+		{devversion.Unidentified, true},
+		{"dev-20261103T231632.195584591Z", true},
+		{"dev-754e31b498e0-20261103T231632.195584591Z", true},
+		{"dev-754e31b498e0-modified-20261103T231632.195584591Z", true},
+		{"0.12.6", false},
+		{"1.4.0", false},
+		{"0.0.0-20261104001632-754e31b498e0", false},
+		{"devel", false},
+		{"", false},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := devversion.Is(tc.version); got != tc.dev {
+				t.Errorf("Is(%q) = %v, want %v", tc.version, got, tc.dev)
+			}
+		})
+	}
+
+	t.Run("it holds for the version this build reports", func(t *testing.T) {
+		if v := devversion.String(); !devversion.Is(v) {
+			t.Errorf("Is(String()) = false for %q", v)
+		}
+	})
+}

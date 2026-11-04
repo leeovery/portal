@@ -327,6 +327,18 @@ func TestBackendAgainstZmx(t *testing.T) {
 		awaitHistory(t, b, "named", "in=named tmux=unset")
 	})
 
+	// zmxtest passes a session nothing of this process's ZMX_DIR, so the
+	// Backend's own run is all that can put one there.
+	t.Run("it marks a session's process with SessionEntry and ReachEnv, though the caller's environment names no ZMX_DIR", func(t *testing.T) {
+		b := zmxtest.New(t)
+
+		mustCreate(t, b, "marked", t.TempDir(), "sh", "-c", `env | grep '^ZMX_'; sleep 1000`)
+
+		for _, entry := range append(b.ReachEnv(), zmx.SessionEntry("marked")) {
+			awaitHistory(t, b, "marked", entry)
+		}
+	})
+
 	t.Run("it refuses to create over a live session, naming it, and leaves it untouched", func(t *testing.T) {
 		b := zmxtest.New(t)
 		mustCreate(t, b, "taken", t.TempDir(), "sleep", "1000")

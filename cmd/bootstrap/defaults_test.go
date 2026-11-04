@@ -76,8 +76,8 @@ func TestNewWithDefaults_RunCallableSmokeTest(t *testing.T) {
 
 type stubOrphanSweeper struct{}
 
-func (stubOrphanSweeper) SweepOrphanDaemons() error { return nil }
+func (stubOrphanSweeper) SweepOrphanDaemons(context.Context) error { return nil }
 
 type stubSaver struct{}
 
-func (stubSaver) EnsureSaver() error { return nil }
+func (stubSaver) EnsureSaver(context.Context) error { return nil }

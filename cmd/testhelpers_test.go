@@ -70,6 +70,14 @@ func withListDeps(t *testing.T, deps ListDeps) {
 	t.Cleanup(func() { listDeps = nil })
 }
 
+// withUninstallDeps installs deps as the package-level uninstall seam for the
+// rest of the test and registers the restore in the same breath.
+func withUninstallDeps(t *testing.T, deps UninstallDeps) {
+	t.Helper()
+	uninstallDeps = &deps
+	t.Cleanup(func() { uninstallDeps = nil })
+}
+
 // requireStagedBackend refuses a nil Backend at the staging site, where it
 // would otherwise surface later as a nil-interface panic in a command body.
 func requireStagedBackend(t harnesstest.TestingT, deps BackendDeps) {

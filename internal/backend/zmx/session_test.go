@@ -720,6 +720,15 @@ func TestDirFor(t *testing.T) {
 	}
 }
 
+func TestSessionEntry(t *testing.T) {
+	if got, want := zmx.SessionEntry("_portal-saver"), "ZMX_SESSION=_portal-saver"; got != want {
+		t.Errorf("SessionEntry = %q, want %q", got, want)
+	}
+	if got := zmx.CurrentFor([]string{zmx.SessionEntry("work")}); got != "work" {
+		t.Errorf("CurrentFor(SessionEntry(work)) = %q, want the session it names", got)
+	}
+}
+
 func TestReachEnv(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ZMX_DIR=/elsewhere", "ZMX_SESSION_PREFIX=work-"}

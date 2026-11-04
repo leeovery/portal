@@ -36,9 +36,9 @@ const (
 	// in flight and the final flush have before the daemon exits without
 	// them: a poll held on commit.lock must not keep a successor meeting a
 	// live daemon.pid. A zmx kill grants far less, sending its uncatchable
-	// signal about 0.5 s after the SIGHUP, so Portal's own stops (S10)
-	// SIGTERM the daemon and wait longer than this for it to exit, rather
-	// than rely on a kill of _portal-saver.
+	// signal about 0.5 s after the SIGHUP, so Portal's own stops
+	// SIGTERM the daemon and wait saverhost.TermWait, longer than this, for
+	// it to exit, rather than rely on a kill of _portal-saver.
 	shutdownBound = 6 * time.Second
 	// flushNaming is the end of the bound the final flush keeps for naming
 	// what it wrote: it stops asking for histories that long before.
