@@ -7,20 +7,20 @@ import (
 	"github.com/leeovery/portal/internal/saverhost"
 )
 
-func TestNewSaverStopper(t *testing.T) {
+func TestNewSaverHost(t *testing.T) {
 	t.Run("it binds a zmx directory's saver", func(t *testing.T) {
 		b, err := bindZmxAt(zmxProgram, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := newSaverStopper(b); err != nil {
-			t.Errorf("newSaverStopper = %v, want the saver of %s", err, b.Dir())
+		if _, err := newSaverHost(b, t.TempDir()); err != nil {
+			t.Errorf("newSaverHost = %v, want the saver of %s", err, b.Dir())
 		}
 	})
 
 	t.Run("it refuses a backend whose reach names no directory", func(t *testing.T) {
-		if s, err := newSaverStopper(backendtest.New()); err == nil {
-			t.Errorf("newSaverStopper = %v, want a refusal", s)
+		if h, err := newSaverHost(backendtest.New(), t.TempDir()); err == nil {
+			t.Errorf("newSaverHost = %v, want a refusal", h)
 		}
 	})
 }

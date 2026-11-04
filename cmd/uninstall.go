@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
 	"github.com/spf13/cobra"
 )
@@ -17,10 +18,9 @@ type UninstallDeps struct {
 	Saver saverStopper
 }
 
-// saverStopper reads the saver's daemon, and stops the one it read.
+// saverStopper stops the saver, reporting whether there was one.
 type saverStopper interface {
-	SaverPID(ctx context.Context) (pid int, present bool, err error)
-	Stop(ctx context.Context, pid int) error
+	Stop(ctx context.Context) (bool, error)
 }
 
 func uninstallStopper() (saverStopper, error) {
@@ -31,12 +31,17 @@ func uninstallStopper() (saverStopper, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newSaverStopper(b)
+	dir, err := state.Dir()
+	if err != nil {
+		return nil, err
+	}
+	return newSaverHost(b, dir)
 }
 
 // Uninstall stops the saver and nothing more: it keeps the bootstrapped
-// latch, so the next Portal command, finding it current, brings the saver
-// back, and it touches no state or config file and starts nothing.
+// latch, touches no state or config file but saver.lock, which it holds for
+// the stop, and starts nothing. The next Portal command, finding no saver,
+// runs the full bootstrap, which brings it back.
 var uninstallCmd = &cobra.Command{
 	Use:           "uninstall",
 	Short:         "Stop Portal's save daemon; leaves saved sessions and config",
@@ -53,18 +58,13 @@ var uninstallCmd = &cobra.Command{
 	},
 }
 
-// stopSaver stops the saver's daemon, the one pid it reads, and reports
-// whether there was one.
+// stopSaver stops the saver, and reports whether there was one.
 func stopSaver(ctx context.Context) (bool, error) {
 	stopper, err := uninstallStopper()
 	if err != nil {
 		return false, err
 	}
-	pid, present, err := stopper.SaverPID(ctx)
-	if err != nil || !present {
-		return false, err
-	}
-	return true, stopper.Stop(ctx, pid)
+	return stopper.Stop(ctx)
 }
 
 // uninstallReport says what uninstall did, where the saved sessions and

@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
-	"github.com/leeovery/portal/internal/devversion"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
@@ -24,12 +24,11 @@ import (
 const ReadyWait = 10 * time.Second
 
 // ErrNotReady is a saver whose daemon did not come up: its session ended, or
-// within ReadyWait its daemon held no lock or recorded no version wanted.
+// within ReadyWait its daemon held no lock or recorded another version.
 var ErrNotReady = errors.New("the saver's daemon did not come up")
 
 // Reasons a live saver is replaced.
 const (
-	reasonDev     = "dev"
 	reasonVersion = "version"
 	reasonUnknown = "unknown"
 )
@@ -39,141 +38,93 @@ type Daemon struct {
 	// Exe is the absolute path of the portal binary to run, so the saver
 	// never runs whichever portal PATH finds.
 	Exe string
-	// Version is Exe's version. EnsureSaver keeps a live saver only while its
-	// daemon records this version, a dev version keeping none, and waits for
-	// a daemon it starts to record it.
+	// Version is Exe's version, a dev build's naming the build. A live saver
+	// is kept only while its daemon records this version, and a daemon
+	// started is up only once it records it.
 	Version string
-	// StateDir is the state directory the daemon records daemon.pid and
-	// daemon.version in, and the session's working directory.
-	StateDir string
 }
 
-// SaverStopper stops the saver's daemon pid, read as the saver session's
-// process, as a Stopper does.
-type SaverStopper interface {
-	Stop(ctx context.Context, pid int) error
-}
-
-// EnsurerConfig is what an Ensurer works over.
-type EnsurerConfig struct {
-	// Backend creates and reads the saver session.
-	Backend backend.Backend
-	// Stopper stops a saver EnsureSaver replaces.
-	Stopper SaverStopper
-	// Daemon is the daemon the saver runs.
-	Daemon Daemon
-	// ReadyWait bounds the wait for a new daemon to come up, and Poll spaces
-	// its reads; zero is the default.
-	ReadyWait, Poll time.Duration
-}
-
-// Ensurer keeps the saver running as one Daemon.
+// Ensurer is the Host's ensure bound to one Daemon, as the bootstrap asks for
+// it.
 type Ensurer struct {
-	backend         backend.Backend
-	stopper         SaverStopper
-	daemon          Daemon
-	readyWait, poll time.Duration
+	host   *Host
+	daemon Daemon
 }
 
-// NewEnsurer binds an Ensurer to cfg, which it refuses without a backend, a
-// stopper, an absolute Exe, a Version or a StateDir.
-func NewEnsurer(cfg EnsurerConfig) (*Ensurer, error) {
-	switch d := cfg.Daemon; {
-	case cfg.Backend == nil:
-		return nil, errors.New("saverhost: no backend")
-	case cfg.Stopper == nil:
-		return nil, errors.New("saverhost: no stopper")
+// Ensurer binds the Host to d, which it refuses without an absolute Exe or a
+// Version.
+func (h *Host) Ensurer(d Daemon) (*Ensurer, error) {
+	switch {
 	case !filepath.IsAbs(d.Exe):
 		return nil, fmt.Errorf("saverhost: the daemon's executable %q is no absolute path", d.Exe)
 	case d.Version == "":
 		return nil, errors.New("saverhost: no version for the daemon")
-	case d.StateDir == "":
-		return nil, errors.New("saverhost: no state directory for the daemon")
 	}
-	e := &Ensurer{backend: cfg.Backend, stopper: cfg.Stopper, daemon: cfg.Daemon, readyWait: cfg.ReadyWait, poll: cfg.Poll}
-	if e.readyWait == 0 {
-		e.readyWait = ReadyWait
-	}
-	if e.poll == 0 {
-		e.poll = pollEvery
-	}
-	return e, nil
+	return &Ensurer{host: h, daemon: d}, nil
 }
 
-// EnsureSaver, the cold bootstrap's, keeps a live saver whose daemon records
-// the Daemon's version, stopping any other, then creates the saver where
-// there is none and waits for its daemon to hold the lock and record the
-// version. A saver another process creates first, or puts in place of one
-// being stopped, counts once its daemon does the same. A saver that can't be
-// read, can't be stopped or doesn't come up is an error, never a wait past
-// its bounds.
+// EnsureSaver ensures the saver runs the Ensurer's Daemon, as the Host's
+// ensure does.
 func (e *Ensurer) EnsureSaver(ctx context.Context) error {
-	pid, present, err := saverPID(ctx, e.backend)
+	return e.host.ensure(ctx, e.daemon)
+}
+
+// ensure keeps a live saver whose daemon records d's version, stopping any
+// other, then creates the saver where there is none and waits for its daemon
+// to hold the lock and record the version. It holds saver.lock throughout,
+// creating the state directory for it. A saver another process creates first
+// counts once its daemon does the same. A saver that can't be read, can't be
+// stopped or doesn't come up is an error, never a wait past its bounds.
+func (h *Host) ensure(ctx context.Context, d Daemon) error {
+	if err := os.MkdirAll(h.stateDir, 0o700); err != nil {
+		return fmt.Errorf("create the state directory: %w", err)
+	}
+	release, err := h.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	pid, present, err := h.SaverPID(ctx)
 	if err != nil {
 		return fmt.Errorf("read the saver: %w", err)
 	}
 	if present {
-		reason := e.replacing(pid)
+		reason := h.replacing(pid, d.Version)
 		if reason == "" {
 			logger.Info("daemon kept", "target_pid", pid)
 			return nil
 		}
 		logger.Info("recycle", "target_pid", pid, "reason", reason)
-		if err := e.stopper.Stop(ctx, pid); err != nil && !errors.Is(err, ErrReplaced) {
+		if err := h.stop(ctx, pid); err != nil {
 			return fmt.Errorf("recycle the saver: %w", err)
 		}
 	}
-	return e.start(ctx, func(r readiness) bool { return r.heldAt(e.daemon.Version) })
-}
-
-// EnsureRunning, the warm path's, creates the saver only when there is none,
-// and waits for its daemon to hold the lock. It judges no version: a live
-// saver is kept whatever it runs, so a dev build doesn't replace the saver
-// on every command.
-func (e *Ensurer) EnsureRunning(ctx context.Context) error {
-	_, present, err := saverPID(ctx, e.backend)
-	switch {
-	case err != nil:
-		return fmt.Errorf("read the saver: %w", err)
-	case present:
-		return nil
+	if err := h.create(ctx, d.Exe); err != nil {
+		return err
 	}
-	return e.start(ctx, readiness.held)
+	return h.awaitReady(ctx, d.Version)
 }
 
 // replacing is why the live saver running pid is replaced, or "" when it is
-// kept: its daemon records this version as the lock's holder. A dev build
-// keeps none, its version naming no one build for sure.
-func (e *Ensurer) replacing(pid int) string {
-	if devversion.Is(e.daemon.Version) {
-		return reasonDev
-	}
-	holder, err := state.ReadPIDFile(e.daemon.StateDir)
+// kept: its daemon records version as the lock's holder.
+func (h *Host) replacing(pid int, version string) string {
+	holder, err := state.ReadPIDFile(h.stateDir)
 	if err != nil || holder != pid {
 		return reasonUnknown
 	}
-	switch version, err := state.ReadVersionFile(e.daemon.StateDir); {
+	switch recorded, err := state.ReadVersionFile(h.stateDir); {
 	case err != nil:
 		return reasonUnknown
-	case version != e.daemon.Version:
+	case recorded != version:
 		return reasonVersion
 	}
 	return ""
 }
 
-// start creates the saver session and waits until ready finds its daemon up.
-func (e *Ensurer) start(ctx context.Context, ready func(readiness) bool) error {
-	if err := e.create(ctx); err != nil {
-		return err
-	}
-	return e.awaitReady(ctx, ready)
-}
-
-// create creates the saver session. A name another process created first
-// counts as made.
-func (e *Ensurer) create(ctx context.Context) error {
-	command := []string{e.daemon.Exe, "state", "daemon"}
-	session, err := e.backend.Create(ctx, saver.SessionName, e.daemon.StateDir, command)
+// create creates the saver session running `exe state daemon`. A name another
+// process created first counts as made.
+func (h *Host) create(ctx context.Context, exe string) error {
+	session, err := h.backend.Create(ctx, saver.SessionName, h.stateDir, []string{exe, "state", "daemon"})
 	switch {
 	case errors.Is(err, backend.ErrSessionExists):
 		logger.Debug("session created elsewhere", "error", err)
@@ -185,18 +136,20 @@ func (e *Ensurer) create(ctx context.Context) error {
 	return nil
 }
 
-// awaitReady waits up to the ReadyWait for ready to find the saver's daemon
-// up. A session that ends first, its daemon refusing to run, fails at once.
-func (e *Ensurer) awaitReady(ctx context.Context, ready func(readiness) bool) error {
+// awaitReady waits up to ReadyWait for the saver session's process to hold
+// the daemon's lock, daemon.pid naming it, and to record version: the daemon
+// records its version just after its pid. A session that ends first, its
+// daemon refusing to run, fails at once.
+func (h *Host) awaitReady(ctx context.Context, version string) error {
 	start := time.Now()
-	deadline := time.NewTimer(e.readyWait)
+	deadline := time.NewTimer(h.readyWait)
 	defer deadline.Stop()
-	tick := time.NewTicker(e.poll)
+	tick := time.NewTicker(h.poll)
 	defer tick.Stop()
 	for {
-		r := e.readiness(ctx)
+		r := h.readiness(ctx)
 		switch {
-		case ready(r):
+		case r.ready(version):
 			logger.Info("daemon ready", "target_pid", r.session, log.Took(start))
 			return nil
 		case r.ended():
@@ -206,7 +159,7 @@ func (e *Ensurer) awaitReady(ctx context.Context, ready func(readiness) bool) er
 		case <-ctx.Done():
 			return fmt.Errorf("wait for the saver's daemon: %w", context.Cause(ctx))
 		case <-deadline.C:
-			return fmt.Errorf("%w within %s: %s", ErrNotReady, e.readyWait, r)
+			return fmt.Errorf("%w within %s: %s", ErrNotReady, h.readyWait, r)
 		case <-tick.C:
 		}
 	}
@@ -225,24 +178,19 @@ type readiness struct {
 	versionErr error
 }
 
-func (e *Ensurer) readiness(ctx context.Context) readiness {
+func (h *Host) readiness(ctx context.Context) readiness {
 	var r readiness
-	r.session, r.present, r.sessionErr = saverPID(ctx, e.backend)
-	r.holder, r.holderErr = state.ReadPIDFile(e.daemon.StateDir)
-	r.version, r.versionErr = state.ReadVersionFile(e.daemon.StateDir)
+	r.session, r.present, r.sessionErr = h.SaverPID(ctx)
+	r.holder, r.holderErr = state.ReadPIDFile(h.stateDir)
+	r.version, r.versionErr = state.ReadVersionFile(h.stateDir)
 	return r
 }
 
-// held reports whether the saver session's process holds the daemon's lock,
-// daemon.pid naming it.
-func (r readiness) held() bool {
-	return r.present && r.holderErr == nil && r.holder == r.session
-}
-
-// heldAt is held, with daemon.version holding version: the daemon records
-// its version just after its pid.
-func (r readiness) heldAt(version string) bool {
-	return r.held() && r.versionErr == nil && r.version == version
+// ready reports whether the saver session's process holds the daemon's lock,
+// daemon.pid naming it, and daemon.version holds version.
+func (r readiness) ready(version string) bool {
+	return r.present && r.holderErr == nil && r.holder == r.session &&
+		r.versionErr == nil && r.version == version
 }
 
 func (r readiness) ended() bool {

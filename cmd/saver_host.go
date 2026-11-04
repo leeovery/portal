@@ -14,18 +14,19 @@ import (
 // are no processes of the test's.
 var signalProcess = syscall.Kill
 
-// newSaverStopper stops b's saver, proving its daemon by the marks of b's
-// saver session and signalling through signalProcess. It refuses a b whose
-// reach names no directory, by whose saver session's name alone a saver in
-// any directory would be proved.
-func newSaverStopper(b backend.Backend) (*saverhost.Stopper, error) {
+// newSaverHost runs b's saver's lifecycle over the state directory stateDir,
+// proving its daemon by the marks of b's saver session and signalling
+// through signalProcess. It refuses a b whose reach names no directory, by
+// whose saver session's name alone a saver in any directory would be proved.
+func newSaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
 	marks, err := zmx.SessionMarks(saver.SessionName, b.ReachEnv())
 	if err != nil {
 		return nil, err
 	}
-	return saverhost.NewStopper(saverhost.Config{
-		Backend: b,
-		Marks:   marks,
-		Signal:  func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
+	return saverhost.NewHost(saverhost.Config{
+		Backend:  b,
+		StateDir: stateDir,
+		Marks:    marks,
+		Signal:   func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
 	})
 }

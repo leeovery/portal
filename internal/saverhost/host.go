@@ -1,14 +1,16 @@
 // Package saverhost runs the saver's lifecycle: `portal state daemon` in the
 // _portal-saver session. It brings the saver up as this binary, replacing one
-// running another version, and stops it. It signals a process only once it has
-// proved it, as each signal is sent, the saver's daemon of this backend's
-// sessions; a proof that fails or can't be read sends nothing more.
+// running another version, and stops it, one run at a time under saver.lock.
+// It signals a process only once it has proved it, as each signal is sent,
+// the saver's daemon of this backend's sessions; a proof that fails or can't
+// be read sends nothing more.
 package saverhost
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"syscall"
 	"time"
@@ -39,15 +41,17 @@ const (
 var (
 	// ErrNoProcess is a saver session that answers naming no process.
 	ErrNoProcess = errors.New("the saver session names no process")
-	// ErrReplaced is a stop of a pid the saver session no longer runs:
-	// another process replaced the saver since the pid was read.
+	// ErrReplaced is a stop of a pid the saver session no longer runs.
 	ErrReplaced = errors.New("the saver session runs another process now")
 )
 
-// Config is what a Stopper works over.
+// Config is what a Host works over.
 type Config struct {
 	// Backend holds the saver session.
 	Backend backend.Backend
+	// StateDir is the state directory the saver's daemon records itself in,
+	// the saver session's working directory, and the home of saver.lock.
+	StateDir string
 	// Marks are the entries, KEY=value, that the environment of every process
 	// the backend's saver session runs carries, and that no other process's
 	// does: one naming the session, and those saying where it is. On zmx they
@@ -64,27 +68,36 @@ type Config struct {
 	Args     func(pid int) (proctable.Args, error)
 	Running  func(pid int) bool
 
-	// TermWait and KillWait bound the waits for the daemon to exit after
-	// each signal, and Poll spaces their reads; zero is the default.
-	TermWait, KillWait, Poll time.Duration
+	// LockWait, TermWait, KillWait and ReadyWait bound the wait for saver.lock,
+	// for the daemon to exit after each signal, and for a new daemon to come
+	// up, and Poll spaces their reads; zero is the default.
+	LockWait, TermWait, KillWait, ReadyWait, Poll time.Duration
 }
 
-// Stopper stops the saver, and proves which process is its daemon.
-type Stopper struct {
-	backend            backend.Backend
-	proof              proof
-	signal             func(pid int, sig syscall.Signal) error
-	running            func(pid int) bool
-	termWait, killWait time.Duration
-	poll               time.Duration
+// Host runs the saver's lifecycle over one backend and state directory: its
+// stop, an Ensurer's bringing it up, and the proof of which process is its
+// daemon.
+type Host struct {
+	backend   backend.Backend
+	stateDir  string
+	proof     proof
+	signal    func(pid int, sig syscall.Signal) error
+	running   func(pid int) bool
+	lockWait  time.Duration
+	termWait  time.Duration
+	killWait  time.Duration
+	readyWait time.Duration
+	poll      time.Duration
 }
 
-// NewStopper binds a Stopper to cfg. It refuses a Config without a backend,
-// a signal, or marks naming the saver session and where it is.
-func NewStopper(cfg Config) (*Stopper, error) {
+// NewHost binds a Host to cfg. It refuses a Config without a backend, a state
+// directory, a signal, or marks naming the saver session and where it is.
+func NewHost(cfg Config) (*Host, error) {
 	switch {
 	case cfg.Backend == nil:
 		return nil, errors.New("saverhost: no backend")
+	case cfg.StateDir == "":
+		return nil, errors.New("saverhost: no state directory")
 	case cfg.Signal == nil:
 		return nil, errors.New("saverhost: no way to signal the daemon")
 	}
@@ -92,14 +105,17 @@ func NewStopper(cfg Config) (*Stopper, error) {
 		return nil, fmt.Errorf("saverhost: %w", err)
 	}
 	cfg = cfg.withDefaults()
-	return &Stopper{
-		backend:  cfg.Backend,
-		proof:    proof{marks: cfg.Marks, identify: cfg.Identify, args: cfg.Args},
-		signal:   cfg.Signal,
-		running:  cfg.Running,
-		termWait: cfg.TermWait,
-		killWait: cfg.KillWait,
-		poll:     cfg.Poll,
+	return &Host{
+		backend:   cfg.Backend,
+		stateDir:  cfg.StateDir,
+		proof:     proof{marks: cfg.Marks, running: cfg.Running, identify: cfg.Identify, args: cfg.Args},
+		signal:    cfg.Signal,
+		running:   cfg.Running,
+		lockWait:  cfg.LockWait,
+		termWait:  cfg.TermWait,
+		killWait:  cfg.KillWait,
+		readyWait: cfg.ReadyWait,
+		poll:      cfg.Poll,
 	}, nil
 }
 
@@ -115,14 +131,16 @@ func (c Config) withDefaults() Config {
 	if c.Running == nil {
 		c.Running = running
 	}
-	if c.TermWait == 0 {
-		c.TermWait = TermWait
-	}
-	if c.KillWait == 0 {
-		c.KillWait = killWait
-	}
-	if c.Poll == 0 {
-		c.Poll = pollEvery
+	for _, d := range []struct {
+		bound *time.Duration
+		def   time.Duration
+	}{
+		{&c.LockWait, LockWait}, {&c.TermWait, TermWait}, {&c.KillWait, killWait},
+		{&c.ReadyWait, ReadyWait}, {&c.Poll, pollEvery},
+	} {
+		if *d.bound == 0 {
+			*d.bound = d.def
+		}
 	}
 	return c
 }
@@ -138,21 +156,23 @@ func running(pid int) bool {
 	return state.IsProcessAlive(pid)
 }
 
-// Prove proves pid the saver's daemon of the Stopper's backend, read as it is
+// Present reports whether the saver session is there, whatever it runs. A
+// session the backend can tell neither live nor gone is its ErrTimeout.
+func (h *Host) Present(ctx context.Context) (bool, error) {
+	return h.backend.Exists(ctx, saver.SessionName)
+}
+
+// Prove proves pid the saver's daemon of the Host's backend, read as it is
 // called. Its error wraps ErrGone, ErrNotSaverDaemon or ErrUnreadable.
-func (s *Stopper) Prove(pid int) error {
-	return s.proof.prove(pid)
+func (h *Host) Prove(pid int) error {
+	return h.proof.prove(pid)
 }
 
 // SaverPID is the process the saver session runs, and whether there is a saver
 // session. A session that doesn't answer, or answers naming no process, is an
 // error: nothing is known of its process.
-func (s *Stopper) SaverPID(ctx context.Context) (pid int, present bool, err error) {
-	return saverPID(ctx, s.backend)
-}
-
-func saverPID(ctx context.Context, b backend.Backend) (int, bool, error) {
-	session, err := b.Session(ctx, saver.SessionName)
+func (h *Host) SaverPID(ctx context.Context) (pid int, present bool, err error) {
+	session, err := h.backend.Session(ctx, saver.SessionName)
 	switch {
 	case errors.Is(err, backend.ErrNoSuchSession):
 		return 0, false, nil
@@ -164,8 +184,40 @@ func saverPID(ctx context.Context, b backend.Backend) (int, bool, error) {
 	return session.PID, true, nil
 }
 
-// Stop stops the saver's daemon pid, which the caller read as the saver
-// session's process, then kills the session. It sends nothing to this
+// Stop stops the saver, holding saver.lock throughout, and reports whether
+// there was one: it reads the saver session's process under the lock and
+// stops it as stop does. With no state directory, so no lock to hold, only
+// the absence of a saver is an answer.
+func (h *Host) Stop(ctx context.Context) (bool, error) {
+	release, err := h.lock(ctx)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, h.absent(ctx, err)
+	}
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	pid, present, err := h.SaverPID(ctx)
+	if err != nil || !present {
+		return false, err
+	}
+	return true, h.stop(ctx, pid)
+}
+
+// absent is nil when there is no saver, and otherwise why the stop of one
+// can't be held under saver.lock.
+func (h *Host) absent(ctx context.Context, lockErr error) error {
+	switch present, err := h.Present(ctx); {
+	case err != nil:
+		return err
+	case present:
+		return fmt.Errorf("the saver is running, but its stop can't be held under saver.lock: %w", lockErr)
+	}
+	return nil
+}
+
+// stop stops the saver's daemon pid, read as the saver session's process, then
+// kills the session. Its caller holds saver.lock. It sends nothing to this
 // process, or to a pid the session no longer runs (ErrReplaced). It proves
 // pid the daemon and sends it SIGTERM, then waits TermWait for it to exit;
 // past that it proves it again and sends SIGKILL. A pid a proof finds gone
@@ -173,25 +225,25 @@ func saverPID(ctx context.Context, b backend.Backend) (int, bool, error) {
 // exited does it kill the session, which zmx ends with its process in any
 // case. A proof that fails or can't be read fails the stop, sending nothing
 // more and killing no session.
-func (s *Stopper) Stop(ctx context.Context, pid int) error {
-	if err := s.stillSaver(ctx, pid); err != nil {
+func (h *Host) stop(ctx context.Context, pid int) error {
+	if err := h.stillSaver(ctx, pid); err != nil {
 		return err
 	}
 	start := time.Now()
-	if err := s.end(ctx, pid); err != nil {
+	if err := h.end(ctx, pid); err != nil {
 		return err
 	}
 	logger.Info("daemon exited", "target_pid", pid, log.Took(start))
-	return s.killSession(ctx, pid)
+	return h.killSession(ctx, pid)
 }
 
 // stillSaver refuses pid when it is this process, or when the saver session
 // runs another. A session gone since pid was read leaves pid to its proof.
-func (s *Stopper) stillSaver(ctx context.Context, pid int) error {
+func (h *Host) stillSaver(ctx context.Context, pid int) error {
 	if pid == os.Getpid() {
 		return fmt.Errorf("pid %d is this process", pid)
 	}
-	running, present, err := s.SaverPID(ctx)
+	running, present, err := h.SaverPID(ctx)
 	switch {
 	case err != nil:
 		return err
@@ -204,19 +256,19 @@ func (s *Stopper) stillSaver(ctx context.Context, pid int) error {
 // end ends the daemon pid: SIGTERM, then SIGKILL once TermWait has passed,
 // each sent only on a proof read as it is sent, and then waits for it to
 // finish exiting.
-func (s *Stopper) end(ctx context.Context, pid int) error {
-	sent, err := s.signalProved(pid, syscall.SIGTERM,
+func (h *Host) end(ctx context.Context, pid int) error {
+	sent, err := h.signalProved(pid, syscall.SIGTERM,
 		fmt.Sprintf("pid %d isn't confirmed as the save daemon, so nothing was sent to it", pid))
 	if err != nil {
 		return err
 	}
 	if sent {
 		logger.Info("stop started", "target_pid", pid)
-		if exited, err := s.awaitExit(ctx, pid, s.termWait); exited || err != nil {
+		if exited, err := h.awaitExit(ctx, pid, h.termWait); exited || err != nil {
 			return err
 		}
-		sent, err = s.signalProved(pid, syscall.SIGKILL,
-			fmt.Sprintf("pid %d, sent SIGTERM, still ran %s later and isn't confirmed as the save daemon any more, so it wasn't sent SIGKILL", pid, s.termWait))
+		sent, err = h.signalProved(pid, syscall.SIGKILL,
+			fmt.Sprintf("pid %d, sent SIGTERM, still ran %s later and isn't confirmed as the save daemon any more, so it wasn't sent SIGKILL", pid, h.termWait))
 		if err != nil {
 			return err
 		}
@@ -224,21 +276,21 @@ func (s *Stopper) end(ctx context.Context, pid int) error {
 			logger.Info("stop escalated", "target_pid", pid, "reason", "term-timeout")
 		}
 	}
-	return s.AwaitExit(ctx, pid)
+	return h.AwaitExit(ctx, pid)
 }
 
 // signalProved sends sig to pid once proved the saver's daemon, and reports
 // whether it sent it: a daemon found gone is sent nothing. A pid it can't
 // prove is sent nothing, and fails as refused says.
-func (s *Stopper) signalProved(pid int, sig syscall.Signal, refused string) (bool, error) {
-	switch err := s.proof.prove(pid); {
+func (h *Host) signalProved(pid int, sig syscall.Signal, refused string) (bool, error) {
+	switch err := h.proof.prove(pid); {
 	case errors.Is(err, ErrGone):
 		return false, nil
 	case err != nil:
 		logger.Warn("stop refused", "target_pid", pid, "error", err)
 		return false, fmt.Errorf("%s: %w", refused, err)
 	}
-	switch err := s.signal(pid, sig); {
+	switch err := h.signal(pid, sig); {
 	case errors.Is(err, syscall.ESRCH):
 		return false, nil
 	case err != nil:
@@ -250,52 +302,52 @@ func (s *Stopper) signalProved(pid int, sig syscall.Signal, refused string) (boo
 // AwaitExit waits up to the kill bound for pid, sent SIGKILL or found gone,
 // to finish exiting, and fails if it hasn't: a process found gone may still
 // be exiting, holding daemon.lock.
-func (s *Stopper) AwaitExit(ctx context.Context, pid int) error {
-	exited, err := s.awaitExit(ctx, pid, s.killWait)
+func (h *Host) AwaitExit(ctx context.Context, pid int) error {
+	exited, err := h.awaitExit(ctx, pid, h.killWait)
 	if err == nil && !exited {
-		err = fmt.Errorf("pid %d still hadn't finished exiting %s later", pid, s.killWait)
+		err = fmt.Errorf("pid %d still hadn't finished exiting %s later", pid, h.killWait)
 	}
 	return err
 }
 
 // awaitExit waits up to bound for pid to finish exiting, and reports whether
 // it did. It fails only when ctx ends first.
-func (s *Stopper) awaitExit(ctx context.Context, pid int, bound time.Duration) (bool, error) {
+func (h *Host) awaitExit(ctx context.Context, pid int, bound time.Duration) (bool, error) {
 	deadline := time.NewTimer(bound)
 	defer deadline.Stop()
-	tick := time.NewTicker(s.poll)
+	tick := time.NewTicker(h.poll)
 	defer tick.Stop()
 	for {
-		if !s.running(pid) {
+		if !h.running(pid) {
 			return true, nil
 		}
 		select {
 		case <-ctx.Done():
 			return false, fmt.Errorf("wait for pid %d to exit: %w", pid, context.Cause(ctx))
 		case <-deadline.C:
-			return !s.running(pid), nil
+			return !h.running(pid), nil
 		case <-tick.C:
 		}
 	}
 }
 
 // killSession kills the saver session once its daemon pid has exited,
-// leaving one that runs another process, made since. zmx tears the session
-// down as its process exits, so a kill that fails while it does, the session
-// gone after, has nothing left to do.
-func (s *Stopper) killSession(ctx context.Context, pid int) error {
-	session, err := s.backend.Session(ctx, saver.SessionName)
+// leaving one that runs another process. zmx tears the session down as its
+// process exits, so a kill that fails while it does, the session gone after,
+// has nothing left to do.
+func (h *Host) killSession(ctx context.Context, pid int) error {
+	session, err := h.backend.Session(ctx, saver.SessionName)
 	switch {
 	case errors.Is(err, backend.ErrNoSuchSession):
 		return nil
 	case err == nil && session.PID > 0 && session.PID != pid:
 		return nil
 	}
-	err = s.backend.Kill(ctx, saver.SessionName)
+	err = h.backend.Kill(ctx, saver.SessionName)
 	if err == nil || errors.Is(err, backend.ErrNoSuchSession) {
 		return nil
 	}
-	if _, readErr := s.backend.Session(ctx, saver.SessionName); errors.Is(readErr, backend.ErrNoSuchSession) {
+	if _, readErr := h.backend.Session(ctx, saver.SessionName); errors.Is(readErr, backend.ErrNoSuchSession) {
 		return nil
 	}
 	return fmt.Errorf("couldn't end the save daemon's session: %w", err)

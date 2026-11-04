@@ -32,12 +32,6 @@ const (
 // without hashing the binary.
 func String() string { return current() }
 
-// Is reports whether v is a dev version, as String composes one: Unidentified,
-// alone or leading its parts. A release version never is.
-func Is(v string) bool {
-	return v == Unidentified || strings.HasPrefix(v, Unidentified+"-")
-}
-
 var current = sync.OnceValue(func() string {
 	info, _ := debug.ReadBuildInfo()
 	return compose(info, executableWritten())

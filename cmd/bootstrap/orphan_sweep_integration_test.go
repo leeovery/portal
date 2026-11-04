@@ -71,11 +71,11 @@ func sweepWith(t *testing.T, marks []string, pgrep func() ([]int, error), held .
 		}
 		return fmt.Errorf("pid %d is none of the test's processes, so it is not signalled", pid)
 	}
-	stopper, err := saverhost.NewStopper(saverhost.Config{Backend: backendtest.New(), Marks: marks, Signal: signal})
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Marks: marks, Signal: signal})
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := &bootstrap.OrphanSweepCore{Pgrep: pgrep, SaverPID: stopper.SaverPID, Prove: stopper.Prove, Signal: signal, AwaitExit: stopper.AwaitExit}
+	core := &bootstrap.OrphanSweepCore{Pgrep: pgrep, SaverPID: host.SaverPID, Prove: host.Prove, Signal: signal, AwaitExit: host.AwaitExit}
 	if err := core.SweepOrphanDaemons(t.Context()); err != nil {
 		t.Fatalf("SweepOrphanDaemons = %v, want nil", err)
 	}
@@ -145,13 +145,13 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 
 	survives(t, sleeper, "a sleep the pgrep hit named")
 	survives(t, marked, "a process carrying the saver session's marks")
-	stopper, err := saverhost.NewStopper(saverhost.Config{Backend: backendtest.New(), Marks: marks, Signal: func(int, syscall.Signal) error {
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Marks: marks, Signal: func(int, syscall.Signal) error {
 		return errors.New("no signal")
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stopper.Prove(marked.PID()); !errors.Is(err, saverhost.ErrNotSaverDaemon) {
+	if err := host.Prove(marked.PID()); !errors.Is(err, saverhost.ErrNotSaverDaemon) {
 		t.Errorf("Prove(the marked process) = %v, want the identity check's refusal", err)
 	}
 }

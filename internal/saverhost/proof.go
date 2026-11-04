@@ -28,19 +28,27 @@ var (
 // environment it was exec'd with. A daemon on argv alone, such as the
 // installed tmux Portal's, lacks the saver session's name. The argv is read
 // with the environment, from the one read, so a pid reused since the
-// identity's read proves nothing.
+// identity's read proves nothing. A process that has finished exiting is
+// gone, asked before it is identified and again once ps names it no daemon,
+// as ps shows a zombie.
 type proof struct {
 	marks    []string
+	running  func(pid int) bool
 	identify func(pid int) (state.IdentifyResult, error)
 	args     func(pid int) (proctable.Args, error)
 }
 
 func (p proof) prove(pid int) error {
+	if !p.running(pid) {
+		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+	}
 	verdict, err := p.identify(pid)
 	switch {
 	case err != nil:
 		return fmt.Errorf("%w: %w", ErrUnreadable, err)
 	case verdict == state.IdentifyDead:
+		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+	case verdict != state.IdentifyIsPortalDaemon && !p.running(pid):
 		return fmt.Errorf("pid %d: %w", pid, ErrGone)
 	case verdict != state.IdentifyIsPortalDaemon:
 		return fmt.Errorf("pid %d is no portal state daemon: %w", pid, ErrNotSaverDaemon)

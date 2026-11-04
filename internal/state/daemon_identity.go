@@ -37,13 +37,17 @@ const portalProgram = `(/([^ ]*/)?)?portal`
 // flags while rejecting a suffix such as "portal state daemon-foo".
 const PortalDaemonArgvPattern = `^` + portalProgram + ` state daemon( |$)`
 
-var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
+var (
+	daemonArgvPattern    = regexp.MustCompile(PortalDaemonArgvPattern)
+	portalProgramPattern = regexp.MustCompile(`^` + portalProgram + `$`)
+)
 
 // IsDaemonArgv reports whether argv, as a process exec'd it, is a portal state
-// daemon's: its words joined by spaces, as ps shows them, match
-// PortalDaemonArgvPattern.
+// daemon's, word by word: portal, bare or at an absolute path, then state,
+// then daemon, then any flags. A word holding a space is no daemon's, though
+// ps would show it as one.
 func IsDaemonArgv(argv []string) bool {
-	return daemonArgvPattern.MatchString(strings.Join(argv, " "))
+	return len(argv) >= 3 && portalProgramPattern.MatchString(argv[0]) && argv[1] == "state" && argv[2] == "daemon"
 }
 
 var identifyPS = defaultIdentifyPS

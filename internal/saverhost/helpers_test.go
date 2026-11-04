@@ -2,6 +2,7 @@ package saverhost_test
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"syscall"
@@ -18,7 +19,7 @@ import (
 )
 
 // daemonPID is the saver's daemon in the fakes. No signal here reaches the
-// kernel: every Stopper a test makes signals through procs.
+// kernel: every Host a test makes signals through procs.
 const daemonPID = 4242
 
 var marks = []string{"ZMX_SESSION=_portal-saver", "ZMX_DIR=/tmp/zx-saverhost"}
@@ -26,11 +27,13 @@ var marks = []string{"ZMX_SESSION=_portal-saver", "ZMX_DIR=/tmp/zx-saverhost"}
 // daemonArgv is the argv the saver's daemon runs.
 var daemonArgv = []string{"/opt/homebrew/bin/portal", "state", "daemon"}
 
-// The bounds every Stopper a test makes waits by.
+// The bounds every Host a test makes waits by.
 const (
-	termWait = 40 * time.Millisecond
-	killWait = 40 * time.Millisecond
-	poll     = 2 * time.Millisecond
+	lockWait  = 5 * time.Second
+	termWait  = 40 * time.Millisecond
+	killWait  = 40 * time.Millisecond
+	readyWait = 150 * time.Millisecond
+	poll      = 2 * time.Millisecond
 )
 
 // proc is a process as the fakes read it, and as it answers a signal.
@@ -43,6 +46,9 @@ type proc struct {
 	// more reads of whether it is running, still exiting.
 	exited  bool
 	lingers int
+	// zombie is a process that has finished exiting, unreaped: ps shows it
+	// as no daemon, and its arguments can't be read.
+	zombie bool
 	// onSignal is what a signal does to it; nil leaves it running.
 	onSignal func(p *proc, sig syscall.Signal)
 }
@@ -83,11 +89,14 @@ func newProcs(table map[int]*proc) *procs { return &procs{table: table} }
 
 func (p *procs) live(pid int) (*proc, bool) {
 	pr, ok := p.table[pid]
-	return pr, ok && !pr.exited
+	return pr, ok && !pr.exited && !pr.zombie
 }
 
 func (p *procs) identify(pid int) (state.IdentifyResult, error) {
 	p.events = append(p.events, fmt.Sprintf("identify %d", pid))
+	if pr, ok := p.table[pid]; ok && pr.zombie {
+		return state.IdentifyNotPortalDaemon, nil
+	}
 	pr, ok := p.live(pid)
 	if !ok {
 		return state.IdentifyDead, nil
@@ -107,7 +116,7 @@ func (p *procs) args(pid int) (proctable.Args, error) {
 func (p *procs) running(pid int) bool {
 	pr, ok := p.table[pid]
 	switch {
-	case !ok:
+	case !ok || pr.zombie:
 		return false
 	case pr.exited && pr.lingers > 0:
 		pr.lingers--
@@ -139,36 +148,40 @@ func (p *procs) signals() []string {
 	return sent
 }
 
-// config is a Config over b that reads and signals p alone, at the tests'
-// bounds.
-func config(b backend.Backend, p *procs) saverhost.Config {
+// config is a Config over b and the state directory dir that reads and
+// signals p alone, at the tests' bounds.
+func config(b backend.Backend, p *procs, dir string) saverhost.Config {
 	return saverhost.Config{
-		Backend:  b,
-		Marks:    marks,
-		Signal:   p.signal,
-		Identify: p.identify,
-		Args:     p.args,
-		Running:  p.running,
-		TermWait: termWait,
-		KillWait: killWait,
-		Poll:     poll,
+		Backend:   b,
+		StateDir:  dir,
+		Marks:     marks,
+		Signal:    p.signal,
+		Identify:  p.identify,
+		Args:      p.args,
+		Running:   p.running,
+		LockWait:  lockWait,
+		TermWait:  termWait,
+		KillWait:  killWait,
+		ReadyWait: readyWait,
+		Poll:      poll,
 	}
 }
 
-// newStopper is a Stopper over b that reads and signals p alone.
-func newStopper(t *testing.T, b backend.Backend, p *procs) *saverhost.Stopper {
+// newHost is a Host over b and a state directory of its own that reads and
+// signals p alone.
+func newHost(t *testing.T, b backend.Backend, p *procs) *saverhost.Host {
 	t.Helper()
-	return stopperOf(t, config(b, p))
+	return hostOf(t, config(b, p, t.TempDir()))
 }
 
-// stopperOf is the Stopper cfg binds, failing the test on a refusal.
-func stopperOf(t *testing.T, cfg saverhost.Config) *saverhost.Stopper {
+// hostOf is the Host cfg binds, failing the test on a refusal.
+func hostOf(t *testing.T, cfg saverhost.Config) *saverhost.Host {
 	t.Helper()
-	s, err := saverhost.NewStopper(cfg)
+	h, err := saverhost.NewHost(cfg)
 	if err != nil {
-		t.Fatalf("NewStopper: %v", err)
+		t.Fatalf("NewHost: %v", err)
 	}
-	return s
+	return h
 }
 
 // withSaver is a Fake holding the saver session, running pid.
@@ -183,4 +196,32 @@ func kills(b *backendtest.Fake) []string {
 		names = append(names, c.Name)
 	}
 	return names
+}
+
+// stillWaiting fails the test if done delivers within a moment, as a run
+// waiting on saver.lock would not, putting back what it delivered.
+func stillWaiting(t *testing.T, done chan error, what string) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Errorf("%s = %v while saver.lock was held, want it waiting", what, err)
+		done <- err
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// holdLock takes saver.lock in dir through an open file description of its
+// own, as another process would, until the returned release or the test's
+// end.
+func holdLock(t *testing.T, dir string) (release func()) {
+	t.Helper()
+	f, err := os.OpenFile(saverhost.LockPath(dir), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatalf("flock saver.lock: %v", err)
+	}
+	return func() { _ = f.Close() }
 }

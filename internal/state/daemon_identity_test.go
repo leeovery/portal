@@ -342,6 +342,9 @@ func TestIsDaemonArgv(t *testing.T) {
 		{"/x/y/portal", "state"},
 		{"/x/y/portal", "state", "daemon-foo"},
 		{"/x/y/portal", "state", "hydrate"},
+		{"/x/y/portal", "state daemon"},
+		{"portal state daemon"},
+		{"/x/y z/portal", "state", "daemon"},
 	} {
 		if IsDaemonArgv(argv) {
 			t.Errorf("IsDaemonArgv(%q) = true; want false", argv)

@@ -21,39 +21,35 @@ import (
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
-// realEnsurer brings up binary in dir's saver session at version, stopping
-// through realStopper.
-func realEnsurer(t *testing.T, dir portaltest.SaverDir, binary, version string) *saverhost.Ensurer {
-	t.Helper()
-	e, err := saverhost.NewEnsurer(saverhost.EnsurerConfig{
-		Backend: dir.Backend,
-		Stopper: realStopper(t, dir),
-		Daemon:  saverhost.Daemon{Exe: binary, Version: version, StateDir: dir.StateDir},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return e
-}
-
-// realStopper stops dir's saver, proving its daemon by the marks a zmx
+// realHost is dir's saver's Host, proving its daemon by the marks a zmx
 // session's process carries. zmxtest proves each pid a process of the test's
 // own zmx directory again as it signals it.
-func realStopper(t *testing.T, dir portaltest.SaverDir) *saverhost.Stopper {
+func realHost(t *testing.T, dir portaltest.SaverDir) *saverhost.Host {
 	t.Helper()
 	marks, err := zmx.SessionMarks(saver.SessionName, dir.Backend.ReachEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := saverhost.NewStopper(saverhost.Config{
-		Backend: dir.Backend,
-		Marks:   marks,
-		Signal:  func(pid int, sig syscall.Signal) error { return zmxtest.Signal(dir.Backend, pid, sig) },
+	h, err := saverhost.NewHost(saverhost.Config{
+		Backend:  dir.Backend,
+		StateDir: dir.StateDir,
+		Marks:    marks,
+		Signal:   func(pid int, sig syscall.Signal) error { return zmxtest.Signal(dir.Backend, pid, sig) },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return h
+}
+
+// realEnsurer brings up binary in dir's saver session at version.
+func realEnsurer(t *testing.T, dir portaltest.SaverDir, binary, version string) *saverhost.Ensurer {
+	t.Helper()
+	e, err := realHost(t, dir).Ensurer(saverhost.Daemon{Exe: binary, Version: version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
 }
 
 // binaryVersion is the version binary records, as it reports it run in
@@ -112,7 +108,7 @@ func TestEnsureSaverAgainstZmx(t *testing.T) {
 		if pids, err := portaltest.PgrepPortalDaemons(); err != nil || !slices.Equal(pids, []int{pid}) {
 			t.Errorf("PgrepPortalDaemons = %v, %v; want the daemon %d alone", pids, err, pid)
 		}
-		if err := realStopper(t, dir).Prove(pid); err != nil {
+		if err := realHost(t, dir).Prove(pid); err != nil {
 			t.Errorf("Prove(%d) = %v, want the saver's daemon proved", pid, err)
 		}
 		if got, err := state.ReadVersionFile(dir.StateDir); err != nil || got != version {
@@ -120,13 +116,27 @@ func TestEnsureSaverAgainstZmx(t *testing.T) {
 		}
 	})
 
-	// The binary a test builds is a dev build, whose saver every EnsureSaver
-	// replaces; a replacement for another version takes the same stop.
-	t.Run("a dev build's saver is replaced, the old daemon stopped through its SIGTERM, its flush done before its session goes", func(t *testing.T) {
+	t.Run("a saver at this very build is kept, a dev build's included", func(t *testing.T) {
 		sink := logtest.Install(t)
 		dir := portaltest.NewSaverDir(t)
 		e := realEnsurer(t, dir, binary, binaryVersion(t, dir, binary))
 		first := ensure(t, e, dir)
+
+		if again := ensure(t, e, dir); again != first {
+			t.Errorf("the saver runs %d, want %d kept", again, first)
+		}
+		sink.Records().Matching("saver", "daemon kept").Only(t, "the kept saver")
+	})
+
+	t.Run("a saver of another version is replaced, the old daemon stopped through its SIGTERM, its flush done before its session goes", func(t *testing.T) {
+		sink := logtest.Install(t)
+		dir := portaltest.NewSaverDir(t)
+		e := realEnsurer(t, dir, binary, binaryVersion(t, dir, binary))
+		first := ensure(t, e, dir)
+		// The daemon records its version once, as it starts.
+		if err := state.WriteVersionFile(dir.StateDir, "9.9.9", nil); err != nil {
+			t.Fatal(err)
+		}
 
 		second := ensure(t, e, dir)
 
@@ -134,8 +144,8 @@ func TestEnsureSaverAgainstZmx(t *testing.T) {
 			t.Fatalf("the saver still runs %d, want it replaced", first)
 		}
 		recycled := sink.Records().Matching("saver", "recycle").Only(t, "the recycle")
-		if reason := recycled.AttrString(t, "reason"); reason != "dev" {
-			t.Errorf("recycle reason = %q, want dev", reason)
+		if reason := recycled.AttrString(t, "reason"); reason != "version" {
+			t.Errorf("recycle reason = %q, want version", reason)
 		}
 		if err := zmxtest.Signal(dir.Backend, first, 0); err == nil {
 			t.Errorf("the old daemon %d still runs in the test's zmx directory", first)
@@ -146,20 +156,23 @@ func TestEnsureSaverAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("EnsureRunning keeps a live saver of any version, and brings one up where there is none", func(t *testing.T) {
+	t.Run("Stop stops the saver and ends its session, and finds none to stop after", func(t *testing.T) {
 		dir := portaltest.NewSaverDir(t)
-		e := realEnsurer(t, dir, binary, "9.9.9")
+		h := realHost(t, dir)
+		pid := ensure(t, realEnsurer(t, dir, binary, binaryVersion(t, dir, binary)), dir)
 
-		if err := e.EnsureRunning(t.Context()); err != nil {
-			t.Fatalf("EnsureRunning from cold: %v\n--- portal.log ---\n%s", err, portaltest.ReadPortalLogSafe(dir.StateDir))
-		}
-		first := saverRunning(t, dir)
-		if err := e.EnsureRunning(t.Context()); err != nil {
-			t.Fatalf("EnsureRunning with a saver: %v", err)
+		if stopped, err := h.Stop(t.Context()); !stopped || err != nil {
+			t.Fatalf("Stop = %v, %v; want true, nil", stopped, err)
 		}
 
-		if again := saverRunning(t, dir); again != first {
-			t.Errorf("the saver runs %d, want %d kept", again, first)
+		if err := zmxtest.Signal(dir.Backend, pid, 0); err == nil {
+			t.Errorf("the daemon %d still runs in the test's zmx directory", pid)
+		}
+		if present, err := h.Present(t.Context()); present || err != nil {
+			t.Errorf("Present = %v, %v; want the saver session gone", present, err)
+		}
+		if stopped, err := h.Stop(t.Context()); stopped || err != nil {
+			t.Errorf("Stop again = %v, %v; want false, nil", stopped, err)
 		}
 	})
 }

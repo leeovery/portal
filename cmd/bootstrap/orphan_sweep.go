@@ -36,7 +36,7 @@ type OrphanSweepCore struct {
 	SaverPID func(ctx context.Context) (pid int, present bool, err error)
 
 	// Prove proves a pid the saver's daemon of this backend's sessions, as
-	// saverhost.Stopper.Prove does, its error wrapping saverhost's.
+	// saverhost.Host.Prove does, its error wrapping saverhost's.
 	Prove func(pid int) error
 
 	// Signal sends sig to pid; the sweep sends only SIGKILL, and only to a
@@ -44,7 +44,7 @@ type OrphanSweepCore struct {
 	Signal func(pid int, sig syscall.Signal) error
 
 	// AwaitExit waits, bounded, for a pid sent SIGKILL to finish exiting, as
-	// saverhost.Stopper.AwaitExit does, so the saver started next meets no
+	// saverhost.Host.AwaitExit does, so the saver started next meets no
 	// orphan still holding daemon.lock.
 	AwaitExit func(ctx context.Context, pid int) error
 
