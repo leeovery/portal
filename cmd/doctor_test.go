@@ -210,23 +210,25 @@ func TestDoctorZeroValueCheckResultNotHealthy(t *testing.T) {
 
 // A fresh install has run no Portal command, so no saver: that is its one
 // failure, and every line about what Portal has made passes.
-func TestDoctorFreshInstallFailsOnlyOnTheSaver(t *testing.T) {
+// A fresh install has nothing for a saver to save, so the saver it doesn't
+// run yet is stated, and doctor reads it healthy.
+func TestDoctorFreshInstallIsHealthy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	zmxDir := filepath.Join(t.TempDir(), "zmx")
 	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: backendtest.New().List, Saver: &saverAnswers{}}))
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy, with no saver running", err)
+	if err != nil {
+		t.Fatalf("Execute err = %v; want a healthy fresh install", err)
 	}
 	out := outBuf.String()
 	for _, line := range []string{
 		"✓ zmx dir: not created yet",
 		"✓ sessions: no sessions",
-		"✗ saver: _portal-saver not running — run portal open to start it",
-		"✗ daemon: not running (no _portal-saver)",
+		"  saver: _portal-saver not running — nothing to save yet",
+		"  daemon: not running (no _portal-saver; nothing to save yet)",
 		"✓ state dir: not created yet",
 		"✓ sessions.json: no sessions indexed yet",
 		"  pending resumes: 0 sessions waiting to resume",
-		"8 of 10 checks passed",
+		"8 checks passed",
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("report missing %q:\n%s", line, out)

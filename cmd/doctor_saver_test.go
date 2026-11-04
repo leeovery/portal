@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 	"golang.org/x/sys/unix"
 )
@@ -105,8 +106,84 @@ func TestDoctorSaverCheck(t *testing.T) {
 	})
 
 	t.Run("it is not evaluable with no saver to read", func(t *testing.T) {
-		assertCheck(t, checkSaver(t.Context(), nil), checkNotEvaluable, "could not read _portal-saver")
+		assertCheck(t, checkSaver(t.Context(), nil, false), checkNotEvaluable, "could not read _portal-saver")
 	})
+}
+
+// A missing saver fails while there is anything for it to save, and is
+// stated, never failed, on an install with nothing to save yet. Both lines
+// that report it read the same.
+func TestDoctorMissingSaver(t *testing.T) {
+	missing := func(t *testing.T, deps *DoctorDeps) (saverLine, daemonLine checkResult) {
+		t.Helper()
+		deps.Saver = &saverAnswers{}
+		results := diagnose(t, withHealthyRuntime(t, deps))
+		return findCheck(t, results, "saver"), findCheck(t, results, "daemon")
+	}
+	nothingListed := backendtest.New().List
+
+	for _, tc := range []struct {
+		name string
+		deps func(t *testing.T) *DoctorDeps
+	}{
+		{"nothing is live and no state dir is made yet", func(t *testing.T) *DoctorDeps {
+			return &DoctorDeps{StateDir: filepath.Join(t.TempDir(), "state"), ListSessions: nothingListed}
+		}},
+		{"nothing is live and sessions.json holds no entry", func(t *testing.T) *DoctorDeps {
+			dir := t.TempDir()
+			seedValidSessionsJSON(t, dir, 0)
+			return &DoctorDeps{StateDir: dir, ListSessions: nothingListed}
+		}},
+	} {
+		t.Run("it states it when "+tc.name, func(t *testing.T) {
+			saverLine, daemonLine := missing(t, tc.deps(t))
+			assertCheck(t, saverLine, checkInfo, "_portal-saver not running — nothing to save yet")
+			assertCheck(t, daemonLine, checkInfo, "not running (no _portal-saver; nothing to save yet)")
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		deps func(t *testing.T) *DoctorDeps
+	}{
+		{"a session is live", func(t *testing.T) *DoctorDeps {
+			return &DoctorDeps{StateDir: t.TempDir(), ListSessions: backendtest.New(backend.Session{Name: "api-x7Kd9a"}).List}
+		}},
+		{"sessions.json holds an entry", func(t *testing.T) *DoctorDeps {
+			dir := t.TempDir()
+			seedValidSessionsJSON(t, dir, 1)
+			return &DoctorDeps{StateDir: dir, ListSessions: nothingListed}
+		}},
+		{"the sessions can't be listed", func(t *testing.T) *DoctorDeps {
+			return &DoctorDeps{StateDir: t.TempDir(), ListSessions: func(context.Context) ([]backend.Session, error) {
+				return nil, errors.New("read zmx dir: permission denied")
+			}}
+		}},
+		{"sessions.json can't be read", func(t *testing.T) *DoctorDeps {
+			dir := t.TempDir()
+			if err := os.WriteFile(sessionindex.Path(dir), []byte("{not json"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return &DoctorDeps{StateDir: dir, ListSessions: nothingListed}
+		}},
+	} {
+		t.Run("it fails when "+tc.name, func(t *testing.T) {
+			saverLine, daemonLine := missing(t, tc.deps(t))
+			assertCheck(t, saverLine, checkFail, "_portal-saver not running — run portal open to start it")
+			assertCheck(t, daemonLine, checkFail, "not running (no _portal-saver)")
+		})
+	}
+}
+
+func TestNothingToSave(t *testing.T) {
+	saverOnly := []backend.Session{{Name: saver.SessionName}}
+
+	if !nothingToSave(saverOnly, nil, t.TempDir(), nil) {
+		t.Error("nothingToSave(only the saver's own session) = false; the saver's session is nothing to save")
+	}
+	if nothingToSave(nil, nil, "", errors.New("no home")) {
+		t.Error("nothingToSave(no state dir) = true; an index it can't find shows nothing")
+	}
 }
 
 // daemonInstall is a state dir and a saver running doctorSaverPID.
@@ -127,7 +204,7 @@ func (d daemonInstall) check(t *testing.T, version string) checkResult {
 
 func (d daemonInstall) checkWithin(t *testing.T, version string, settle time.Duration) checkResult {
 	t.Helper()
-	return checkDaemon(t.Context(), d.saver, d.dir, nil, version, settle)
+	return checkDaemon(t.Context(), d.saver, d.dir, nil, version, settle, false)
 }
 
 // recordOnRead records the daemon at pid when the saver is read the nth
@@ -226,13 +303,13 @@ func TestDoctorDaemonCheck(t *testing.T) {
 			detail string
 		}{
 			{"no saver to read", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), nil, t.TempDir(), nil, doctorVersion, testDaemonSettle)
+				return checkDaemon(t.Context(), nil, t.TempDir(), nil, doctorVersion, testDaemonSettle, false)
 			}, "could not read _portal-saver"},
 			{"a saver the backend can't tell", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), &saverAnswers{err: backend.ErrTimeout}, t.TempDir(), nil, doctorVersion, testDaemonSettle)
+				return checkDaemon(t.Context(), &saverAnswers{err: backend.ErrTimeout}, t.TempDir(), nil, doctorVersion, testDaemonSettle, false)
 			}, "could not read _portal-saver: backend did not answer in time"},
 			{"no state dir", func(t *testing.T) checkResult {
-				return checkDaemon(t.Context(), &saverAnswers{present: true, pid: doctorSaverPID}, "", errors.New("no home"), doctorVersion, testDaemonSettle)
+				return checkDaemon(t.Context(), &saverAnswers{present: true, pid: doctorSaverPID}, "", errors.New("no home"), doctorVersion, testDaemonSettle, false)
 			}, stateDirStandDownPhrase},
 			{"a daemon.pid that doesn't parse", func(t *testing.T) checkResult {
 				d := newDaemonInstall(t)
