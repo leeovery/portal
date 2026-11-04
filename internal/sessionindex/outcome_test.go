@@ -33,7 +33,7 @@ func TestUpdate_Outcome(t *testing.T) {
 			for _, name := range []string{"recreated", "same", "saved", "unrecorded", "fresh"} {
 				idx.Claim(name, "/"+name, liveCreation, 4242, ruleRestoring())
 			}
-			idx.Restored("restored", liveCreation, 4242)
+			idx.Restored(restored, liveCreation, 4242)
 			_ = idx.SetLabel("saved", "Relabelled")
 			return idx.SetLabel("bare", "Bare")
 		}, held...)

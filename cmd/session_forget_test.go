@@ -270,7 +270,7 @@ func TestClaim_KeepsAnEntryRestoreRecordedNoCreationFor(t *testing.T) {
 		stageKept(t, dir, currentSessionName)
 		store, _ := stageHooks(t, currentSessionName)
 		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
-			if idx.Restored(currentSessionName, time.Time{}, 0) {
+			if idx.Restored(saved, time.Time{}, 0) {
 				t.Error("Restored of no creation = true, want it to record nothing")
 			}
 			return nil

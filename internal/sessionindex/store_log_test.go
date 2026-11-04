@@ -44,7 +44,7 @@ func TestUpdate_Logging(t *testing.T) {
 			idx.Remove("b")
 			idx.Claim("d", "/d", time.Time{}, 0, ruleRestoring())
 			idx.Claim("f", "/f", liveCreation, 4242, ruleRestoring())
-			idx.Restored("e", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
+			idx.Restored(sessionindex.Entry{Name: "e", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC)}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
 			idx.SetScrollback("e", "scrollback/e.bin")
 			idx.RecordCwd("e", "/work/e")
 			return nil
@@ -82,7 +82,7 @@ func TestUpdate_Logging(t *testing.T) {
 		sink := logtest.Install(t)
 
 		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
-			idx.Restored("a", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
+			idx.Restored(sessionindex.Entry{Name: "a", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC), PID: 1717}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
 			return nil
 		}); err != nil {
 			t.Fatalf("Update: %v", err)

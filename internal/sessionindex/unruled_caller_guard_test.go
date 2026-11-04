@@ -90,7 +90,7 @@ func forgetSession(idx *sessionindex.Index) {
 }
 
 func elsewhere(idx *sessionindex.Index) {
-	idx.Restored("a", at, 0)
+	idx.Restored(sessionindex.Entry{Name: "a"}, at, 0)
 	remove := idx.Remove
 	_ = remove
 }
@@ -105,26 +105,38 @@ func elsewhere(w wrapped) { w.Remove("a") }
 `
 	const viaInterface = `package fixture
 
-import "time"
+import (
+	"time"
+
+	"github.com/leeovery/portal/internal/sessionindex"
+)
 
 type remover interface {
 	Remove(name string) bool
 	Other()
 }
 
-type restorer interface{ Restored(string, time.Time, int) bool }
+type restorer interface {
+	Restored(sessionindex.Entry, time.Time, int) bool
+}
 
 func elsewhere(r remover, s restorer) {
 	r.Remove("a")
-	s.Restored("a", at, 0)
+	s.Restored(sessionindex.Entry{Name: "a"}, at, 0)
 }
 `
 	const viaConstraint = `package fixture
 
-import "time"
+import (
+	"time"
 
-func restore[T interface{ Restored(string, time.Time, int) bool }](x T) {
-	x.Restored("a", at, 0)
+	"github.com/leeovery/portal/internal/sessionindex"
+)
+
+func restore[T interface {
+	Restored(sessionindex.Entry, time.Time, int) bool
+}](x T) {
+	x.Restored(sessionindex.Entry{Name: "a"}, at, 0)
 }
 `
 	const savesDrop = `package fixture
@@ -228,14 +240,14 @@ func elsewhere(s store, r remover) {
 			name: "it reports a call through an interface method an Index satisfies by name and signature",
 			pkg:  modulePath + "/cmd", src: viaInterface,
 			want: []string{
-				"fixture.go:13: Remove through an interface in elsewhere",
-				"fixture.go:14: Restored through an interface in elsewhere",
+				"fixture.go:19: Remove through an interface in elsewhere",
+				"fixture.go:20: Restored through an interface in elsewhere",
 			},
 		},
 		{
 			name: "it reports a call through a generic constraint",
 			pkg:  modulePath + "/cmd", src: viaConstraint,
-			want: []string{"fixture.go:6: Restored through an interface in restore"},
+			want: []string{"fixture.go:12: Restored through an interface in restore"},
 		},
 		{
 			name: "it allows an interface method through restore's package, as the method itself",
@@ -297,7 +309,7 @@ func unruledMethods(t harnesstest.TestingT) map[string]string {
 				continue
 			}
 			if fn, ok := pkg.Object(fd.Name).(*types.Func); ok {
-				shapes[fd.Name.Name] = shape(fn.Signature())
+				shapes[fd.Name.Name] = shape(fn.Signature(), fn.Pkg())
 			}
 		}
 	}
@@ -371,7 +383,7 @@ func unruledMethod(methods map[string]string, obj types.Object) (method, how str
 	if _, bounded := methods[fn.Name()]; bounded && fn.FullName() == "(*"+sessionindexPkgPath+".Index)."+fn.Name() {
 		return fn.Name(), ""
 	}
-	if want, bounded := methods[fn.Name()]; bounded && isInterfaceMethod(fn) && shape(fn.Signature()) == want {
+	if want, bounded := methods[fn.Name()]; bounded && isInterfaceMethod(fn) && shape(fn.Signature(), nil) == want {
 		return fn.Name(), " through an interface"
 	}
 	return "", ""
@@ -382,11 +394,17 @@ func isInterfaceMethod(fn *types.Func) bool {
 	return recv != nil && types.IsInterface(recv.Type())
 }
 
-// shape renders sig's parameter and result types, packages by path and
+// shape renders sig's parameter and result types, packages by import path and
 // without names, so a method and an interface's can be compared across
-// type-checks.
-func shape(sig *types.Signature) string {
-	qualifier := func(p *types.Package) string { return p.Path() }
+// type-checks. A type-check of sessionindex's own sources knows it by its name
+// alone, so own, when given, is that package, rendered by its import path.
+func shape(sig *types.Signature, own *types.Package) string {
+	qualifier := func(p *types.Package) string {
+		if p == own {
+			return sessionindexPkgPath
+		}
+		return p.Path()
+	}
 	render := func(tuple *types.Tuple) string {
 		var rendered []string
 		for v := range tuple.Variables() {

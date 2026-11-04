@@ -310,7 +310,7 @@ func TestRestored(t *testing.T) {
 	t.Run("it records the new creation and keeps everything else", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{saved, {Name: "b", Label: "Beta"}})
 
-		if !idx.Restored("a", liveCreation, 4242) {
+		if !idx.Restored(saved, liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
 		}
 
@@ -322,10 +322,11 @@ func TestRestored(t *testing.T) {
 		}
 	})
 
-	t.Run("it records the creation whatever the entry's, with no rule to consult", func(t *testing.T) {
-		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(earlierThisBoot, 1717)})
+	t.Run("it records the creation over whatever creation restore read, with no rule to consult", func(t *testing.T) {
+		read := keeping(earlierThisBoot, 1717)
+		idx := sessionindex.IndexOf([]sessionindex.Entry{read})
 
-		if !idx.Restored("a", liveCreation, 4242) {
+		if !idx.Restored(read, liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
 		}
 		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
@@ -336,15 +337,53 @@ func TestRestored(t *testing.T) {
 	t.Run("an entry already recording the creation reports it recorded", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(liveCreation, 4242)})
 
-		if !idx.Restored("a", liveCreation, 4242) {
+		if !idx.Restored(saved, liveCreation, 4242) {
 			t.Error("Restored = false, want the creation reported recorded")
 		}
 	})
 
+	// A raw recreation of the name, adopted by a claim while restore waited
+	// for the lock, is the live session now: restore's dead creation written
+	// over it would have the next claim replace the entry, and forget what it
+	// kept.
+	for name, c := range map[string]struct{ read, since sessionindex.Entry }{
+		"another creation":                   {saved, keeping(earlierThisBoot, 7)},
+		"the same time under another pid":    {saved, keeping(beforeBoot, 7)},
+		"another time under the same pid":    {saved, keeping(earlierThisBoot, 1717)},
+		"a creation where restore read none": {keeping(time.Time{}, 0), keeping(earlierThisBoot, 7)},
+	} {
+		t.Run("an entry taken over for "+name+" since restore read it is left as it is", func(t *testing.T) {
+			idx := sessionindex.IndexOf([]sessionindex.Entry{c.since})
+
+			if idx.Restored(c.read, liveCreation, 4242) {
+				t.Error("Restored = true, want false: the entry records a creation restore didn't read")
+			}
+			if got, _ := idx.Lookup("a"); !sameEntry(got, c.since) {
+				t.Errorf("entry = %+v, want it untouched, %+v", got, c.since)
+			}
+		})
+	}
+
+	for name, c := range map[string]struct{ read, since sessionindex.Entry }{
+		"one that never recorded a creation":         {keeping(time.Time{}, 0), keeping(time.Time{}, 0)},
+		"the creation read, its pid filled in since": {keeping(beforeBoot, 0), keeping(beforeBoot, 1717)},
+	} {
+		t.Run("it records the creation over "+name, func(t *testing.T) {
+			idx := sessionindex.IndexOf([]sessionindex.Entry{c.since})
+
+			if !idx.Restored(c.read, liveCreation, 4242) {
+				t.Fatal("Restored = false, want the creation recorded")
+			}
+			if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
+				t.Errorf("entry = %+v, want %+v", got, keeping(liveCreation, 4242))
+			}
+		})
+	}
+
 	t.Run("a zero creation records nothing, and says so", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{saved})
 
-		if idx.Restored("a", time.Time{}, 4242) {
+		if idx.Restored(saved, time.Time{}, 4242) {
 			t.Error("Restored = true, want false: nothing was recorded")
 		}
 		if got, _ := idx.Lookup("a"); !sameEntry(got, saved) {
@@ -355,7 +394,7 @@ func TestRestored(t *testing.T) {
 	t.Run("a session with no entry gets none, and says so", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
 
-		if idx.Restored("a", liveCreation, 4242) {
+		if idx.Restored(saved, liveCreation, 4242) {
 			t.Error("Restored = true, want false: there was no entry")
 		}
 		if idx.Len() != 1 {

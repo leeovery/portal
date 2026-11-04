@@ -135,8 +135,9 @@ func (s *Saver) begin(ctx context.Context) (listing, error) {
 }
 
 // listing is one successful List, taken at at: every name it shows, and the
-// sessions among them a poll claims and captures, those that answered and are
-// not Portal's own.
+// sessions among them a poll claims and captures, those that answered, are not
+// Portal's own, and have a name Create accepts. A session made outside Portal
+// under any other name could never be restored, so it is never saved.
 type listing struct {
 	at       time.Time
 	names    map[string]bool
@@ -152,7 +153,7 @@ func (s *Saver) list(ctx context.Context) (listing, error) {
 	l.names = make(map[string]bool, len(sessions))
 	for _, live := range sessions {
 		l.names[live.Name] = true
-		if live.Answered && !live.PortalOwned() {
+		if live.Answered && !live.PortalOwned() && s.backend.ValidateName(live.Name) == nil {
 			l.answered = append(l.answered, live)
 		}
 	}

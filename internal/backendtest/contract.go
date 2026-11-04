@@ -384,6 +384,32 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 	})
 
+	t.Run("it reports the command it made a session running as DisplayCommand renders it", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(Creating); why != "" {
+			t.Skip(why)
+		}
+		b, ctx := s.Backend(), t.Context()
+		command := []string{"/bin/sh", "-c", "exec sleep 1000"}
+
+		made, err := b.Create(ctx, "made", t.TempDir(), command)
+		if err != nil {
+			t.Fatalf("Create = %v", err)
+		}
+
+		want := b.DisplayCommand(command)
+		if want != "/bin/sh -c 'exec sleep 1000'" {
+			t.Errorf("DisplayCommand = %q, want each argument the shell would split quoted", want)
+		}
+		looked, err := b.Session(ctx, "made")
+		if err != nil {
+			t.Fatalf("Session = %v", err)
+		}
+		if got := listed(t, b, "made").Command; made.Command != want || got != want || looked.Command != want {
+			t.Errorf("Create reported %q, List %q and Session %q, want each %q", made.Command, got, looked.Command, want)
+		}
+	})
+
 	t.Run("its PID is its command's own, kept as the command is exec'd", func(t *testing.T) {
 		s := newSubject(t)
 		if why := s.Lacks(Creating); why != "" {

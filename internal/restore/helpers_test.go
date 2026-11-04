@@ -3,6 +3,7 @@ package restore_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,12 +21,12 @@ import (
 // nothing, so it need not exist.
 const exe = "/opt/portal/bin/portal"
 
-// saved is the creation the entries a test saves record, before any boot a
-// test makes.
-var saved = time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+// saved is the creation the entries a test saves record, before any boot of
+// the machine running the test.
+var saved = time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
 
-// world is a restore over a Fake backend and a state directory of the test's
-// own, its log captured.
+// world is a restore over a Fake backend, watched by a flagWitness, and a
+// state directory of the test's own, its log captured.
 type world struct {
 	dir     string
 	fake    *backendtest.Fake
@@ -47,18 +48,36 @@ func newWorld(t *testing.T, live ...backend.Session) *world {
 	return w
 }
 
-// flagWitness records, as each Create is made, whether the session's
-// hydrating flag was raised.
+// flagWitness records each name Create is asked to make, and whether the
+// session's hydrating flag was raised as it was asked.
 type flagWitness struct {
 	backend.Backend
 	dir    string
+	asked  []string
 	raised map[string]bool
 }
 
 func (f *flagWitness) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
 	up, err := state.Hydrating.Exists(f.dir, name)
+	f.asked = append(f.asked, name)
 	f.raised[name] = up && err == nil
 	return f.Backend.Create(ctx, name, dir, command)
+}
+
+// createFunc is the Fake with Create replaced by create.
+type createFunc struct {
+	*backendtest.Fake
+	create func(ctx context.Context, name, dir string, command []string) (backend.Session, error)
+}
+
+func (c createFunc) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+	return c.create(ctx, name, dir, command)
+}
+
+// createWith replaces the world's Create with create, the flag witness still
+// watching each call.
+func (w *world) createWith(create func(ctx context.Context, name, dir string, command []string) (backend.Session, error)) {
+	w.witness.Backend = createFunc{Fake: w.fake, create: create}
 }
 
 // entry is a saved session's entry that starts in a directory of the test's
@@ -126,14 +145,24 @@ func (w *world) hydrating(t *testing.T, name string) bool {
 	return up
 }
 
-// created is the names Create was asked to make, in order.
-func (w *world) created() []string {
-	var names []string
-	for _, c := range w.fake.CallsTo(backendtest.OpCreate) {
-		names = append(names, c.Name)
-	}
-	return names
+// sameEntry compares entries field by field, creation times as instants.
+func sameEntry(a, b sessionindex.Entry) bool {
+	same := a.CreatedAt.Equal(b.CreatedAt)
+	a.CreatedAt, b.CreatedAt = time.Time{}, time.Time{}
+	return same && a == b
 }
+
+// anomalous is what the run's summary counts as anomalous.
+func (w *world) anomalous(t *testing.T) int64 {
+	t.Helper()
+	return w.sink.Records().WithMessage("restore complete").AtExactLevel(slog.LevelInfo).Only(t, "restore summary").IntAttr(t, "anomalous")
+}
+
+// warnings is every record the run logged at WARN or above.
+func (w *world) warnings() logtest.Records { return w.sink.Records().AtOrAboveLevel(slog.LevelWarn) }
+
+// created is the names Create was asked to make, in order.
+func (w *world) created() []string { return w.witness.asked }
 
 // onlyCreate is the one Create call restore made.
 func (w *world) onlyCreate(t *testing.T) backendtest.Call {

@@ -12,7 +12,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
@@ -60,11 +63,21 @@ type Restorer struct {
 	progress func(n, m int)
 }
 
-// New returns a Restorer over cfg. It refuses an Exe that is not an absolute
-// path.
+// testBinarySuffix ends the name of every binary go test builds.
+const testBinarySuffix = ".test"
+
+// New returns a Restorer over cfg. It refuses a Config with no Backend or no
+// StateDir, and an Exe that is not an absolute path or is a test binary.
 func New(cfg Config) (*Restorer, error) {
-	if !filepath.IsAbs(cfg.Exe) {
+	switch {
+	case cfg.Backend == nil:
+		return nil, errors.New("restore: no backend to restore sessions in")
+	case cfg.StateDir == "":
+		return nil, errors.New("restore: no state directory to restore sessions from")
+	case !filepath.IsAbs(cfg.Exe):
 		return nil, fmt.Errorf("restore: the hydrate helper's executable must be an absolute path, not %q", cfg.Exe)
+	case strings.HasSuffix(cfg.Exe, testBinarySuffix):
+		return nil, fmt.Errorf("restore: the hydrate helper's executable %q is a test binary, which a restored session would run as the whole suite", cfg.Exe)
 	}
 	return &Restorer{backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger)}, nil
 }
@@ -73,135 +86,182 @@ func New(cfg Config) (*Restorer, error) {
 // it restores.
 func (r *Restorer) SetProgress(fn func(n, m int)) { r.progress = fn }
 
-// Restore makes again, in index order, the session of every saved entry the
-// backend doesn't list, Portal's own aside. A session it can't make keeps its
-// entry for the next bootstrap. It asks the backend nothing when sessions.json
-// can't be read, and makes nothing when the backend can't be listed.
+// Restore makes again, in index order, the session of every saved entry that
+// may predate this boot and that the backend doesn't list, Portal's own aside.
+// An entry from this boot whose session is gone ended this boot, and is the
+// saver's to drop; with no boot time to judge by, every entry may predate it.
+// A session it can't make keeps its entry for the next bootstrap. It asks the
+// backend nothing when sessions.json can't be read, makes nothing when the
+// backend can't be listed, and makes no further session once ctx ends.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
-	res := r.restore(ctx)
-	r.logger.Info("restore complete", "sessions", res.Restored, "anomalous", res.Failed, log.Took(start))
-	return res
+	pass := &run{Restorer: r}
+	pass.restore(ctx)
+	r.logger.Info("restore complete", "sessions", pass.res.Restored, "anomalous", pass.anomalous, log.Took(start))
+	return pass.res
 }
 
-func (r *Restorer) restore(ctx context.Context) Result {
+// run is one Restore: what it did, and how many warnings its sessions drew.
+type run struct {
+	*Restorer
+	res       Result
+	anomalous int
+}
+
+func (r *run) restore(ctx context.Context) {
 	idx, err := sessionindex.Read(r.dir)
 	if err != nil {
 		r.logger.Warn("sessions.json unreadable", "error", err)
-		return Result{IndexErr: err}
+		r.res.IndexErr = err
+		return
 	}
 	if idx.Len() == 0 {
-		return Result{}
+		return
 	}
 	live, err := r.backend.List(ctx)
 	if err != nil {
 		r.logger.Warn("list sessions failed", "error", err)
-		return Result{ListErr: err}
+		r.res.ListErr = err
+		return
 	}
 	due := r.due(idx.Entries(), live)
-	var res Result
 	for i, e := range due {
+		if ctx.Err() != nil {
+			r.logger.Warn("restore cancelled", "detail", fmt.Sprintf("%d of %d sessions left for the next bootstrap", len(due)-i, len(due)), "error", context.Cause(ctx))
+			return
+		}
 		if r.progress != nil {
 			r.progress(i+1, len(due))
 		}
-		switch r.restoreOne(ctx, e) {
-		case restored:
-			res.Restored++
-		case failed:
-			res.Failed++
-		}
+		r.restoreOne(ctx, e)
 	}
-	return res
 }
 
-// due is the entries to restore: those whose sessions the listing doesn't
-// hold, answering or not, and that aren't Portal's own.
-func (r *Restorer) due(entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
+// due is the entries to restore.
+func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
 	listed := make(map[string]bool, len(live))
 	for _, s := range live {
 		listed[s.Name] = true
 	}
+	rule := state.ClaimRule(r.dir)
 	var due []sessionindex.Entry
 	for _, e := range entries {
-		switch {
-		case listed[e.Name]:
-			r.logger.Debug("session skipped", "session", e.Name, "detail", "it is live")
-		case backend.IsPortalOwned(e.Name):
-			r.logger.Debug("session skipped", "session", e.Name, "detail", "it is one of Portal's own")
-		default:
-			due = append(due, e)
+		if why := skipped(e, listed, rule); why != "" {
+			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
+			continue
 		}
+		due = append(due, e)
 	}
 	return due
 }
 
-type outcome int
+// skipped says why the entry's session is not restored, and is empty when it
+// is: its session is listed, answering or not, it is one of Portal's own, or
+// it can't predate this boot.
+func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule) string {
+	switch {
+	case listed[e.Name]:
+		return "it is live"
+	case backend.IsPortalOwned(e.Name):
+		return "it is one of Portal's own"
+	case !rule.MayPredateBoot(e):
+		return "it ended this boot"
+	}
+	return ""
+}
 
-const (
-	restored outcome = iota
-	// held is a session the backend holds after all, under another spelling
-	// or made since the listing: live, so not restored, and not failed.
-	held
-	failed
-)
-
-// restoreOne makes the entry's session again. Its hydrating flag goes up
-// first, keeping the saver off the session until the helper has replayed its
-// transcript, and a session whose flag can't be looked for or raised is not
-// made. A refused Create lowers only a flag this run raised: one raised before
-// is another restore's.
-func (r *Restorer) restoreOne(ctx context.Context, e sessionindex.Entry) outcome {
+// restoreOne makes the entry's session again. A name Create refuses is never
+// tried. The session's hydrating flag goes up first, keeping the saver off it
+// until the helper has replayed its transcript, and a session whose flag can't
+// be looked for or raised is not made.
+func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
+	if err := r.backend.ValidateName(e.Name); err != nil {
+		r.failed(e.Name, fmt.Errorf("its name is one the backend can never create: %w", err))
+		return
+	}
 	raisedBefore, err := state.Hydrating.Exists(r.dir, e.Name)
 	if err == nil {
 		err = state.Hydrating.Set(r.dir, e.Name)
 	}
 	if err != nil {
-		r.logger.Warn("restore session failed", "session", e.Name, "error", fmt.Errorf("raise its hydrating flag: %w", err))
-		return failed
+		r.failed(e.Name, fmt.Errorf("raise its hydrating flag: %w", err))
+		return
 	}
-	dir := startDir(e)
-	s, err := r.backend.Create(ctx, e.Name, dir, r.command(e))
+	dir, argv := startDir(e), r.command(e)
+	s, err := r.backend.Create(ctx, e.Name, dir, argv)
 	if err != nil {
-		if !raisedBefore {
-			r.lowerHydrating(e.Name)
+		if s, err = r.madeAnyway(ctx, e.Name, argv, raisedBefore, err); err != nil {
+			r.failed(e.Name, err)
+			return
 		}
-		return r.refused(e.Name, err)
 	}
-	r.record(e.Name, s)
-	r.logger.Debug("session restored", "session", e.Name, "path", dir)
-	return restored
+	r.restored(e, s, dir)
 }
 
-func (r *Restorer) lowerHydrating(name string) {
-	if _, err := state.Hydrating.Clear(r.dir, name); err != nil {
-		r.logger.Warn("clear hydrating flag failed", "session", name, "error", err)
+// madeAnyway looks up the session a Create that failed may have made all the
+// same, as one that timed out waiting for it to answer has. A session running
+// restore's helper is restored, its flag the helper's to lower. Any other
+// session holding the name is not restore's, so its flag comes down whoever
+// raised it: left up, it would keep the saver off that session for good. With
+// no session under the name, only a flag this run raised comes down, as one
+// raised before is another restore's. A session that can't be looked up may be
+// the helper's, so its flag stays.
+func (r *run) madeAnyway(ctx context.Context, name string, argv []string, raisedBefore bool, createErr error) (backend.Session, error) {
+	live, err := r.backend.Session(context.WithoutCancel(ctx), name)
+	_, heldAs := errors.AsType[*backend.HeldAsError](err)
+	switch {
+	case err == nil && live.Command == r.backend.DisplayCommand(argv):
+		return live, nil
+	case err == nil:
+		r.lowerHydrating(name)
+		return backend.Session{}, fmt.Errorf("%w; the session holding its name runs %q, not restore's helper", createErr, live.Command)
+	case heldAs:
+		r.lowerHydrating(name)
+		return backend.Session{}, fmt.Errorf("%w; %w", createErr, err)
+	case errors.Is(err, backend.ErrNoSuchSession):
+		if !raisedBefore {
+			r.lowerHydrating(name)
+		}
+		return backend.Session{}, createErr
 	}
+	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", createErr, err)
 }
 
-func (r *Restorer) refused(name string, err error) outcome {
-	if _, ok := errors.AsType[*backend.SessionExistsError](err); ok {
-		r.logger.Debug("session skipped", "session", name, "detail", "the backend holds it", "error", err)
-		return held
-	}
-	r.logger.Warn("restore session failed", "session", name, "error", err)
-	return failed
-}
-
-// record makes the creation Create returned the entry's own, under the commit
-// lock every writer of the index holds. A session Create read no creation of
-// records none: the hydrate helper's claim records it.
-func (r *Restorer) record(name string, s backend.Session) {
+// restored records the session's creation as the entry's own, under the
+// commit lock every writer of the index holds. A session reporting no
+// creation records none: the hydrate helper's claim records it.
+func (r *run) restored(e sessionindex.Entry, s backend.Session, dir string) {
+	r.res.Restored++
 	if _, err := sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
-		idx.Restored(name, s.Created, s.PID)
+		idx.Restored(e, s.Created, s.PID)
 		return nil
 	}); err != nil {
-		r.logger.Warn("record session creation failed", "session", name, "error", err)
+		r.warn("record session creation failed", e.Name, "error", err)
 	}
+	r.logger.Debug("session restored", "session", e.Name, "path", dir)
+}
+
+func (r *run) failed(name string, err error) {
+	r.res.Failed++
+	r.warn("restore session failed", name, "error", err)
+}
+
+func (r *run) lowerHydrating(name string) {
+	if _, err := state.Hydrating.Clear(r.dir, name); err != nil {
+		r.warn("clear hydrating flag failed", name, "error", err)
+	}
+}
+
+// warn logs a warning about the named session, which the run's summary
+// counts as anomalous.
+func (r *run) warn(msg, name string, attrs ...any) {
+	r.anomalous++
+	r.logger.Warn(msg, append([]any{"session", name}, attrs...)...)
 }
 
 // command is the hydrate helper's argv for the entry's session, naming its
 // transcript only when it has one to replay.
-func (r *Restorer) command(e sessionindex.Entry) []string {
+func (r *run) command(e sessionindex.Entry) []string {
 	argv := []string{r.exe, "state", "hydrate", "--session", e.Name}
 	if file, ok := r.transcript(e); ok {
 		argv = append(argv, "--file", file)
@@ -213,13 +273,13 @@ func (r *Restorer) command(e sessionindex.Entry) []string {
 // the helper should replay it: it exists, or can't be looked for, a failure
 // the helper records when it opens it. A file the entry names that is no
 // transcript of its session is never read.
-func (r *Restorer) transcript(e sessionindex.Entry) (string, bool) {
+func (r *run) transcript(e sessionindex.Entry) (string, bool) {
 	if e.ScrollbackFile == "" {
 		return "", false
 	}
 	path, err := state.ScrollbackPath(r.dir, e)
 	if err != nil {
-		r.logger.Warn("scrollback file refused", "session", e.Name, "path", e.ScrollbackFile, "error", err)
+		r.warn("scrollback file refused", e.Name, "path", e.ScrollbackFile, "error", err)
 		return "", false
 	}
 	_, err = os.Stat(path)
@@ -227,14 +287,24 @@ func (r *Restorer) transcript(e sessionindex.Entry) (string, bool) {
 }
 
 // startDir is where the entry's session starts: its last working directory,
-// else the one Portal made it in, each only while it is a directory, else
-// HOME.
+// else the one Portal made it in, else HOME, each only while it is a directory
+// the session can start in, else the root.
 func startDir(e sessionindex.Entry) string {
-	for _, dir := range []string{e.Cwd, e.Dir} {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{e.Cwd, e.Dir, home} {
+		if enterable(dir) {
 			return dir
 		}
 	}
-	home, _ := os.UserHomeDir()
-	return home
+	return "/"
+}
+
+// enterable reports whether dir is an absolute path to a directory this
+// process may search.
+func enterable(dir string) bool {
+	if !filepath.IsAbs(dir) {
+		return false
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir() && unix.Access(dir, unix.X_OK) == nil
 }

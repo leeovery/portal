@@ -269,7 +269,7 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string) (
 		Dir:      resolved(dir),
 		PID:      f.lastPID,
 		Created:  f.now().Truncate(time.Second),
-		Command:  zmx.DisplayCommand(command),
+		Command:  f.DisplayCommand(command),
 	}
 	f.sessions[name] = s
 	return s, nil
@@ -385,6 +385,9 @@ func (f *Fake) ValidateName(name string) error {
 	defer f.mu.Unlock()
 	return f.validate(name)
 }
+
+// DisplayCommand renders command as the driver does.
+func (f *Fake) DisplayCommand(command []string) string { return zmx.DisplayCommand(command) }
 
 // forget drops all the Fake keeps for a session that has ended. The caller
 // holds mu.

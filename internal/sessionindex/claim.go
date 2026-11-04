@@ -119,22 +119,37 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 	return true
 }
 
-// Restored records the creation restore just made for the session, created
-// and pid, as its entry's own, keeping everything else the entry was saved
-// with. It reports whether the entry now records that creation: a session
-// with no entry, or a created of zero, records nothing, so its entry keeps the
-// creation it was saved with for a later claim to take over. It adopts
-// whatever the entry records, consulting no rule, so restore is its only
-// caller, which a guard holds to.
-func (idx *Index) Restored(name string, created time.Time, pid int) bool {
-	i := idx.indexOf(name)
+// Restored records the creation restore just made, created and pid, as the
+// entry's own that restore read as read, keeping everything else it was saved
+// with. It reports whether the entry now records that creation. It changes
+// nothing in an entry that no longer records the creation restore read, one a
+// claim has taken over for another creation since: that is no longer restore's
+// to overwrite. A session with no entry, or a created of zero, records
+// nothing, so its entry keeps the creation it was saved with for a later claim
+// to take over. It consults no rule, so restore is its only caller, which a
+// guard holds to.
+func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
+	i := idx.indexOf(read.Name)
 	if i < 0 || created.IsZero() {
 		return false
 	}
-	if e := idx.sessions[i]; !e.CreatedAt.Equal(created) || e.PID != pid {
-		idx.adopt(i, created, pid, "restored", "restore made it")
+	switch e := idx.sessions[i]; {
+	case e.SameCreation(created, pid):
+		return true
+	case !e.recordsCreationOf(read):
+		return false
 	}
+	idx.adopt(i, created, pid, "restored", "restore made it")
 	return true
+}
+
+// recordsCreationOf reports whether the entry still records the creation read
+// recorded: none, if read recorded none.
+func (e Entry) recordsCreationOf(read Entry) bool {
+	if read.CreatedAt.IsZero() {
+		return e.CreatedAt.IsZero()
+	}
+	return e.SameCreation(read.CreatedAt, read.PID)
 }
 
 // adopt makes the creation created, running pid, the entry at i's own,

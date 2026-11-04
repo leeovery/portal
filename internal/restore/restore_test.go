@@ -1,7 +1,10 @@
 package restore_test
 
 import (
+	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,22 +14,59 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
 
-var errRefused = errors.New("zmx attach: refused")
+var (
+	errRefused  = errors.New("zmx attach: refused")
+	errTimedOut = fmt.Errorf("create session: %w", backend.ErrTimeout)
+)
 
 func TestNew(t *testing.T) {
-	for name, exe := range map[string]string{
-		"it refuses an empty exe, having no default": "",
-		"it refuses a relative exe":                  "portal",
+	for name, change := range map[string]func(*restore.Config){
+		"it refuses no backend":                      func(c *restore.Config) { c.Backend = nil },
+		"it refuses no state directory":              func(c *restore.Config) { c.StateDir = "" },
+		"it refuses an empty exe, having no default": func(c *restore.Config) { c.Exe = "" },
+		"it refuses a relative exe":                  func(c *restore.Config) { c.Exe = "portal" },
+		"it refuses a test binary":                   func(c *restore.Config) { c.Exe = "/var/folders/x/go-build1/b001/restore.test" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			r, err := restore.New(restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe})
-			if err == nil || r != nil {
+			cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}
+			change(&cfg)
+
+			if r, err := restore.New(cfg); err == nil || r != nil {
+				t.Errorf("New(%+v) = %v, %v; want a refusal", cfg, r, err)
+			}
+		})
+	}
+
+	t.Run("it takes an absolute exe that is no test binary, wherever it lives", func(t *testing.T) {
+		cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: "/opt/tools.test/bin/portal"}
+
+		if r, err := restore.New(cfg); err != nil || r == nil {
+			t.Errorf("New(%+v) = %v, %v; want a Restorer", cfg, r, err)
+		}
+	})
+}
+
+// The one test that hands New the running binary, which the exe guard keeps
+// from every other: New must refuse it on whatever route it arrives.
+func TestNew_RefusesTheRunningTestBinary(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, exe := range map[string]string{"os.Args[0]": os.Args[0], "os.Executable": self} {
+		t.Run("it refuses "+name, func(t *testing.T) {
+			if !filepath.IsAbs(exe) {
+				t.Fatalf("%s = %q is relative, so its refusal would prove nothing of the test-binary rule", name, exe)
+			}
+
+			if r, err := restore.New(restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}); err == nil || r != nil {
 				t.Errorf("New(Exe: %q) = %v, %v; want a refusal", exe, r, err)
 			}
 		})
@@ -36,6 +76,7 @@ func TestNew(t *testing.T) {
 func TestRestore_RestoresEachSavedSession(t *testing.T) {
 	w := newWorld(t)
 	work, notes := entry(t, "work"), entry(t, "notes")
+	notes.CreatedAt, notes.PID = time.Time{}, 0
 	w.save(t, work, notes)
 
 	res := w.r.Restore(t.Context())
@@ -44,7 +85,7 @@ func TestRestore_RestoresEachSavedSession(t *testing.T) {
 		t.Errorf("Restore = %+v, want %+v", res, want)
 	}
 	if got, want := w.created(), []string{"work", "notes"}; !slices.Equal(got, want) {
-		t.Errorf("created %q, want %q, in index order", got, want)
+		t.Errorf("created %q, want %q, in index order, an entry recording no creation among them", got, want)
 	}
 	for _, name := range []string{"work", "notes"} {
 		if !w.witness.raised[name] {
@@ -56,7 +97,7 @@ func TestRestore_RestoresEachSavedSession(t *testing.T) {
 	}
 	summary := w.sink.Records().WithMessage("restore complete").AtExactLevel(slog.LevelInfo).Only(t, "restore summary")
 	if summary.IntAttr(t, "sessions") != 2 || summary.IntAttr(t, "anomalous") != 0 {
-		t.Errorf("summary = %v, want 2 sessions restored and none failed", summary.Attrs)
+		t.Errorf("summary = %v, want 2 sessions restored and nothing anomalous", summary.Attrs)
 	}
 	summary.RequireDuration(t, "took")
 }
@@ -66,7 +107,7 @@ func TestRestore_Skips(t *testing.T) {
 		w := newWorld(t, backend.Session{Name: "work"})
 		w.save(t, entry(t, "work"))
 
-		w.assertSkipped(t, w.r.Restore(t.Context()), "work")
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it is live")
 	})
 
 	t.Run("a session the listing holds, not answering", func(t *testing.T) {
@@ -74,46 +115,35 @@ func TestRestore_Skips(t *testing.T) {
 		w.fake.StopAnswering("work")
 		w.save(t, entry(t, "work"))
 
-		w.assertSkipped(t, w.r.Restore(t.Context()), "work")
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it is live")
 	})
 
 	t.Run("one of Portal's own", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "_portal-saver"))
 
-		w.assertSkipped(t, w.r.Restore(t.Context()), "_portal-saver")
+		w.assertSkipped(t, w.r.Restore(t.Context()), "_portal-saver", "it is one of Portal's own")
 	})
 
-	// zmx finds a session by statting its socket, so on a filesystem that
-	// folds case one held as work answers for Work. Only the backend can say
-	// so, and Create does, refusing the name.
-	t.Run("a session held under another spelling", func(t *testing.T) {
-		w := newWorld(t, backend.Session{Name: "work"})
-		saved := entry(t, "Work")
-		w.save(t, saved)
+	// A session of this boot that is gone ended this boot, by the user or
+	// otherwise: a bootstrap again within the boot, as a version change runs,
+	// must not bring it back.
+	t.Run("an entry created this boot", func(t *testing.T) {
+		w := newWorld(t)
+		e := entry(t, "work")
+		e.CreatedAt = time.Now().Truncate(time.Second)
+		w.save(t, e)
 
-		res := w.r.Restore(t.Context())
-
-		if res != (restore.Result{}) {
-			t.Errorf("Restore = %+v, want nothing restored and nothing failed", res)
-		}
-		if _, ok := w.fake.Held("Work"); ok {
-			t.Error("Work was made beside work")
-		}
-		if w.hydrating(t, "Work") {
-			t.Error("Work's hydrating flag, raised by this run, is left up")
-		}
-		if e, ok := w.lookup(t, "Work"); !ok || e != saved {
-			t.Errorf("Work's entry = %+v, %v; want it kept as saved, %+v", e, ok, saved)
-		}
-		if failures := w.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(failures) > 0 {
-			t.Errorf("a held name logged %v, want no warning", failures)
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it ended this boot")
+		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
+			t.Errorf("entry = %+v, %v; want it left for the saver to drop, %+v", got, ok, e)
 		}
 	})
 }
 
-// assertSkipped checks the restore made nothing and raised no flag for name.
-func (w *world) assertSkipped(t *testing.T, res restore.Result, name string) {
+// assertSkipped checks the restore made nothing and raised no flag for name,
+// saying why at DEBUG.
+func (w *world) assertSkipped(t *testing.T, res restore.Result, name, reason string) {
 	t.Helper()
 	if res != (restore.Result{}) {
 		t.Errorf("Restore = %+v, want nothing restored and nothing failed", res)
@@ -123,6 +153,48 @@ func (w *world) assertSkipped(t *testing.T, res restore.Result, name string) {
 	}
 	if w.hydrating(t, name) {
 		t.Errorf("%s's hydrating flag was raised for a session restore skips", name)
+	}
+	skip := w.sink.Records().WithMessage("session skipped").AtExactLevel(slog.LevelDebug).Only(t, "skip")
+	if got := skip.AttrString(t, "session"); got != name {
+		t.Errorf("skip names %q, want %q", got, name)
+	}
+	if got := skip.AttrString(t, "reason"); got != reason {
+		t.Errorf("skip reason = %q, want %q", got, reason)
+	}
+}
+
+// decision 56: Create's name rules are zmx's, and the saver saves no session
+// under a name they refuse, but an index from before that rule may hold one.
+func TestRestore_NameCreateRefuses(t *testing.T) {
+	w := newWorld(t)
+	w.save(t, entry(t, "logs"), entry(t, "-x"), entry(t, "foo*"), entry(t, "work"))
+
+	res := w.r.Restore(t.Context())
+
+	if want := (restore.Result{Restored: 1, Failed: 3}); res != want {
+		t.Errorf("Restore = %+v, want %+v", res, want)
+	}
+	if got := w.created(); !slices.Equal(got, []string{"work"}) {
+		t.Errorf("created %q, want work alone: a name Create refuses is never tried", got)
+	}
+	failures := w.sink.Records().WithMessage("restore session failed").AtExactLevel(slog.LevelWarn)
+	var named []string
+	for _, rec := range failures {
+		named = append(named, rec.AttrString(t, "session"))
+		if !errors.Is(rec.ErrorAttr(t, "error"), backend.ErrInvalidName) {
+			t.Errorf("%s's failure = %v, want it to say the name can never be created", named[len(named)-1], rec.Attrs)
+		}
+	}
+	if !slices.Equal(named, []string{"logs", "-x", "foo*"}) {
+		t.Errorf("failures name %q, want each refused name", named)
+	}
+	for _, name := range []string{"logs", "foo*"} {
+		if w.hydrating(t, name) {
+			t.Errorf("%s's hydrating flag was raised for a name Create refuses", name)
+		}
+	}
+	if got := w.anomalous(t); got != 3 {
+		t.Errorf("anomalous = %d, want 3", got)
 	}
 }
 
@@ -216,43 +288,157 @@ func TestRestore_FlagCantBeRaised(t *testing.T) {
 	}
 }
 
-func TestRestore_RefusedCreate(t *testing.T) {
-	t.Run("it lowers the flag it raised and keeps the entry", func(t *testing.T) {
-		w := newWorld(t)
-		saved := entry(t, "work")
-		w.save(t, saved)
-		w.fake.Fail(backendtest.OpCreate, errRefused)
+// A Create that failed may have made the session all the same, so restore
+// looks the name up before it settles the session's flag and its count.
+func TestRestore_FailedCreate(t *testing.T) {
+	type outcome struct {
+		res restore.Result
+		// keepsOwn and keepsEarlier say whether the hydrating flag is still up
+		// after, raised by this run or before it.
+		keepsOwn, keepsEarlier bool
+	}
+	var (
+		restored = outcome{res: restore.Result{Restored: 1}, keepsOwn: true, keepsEarlier: true}
+		other    = outcome{res: restore.Result{Failed: 1}}
+		none     = outcome{res: restore.Result{Failed: 1}, keepsEarlier: true}
+		unknown  = outcome{res: restore.Result{Failed: 1}, keepsOwn: true, keepsEarlier: true}
+	)
+	makes := func(w *world, then func(name string) error) {
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				return backend.Session{}, err
+			}
+			return backend.Session{}, then(name)
+		})
+	}
+	first := func(w *world, made func(ctx context.Context, name, dir string, command []string)) {
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			made(ctx, name, dir, command)
+			return w.fake.Create(ctx, name, dir, command)
+		})
+	}
 
-		res := w.r.Restore(t.Context())
+	for _, tc := range []struct {
+		name  string
+		stage func(w *world)
+		want  outcome
+	}{
+		{
+			name: "a session restore's helper runs, though Create timed out, is restored",
+			stage: func(w *world) {
+				makes(w, func(string) error { return errTimedOut })
+			},
+			want: restored,
+		},
+		{
+			name: "a session a concurrent restore made first, running restore's helper, is restored",
+			stage: func(w *world) {
+				first(w, func(ctx context.Context, name, dir string, command []string) {
+					_, _ = w.fake.Create(ctx, name, dir, command)
+				})
+			},
+			want: restored,
+		},
+		{
+			name: "a session made since the listing, running anything else, fails",
+			stage: func(w *world) {
+				first(w, func(_ context.Context, name, _ string, _ []string) {
+					w.fake.Add(backend.Session{Name: name, Command: "vim notes.md"})
+				})
+			},
+			want: other,
+		},
+		{
+			name: "a session made since the listing, running the user's shell, fails",
+			stage: func(w *world) {
+				first(w, func(_ context.Context, name, _ string, _ []string) { w.fake.Add(backend.Session{Name: name}) })
+			},
+			want: other,
+		},
+		// zmx finds a session by statting its socket, so on a filesystem that
+		// folds case one held as WORK answers for work.
+		{
+			name:  "a session held under another spelling fails",
+			stage: func(w *world) { w.fake.Add(backend.Session{Name: "WORK"}) },
+			want:  other,
+		},
+		{
+			name:  "a refusal leaving no session fails",
+			stage: func(w *world) { w.fake.Fail(backendtest.OpCreate, errRefused) },
+			want:  none,
+		},
+		{
+			name: "a refusal as held that names no holder, and holds nothing, fails",
+			stage: func(w *world) {
+				w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+					return backend.Session{}, &backend.SessionExistsError{Name: name}
+				})
+			},
+			want: none,
+		},
+		{
+			name: "a session that can't be looked up fails, as one that may be the helper's",
+			stage: func(w *world) {
+				makes(w, func(name string) error {
+					w.fake.StopAnswering(name)
+					return errTimedOut
+				})
+			},
+			want: unknown,
+		},
+	} {
+		for _, earlier := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s (flag raised before: %v)", tc.name, earlier), func(t *testing.T) {
+				w := newWorld(t)
+				saved := entry(t, "work")
+				w.save(t, saved)
+				if earlier {
+					if err := state.Hydrating.Set(w.dir, "work"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				tc.stage(w)
 
-		if want := (restore.Result{Failed: 1}); res != want {
-			t.Errorf("Restore = %+v, want %+v", res, want)
-		}
-		if w.hydrating(t, "work") {
-			t.Error("the hydrating flag this run raised is left up")
-		}
-		if e, ok := w.lookup(t, "work"); !ok || e != saved {
-			t.Errorf("entry = %+v, %v; want it kept as saved for the next bootstrap, %+v", e, ok, saved)
-		}
-		if cause := w.failureLogged(t, "work").ErrorAttr(t, "error"); !errors.Is(cause, errRefused) {
-			t.Errorf("logged cause %v, want Create's refusal", cause)
-		}
-	})
+				res := w.r.Restore(t.Context())
 
-	t.Run("it keeps a flag raised before it", func(t *testing.T) {
-		w := newWorld(t)
-		w.save(t, entry(t, "work"))
-		if err := state.Hydrating.Set(w.dir, "work"); err != nil {
-			t.Fatal(err)
+				if res != tc.want.res {
+					t.Errorf("Restore = %+v, want %+v", res, tc.want.res)
+				}
+				if up, want := w.hydrating(t, "work"), tc.want.keepsOwn && !earlier || tc.want.keepsEarlier && earlier; up != want {
+					t.Errorf("hydrating flag up = %v, want %v", up, want)
+				}
+				if tc.want.res.Restored == 0 {
+					w.assertFailedKeepingEntry(t, saved)
+					return
+				}
+				w.assertRestoredWithoutWarning(t, saved)
+			})
 		}
-		w.fake.Fail(backendtest.OpCreate, errRefused)
+	}
+}
 
-		w.r.Restore(t.Context())
+func (w *world) assertFailedKeepingEntry(t *testing.T, saved sessionindex.Entry) {
+	t.Helper()
+	w.failureLogged(t, saved.Name)
+	if e, ok := w.lookup(t, saved.Name); !ok || !sameEntry(e, saved) {
+		t.Errorf("entry = %+v, %v; want it kept as saved for the next bootstrap, %+v", e, ok, saved)
+	}
+}
 
-		if !w.hydrating(t, "work") {
-			t.Error("a hydrating flag an earlier restore raised was lowered")
-		}
-	})
+func (w *world) assertRestoredWithoutWarning(t *testing.T, saved sessionindex.Entry) {
+	t.Helper()
+	live, ok := w.fake.Held(saved.Name)
+	if !ok {
+		t.Fatalf("%s is not held", saved.Name)
+	}
+	want := saved
+	want.CreatedAt, want.PID = live.Created, live.PID
+	if got, _ := w.lookup(t, saved.Name); !sameEntry(got, want) {
+		t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, want)
+	}
+	if warnings := w.warnings(); len(warnings) > 0 {
+		t.Errorf("a session restore made logged %v, want no warning", warnings)
+	}
 }
 
 // failureLogged checks one WARN names the session that failed and the summary
@@ -263,32 +449,203 @@ func (w *world) failureLogged(t *testing.T, name string) logtest.Record {
 	if got := rec.AttrString(t, "session"); got != name {
 		t.Errorf("failure names session %q, want %q", got, name)
 	}
-	summary := w.sink.Records().WithMessage("restore complete").Only(t, "restore summary")
-	if summary.IntAttr(t, "anomalous") != 1 {
-		t.Errorf("summary = %v, want one session failed", summary.Attrs)
+	if got := w.anomalous(t); got != 1 {
+		t.Errorf("anomalous = %d, want the one failure", got)
 	}
 	return rec
 }
 
+func TestRestore_RefusedCreateNamesItsCause(t *testing.T) {
+	w := newWorld(t)
+	w.save(t, entry(t, "work"))
+	w.fake.Fail(backendtest.OpCreate, errRefused)
+
+	w.r.Restore(t.Context())
+
+	if cause := w.failureLogged(t, "work").ErrorAttr(t, "error"); !errors.Is(cause, errRefused) {
+		t.Errorf("logged cause %v, want Create's refusal", cause)
+	}
+}
+
+func TestRestore_CountsEveryWarningAsAnomalous(t *testing.T) {
+	t.Run("a creation it can't record", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		commitlock.SetTimeoutForTest(t, 50*time.Millisecond)
+		commitlock.HoldForTest(t, w.dir)
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v: the session was made", res, want)
+		}
+		w.warnedOnce(t, "record session creation failed")
+	})
+
+	t.Run("a flag it can't lower", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		flags := filepath.Join(w.dir, string(state.Hydrating))
+		w.createWith(func(context.Context, string, string, []string) (backend.Session, error) {
+			if err := os.Chmod(flags, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(flags, 0o700) })
+			return backend.Session{}, errRefused
+		})
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		w.sink.Records().WithMessage("clear hydrating flag failed").AtExactLevel(slog.LevelWarn).Only(t, "clear failure")
+		if got := w.anomalous(t); got != 2 {
+			t.Errorf("anomalous = %d, want the failure and the flag left up", got)
+		}
+	})
+
+	t.Run("a transcript file it refuses", func(t *testing.T) {
+		w := newWorld(t)
+		e, _ := w.saveTranscript(t, entry(t, "notes"))
+		e.Name = "work"
+		w.save(t, e)
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		w.warnedOnce(t, "scrollback file refused")
+	})
+}
+
+// warnedOnce checks the run's one warning is msg, naming work, and the summary
+// counts it.
+func (w *world) warnedOnce(t *testing.T, msg string) {
+	t.Helper()
+	rec := w.warnings().Only(t, "warning")
+	if rec.Msg != msg || rec.AttrString(t, "session") != "work" {
+		t.Errorf("warning = %q %v, want %q naming work", rec.Msg, rec.Attrs, msg)
+	}
+	if got := w.anomalous(t); got != 1 {
+		t.Errorf("anomalous = %d, want 1", got)
+	}
+}
+
+func TestRestore_StopsOnceItsContextEnds(t *testing.T) {
+	cause := errors.New("bootstrap abandoned")
+
+	t.Run("it makes no session after the one it was making", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "a"), entry(t, "b"), entry(t, "c"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			s, err := w.fake.Create(ctx, name, dir, command)
+			cancel(cause)
+			return s, err
+		})
+
+		res := w.r.Restore(ctx)
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v: the rest neither made nor failed", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"a"}) {
+			t.Errorf("created %q, want a alone", got)
+		}
+		w.assertCancelled(t, cause)
+		for _, name := range []string{"b", "c"} {
+			if w.hydrating(t, name) {
+				t.Errorf("%s's hydrating flag was raised after the context ended", name)
+			}
+		}
+	})
+
+	t.Run("it still looks up a session the Create it cut short made, and restores it", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "a")
+		w.save(t, saved, entry(t, "b"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				return backend.Session{}, err
+			}
+			cancel(cause)
+			return backend.Session{}, cause
+		})
+
+		if res, want := w.r.Restore(ctx), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if !w.hydrating(t, "a") {
+			t.Error("a's hydrating flag is down: its helper runs, and lowers it")
+		}
+		live, _ := w.fake.Held("a")
+		want := saved
+		want.CreatedAt, want.PID = live.Created, live.PID
+		if got, _ := w.lookup(t, "a"); !sameEntry(got, want) {
+			t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, want)
+		}
+		w.assertCancelled(t, cause)
+	})
+
+	t.Run("it makes none once it has ended before the run", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "a"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cancel(cause)
+
+		if res := w.r.Restore(ctx); res != (restore.Result{}) {
+			t.Errorf("Restore = %+v, want nothing", res)
+		}
+		if created := w.created(); len(created) > 0 {
+			t.Errorf("created %q, want nothing", created)
+		}
+		w.assertCancelled(t, cause)
+	})
+}
+
+func (w *world) assertCancelled(t *testing.T, cause error) {
+	t.Helper()
+	rec := w.warnings().Only(t, "warning")
+	if rec.Msg != "restore cancelled" || !errors.Is(rec.ErrorAttr(t, "error"), cause) {
+		t.Errorf("warning = %q %v, want the cancellation, once, with its cause", rec.Msg, rec.Attrs)
+	}
+}
+
 func TestRestore_StartDir(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "gone")
+	// An executable file passes the search check a directory must, so only
+	// being no directory refuses it.
 	file := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
+	if err := os.WriteFile(file, nil, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	sealed := t.TempDir()
+	if err := os.Chmod(sealed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o700) })
 	cwd, dir, home := t.TempDir(), t.TempDir(), t.TempDir()
 
 	for _, tc := range []struct {
-		name, cwd, dir, want string
+		name, cwd, dir, home, want string
 	}{
 		{name: "its last working directory", cwd: cwd, dir: dir, want: cwd},
 		{name: "the directory it was made in, its last one gone", cwd: gone, dir: dir, want: dir},
-		{name: "HOME, both gone", cwd: gone, dir: gone, want: home},
 		{name: "the directory it was made in, its last one a file", cwd: file, dir: dir, want: dir},
+		{name: "the directory it was made in, its last one not searchable", cwd: sealed, dir: dir, want: dir},
+		{name: "the directory it was made in, its last one relative", cwd: ".", dir: dir, want: dir},
 		{name: "the directory it was made in, recording no last one", dir: dir, want: dir},
+		{name: "HOME, both gone", cwd: gone, dir: gone, want: home},
+		{name: "HOME, both relative", cwd: ".", dir: ".", want: home},
+		{name: "the root, HOME gone as well", cwd: gone, dir: gone, home: gone, want: "/"},
+		{name: "the root, HOME not searchable", cwd: gone, dir: gone, home: sealed, want: "/"},
+		{name: "the root, HOME relative", cwd: gone, dir: gone, home: ".", want: "/"},
 	} {
 		t.Run("it starts in "+tc.name, func(t *testing.T) {
-			t.Setenv("HOME", home)
+			t.Setenv("HOME", cmp.Or(tc.home, home))
 			w := newWorld(t)
 			e := entry(t, "work")
 			e.Cwd, e.Dir = tc.cwd, tc.dir
@@ -327,7 +684,7 @@ func TestRestore_HelperArgv(t *testing.T) {
 		if got := w.onlyCreate(t).Command; !slices.Equal(got, bare) {
 			t.Errorf("command = %q, want %q", got, bare)
 		}
-		if warnings := w.sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) > 0 {
+		if warnings := w.warnings(); len(warnings) > 0 {
 			t.Errorf("a session that saved no transcript logged %v, want nothing amiss", warnings)
 		}
 	})
@@ -398,7 +755,7 @@ func TestRestore_RecordsTheCreation(t *testing.T) {
 		}
 		want := e
 		want.CreatedAt, want.PID = live.Created, live.PID
-		if got, _ := w.lookup(t, "work"); got != want {
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, want) {
 			t.Errorf("entry = %+v, want %+v", got, want)
 		}
 	})
@@ -413,8 +770,31 @@ func TestRestore_RecordsTheCreation(t *testing.T) {
 			t.Fatalf("Restore = %+v, want work restored", res)
 		}
 
-		if got, _ := w.lookup(t, "work"); got != saved {
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, saved) {
 			t.Errorf("entry = %+v, want it as saved, %+v", got, saved)
+		}
+	})
+
+	// A raw recreation of the name, claimed while restore waited for the lock,
+	// is the live session now: recording restore's creation over it would have
+	// the next claim replace the entry and lose what it was saved with.
+	t.Run("an entry a claim took over since restore read it is left to the claim", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		claimed := saved
+		claimed.CreatedAt, claimed.PID = time.Now().Truncate(time.Second), 9999
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.save(t, claimed)
+			return w.fake.Create(ctx, name, dir, command)
+		})
+
+		if res := w.r.Restore(t.Context()); res.Restored != 1 {
+			t.Fatalf("Restore = %+v, want work restored", res)
+		}
+
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, claimed) {
+			t.Errorf("entry = %+v, want the claim's, %+v", got, claimed)
 		}
 	})
 }

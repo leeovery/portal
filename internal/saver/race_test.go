@@ -188,8 +188,8 @@ func TestPoll_RestoreRaces(t *testing.T) {
 		}
 		return s
 	}
-	restored := func(w *world, s backend.Session) {
-		w.update(func(idx *sessionindex.Index) { idx.Restored(s.Name, s.Created, s.PID) })
+	restored := func(w *world, read sessionindex.Entry, s backend.Session) {
+		w.update(func(idx *sessionindex.Index) { idx.Restored(read, s.Created, s.PID) })
 	}
 
 	t.Run("a restore landing between the listing and the commit is honoured", func(t *testing.T) {
@@ -198,7 +198,7 @@ func TestPoll_RestoreRaces(t *testing.T) {
 		var made backend.Session
 		w.race.afterList = func() {
 			made = restore(w)
-			restored(w, made)
+			restored(w, e, made)
 		}
 
 		w.poll()
@@ -220,7 +220,7 @@ func TestPoll_RestoreRaces(t *testing.T) {
 		w := newWorld(t)
 		e := saved(w)
 		made := restore(w)
-		w.race.afterList = func() { restored(w, made) }
+		w.race.afterList = func() { restored(w, e, made) }
 
 		w.poll()
 
