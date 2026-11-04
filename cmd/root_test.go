@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -376,6 +378,32 @@ func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	}
 	if strings.Count(got, "\n") != 1 {
 		t.Errorf("stderr contained %d newlines; want exactly 1", strings.Count(got, "\n"))
+	}
+}
+
+// decision 75: a mint whose create the backend refused, because a zmx 0.8.1
+// first on PATH made the session, fails with the older-zmx fatal, as a
+// bootstrap meeting that zmx does.
+func TestExecute_UnsupportedCreateIsTheOlderZmxFatal(t *testing.T) {
+	fake, _ := stageAttach(t)
+	stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+	fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w; zmx kill ended the session", "x", backend.ErrUnsupportedProtocol))
+
+	var stderr bytes.Buffer
+	originalWriter := fatalErrorStderr
+	fatalErrorStderr = &stderr
+	t.Cleanup(func() { fatalErrorStderr = originalWriter })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", t.TempDir()})
+	err := Execute()
+
+	fatal, ok := errors.AsType[*bootstrap.FatalError](err)
+	if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
+		t.Fatalf("Execute = %v, want the older-zmx fatal carrying the refusal", err)
+	}
+	if got, want := stderr.String(), bootstrap.OlderZmxMessage+"\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }
 

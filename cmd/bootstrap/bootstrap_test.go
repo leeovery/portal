@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
@@ -26,7 +27,7 @@ type answer struct {
 type stepRecorder struct {
 	calls []string
 
-	ZmxErr, RemoveErr, RaiseErr, OrphansErr, FlagsErr, LatchErr error
+	ZmxErr, ZmxDirErr, RemoveErr, RaiseErr, OrphansErr, FlagsErr, LatchErr error
 	// LowerErrs are the lowers' errors in turn, nil past the last.
 	LowerErrs []error
 	// Raised is the restoring flag, as a pass cut short may leave it.
@@ -74,6 +75,7 @@ func (r *stepRecorder) count(call string) int {
 }
 
 func (r *stepRecorder) CheckZmx(context.Context) error { r.record("CheckZmx"); return r.ZmxErr }
+func (r *stepRecorder) Claim() error                   { r.record("ClaimZmxDir"); return r.ZmxDirErr }
 func (r *stepRecorder) RemoveLatch() error             { r.record("RemoveLatch"); return r.RemoveErr }
 func (r *stepRecorder) WriteLatch() error              { r.record("WriteLatch"); return r.LatchErr }
 
@@ -175,6 +177,7 @@ func (r *stepRecorder) Restore(context.Context) restore.Result {
 func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 	return &Orchestrator{
 		Zmx:           r,
+		ZmxDir:        r,
 		Latch:         r,
 		Restoring:     r,
 		OrphanSweeper: r,
@@ -189,7 +192,7 @@ func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 // wantAllCalls is every seam call a bootstrap that finds its saver running
 // makes, in the order Run makes them.
 var wantAllCalls = []string{
-	"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+	"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 	"Present", "Protocol", "EnsureSaver", "Raise", "Restore", "Lower", "WriteLatch",
 }
 
@@ -243,7 +246,7 @@ func TestOrchestratorRun_RunsTheSixStepsInOrder(t *testing.T) {
 		runPass(t, r, &logtest.Sink{})
 
 		want := []string{
-			"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+			"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 			"Present", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 		}
 		if !slices.Equal(r.calls, want) {
@@ -271,7 +274,7 @@ func TestOrchestratorRun_LatchAndRestoringFlag(t *testing.T) {
 
 		runPass(t, r, &logtest.Sink{})
 
-		if got := r.calls[:2]; !slices.Equal(got, []string{"CheckZmx", "RemoveLatch"}) {
+		if got := r.calls[:3]; !slices.Equal(got, []string{"CheckZmx", "ClaimZmxDir", "RemoveLatch"}) {
 			t.Errorf("calls begin %v, want the latch removed straight after zmx is checked", got)
 		}
 	})
@@ -301,7 +304,7 @@ func TestOrchestratorRun_LatchAndRestoringFlag(t *testing.T) {
 
 		runPass(t, r, sink)
 
-		if got := r.calls[:3]; !slices.Equal(got, []string{"CheckZmx", "RemoveLatch", "Lower"}) {
+		if got := r.calls[:4]; !slices.Equal(got, []string{"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower"}) {
 			t.Errorf("calls begin %v, want the flag lowered with the latch removed", got)
 		}
 		rec := sink.Records().WithMessage("restoring flag lowered").AtExactLevel(slog.LevelInfo).Only(t, "the flag left raised")
@@ -364,32 +367,48 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 			calls:   wantAllCalls[:1],
 		},
 		{
+			name: "a state directory of another zmx directory",
+			stage: func(r *stepRecorder) {
+				r.ZmxDirErr = &OtherZmxDirError{StateDir: "/srv/state", Recorded: "/srv/zmx", Using: "/tmp/scratch"}
+			},
+			step:    indexCheckZmx,
+			message: "Portal's state in /srv/state belongs to the zmx sessions in /srv/zmx, but this Portal is using /tmp/scratch. Run it with ZMX_DIR=/srv/zmx, or give it a state of its own with PORTAL_STATE_DIR.",
+			calls:   wantAllCalls[:2],
+		},
+		{
+			name:    "a zmx directory record it can't read or write",
+			stage:   func(r *stepRecorder) { r.ZmxDirErr = errBoom },
+			step:    indexCheckZmx,
+			message: "Portal failed to record the zmx directory its state belongs to: boom",
+			calls:   wantAllCalls[:2],
+		},
+		{
 			name:    "removing the latch",
 			stage:   func(r *stepRecorder) { r.RemoveErr = errBoom },
 			step:    indexRemoveLatch,
 			message: "Portal failed to remove the bootstrapped latch: boom",
-			calls:   wantAllCalls[:2],
+			calls:   wantAllCalls[:3],
 		},
 		{
 			name:    "lowering a restoring flag left raised",
 			stage:   func(r *stepRecorder) { r.LowerErrs = []error{errBoom} },
 			step:    indexRemoveLatch,
 			message: "Portal failed to lower the restoring flag: boom",
-			calls:   wantAllCalls[:3],
+			calls:   wantAllCalls[:4],
 		},
 		{
 			name:    "raising the restoring flag",
 			stage:   func(r *stepRecorder) { r.RaiseErr = errBoom },
 			step:    indexRestore,
 			message: "Portal failed to raise the restoring flag: boom",
-			calls:   wantAllCalls[:9],
+			calls:   wantAllCalls[:10],
 		},
 		{
 			name:    "lowering the restoring flag after restore",
 			stage:   func(r *stepRecorder) { r.LowerErrs = []error{nil, errBoom} },
 			step:    indexRestore,
 			message: "Portal failed to lower the restoring flag: boom",
-			calls:   wantAllCalls[:11],
+			calls:   wantAllCalls[:12],
 		},
 	} {
 		t.Run(tc.name+" is fatal, and nothing runs after it, the latch least of all", func(t *testing.T) {
@@ -447,7 +466,7 @@ func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
 			}
 
 			want := []string{
-				"CheckZmx", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+				"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 				"Present", "Protocol", "End", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 			}
 			if !slices.Equal(r.calls, want) {
@@ -533,6 +552,39 @@ func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
 		fatal := fatalOf(t, r)
 
 		if !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver it made on it, which is left: its socket outlived SIGTERM") || fatal.UserMessage != olderZmx {
+			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
+		}
+	})
+
+	// decision 75: the backend's create judges what it made, ending a session
+	// of zmx 0.8.1's with that zmx's kill before it refuses it.
+	t.Run("one the create refuses as zmx 0.8.1's is fatal, End finding it ended, and nothing restored", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.CreateErr = fmt.Errorf("create the saver session: %w; zmx kill ended the session", backend.ErrUnsupportedProtocol)
+
+		fatal := fatalOf(t, r)
+
+		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+			t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, olderZmx, indexEnsureSaver)
+		}
+		if !r.called("End") || r.called("EndMade") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
+			t.Errorf("calls = %v, want End's proved signal for one the kill left, not zmx kill again, and no restore and no latch", r.calls)
+		}
+		if !strings.Contains(fatal.Cause.Error(), "Portal ended the saver it made on it") {
+			t.Errorf("cause = %v, want it to say the saver made was ended", fatal.Cause)
+		}
+	})
+
+	t.Run("one the create refuses and End can't end is left, and the fatal's cause says so", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.CreateErr = fmt.Errorf("create the saver session: %w; the session is left running: zmx kill failed", backend.ErrUnsupportedProtocol)
+		r.EndErr = errors.New("no one process is proved the session's zmx daemon")
+
+		fatal := fatalOf(t, r)
+
+		if fatal.UserMessage != olderZmx || !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver it made on it, which is left: no one process") {
 			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
 		}
 	})
@@ -741,6 +793,22 @@ func TestOrchestratorRun_RestoreWarnings(t *testing.T) {
 				t.Errorf("calls = %v, want every step run, the flag lowered and the latch written", r.calls)
 			}
 		})
+	}
+}
+
+// decision 75: a zmx 0.8.1 first on PATH makes every create fail alike, so a
+// restore the backend refused a session to stops there, with the fatal.
+func TestOrchestratorRun_RestoreStoppedByAnUnsupportedCreateIsFatal(t *testing.T) {
+	r := newRecorder()
+	r.Result = restore.Result{Failed: 1, Unsupported: fmt.Errorf("create session %q: %w", "work", backend.ErrUnsupportedProtocol)}
+
+	fatal := fatalOf(t, r)
+
+	if fatal.UserMessage != olderZmx || fatal.Step != indexRestore || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, olderZmx, indexRestore)
+	}
+	if want := wantAllCalls[:len(wantAllCalls)-1]; !slices.Equal(r.calls, want) || r.Raised {
+		t.Errorf("calls = %v, want %v: the flag lowered, no latch", r.calls, want)
 	}
 }
 

@@ -208,11 +208,18 @@ var fatalErrorStderr io.Writer = os.Stderr
 
 // Execute writes a *bootstrap.FatalError's UserMessage to stderr before
 // returning it, and never calls os.Exit — the caller maps the returned error to
-// the process exit code.
+// the process exit code. A create's refusal of a session made by a zmx Portal
+// can't talk to, from any command, is the fatal a bootstrap meeting that zmx
+// gives.
 func Execute() error {
 	err := rootCmd.Execute()
 	if err == nil {
 		return nil
+	}
+	if _, ok := errors.AsType[*bootstrap.FatalError](err); !ok {
+		if refused := bootstrap.UnsupportedCreate(err); refused != nil {
+			err = refused
+		}
 	}
 	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
 		_, _ = fmt.Fprintln(fatalErrorStderr, fatal.UserMessage)

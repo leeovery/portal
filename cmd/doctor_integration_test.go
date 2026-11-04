@@ -113,7 +113,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 			"✓ sessions: 2 sessions answering",
 			"✓ saver: _portal-saver up",
 			"  pending resumes: 1 session waiting to resume",
-			"10 checks passed",
+			"11 checks passed",
 		)
 		if want := fmt.Sprintf("\n  ✓ daemon: running (pid %d, version ", d.PID); !strings.Contains(out, want) {
 			t.Errorf("report missing %q:\n%s", want, out)
@@ -137,7 +137,7 @@ func TestPortalDoctorAgainstZmx(t *testing.T) {
 		}
 		assertLines(t, out,
 			"✗ sessions: 2 of 4 not answering: future-2 (speaks protocol 2; Portal speaks 1), wedged-Lp4s (no answer)",
-			"9 of 10 checks passed",
+			"10 of 11 checks passed",
 		)
 	})
 }

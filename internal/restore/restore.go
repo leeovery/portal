@@ -52,6 +52,11 @@ type Result struct {
 	// Restored counts the sessions made again. Failed counts those that
 	// couldn't be, whose entries stay for the next bootstrap to retry.
 	Restored, Failed int
+	// Unsupported is why restore stopped short: a session it made speaks a
+	// protocol Portal doesn't support, as every session it made next would.
+	// The backend has ended that session, and the entries it didn't reach
+	// stay for the next bootstrap.
+	Unsupported error
 }
 
 // Restorer restores the saved sessions. It is not safe for concurrent use.
@@ -135,7 +140,8 @@ func (r *Restorer) MarkOwed(ctx context.Context) error {
 // to judge by, every entry may predate the boot. A session it can't make
 // keeps its entry for the next bootstrap. It asks the backend nothing when
 // sessions.json can't be read, makes nothing when the backend can't be
-// listed, and makes no further session once ctx ends.
+// listed, and makes no further session once ctx ends or the backend refuses
+// one it made as speaking a protocol Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r}
@@ -177,6 +183,9 @@ func (r *run) restore(ctx context.Context) {
 			r.progress(i+1, len(due))
 		}
 		r.restoreOne(ctx, e)
+		if r.res.Unsupported != nil {
+			return
+		}
 	}
 }
 
@@ -238,6 +247,10 @@ func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
 	}
 	dir, argv := startDir(e), r.command(e)
 	s, err := r.backend.Create(ctx, e.Name, dir, argv)
+	if errors.Is(err, backend.ErrUnsupportedProtocol) {
+		r.unsupported(e.Name, raisedBefore, err)
+		return
+	}
 	if err != nil {
 		if s, err = r.madeAnyway(ctx, e.Name, raisedBefore, err); err != nil {
 			r.failed(e.Name, err)
@@ -273,6 +286,18 @@ func (r *run) madeAnyway(ctx context.Context, name string, raisedBefore bool, cr
 		return backend.Session{}, createErr
 	}
 	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", createErr, err)
+}
+
+// unsupported stops the run on a Create the backend refused because the
+// session it made speaks a protocol Portal doesn't support: every Create
+// after it would make another. Only a flag this run raised comes down, as
+// for a session that isn't there.
+func (r *run) unsupported(name string, raisedBefore bool, err error) {
+	if !raisedBefore {
+		r.lowerHydrating(name)
+	}
+	r.failed(name, err)
+	r.res.Unsupported = err
 }
 
 // holder is the session holding the name, asked for a second time a probe's

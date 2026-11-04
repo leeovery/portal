@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
@@ -135,6 +136,13 @@ func standDownCases() []standDownCase {
 		}},
 		{name: "nothing listed and no sessions.json", reason: ReasonNoSessions, listed: true, stage: func(*testing.T, *world) {}},
 		{name: "nothing listed and an empty sessions.json", reason: ReasonNoSessions, listed: true, stage: func(t *testing.T, w *world) {
+			w.index(t)
+		}},
+		// The daemon that sweeps runs in _portal-saver, so a listing always
+		// holds it: a scratch state and zmx dir beside a real hooks.json must
+		// still read as nothing listed.
+		{name: "only _portal-saver listed beside an empty sessions.json", reason: ReasonNoSessions, listed: true, stage: func(t *testing.T, w *world) {
+			w.backend.Add(backend.Session{Name: portalSaver})
 			w.index(t)
 		}},
 	}

@@ -163,8 +163,8 @@ func TestDoctorResumeMode(t *testing.T) {
 			return lines[len(lines)-1]
 		}
 		for _, stored := range []string{"eager", "lazy"} {
-			if got := summaryFor(stored); got != "  10 checks passed" {
-				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  10 checks passed")
+			if got := summaryFor(stored); got != "  11 checks passed" {
+				t.Errorf("summary with resume mode %s = %q; want %q", stored, got, "  11 checks passed")
 			}
 		}
 

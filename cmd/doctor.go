@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -394,6 +395,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkSaver(ctx, deps.Saver, idle),
 		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
+		checkStateZmxDir(dir, dirErr, deps.ZmxDir),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
@@ -627,6 +629,32 @@ func checkStateDirSane(dir string, dirErr error) checkResult {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
 	}
 	return checkDirReadable(name, dir)
+}
+
+// otherZmxDirDetail is the state's zmx dir check failing on a state directory
+// that belongs to another zmx directory: the one it belongs to, and the one
+// this Portal uses.
+const otherZmxDirDetail = "belongs to the zmx sessions in %[1]s, but this Portal is using %[2]s; run it with ZMX_DIR=%[1]s, or give it a state of its own with PORTAL_STATE_DIR"
+
+// checkStateZmxDir reads, as the bootstrap does but recording nothing, which
+// zmx directory the state directory belongs to. A state directory that
+// records none yet passes: the next bootstrap records this one.
+func checkStateZmxDir(dir string, dirErr error, zmxDir string) checkResult {
+	const name = "state's zmx dir"
+	if dirErr != nil {
+		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
+	}
+	recorded, err := zmxDirOwner(dir, zmxDir).Recorded()
+	other, isOther := errors.AsType[*bootstrap.OtherZmxDirError](err)
+	switch {
+	case isOther:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(otherZmxDirDetail, other.Recorded, other.Using)}
+	case err != nil:
+		return checkResult{name: name, status: checkFail, detail: "unreadable"}
+	case recorded == "":
+		return checkResult{name: name, status: checkPass, detail: "not recorded yet"}
+	}
+	return checkResult{name: name, status: checkPass, detail: recorded}
 }
 
 // checkDirReadable passes a directory that can be read, or that is not made

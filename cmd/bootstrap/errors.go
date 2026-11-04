@@ -1,8 +1,10 @@
 package bootstrap
 
 import (
+	"errors"
 	"strconv"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/warning"
 )
 
@@ -29,6 +31,21 @@ func NewFatal(userMsg string, cause error) *FatalError {
 // nor end: the fatal of a bootstrap that finds one, and uninstall's failure on
 // one.
 const SaverLeftMessage = "Portal can't use the _portal-saver session left running on another zmx, and couldn't end it. End it with that zmx (zmx kill _portal-saver), or restart your computer."
+
+// OlderZmxMessage is the fatal of a zmx that speaks zmx 0.8.1's protocol: a
+// saver judged so, or a session any create just made, which the backend
+// refuses with backend.ErrUnsupportedProtocol.
+const OlderZmxMessage = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1."
+
+// UnsupportedCreate is err as the older-zmx fatal when it carries a create's
+// refusal of a session made by a zmx Portal can't talk to, and nil otherwise,
+// so every command that creates fails the same way.
+func UnsupportedCreate(err error) *FatalError {
+	if !errors.Is(err, backend.ErrUnsupportedProtocol) {
+		return nil
+	}
+	return NewFatal(OlderZmxMessage, err)
+}
 
 // Warning is an alias, not a local type: cmd, cmd/bootstrap and tui must share
 // one canonical shape across the import boundary.

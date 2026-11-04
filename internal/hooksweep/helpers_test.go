@@ -169,6 +169,9 @@ func assertStandDown(t *testing.T, sink *logtest.Sink, reason Reason) logtest.Re
 // enough to be a real wait, short enough that a suite can afford one.
 const lockBound = 60 * time.Millisecond
 
+// portalSaver is the session the sweeping daemon runs in, one of Portal's own.
+const portalSaver = "_portal-saver"
+
 // errZmxDown is the listing failure a backend is armed with when the case is
 // about what the cycle does with a failed read, not about which read failed.
 var errZmxDown = errors.New("zmx directory unreadable")

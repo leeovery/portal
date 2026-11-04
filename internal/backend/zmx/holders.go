@@ -117,12 +117,14 @@ func (b *Backend) mayBeDir(dir string) bool {
 
 // isDir reports whether dir, absolute, resolves to the Backend's directory.
 func (b *Backend) isDir(dir string) bool {
-	return filepath.IsAbs(dir) && resolved(dir) == resolved(b.dir)
+	return filepath.IsAbs(dir) && CanonicalDir(dir) == CanonicalDir(b.dir)
 }
 
-// resolved is dir with its symbolic links resolved, or as written when they
-// can't be: a directory that doesn't resolve is not one that does.
-func resolved(dir string) string {
+// CanonicalDir is dir with its symbolic links resolved, or as written when
+// they can't be: a directory that doesn't resolve is not one that does. Two
+// spellings of one zmx directory, as /tmp and /private/tmp are on macOS,
+// have one canonical form.
+func CanonicalDir(dir string) string {
 	if path, err := filepath.EvalSymlinks(dir); err == nil {
 		return path
 	}

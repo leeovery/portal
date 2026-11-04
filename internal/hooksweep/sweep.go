@@ -25,8 +25,8 @@ const (
 	sweepFailedMsg = "stale-hook cleanup failed"
 )
 
-// Sources are what protect a key from the sweep: every session List names,
-// answering or not, and every entry sessions.json in StateDir holds. StateDir
+// Sources are what protect a key from the sweep: every user session List
+// names, answering or not, and every entry sessions.json in StateDir holds. StateDir
 // also holds the restoring flag that stands the judgement down.
 type Sources struct {
 	List     func(context.Context) ([]backend.Session, error)
@@ -65,8 +65,12 @@ func restoringStandDown(dir string) StandDown {
 	return StandDown{}
 }
 
-// listedNames is every session name the backend lists, answering or not: a
-// session that doesn't answer is still a session, and its hook is still its.
+// listedNames is every user session name the backend lists, answering or not:
+// a session that doesn't answer is still a session, and its hook is still its.
+// Portal's own sessions are left out here, for the sweep and the diagnosis
+// alike, since the driver lists them: counted, the daemon's own _portal-saver
+// would keep nothingProtects from ever standing down in the one process that
+// sweeps unattended.
 func listedNames(ctx context.Context, list func(context.Context) ([]backend.Session, error)) ([]string, StandDown) {
 	sessions, err := list(ctx)
 	if err != nil {
@@ -74,7 +78,9 @@ func listedNames(ctx context.Context, list func(context.Context) ([]backend.Sess
 	}
 	names := make([]string, 0, len(sessions))
 	for _, s := range sessions {
-		names = append(names, s.Name)
+		if !s.PortalOwned() {
+			names = append(names, s.Name)
+		}
 	}
 	return names, StandDown{}
 }

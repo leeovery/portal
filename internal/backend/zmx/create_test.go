@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 const createdLine = `printf 'session "%s" created\n' "$2"`
@@ -193,6 +194,8 @@ type createResult struct {
 	err     error
 	// afterUp is how long Create took to return once the daemon was up.
 	afterUp time.Duration
+	// log is what the fake zmx recorded of its last run.
+	log string
 }
 
 // createBringingUp runs Create of name with a fake zmx that prints its
@@ -207,8 +210,16 @@ func createBringingUp(t *testing.T, dir, name string, up func()) createResult {
 // createBringingUpWithin is createBringingUp under the probe ceiling probe.
 func createBringingUpWithin(t *testing.T, dir, name string, probe time.Duration, up func()) createResult {
 	t.Helper()
+	return createBringingUpKilling(t, dir, name, probe, "echo 'zmx kill was not expected' >&2; exit 1", up)
+}
+
+// createBringingUpKilling is createBringingUpWithin with a fake zmx whose
+// kill runs kill.
+func createBringingUpKilling(t *testing.T, dir, name string, probe time.Duration, kill string, up func()) createResult {
+	t.Helper()
 	ready := filepath.Join(t.TempDir(), "up")
-	binary, log := fakeZmx(t, createdLine+"; while [ ! -e "+ready+" ]; do sleep 0.01; done")
+	binary, log := fakeZmx(t, `if [ "$1" = kill ]; then `+kill+"; exit; fi; "+
+		createdLine+"; while [ ! -e "+ready+" ]; do sleep 0.01; done")
 	b := held(newBackendRunning(t, binary, dir, "PATH=/usr/bin:/bin"), dir, name)
 	zmx.ShortenCeilings(b, probe)
 
@@ -238,7 +249,14 @@ func createBringingUpWithin(t *testing.T, dir, name string, probe time.Duration,
 	upAt := time.Now()
 	r := <-done
 	r.result.afterUp = r.at.Sub(upAt)
+	r.result.log = log
 	return r.result
+}
+
+// lastRun is the arguments of the fake zmx's last run.
+func lastRun(t *testing.T, log string) []string {
+	t.Helper()
+	return strings.Split(strings.TrimSuffix(string(ran(t, log, "args")), "\x00"), "\x00")
 }
 
 func TestCreateReturnsTheSessionItMade(t *testing.T) {
@@ -291,10 +309,50 @@ func TestCreateReturnsTheSessionItMade(t *testing.T) {
 		if got.err != nil || got.session != (backend.Session{Name: "work"}) {
 			t.Errorf("Create = %+v, %v; want only the name, and no error", got.session, got.err)
 		}
-		// Far from the one ceiling it takes, and far short of the create
-		// ceiling it would wait out unbounded.
+		// Far from the two ceilings it takes, the read-back's and the ask in
+		// zmx 0.8.1's framing, and far short of the create ceiling it would
+		// wait out unbounded.
 		if bound := zmx.CreateCeiling / 2; got.afterUp > bound {
-			t.Errorf("Create took %s reading back a silent daemon, want about one %s probe ceiling, well within %s", got.afterUp, ceiling, bound)
+			t.Errorf("Create took %s reading back a silent daemon, want about two %s probe ceilings, well within %s", got.afterUp, ceiling, bound)
+		}
+		if args := lastRun(t, got.log); args[0] != "attach" {
+			t.Errorf("zmx last ran %q, want only the attach: a daemon answering neither framing is not ended", args)
+		}
+	})
+}
+
+// A session the create made that answers only zmx 0.8.1's framing was made by
+// a zmx Portal can't talk to, as every session that zmx makes would be: it is
+// ended by that zmx's own kill and refused, so no caller keeps it.
+func TestCreateRefusesASessionOfAnOlderZmx(t *testing.T) {
+	t.Run("it ends the session with zmx kill and refuses it", func(t *testing.T) {
+		dir := socketDir(t)
+		kill := "rm -f " + shellquote.Single(filepath.Join(dir, "work"))
+
+		got := createBringingUpKilling(t, dir, "work", ceiling, kill, func() { serve(t, dir, "work", olderDaemon(552)) })
+
+		if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || got.session != (backend.Session{}) {
+			t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", got.session, got.err)
+		}
+		if args := lastRun(t, got.log); !slices.Equal(args, []string{"kill", "work"}) {
+			t.Errorf("zmx last ran %q, want kill work", args)
+		}
+		if !strings.Contains(got.err.Error(), "zmx kill ended the session") {
+			t.Errorf("Create = %v, want it to say the session was ended", got.err)
+		}
+	})
+
+	t.Run("one zmx kill can't end is refused all the same, saying it is left", func(t *testing.T) {
+		dir := socketDir(t)
+		kill := "echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1"
+
+		got := createBringingUpKilling(t, dir, "work", ceiling, kill, func() { serve(t, dir, "work", olderDaemon(552)) })
+
+		if !errors.Is(got.err, backend.ErrUnsupportedProtocol) {
+			t.Fatalf("Create = %+v, %v; want ErrUnsupportedProtocol", got.session, got.err)
+		}
+		if msg := got.err.Error(); !strings.Contains(msg, "left running") || !strings.Contains(msg, "SessionUnresponsive") {
+			t.Errorf("Create = %v, want it to say the session is left, with zmx's output", got.err)
 		}
 	})
 }

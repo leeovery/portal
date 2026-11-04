@@ -1055,3 +1055,29 @@ func TestRestore_Progress(t *testing.T) {
 		t.Errorf("progress = %v, want %v: each session restore takes up, failed or not, of those it restores", got, want)
 	}
 }
+
+// decision 75: a Create the backend refuses because the session it made speaks
+// a protocol Portal doesn't support stops the restore there, since every
+// Create after it would make another; the entries it didn't reach stay.
+func TestRestore_StopsOnASessionOfAnUnsupportedProtocol(t *testing.T) {
+	w := newWorld(t)
+	w.fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w", "work", backend.ErrUnsupportedProtocol))
+	w.save(t, entry(t, "work"), entry(t, "notes"))
+
+	res := w.r.Restore(t.Context())
+
+	if !errors.Is(res.Unsupported, backend.ErrUnsupportedProtocol) || res.Failed != 1 || res.Restored != 0 {
+		t.Errorf("Restore = %+v, want one failed, carrying the refusal", res)
+	}
+	if got := w.created(); !slices.Equal(got, []string{"work"}) {
+		t.Errorf("created %q, want work alone: nothing is made after the refusal", got)
+	}
+	for _, name := range []string{"work", "notes"} {
+		if w.hydrating(t, name) {
+			t.Errorf("%s's hydrating flag is up, want it down: no session runs the helper", name)
+		}
+		if _, ok := w.lookup(t, name); !ok {
+			t.Errorf("%s's entry is gone, want it kept for the next restore", name)
+		}
+	}
+}
