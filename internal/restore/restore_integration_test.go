@@ -83,7 +83,7 @@ func saveSession(t *testing.T, binary, mode string) *rebootWorld {
 // inSession is the environment of a command typed in the session, in the zmx
 // directory b binds, isolated as the saver is.
 func (w *rebootWorld) inSession(b *zmx.Backend, extra ...string) []string {
-	return slices.Concat(w.saver.Env, b.ReachEnv(), []string{"ZMX_SESSION=" + restoredSession}, extra)
+	return slices.Concat(w.bootEnv(), b.ReachEnv(), []string{"ZMX_SESSION=" + restoredSession}, extra)
 }
 
 // portal runs the built portal with args in env, and returns what it printed.
@@ -123,11 +123,29 @@ func (w *rebootWorld) awaitSaved(t *testing.T) {
 	}
 }
 
-// reboot ends every session, the saver's first so it drops nothing, and
-// returns the zmx directory of the boot that follows: empty, with every
-// session it makes, and this process, judging the entries saved as from
-// before the boot.
+// reboot ends every session and returns the zmx directory of the boot that
+// follows: empty, with every session it makes, and this process, judging the
+// entries saved as from before the boot.
 func (w *rebootWorld) reboot(t *testing.T) *zmx.Backend {
+	t.Helper()
+	w.endSessions(t)
+	booted := time.Now().Format(time.RFC3339Nano)
+	t.Setenv(state.BootTimeEnv, booted)
+	w.booted = state.BootTimeEnv + "=" + booted
+	return zmxtest.New(t, zmxtest.WithEnv(w.bootEnv()...))
+}
+
+// logout ends every session, as a logout or a crash does, and returns the
+// empty zmx directory sessions are made in next, within the same boot.
+func (w *rebootWorld) logout(t *testing.T) *zmx.Backend {
+	t.Helper()
+	w.endSessions(t)
+	return zmxtest.New(t, zmxtest.WithEnv(w.bootEnv()...))
+}
+
+// endSessions ends the saver and the session, the saver first so it drops
+// nothing.
+func (w *rebootWorld) endSessions(t *testing.T) {
 	t.Helper()
 	b := w.saver.Backend
 	if err := b.Kill(t.Context(), saver.SessionName); err != nil {
@@ -139,14 +157,17 @@ func (w *rebootWorld) reboot(t *testing.T) *zmx.Backend {
 	if err := b.Kill(t.Context(), restoredSession); err != nil {
 		t.Fatalf("end the session: %v", err)
 	}
-	booted := time.Now().Format(time.RFC3339Nano)
-	t.Setenv(state.BootTimeEnv, booted)
-	w.booted = state.BootTimeEnv + "=" + booted
-	return zmxtest.New(t, zmxtest.WithEnv(w.bootEnv()...))
 }
 
-// bootEnv is what the processes of the boot after the reboot run with.
-func (w *rebootWorld) bootEnv() []string { return append(slices.Clone(w.saver.Env), w.booted) }
+// bootEnv is what the processes of the boot run with: the saver's
+// environment, and the boot a reboot moved, if one did.
+func (w *rebootWorld) bootEnv() []string {
+	env := slices.Clone(w.saver.Env)
+	if w.booted != "" {
+		env = append(env, w.booted)
+	}
+	return env
+}
 
 // restorer is a Restorer over b and the saved state, logging to a sink of its
 // own.
@@ -160,10 +181,10 @@ func (w *rebootWorld) restorer(t *testing.T, b *zmx.Backend) (*restore.Restorer,
 	return r, sink
 }
 
-func (w *rebootWorld) restore(t *testing.T, b *zmx.Backend) {
+func (w *rebootWorld) restore(t *testing.T, b *zmx.Backend, opts ...restore.Option) {
 	t.Helper()
 	r, sink := w.restorer(t, b)
-	if res, want := r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+	if res, want := r.Restore(t.Context(), opts...), (restore.Result{Restored: 1}); res != want {
 		t.Fatalf("Restore = %+v, want %+v\n%s", res, want, sink.Body())
 	}
 }
@@ -228,7 +249,7 @@ func (w *rebootWorld) checkRestored(t *testing.T, b *zmx.Backend) {
 	if e.Label != label {
 		t.Errorf("entry's label = %q, want %q", e.Label, label)
 	}
-	if shown := strings.TrimSpace(w.portal(t, w.inSession(b, w.booted), "current")); shown != label {
+	if shown := strings.TrimSpace(w.portal(t, w.inSession(b), "current")); shown != label {
 		t.Errorf("portal current = %q, want the label %q", shown, label)
 	}
 	if log := portaltest.ReadPortalLogSafe(w.saver.StateDir); !strings.Contains(log, "hydrate: scrollback replayed") {
@@ -359,6 +380,27 @@ func TestRestoreAgainstZmx(t *testing.T) {
 		b := w.reboot(t)
 
 		w.restore(t, b)
+
+		if !harnesstest.PollUntil(t, helperSettle, 20*time.Millisecond, w.hookRan) {
+			t.Fatalf("the resume hook never ran\n--- portal.log ---\n%s", portaltest.ReadPortalLogSafe(w.saver.StateDir))
+		}
+		w.awaitHydrated(t)
+		w.history(t, b, "its transcript", func(shown string) bool { return strings.Contains(shown, savedLine) })
+		w.checkRestored(t, b)
+	})
+
+	// decision 58: a logout, every zmx daemon dying or a crash ends the saver
+	// with the sessions, so no saver saw them end, and the bootstrap that
+	// finds none brings this boot's sessions back with the rest.
+	t.Run("with no saver running, a session of this boot comes back", func(t *testing.T) {
+		w := saveSession(t, binary, "eager")
+		b := w.logout(t)
+		r, sink := w.restorer(t, b)
+		if res := r.Restore(t.Context()); res != (restore.Result{}) {
+			t.Fatalf("Restore = %+v, want this boot's session left to the saver that ran\n%s", res, sink.Body())
+		}
+
+		w.restore(t, b, restore.NoSaverRan())
 
 		if !harnesstest.PollUntil(t, helperSettle, 20*time.Millisecond, w.hookRan) {
 			t.Fatalf("the resume hook never ran\n--- portal.log ---\n%s", portaltest.ReadPortalLogSafe(w.saver.StateDir))

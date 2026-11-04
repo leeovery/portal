@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -61,13 +60,23 @@ type Restorer struct {
 	exe      string
 	logger   *slog.Logger
 	progress func(n, m int)
+	// claimRule and sleep are state.ClaimRule and time.Sleep but in tests.
+	claimRule func(dir string) sessionindex.Rule
+	sleep     func(time.Duration)
 }
 
-// testBinarySuffix ends the name of every binary go test builds.
-const testBinarySuffix = ".test"
+// exeName is the base name of every portal binary, as the daemon's identity
+// requires of one. A binary named otherwise is none a restored session should
+// run: a test binary runs the whole suite, as a debugger's build or a renamed
+// go test -c build may.
+const exeName = "portal"
+
+// recheckAfter is how long a failed Create's session is given to answer before
+// it is asked for again: a probe's ceiling, the second zmx gives one.
+const recheckAfter = time.Second
 
 // New returns a Restorer over cfg. It refuses a Config with no Backend or no
-// StateDir, and an Exe that is not an absolute path or is a test binary.
+// StateDir, and an Exe that is not an absolute path to a binary named portal.
 func New(cfg Config) (*Restorer, error) {
 	switch {
 	case cfg.Backend == nil:
@@ -76,36 +85,54 @@ func New(cfg Config) (*Restorer, error) {
 		return nil, errors.New("restore: no state directory to restore sessions from")
 	case !filepath.IsAbs(cfg.Exe):
 		return nil, fmt.Errorf("restore: the hydrate helper's executable must be an absolute path, not %q", cfg.Exe)
-	case strings.HasSuffix(cfg.Exe, testBinarySuffix):
-		return nil, fmt.Errorf("restore: the hydrate helper's executable %q is a test binary, which a restored session would run as the whole suite", cfg.Exe)
+	case filepath.Base(cfg.Exe) != exeName:
+		return nil, fmt.Errorf("restore: the hydrate helper's executable %q is not named %s", cfg.Exe, exeName)
 	}
-	return &Restorer{backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger)}, nil
+	return &Restorer{
+		backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger),
+		claimRule: state.ClaimRule, sleep: time.Sleep,
+	}, nil
 }
 
 // SetProgress has Restore report each session it takes up: the nth of the m
 // it restores.
 func (r *Restorer) SetProgress(fn func(n, m int)) { r.progress = fn }
 
-// Restore makes again, in index order, the session of every saved entry that
-// may predate this boot and that the backend doesn't list, Portal's own aside.
-// An entry from this boot whose session is gone ended this boot, and is the
-// saver's to drop; with no boot time to judge by, every entry may predate it.
-// A session it can't make keeps its entry for the next bootstrap. It asks the
-// backend nothing when sessions.json can't be read, makes nothing when the
-// backend can't be listed, and makes no further session once ctx ends.
-func (r *Restorer) Restore(ctx context.Context) Result {
+// Option changes one Restore.
+type Option func(*run)
+
+// NoSaverRan is the restore of a bootstrap that found no saver running. The
+// saver's world ended with the sessions, by a logout, every zmx daemon dying
+// or a crash, so no saver saw them end: every entry not live comes back, this
+// boot's included.
+func NoSaverRan() Option { return func(r *run) { r.everyEntry = true } }
+
+// Restore makes again, in index order, the session of every saved entry the
+// backend doesn't list, Portal's own aside. Unless NoSaverRan, it skips an
+// entry from this boot, whose session ended while a saver watched and is the
+// saver's to drop; with no boot time to judge by, every entry may predate the
+// boot. A session it can't make keeps its entry for the next bootstrap. It
+// asks the backend nothing when sessions.json can't be read, makes nothing
+// when the backend can't be listed, and makes no further session once ctx
+// ends.
+func (r *Restorer) Restore(ctx context.Context, opts ...Option) Result {
 	start := time.Now()
 	pass := &run{Restorer: r}
+	for _, opt := range opts {
+		opt(pass)
+	}
 	pass.restore(ctx)
-	r.logger.Info("restore complete", "sessions", pass.res.Restored, "anomalous", pass.anomalous, log.Took(start))
+	r.logger.Info("restore complete", "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
 	return pass.res
 }
 
 // run is one Restore: what it did, and how many warnings its sessions drew.
 type run struct {
 	*Restorer
-	res       Result
-	anomalous int
+	// everyEntry restores this boot's entries as well.
+	everyEntry bool
+	res        Result
+	anomalous  int
 }
 
 func (r *run) restore(ctx context.Context) {
@@ -143,10 +170,10 @@ func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessio
 	for _, s := range live {
 		listed[s.Name] = true
 	}
-	rule := state.ClaimRule(r.dir)
+	predates := r.predating()
 	var due []sessionindex.Entry
 	for _, e := range entries {
-		if why := skipped(e, listed, rule); why != "" {
+		if why := skipped(e, listed, predates); why != "" {
 			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
 			continue
 		}
@@ -155,16 +182,25 @@ func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessio
 	return due
 }
 
+// predating reports whether an entry may predate this boot, as the claim rule
+// judges it, or for every entry when no saver ran.
+func (r *run) predating() func(sessionindex.Entry) bool {
+	if r.everyEntry {
+		return func(sessionindex.Entry) bool { return true }
+	}
+	return r.claimRule(r.dir).MayPredateBoot
+}
+
 // skipped says why the entry's session is not restored, and is empty when it
 // is: its session is listed, answering or not, it is one of Portal's own, or
 // it can't predate this boot.
-func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule) string {
+func skipped(e sessionindex.Entry, listed map[string]bool, predates func(sessionindex.Entry) bool) string {
 	switch {
 	case listed[e.Name]:
 		return "it is live"
 	case backend.IsPortalOwned(e.Name):
 		return "it is one of Portal's own"
-	case !rule.MayPredateBoot(e):
+	case !predates(e):
 		return "it ended this boot"
 	}
 	return ""
@@ -207,15 +243,14 @@ func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) {
 // raised before is another restore's. A session that can't be looked up may be
 // the helper's, so its flag stays.
 func (r *run) madeAnyway(ctx context.Context, name string, argv []string, raisedBefore bool, createErr error) (backend.Session, error) {
-	live, err := r.backend.Session(context.WithoutCancel(ctx), name)
-	_, heldAs := errors.AsType[*backend.HeldAsError](err)
+	live, err := r.holder(context.WithoutCancel(ctx), name)
 	switch {
 	case err == nil && live.Command == r.backend.DisplayCommand(argv):
 		return live, nil
 	case err == nil:
 		r.lowerHydrating(name)
 		return backend.Session{}, fmt.Errorf("%w; the session holding its name runs %q, not restore's helper", createErr, live.Command)
-	case heldAs:
+	case heldAs(err):
 		r.lowerHydrating(name)
 		return backend.Session{}, fmt.Errorf("%w; %w", createErr, err)
 	case errors.Is(err, backend.ErrNoSuchSession):
@@ -225,6 +260,26 @@ func (r *run) madeAnyway(ctx context.Context, name string, argv []string, raised
 		return backend.Session{}, createErr
 	}
 	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", createErr, err)
+}
+
+// holder is the session holding the name, asked for a second time a probe's
+// ceiling after a first answer of none: a Create cut short once zmx has forked
+// the session's daemon, before its socket listens, leaves a session that
+// answers to no one yet.
+func (r *run) holder(ctx context.Context, name string) (backend.Session, error) {
+	live, err := r.backend.Session(ctx, name)
+	if errors.Is(err, backend.ErrNoSuchSession) && !heldAs(err) {
+		r.sleep(recheckAfter)
+		live, err = r.backend.Session(ctx, name)
+	}
+	return live, err
+}
+
+// heldAs reports whether err is the backend's answer that it holds the name
+// only under another spelling.
+func heldAs(err error) bool {
+	_, ok := errors.AsType[*backend.HeldAsError](err)
+	return ok
 }
 
 // restored records the session's creation as the entry's own, under the

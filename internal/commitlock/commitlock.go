@@ -41,19 +41,27 @@ func Acquire(dir string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open commit lock: %w", err)
 	}
-	deadline := time.Now().Add(timeout)
+	if err := lock(f, path, timeout); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// lock takes f's lock on path exclusively, retrying until bound has passed. A
+// lock not granted within it is an error wrapping ErrHeld.
+func lock(f *os.File, path string, bound time.Duration) error {
+	deadline := time.Now().Add(bound)
 	for {
 		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
-			return f, nil
+			return nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) {
-			_ = f.Close()
-			return nil, fmt.Errorf("flock commit lock %s: %w", path, err)
+			return fmt.Errorf("flock commit lock %s: %w", path, err)
 		}
 		if !time.Now().Before(deadline) {
-			_ = f.Close()
-			return nil, fmt.Errorf("%w: %s", ErrHeld, path)
+			return fmt.Errorf("%w: %s", ErrHeld, path)
 		}
 		time.Sleep(pollInterval)
 	}

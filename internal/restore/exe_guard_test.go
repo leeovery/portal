@@ -114,6 +114,29 @@ func TestNew_RefusesTheRunningTestBinary() {
 
 func elsewhere() { _, _ = restore.New(restore.Config{Exe: os.Args[0]}) }
 `
+	const helperHandsOver = `package portaltest
+
+import "os"
+
+func PortalExe() string {
+	exe, _ := os.Executable()
+	return exe
+}
+`
+	const procCheck = `package zmxtest
+
+import "os"
+
+func checkProcessReader() bool { return len(os.Args) > 0 }
+
+func argv0() string { return os.Args[0] }
+`
+	const productionSelf = `package spawn
+
+import "os"
+
+func self() (string, error) { return os.Executable() }
+`
 	const refusalNamedElsewhere = `package a_test
 
 import "os"
@@ -144,6 +167,20 @@ func TestNew_RefusesTheRunningTestBinary() { _ = os.Args[0] }
 			name:  "it allows nothing in a test of the refusal test's name outside restore",
 			files: map[string]string{"internal/a/a_test.go": constructs, "internal/a/refusal_test.go": refusalNamedElsewhere},
 			want:  []string{"internal/a/refusal_test.go:5:50: reaches os.Args in a package whose tests construct a restorer"},
+		},
+		{
+			name:  "it reports a helper in a test-only package that hands the running binary over",
+			files: map[string]string{"internal/a/a_test.go": constructs, "internal/portaltest/exe.go": helperHandsOver},
+			want:  []string{"internal/portaltest/exe.go:6:12: reaches os.Executable in a test-only package"},
+		},
+		{
+			name:  "it allows zmxtest's check of the process reader alone",
+			files: map[string]string{"internal/a/a_test.go": constructs, "internal/zmxtest/proc.go": procCheck},
+			want:  []string{"internal/zmxtest/proc.go:7:30: reaches os.Args in a test-only package"},
+		},
+		{
+			name:  "it leaves the running binary to a production package",
+			files: map[string]string{"internal/a/a_test.go": constructs, "internal/spawn/self.go": productionSelf},
 		},
 		{
 			name:  "it reports one beside a construction under any import name",
@@ -182,7 +219,7 @@ func TestNew_RefusesTheRunningTestBinary() { _ = os.Args[0] }
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := scanExeGuard(t, sourceguardtest.Rooted(writeTree(t, withNew(tc.files))))
+			got := scanExeGuard(t, sourceguardtest.Rooted(writeTree(t, scannable(tc.files))))
 
 			slices.Sort(got)
 			if !slices.Equal(got, tc.want) {
@@ -196,9 +233,10 @@ func TestExeGuard_FatalsWhenItScansNothing(t *testing.T) {
 	const constructs = "package a_test\n\nimport \"github.com/leeovery/portal/internal/restore\"\n\nvar _, _ = restore.New(restore.Config{})\n"
 	for name, files := range map[string]map[string]string{
 		"an empty tree":                                 {},
-		"a tree where no test constructs one":           withNew(map[string]string{"internal/a/a.go": "package a\n", "internal/a/a_test.go": "package a\n"}),
+		"a tree where no test constructs one":           scannable(map[string]string{"internal/a/a.go": "package a\n", "internal/a/a_test.go": "package a\n"}),
 		"a tree where restore's production lacks New":   {"internal/restore/restore.go": "package restore\n\nfunc Old() {}\n", "internal/a/a_test.go": constructs},
 		"a tree where only restore's tests declare New": {"internal/restore/new_test.go": newDeclared, "internal/a/a_test.go": constructs},
+		"a tree with no test-only package's own source": {"internal/restore/restore.go": newDeclared, "internal/a/a_test.go": constructs, "internal/portaltest/x_test.go": "package portaltest\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := writeTree(t, files)
@@ -216,10 +254,12 @@ func TestExeGuard_FatalsWhenItScansNothing(t *testing.T) {
 // the declaration of New.
 const newDeclared = "package restore\n\nfunc New(Config) (*Restorer, error) { return nil, nil }\n"
 
-// withNew is files with restore's declaration of New beside them.
-func withNew(files map[string]string) map[string]string {
+// scannable is files with what every scan must find beside them: restore's
+// declaration of New, and a test-only package's own source.
+func scannable(files map[string]string) map[string]string {
 	tree := maps.Clone(files)
 	tree["internal/restore/restore.go"] = newDeclared
+	tree["internal/portaltest/portaltest.go"] = "package portaltest\n"
 	return tree
 }
 
@@ -243,80 +283,124 @@ func writeTree(t *testing.T, files map[string]string) string {
 // exe its restorer was built with as `<exe> state hydrate …`, and under go test
 // the running binary is the test binary: run with a leading state positional,
 // it runs the whole suite again inside the session, with none of the test's
-// isolation. New refuses an exe that isn't absolute or is a test binary, and
+// isolation. New refuses an exe that isn't absolute or isn't named portal, and
 // the guard keeps the running binary's path away from every construction it
 // can see:
 //
 //   - In tests, no package whose tests construct a restorer reaches
 //     os.Executable or os.Args in any of its test files, so no helper beside
-//     the construction can hand either over. restore's own test of New's
-//     refusal is the one exception.
+//     the construction can hand either over.
+//   - No test-only package reaches either in its own sources, so no helper
+//     there can.
 //   - In production, only cmd constructs one, where the shipped binary's own
 //     path is the intent.
+//
+// The functions allowed name the exceptions.
 const (
 	restorePath    = "github.com/leeovery/portal/internal/restore"
 	restoreDir     = "internal/restore"
 	newRestorer    = "New"
 	productionHome = "cmd"
-	// refusalTest hands New the running binary, to prove New refuses it.
-	refusalTest = "TestNew_RefusesTheRunningTestBinary"
 )
 
 // runningBinary is each name of package os a test reaches the running
 // binary's path through.
 var runningBinary = []string{"Executable", "Args"}
 
+// testOnlyPackages are the test-only packages CLAUDE.md lists, under internal.
+var testOnlyPackages = []string{
+	"capture", "portaltest", "tmuxtest", "portalbintest", "hookstest", "logtest", "harnesstest", "sourceguardtest",
+	"commandertest", "transienttest", "spawntest", "themetest", "backendtest", "zmxtest", "proctest",
+}
+
+// allowed is the one function of each directory that may reach the running
+// binary, for a reason no restorer meets it by.
+var allowed = map[string]string{
+	// It hands New the running binary, to prove New refuses it.
+	restoreDir: "TestNew_RefusesTheRunningTestBinary",
+	// It checks the process table reads this process's argv as os.Args.
+	"internal/zmxtest": "checkProcessReader",
+}
+
 // scanExeGuard reports each breach of the guard's rules in the tree the
 // options name. A scan that finds no production source of restore declaring
-// New, or no test constructing a restorer, is fatal: the guard has lost sight
-// of New.
+// New, no test constructing a restorer, or no test-only package's own source
+// is fatal: the guard has lost sight of what it holds.
 func scanExeGuard(t harnesstest.TestingT, opts ...sourceguardtest.ScanOption) []string {
 	t.Helper()
 	_, sources := sourceguardtest.RepoSources(t, sourceguardtest.AllSources, opts...)
-	declared := false
-	constructing := map[string]bool{}
-	var findings []string
-	for _, source := range sources {
-		declared = declared || !isTest(source) && inRestore(source) && declaresFunc(source.File, newRestorer)
-		constructions := reaches(source, source.File, restorePath, newRestorer)
-		if len(constructions) == 0 {
-			continue
-		}
-		if isTest(source) {
-			constructing[dirOf(source)] = true
-		} else if dirOf(source) != productionHome {
-			findings = append(findings, at(source, constructions, "constructs a restorer outside "+productionHome)...)
-		}
-	}
+	s := surveyOf(sources)
 	switch {
-	case !declared:
+	case !s.declared:
 		t.Fatalf("no production source of %s declares %s, so the guard would pass by having stopped looking", restoreDir, newRestorer)
 		return nil
-	case len(constructing) == 0:
+	case len(s.constructing) == 0:
 		t.Fatalf("no test constructs a restorer through %s.%s, so the guard would pass by having stopped looking", restorePath, newRestorer)
 		return nil
+	case s.helpers == 0:
+		t.Fatalf("no source of a test-only package %v was scanned, so the guard would pass by having stopped looking", testOnlyPackages)
+		return nil
 	}
+	findings := s.findings
 	for _, source := range sources {
-		if isTest(source) && constructing[dirOf(source)] {
-			findings = append(findings, runningBinaryReaches(source)...)
+		switch {
+		case isTest(source) && s.constructing[dirOf(source)]:
+			findings = append(findings, runningBinaryReaches(source, "in a package whose tests construct a restorer")...)
+		case !isTest(source) && isTestOnly(source):
+			findings = append(findings, runningBinaryReaches(source, "in a test-only package")...)
 		}
 	}
 	return findings
 }
 
+// survey is what a pass over the sources finds: whether restore's production
+// declares New, the directories whose tests construct a restorer, how many
+// sources of test-only packages there are, and each production construction
+// outside cmd.
+type survey struct {
+	declared     bool
+	constructing map[string]bool
+	helpers      int
+	findings     []string
+}
+
+func surveyOf(sources []sourceguardtest.ParsedSource) survey {
+	s := survey{constructing: map[string]bool{}}
+	for _, source := range sources {
+		s.declared = s.declared || !isTest(source) && inRestore(source) && declaresFunc(source.File, newRestorer)
+		if !isTest(source) && isTestOnly(source) {
+			s.helpers++
+		}
+		constructions := reaches(source, source.File, restorePath, newRestorer)
+		switch {
+		case len(constructions) == 0:
+		case isTest(source):
+			s.constructing[dirOf(source)] = true
+		case dirOf(source) != productionHome:
+			s.findings = append(s.findings, at(source, constructions, "constructs a restorer outside "+productionHome)...)
+		}
+	}
+	return s
+}
+
 // runningBinaryReaches is every place source reaches the running binary's
-// path, outside restore's own test of New's refusal.
-func runningBinaryReaches(source sourceguardtest.ParsedSource) []string {
+// path, outside the function its directory is allowed, each found where.
+func runningBinaryReaches(source sourceguardtest.ParsedSource, where string) []string {
 	var findings []string
 	for _, decl := range source.File.Decls {
-		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil && fd.Name.Name == refusalTest && dirOf(source) == restoreDir {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil && fd.Name.Name == allowed[dirOf(source)] {
 			continue
 		}
 		for _, name := range runningBinary {
-			findings = append(findings, at(source, reaches(source, decl, "os", name), "reaches os."+name+" in a package whose tests construct a restorer")...)
+			findings = append(findings, at(source, reaches(source, decl, "os", name), "reaches os."+name+" "+where)...)
 		}
 	}
 	return findings
+}
+
+func isTestOnly(source sourceguardtest.ParsedSource) bool {
+	name, ok := strings.CutPrefix(dirOf(source), "internal/")
+	return ok && slices.Contains(testOnlyPackages, name)
 }
 
 // declaresFunc reports whether file declares the package-level function name.

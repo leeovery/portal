@@ -165,7 +165,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 |---|---|
 | `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
 | `bootstrap` | The ten-step bootstrap orchestrator. Bound again in `internal/state` for the `bootstrapped` latch: a WARN `latch unsynced` (`error`, `error_class` `write-failed-fsync`) when the directory sync after the latch's rename fails, the latch landed all the same |
-| `restore` | Two-phase restore engine (skeleton + geometry + scrollback) |
+| `restore` | On zmx, `internal/restore`, under the logger its caller binds: once a bootstrap, the restore of every saved session the backend doesn't list. One INFO `restore complete` (`restored`, `failed`, `anomalous`, `took`). Per session: a DEBUG `session skipped` (`session`, `reason` ∈ {`it is live`, `it is one of Portal's own`, `it ended this boot`}), a DEBUG `session restored` (`session`, `path` the directory it started in), and a WARN per anomaly, each counted in `anomalous`: `restore session failed` (`session`, `error`), `record session creation failed` (`session`, `error`), `clear hydrating flag failed` (`session`, `error`) and `scrollback file refused` (`session`, `path`, `error`). Once a run: a WARN `sessions.json unreadable` (`error`) or `list sessions failed` (`error`), either restoring nothing, and a WARN `restore cancelled` (`detail` how many sessions it left, `error` the cause) when its context ends between sessions |
 | `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
 | `notify` | Notification helpers |
 | `hooks` | `hooks.json` mutations (`portal hooks set/rm`, `hookStore.CleanStale`) |
@@ -188,7 +188,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 
 `prefs` and `terminals` are **deliberately excluded** too, on a different argument from `tmux`'s: they are dumb stores — a tolerant decode and a write — with no runtime behaviour and therefore no outcomes worth a trail. (`prefs.json` likewise stays outside the *State-mutation audit trail*'s closed file set.) What earns `theme` a component where those two are refused is that the theme loader **has** outcomes: a nomination that would not parse, a themes directory that could not be read, a shipped palette standing in for the one the user asked for.
 
-### Closed attr-key value space (67 keys)
+### Closed attr-key value space (69 keys)
 
 **Contextual** (set per call as relevant) — 14:
 
@@ -209,13 +209,13 @@ This list is the **single source of truth** for the component count. Mid-move to
 | `via` | state-mutation origin — `cli` / `tui` / `internal` / `migrate` |
 | `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
-**Cycle-summary** (set per summary line as relevant) — 17: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`, `claimed`, `dropped`, `captured`. (`step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count; `claimed` = sessions a saver poll added to or changed in the index; `dropped` = entries it dropped; `captured` = scrollback files a poll or the daemon's final flush wrote and named; a poll's `reaped` = scrollback files it removed.)
+**Cycle-summary** (set per summary line as relevant) — 19: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`, `claimed`, `dropped`, `captured`, `restored`, `failed`. (`restored` = sessions a restore made again; `failed` = sessions it couldn't, whose entries it keeps for the next bootstrap; `step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count; `claimed` = sessions a saver poll added to or changed in the index; `dropped` = entries it dropped; `captured` = scrollback files a poll or the daemon's final flush wrote and named; a poll's `reaped` = scrollback files it removed.)
 
 **Lifecycle** (set per saver/daemon lifecycle event) — 7: `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`.
 
 **Hydrate** (set per hook-firing exec-chain event) — 3: `result`, `hook_present`, `bytes`.
 
-**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 67-key total counts it once).
+**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 69-key total counts it once).
 
 **Spawn** (set per `spawn:` event — host-terminal detection, `terminals.json` load, per-window outcome, batch summary) — 8:
 
@@ -230,7 +230,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 | `total` | Batch summary — N, the whole target set including the trigger's own surface |
 | `detail` | The opaque lower-layer string: the driver's OS-specific text (osascript output, AppleEvent code), the detection route (`inside-session runner walk`, `inside-session raw client walk`, `outside-session env/self walk`, or `inside-session` before a leader is known) with why when detection refuses, or a rejected `terminals.json` entry's reason. The `sessions` component carries it too, for what a change dropped, displaced or kept (see its row). Carried verbatim and **never parsed** by the logging layer |
 
-The per-window records also carry `session` — **defined in the Contextual group and cross-listed here** (not a separate key; the 67-key total counts it once).
+The per-window records also carry `session` — **defined in the Contextual group and cross-listed here** (not a separate key; the 69-key total counts it once).
 
 **Resolve** (set on the single `resolve: resolved` decision line) — 2: `domain` (which arm of the grammar answered — `session` / `path` / `alias` / `zoxide`, or `miss`), `resolved_path` (the resolved directory, the session name on a session hit, empty on a miss). The same line carries `target`, the raw input — **defined in the Process group and cross-listed here** (counts once).
 
@@ -244,7 +244,7 @@ The per-window records also carry `session` — **defined in the Contextual grou
 | `count` | `theme: enumerated` — rows the panel's union produced, built-ins included |
 | `rejected` | `theme: enumerated` — the unselectable subset of those rows |
 
-Theme events also carry `reason` (Lifecycle group) and `path` (Contextual group) — **cross-listed, not separate keys; the 67-key total counts each once**. `path` is the identity attr for a rejection with no usable slug and for `theme: directory unusable`.
+Theme events also carry `reason` (Lifecycle group) and `path` (Contextual group) — **cross-listed, not separate keys; the 69-key total counts each once**. `path` is the identity attr for a rejection with no usable slug and for `theme: directory unusable`.
 
 **Baseline** (auto-injected per-record by the configured handler) — 4: `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -883,7 +883,7 @@ logger.Info("<verb> complete",
 
 Where:
 - `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
-- `<unit>` is the item being iterated, drawn **only** from the closed cycle-summary keys: `sessions`, `panes`, `entries`, `steps`. Sweeps report their outcome keys instead (`reaped` / `killed` / `skipped` / `unset`), and so do the saver's poll and the daemon's final flush (`claimed` / `dropped` / `captured` / `reaped`). A new unit key requires a vocabulary amendment — do not invent one ad hoc.
+- `<unit>` is the item being iterated, drawn **only** from the closed cycle-summary keys: `sessions`, `panes`, `entries`, `steps`. Sweeps report their outcome keys instead (`reaped` / `killed` / `skipped` / `unset`), and so do the saver's poll and the daemon's final flush (`claimed` / `dropped` / `captured` / `reaped`), and restore (`restored` / `failed`). A new unit key requires a vocabulary amendment — do not invent one ad hoc.
 - Additional sub-categorisation counts ride as attrs on the same summary line. Defined counts: `natural_churn` — items that ended cleanly mid-cycle by normal action (e.g. a session the user closed during the tick), distinct from a capture failure; `anomalous` — items that failed anomalously without terminating the cycle (each also emits a per-item WARN); `entries_failed` — per-item failures within a batch operation.
 - `took` is always present.
 
@@ -899,8 +899,7 @@ Where:
 | Daemon final flush (shutdown) | `capture` | `capture: flush complete captured=N took=T`, only for a flush that captured something |
 | Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=11 warnings=N took=T` |
 | Each bootstrap step | `bootstrap` | `bootstrap: step complete step=<StepName> took=T` |
-| Restore phase A (skeleton) | `restore` | `restore: skeleton complete sessions=N windows=N panes=N took=T` |
-| Restore phase B (geometry + replay) | `restore` | `restore: geometry complete panes=N took=T` |
+| Restore (once a bootstrap) | `restore` | `restore: restore complete restored=N failed=N anomalous=N took=T` |
 | Orphan FIFO sweep | `clean` | `clean: orphan-fifo sweep complete reaped=N skipped=N took=T` |
 | Orphan daemon sweep | `clean` | `clean: orphan-daemon sweep complete killed=N took=T` |
 | Marker cleanup | `clean` | `clean: marker sweep complete unset=N took=T` |

@@ -11,16 +11,15 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// decision 55, through state's boot-time seam, which an integration build
-// reads from BootTimeEnv.
+// decisions 55 and 58, through state's boot-time seam, which an integration
+// build reads from BootTimeEnv.
 func TestRestore_JudgesEachEntryByTheBoot(t *testing.T) {
-	booted := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
 	before, since := entry(t, "before"), entry(t, "since")
 	before.CreatedAt, since.CreatedAt = booted.Add(-time.Hour), booted.Add(time.Hour)
 
 	t.Run("it restores an entry from before the boot and skips one from since", func(t *testing.T) {
 		t.Setenv(state.BootTimeEnv, booted.Format(time.RFC3339Nano))
-		w := newWorld(t)
+		w := newWorldJudgingByState(t)
 		w.save(t, before, since)
 
 		res := w.r.Restore(t.Context())
@@ -37,9 +36,19 @@ func TestRestore_JudgesEachEntryByTheBoot(t *testing.T) {
 		}
 	})
 
+	t.Run("with no saver running, it restores the entry from since the boot as well", func(t *testing.T) {
+		t.Setenv(state.BootTimeEnv, booted.Format(time.RFC3339Nano))
+		w := newWorldJudgingByState(t)
+		w.save(t, before, since)
+
+		if res, want := w.r.Restore(t.Context(), restore.NoSaverRan()), (restore.Result{Restored: 2}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+	})
+
 	t.Run("with no boot time to judge by, it restores every entry not live", func(t *testing.T) {
 		t.Setenv(state.BootTimeEnv, "not a time")
-		w := newWorld(t)
+		w := newWorldJudgingByState(t)
 		w.save(t, before, since)
 
 		res := w.r.Restore(t.Context())

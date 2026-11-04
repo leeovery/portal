@@ -28,11 +28,14 @@ var (
 
 func TestNew(t *testing.T) {
 	for name, change := range map[string]func(*restore.Config){
-		"it refuses no backend":                      func(c *restore.Config) { c.Backend = nil },
-		"it refuses no state directory":              func(c *restore.Config) { c.StateDir = "" },
-		"it refuses an empty exe, having no default": func(c *restore.Config) { c.Exe = "" },
-		"it refuses a relative exe":                  func(c *restore.Config) { c.Exe = "portal" },
-		"it refuses a test binary":                   func(c *restore.Config) { c.Exe = "/var/folders/x/go-build1/b001/restore.test" },
+		"it refuses no backend":                       func(c *restore.Config) { c.Backend = nil },
+		"it refuses no state directory":               func(c *restore.Config) { c.StateDir = "" },
+		"it refuses an empty exe, having no default":  func(c *restore.Config) { c.Exe = "" },
+		"it refuses a relative exe":                   func(c *restore.Config) { c.Exe = "portal" },
+		"it refuses a test binary":                    func(c *restore.Config) { c.Exe = "/var/folders/x/go-build1/b001/restore.test" },
+		"it refuses a debugger's build":               func(c *restore.Config) { c.Exe = "/work/portal/__debug_bin3721882" },
+		"it refuses a test binary built under a name": func(c *restore.Config) { c.Exe = "/tmp/build/x" },
+		"it refuses a name that only starts portal":   func(c *restore.Config) { c.Exe = "/opt/portal/bin/portal-dev" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}
@@ -44,7 +47,7 @@ func TestNew(t *testing.T) {
 		})
 	}
 
-	t.Run("it takes an absolute exe that is no test binary, wherever it lives", func(t *testing.T) {
+	t.Run("it takes an absolute exe named portal, wherever it lives", func(t *testing.T) {
 		cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: "/opt/tools.test/bin/portal"}
 
 		if r, err := restore.New(cfg); err != nil || r == nil {
@@ -63,7 +66,7 @@ func TestNew_RefusesTheRunningTestBinary(t *testing.T) {
 	for name, exe := range map[string]string{"os.Args[0]": os.Args[0], "os.Executable": self} {
 		t.Run("it refuses "+name, func(t *testing.T) {
 			if !filepath.IsAbs(exe) {
-				t.Fatalf("%s = %q is relative, so its refusal would prove nothing of the test-binary rule", name, exe)
+				t.Skipf("%s = %q is relative, so its refusal would prove nothing of the name rule", name, exe)
 			}
 
 			if r, err := restore.New(restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}); err == nil || r != nil {
@@ -96,8 +99,8 @@ func TestRestore_RestoresEachSavedSession(t *testing.T) {
 		}
 	}
 	summary := w.sink.Records().WithMessage("restore complete").AtExactLevel(slog.LevelInfo).Only(t, "restore summary")
-	if summary.IntAttr(t, "sessions") != 2 || summary.IntAttr(t, "anomalous") != 0 {
-		t.Errorf("summary = %v, want 2 sessions restored and nothing anomalous", summary.Attrs)
+	if summary.IntAttr(t, "restored") != 2 || summary.IntAttr(t, "failed") != 0 || summary.IntAttr(t, "anomalous") != 0 {
+		t.Errorf("summary = %v, want 2 sessions restored, none failed and nothing anomalous", summary.Attrs)
 	}
 	summary.RequireDuration(t, "took")
 }
@@ -125,18 +128,55 @@ func TestRestore_Skips(t *testing.T) {
 		w.assertSkipped(t, w.r.Restore(t.Context()), "_portal-saver", "it is one of Portal's own")
 	})
 
-	// A session of this boot that is gone ended this boot, by the user or
-	// otherwise: a bootstrap again within the boot, as a version change runs,
-	// must not bring it back.
+	// decision 55: a session of this boot that is gone ended this boot while
+	// a saver watched, by the user or otherwise. A bootstrap again within the
+	// boot, as a version change runs, must not bring it back.
 	t.Run("an entry created this boot", func(t *testing.T) {
 		w := newWorld(t)
-		e := entry(t, "work")
-		e.CreatedAt = time.Now().Truncate(time.Second)
+		e := thisBoot(t, "work")
 		w.save(t, e)
 
 		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it ended this boot")
 		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
 			t.Errorf("entry = %+v, %v; want it left for the saver to drop, %+v", got, ok, e)
+		}
+	})
+}
+
+// thisBoot is a saved session's entry created after booted.
+func thisBoot(t *testing.T, name string) sessionindex.Entry {
+	t.Helper()
+	e := entry(t, name)
+	e.CreatedAt = booted.Add(time.Hour)
+	return e
+}
+
+// decision 58: with no saver running, none saw the sessions end, so this
+// boot's come back with the rest.
+func TestRestore_NoSaverRan(t *testing.T) {
+	t.Run("it restores this boot's entries with the rest", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, thisBoot(t, "since"), entry(t, "before"))
+
+		res := w.r.Restore(t.Context(), restore.NoSaverRan())
+
+		if want := (restore.Result{Restored: 2}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"since", "before"}) {
+			t.Errorf("created %q, want both", got)
+		}
+	})
+
+	t.Run("it still skips a live session and Portal's own", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "work"})
+		w.save(t, thisBoot(t, "work"), thisBoot(t, "_portal-saver"))
+
+		if res := w.r.Restore(t.Context(), restore.NoSaverRan()); res != (restore.Result{}) {
+			t.Errorf("Restore = %+v, want nothing", res)
+		}
+		if created := w.created(); len(created) > 0 {
+			t.Errorf("created %q, want nothing", created)
 		}
 	})
 }
@@ -193,8 +233,9 @@ func TestRestore_NameCreateRefuses(t *testing.T) {
 			t.Errorf("%s's hydrating flag was raised for a name Create refuses", name)
 		}
 	}
-	if got := w.anomalous(t); got != 3 {
-		t.Errorf("anomalous = %d, want 3", got)
+	summary := w.sink.Records().WithMessage("restore complete").Only(t, "restore summary")
+	if summary.IntAttr(t, "restored") != 1 || summary.IntAttr(t, "failed") != 3 || summary.IntAttr(t, "anomalous") != 3 {
+		t.Errorf("summary = %v, want 1 restored, 3 failed and 3 anomalous", summary.Attrs)
 	}
 }
 
@@ -453,6 +494,81 @@ func (w *world) failureLogged(t *testing.T, name string) logtest.Record {
 		t.Errorf("anomalous = %d, want the one failure", got)
 	}
 	return rec
+}
+
+// A Create cut short once zmx has forked the session's daemon, before its
+// socket listens, leaves a session no one can reach yet: the first ask finds
+// none, though the helper is about to start.
+func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
+	t.Run("a session that answers on the second ask, running restore's helper, is restored", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.asleep = func() {
+				if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return backend.Session{}, errTimedOut
+		})
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if !w.hydrating(t, "work") {
+			t.Error("the hydrating flag came down under a helper about to start")
+		}
+		w.assertRestoredWithoutWarning(t, saved)
+		if !slices.Equal(w.slept, []time.Duration{time.Second}) {
+			t.Errorf("waited %v, want one probe ceiling, a second", w.slept)
+		}
+	})
+
+	t.Run("a session no ask finds fails once both have", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+
+		w.r.Restore(t.Context())
+
+		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 2 || !slices.Equal(w.slept, []time.Duration{time.Second}) {
+			t.Errorf("asked %d times, waiting %v; want twice, a second apart", asks, w.slept)
+		}
+		if w.hydrating(t, "work") {
+			t.Error("the hydrating flag this run raised is left up")
+		}
+	})
+
+	t.Run("New's restorer waits out the second", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+		r, err := restore.New(restore.Config{Backend: w.witness, StateDir: w.dir, Exe: exe})
+		if err != nil {
+			t.Fatal(err)
+		}
+		restore.JudgeByBoot(r, booted)
+		start := time.Now()
+
+		r.Restore(t.Context())
+
+		if took := time.Since(start); took < time.Second {
+			t.Errorf("Restore took %v, want at least the second between the asks", took)
+		}
+	})
+
+	t.Run("a holder found on the first ask is not asked for again", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Add(backend.Session{Name: "WORK"})
+
+		w.r.Restore(t.Context())
+
+		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) > 0 {
+			t.Errorf("asked %d times, waiting %v; want once, with no wait", asks, w.slept)
+		}
+	})
 }
 
 func TestRestore_RefusedCreateNamesItsCause(t *testing.T) {

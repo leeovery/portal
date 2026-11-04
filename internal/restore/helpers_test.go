@@ -21,21 +21,38 @@ import (
 // nothing, so it need not exist.
 const exe = "/opt/portal/bin/portal"
 
-// saved is the creation the entries a test saves record, before any boot of
-// the machine running the test.
-var saved = time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+var (
+	// booted is the boot unit tests judge entries by.
+	booted = time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	// saved is the creation the entries a test saves record, before the boot.
+	saved = time.Date(2000, 1, 1, 9, 0, 0, 0, time.UTC)
+)
 
 // world is a restore over a Fake backend, watched by a flagWitness, and a
-// state directory of the test's own, its log captured.
+// state directory of the test's own, its log captured. Its restorer sleeps not
+// at all, recording each wait.
 type world struct {
 	dir     string
 	fake    *backendtest.Fake
 	witness *flagWitness
 	sink    *logtest.Sink
 	r       *restore.Restorer
+	slept   []time.Duration
+	// asleep, when set, runs in each wait.
+	asleep func()
 }
 
+// newWorld is a world whose restorer judges each entry by booted.
 func newWorld(t *testing.T, live ...backend.Session) *world {
+	t.Helper()
+	w := newWorldJudgingByState(t, live...)
+	restore.JudgeByBoot(w.r, booted)
+	return w
+}
+
+// newWorldJudgingByState is a world whose restorer judges each entry by the
+// boot state's claim rule reads, as New's does.
+func newWorldJudgingByState(t *testing.T, live ...backend.Session) *world {
 	t.Helper()
 	w := &world{dir: t.TempDir(), fake: backendtest.New(live...)}
 	w.witness = &flagWitness{Backend: w.fake, dir: w.dir, raised: map[string]bool{}}
@@ -44,6 +61,12 @@ func newWorld(t *testing.T, live ...backend.Session) *world {
 	if err != nil {
 		t.Fatalf("restore.New: %v", err)
 	}
+	restore.SleepWith(r, func(d time.Duration) {
+		w.slept = append(w.slept, d)
+		if w.asleep != nil {
+			w.asleep()
+		}
+	})
 	w.sink, w.r = sink, r
 	return w
 }
