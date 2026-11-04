@@ -26,9 +26,15 @@ const (
 	IdentifyDead
 )
 
+// portalProgram is portal as a daemon's argv[0] names it: bare, or an absolute
+// path whose last element is exactly portal, as the saver runs it. The path
+// admits no space, which is what keeps a wrapper such as
+// "/bin/sh -c /x/portal state daemon" from reading as a daemon.
+const portalProgram = `(/([^ ]*/)?)?portal`
+
 // PortalDaemonArgvPattern's trailing "( |$)" accepts an exact match or trailing
 // flags while rejecting a suffix such as "portal state daemon-foo".
-const PortalDaemonArgvPattern = `^portal state daemon( |$)`
+const PortalDaemonArgvPattern = `^` + portalProgram + ` state daemon( |$)`
 
 var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
 
@@ -36,8 +42,11 @@ var identifyPS = defaultIdentifyPS
 
 func defaultIdentifyPS(pid int) (string, error) {
 	// The helper still returns captured stdout on the error path, which
-	// IdentifyDaemon's dead-vs-transient discrimination keys on.
-	cmd := exec.Command("ps", "-o", "comm=,args=", "-p", strconv.Itoa(pid))
+	// IdentifyDaemon's dead-vs-transient discrimination keys on. ucomm is the
+	// name of the file the process exec'd, as the kernel keeps it: darwin's
+	// comm is argv[0], cut to 16 bytes in any column but the last, so a
+	// daemon at an absolute path would read as no portal.
+	cmd := exec.Command("ps", "-o", "ucomm=,args=", "-p", strconv.Itoa(pid))
 	out, err := log.CombinedOutputWithContext(cmd)
 	return string(out), err
 }
