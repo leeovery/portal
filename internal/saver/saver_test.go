@@ -89,11 +89,11 @@ func TestPoll_StandsDown(t *testing.T) {
 			mark := w.mark()
 
 			lift := tc.stand(w)
-			err = w.saver.Poll(t.Context())
+			result, err := w.saver.Poll(t.Context())
 			lift()
 
-			if !tc.wantErr(err) {
-				t.Errorf("Poll = %v, want it to stand down", err)
+			if !tc.wantErr(err) || !result.Quiet() {
+				t.Errorf("Poll = %+v, %v, want it to stand down, reporting nothing done", result, err)
 			}
 			if after, _ := os.ReadFile(sessionindex.Path(w.dir)); !bytes.Equal(after, index) {
 				t.Errorf("sessions.json became %s, want it untouched", after)
@@ -121,6 +121,63 @@ func TestPoll_StandsDown(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPoll_ReportsWhatItDid(t *testing.T) {
+	t.Run("it counts the entries it claimed and dropped, the sessions it captured and the files it removed", func(t *testing.T) {
+		w := newWorld(t)
+		stageWork(w)
+
+		got := w.poll()
+
+		if want := (saver.Result{Claimed: 1, Dropped: 1, Captured: 1, Removed: 1}); got != want {
+			t.Errorf("Poll = %+v, want newcomer claimed, gone dropped, kept captured and the stray removed: %+v", got, want)
+		}
+	})
+
+	t.Run("an adopt, a replace and a filled-in pid each count as a claim", func(t *testing.T) {
+		w := newWorld(t)
+		adopted, replaced, filled := w.live("adopted", 1), w.live("replaced", 2), w.live("filled", 3)
+		w.seed(
+			sessionindex.Entry{Name: "adopted", CreatedAt: w.beforeBoot()},
+			sessionindex.Entry{Name: "replaced", CreatedAt: w.thisBoot(0), PID: 999},
+			sessionindex.Entry{Name: "filled", CreatedAt: filled.Created},
+		)
+
+		if got := w.poll(); got.Claimed != 3 {
+			t.Errorf("Claimed = %d, want 3: %s adopted, %s replaced, %s's pid filled in", got.Claimed, adopted.Name, replaced.Name, filled.Name)
+		}
+	})
+
+	t.Run("a poll that changes nothing but where a session works reports nothing", func(t *testing.T) {
+		w := newWorld(t)
+		api := w.live("api", 1)
+		w.fake.SetHistory("api", []byte("the screen"))
+		w.poll()
+
+		api.Dir = "/srv/api/sub"
+		w.fake.Add(api)
+		got := w.after(5 * time.Second)
+
+		if !got.Quiet() {
+			t.Errorf("Poll = %+v, want nothing reported", got)
+		}
+		if e, _ := w.entry("api"); e.Cwd != "/srv/api/sub" {
+			t.Errorf("Cwd = %q, want the move recorded all the same", e.Cwd)
+		}
+	})
+
+	t.Run("a poll whose write fails reports nothing", func(t *testing.T) {
+		w := newWorld(t)
+		w.live("api", 1)
+		w.write("sessions.json", "not an index")
+
+		got, err := w.saver.Poll(t.Context())
+
+		if err == nil || !got.Quiet() {
+			t.Errorf("Poll = %+v, %v, want the unreadable index's failure, reporting nothing", got, err)
+		}
+	})
 }
 
 func TestPoll_ClaimsAnsweringSessions(t *testing.T) {

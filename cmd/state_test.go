@@ -204,6 +204,7 @@ func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 // Referenced by their package-level command vars so a rename or a dropped
 // registration is a compile error rather than a silent miss.
 var stateChildCommands = []*cobra.Command{
+	stateDaemonCmd,
 	stateHydrateCmd,
 	stateResumeDrawCmd,
 	stateResumeWaitCmd,
@@ -220,9 +221,9 @@ func TestStateParentIsHidden(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	t.Run("it registers exactly four hidden state children", func(t *testing.T) {
-		if len(stateChildCommands) != 4 {
-			t.Fatalf("stateChildCommands has %d entries, want 4", len(stateChildCommands))
+	t.Run("it registers exactly five hidden state children", func(t *testing.T) {
+		if len(stateChildCommands) != 5 {
+			t.Fatalf("stateChildCommands has %d entries, want 5", len(stateChildCommands))
 		}
 		for _, c := range stateChildCommands {
 			if !c.Hidden {
@@ -245,7 +246,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"hydrate", "resume-draw", "resume-wait", "resume-recover"}
+	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()

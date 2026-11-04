@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"os"
+	"path"
 	"testing"
 )
 
@@ -202,6 +203,97 @@ func TestIdentifyDaemon_DoesNotMatchPortalStateDaemonWithoutSpaces(t *testing.T)
 	}
 	if got != IdentifyNotPortalDaemon {
 		t.Errorf("got = %v; want IdentifyNotPortalDaemon", got)
+	}
+}
+
+// daemonProgramCases are argv[0]s a daemon runs as, and near misses, for the
+// identity check and the pgrep pattern alike: portal bare or at an absolute
+// path, and nothing else.
+var daemonProgramCases = []struct {
+	program string
+	daemon  bool
+}{
+	{"portal", true},
+	{"/opt/homebrew/bin/portal", true},
+	{"/x/y/portal", true},
+	{"/portal", true},
+	{"/x//portal", true},
+	{"/x/y/notportal", false},
+	{"/x/y/portal2", false},
+	{"/x/y/portal.old", false},
+	{"/x/portal/bin", false},
+	{"x/y/portal", false},
+	{"./portal", false},
+	{"notportal", false},
+	{"/xportal", false},
+}
+
+func TestIdentifyDaemon_ProgramIsPortalBareOrAtAnAbsolutePath(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		t.Run(tc.program, func(t *testing.T) {
+			// ucomm is the exec'd file's name, the last element of argv[0].
+			withIdentifyPSFake(t, func(int) (string, error) {
+				return path.Base(tc.program) + " " + tc.program + " state daemon\n", nil
+			})
+
+			got, err := IdentifyDaemon(1234)
+			if err != nil {
+				t.Fatalf("IdentifyDaemon: unexpected err: %v", err)
+			}
+			if want := map[bool]IdentifyResult{true: IdentifyIsPortalDaemon, false: IdentifyNotPortalDaemon}[tc.daemon]; got != want {
+				t.Errorf("IdentifyDaemon(%q state daemon) = %v; want %v", tc.program, got, want)
+			}
+		})
+	}
+}
+
+func TestIdentifyDaemon_NeedsBothCommAndArgvToNamePortal(t *testing.T) {
+	for _, line := range []string{
+		"notportal /x/y/portal state daemon",
+		"/x/y/portal /x/y/portal state daemon",
+		"portal /x/y/notportal state daemon",
+		"sh /bin/sh -c /x/y/portal state daemon",
+		"portal /x/y/portal state daemon-foo",
+		"portal /x/y/portal state hydrate",
+	} {
+		t.Run(line, func(t *testing.T) {
+			withIdentifyPSFake(t, func(int) (string, error) { return line + "\n", nil })
+
+			got, err := IdentifyDaemon(1234)
+			if err != nil {
+				t.Fatalf("IdentifyDaemon: unexpected err: %v", err)
+			}
+			if got != IdentifyNotPortalDaemon {
+				t.Errorf("IdentifyDaemon(%q) = %v; want IdentifyNotPortalDaemon", line, got)
+			}
+		})
+	}
+}
+
+func TestPortalDaemonArgvPattern(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		for _, tail := range []string{"", " --flag"} {
+			argv := tc.program + " state daemon" + tail
+			t.Run(argv, func(t *testing.T) {
+				if got := daemonArgvPattern.MatchString(argv); got != tc.daemon {
+					t.Errorf("PortalDaemonArgvPattern matches %q = %v; want %v", argv, got, tc.daemon)
+				}
+			})
+		}
+	}
+	for _, argv := range []string{
+		"/bin/sh -c /x/y/portal state daemon",
+		"/x/y z/portal state daemon",
+		"/x/y/portal state daemon-foo",
+		"/x/y/portal state daemons",
+		"/x/y/portal open",
+		" /x/y/portal state daemon",
+	} {
+		t.Run(argv, func(t *testing.T) {
+			if daemonArgvPattern.MatchString(argv) {
+				t.Errorf("PortalDaemonArgvPattern matches %q; want no match", argv)
+			}
+		})
 	}
 }
 

@@ -89,7 +89,7 @@ func TestPoll_DropsAnEntryMissingFromTwoPollsTenSecondsApart(t *testing.T) {
 		w.fake.Add(backend.Session{Name: "gone", Created: w.thisBoot(0), PID: 4000})
 		w.write("sessions.json", "not an index")
 		w.clock.at = w.clock.at.Add(5 * time.Second)
-		if err := w.saver.Poll(t.Context()); err == nil {
+		if _, err := w.saver.Poll(t.Context()); err == nil {
 			t.Fatal("Poll = nil, want the unreadable index's failure")
 		}
 		w.write("sessions.json", string(index))
@@ -108,7 +108,7 @@ func TestPoll_DropsAnEntryMissingFromTwoPollsTenSecondsApart(t *testing.T) {
 
 		w.fake.Fail(backendtest.OpList, fmt.Errorf("zmx dir unreadable"))
 		w.clock.at = w.clock.at.Add(5 * time.Second)
-		if err := w.saver.Poll(t.Context()); err == nil {
+		if _, err := w.saver.Poll(t.Context()); err == nil {
 			t.Fatal("Poll = nil, want the listing's failure")
 		}
 		w.fake.Fail(backendtest.OpList, nil)

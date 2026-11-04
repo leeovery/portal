@@ -1,6 +1,7 @@
 package saver
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -72,14 +75,29 @@ type capture struct {
 	sum     [sha256.Size]byte
 }
 
-// capture saves the history of each session the listing shows answering that
-// is due a capture, outside the commit lock, as History can take seconds: at
-// most once every captureEvery per creation, never while Portal is restoring
-// the session, and writing only a history that differs from the one the
-// index last named. A session the poll's captureBudget runs out before is not
-// asked, so stays due. It returns what it wrote, for the index to name.
+// capture saves, for a poll, the history of each session the listing shows
+// answering that is due a capture: at most once every captureEvery per
+// creation. A session the poll's captureBudget runs out before is not asked,
+// so stays due.
 func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 	until := sb.now().Add(captureBudget)
+	return sb.each(ctx, l, func(memo creation) bool {
+		return sb.now().Before(until) && memo.due(l.at)
+	})
+}
+
+// flush saves, for a flush, the history of every session the listing shows
+// answering, however recently it was asked.
+func (sb *scrollback) flush(ctx context.Context, l listing) []capture {
+	return sb.each(ctx, l, func(creation) bool { return true })
+}
+
+// each saves the history of each session the listing shows answering whose
+// creation ask takes, by what the saver last did with it, outside the commit
+// lock, as History can take seconds: never once ctx ends, never while Portal
+// is restoring the session, and writing only a history that differs from the
+// one the index last named. It returns what it wrote, for the index to name.
+func (sb *scrollback) each(ctx context.Context, l listing, ask func(creation) bool) []capture {
 	listed := map[string]creation{}
 	var written []capture
 	for _, live := range l.answered {
@@ -88,7 +106,7 @@ func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 			continue
 		}
 		memo := sb.creations[file]
-		if ctx.Err() == nil && sb.now().Before(until) && memo.due(l.at) && !state.Flagged(sb.dir, live.Name) {
+		if ctx.Err() == nil && ask(memo) && !state.Flagged(sb.dir, live.Name) {
 			memo.asked = l.at
 			if c, ok := sb.save(ctx, live, file, memo); ok {
 				written = append(written, c)
@@ -101,9 +119,16 @@ func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
 }
 
 // save asks for the session's history and writes it to file, unless it is
-// the history the index last named the file with, reporting what it wrote.
+// the history the index last named the file with, reporting what it wrote. A
+// history of the alternate screen holds none of the main screen and its
+// scrollback, so it is never written over a saved transcript: like any other
+// ask it waits out captureEvery, and records no hash, so the main screen is
+// saved once the session is back on it.
 func (sb *scrollback) save(ctx context.Context, live backend.Session, file string, memo creation) (capture, bool) {
 	vt, err := sb.backend.History(ctx, live.Name, 0)
+	if err == nil && alternateScreen(vt) {
+		err = errAlternateScreen
+	}
 	if err != nil {
 		skipped(live.Name, err)
 		return capture{}, false
@@ -120,17 +145,71 @@ func (sb *scrollback) save(ctx context.Context, live backend.Session, file strin
 	return capture{session: live, file: file, sum: sum}, true
 }
 
-// skipped logs a history the session didn't give: at DEBUG when it had no
-// screen to give, didn't answer in time or has ended, as the next poll it is
-// due asks again, and at WARN for any other failure.
+// errAlternateScreen skips the history of a session on the alternate screen.
+var errAlternateScreen = errors.New("the session is on the alternate screen, whose history holds none of its main screen")
+
+// skipped logs a history the saver didn't save: at DEBUG when the session had
+// no screen to give, didn't answer in time, has ended or is on the alternate
+// screen, as the next poll it is due asks again, and at WARN for any other
+// failure.
 func skipped(session string, err error) {
-	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrTimeout, backend.ErrNoSuchSession} {
+	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrTimeout, backend.ErrNoSuchSession, errAlternateScreen} {
 		if errors.Is(err, skip) {
 			captureLogger.Debug("capture skipped", "session", session, "error", err)
 			return
 		}
 	}
 	captureLogger.Warn("capture failed", "session", session, "error", err)
+}
+
+// alternateScreenModes are the DEC private modes that put a terminal on its
+// alternate screen.
+var alternateScreenModes = []string{"47", "1047", "1049"}
+
+// alternateScreen reports whether vt, a session's history, is that of a
+// session on the alternate screen. zmx leads a history with the modes that
+// differ from a terminal's defaults, each set or reset by a sequence of its
+// own, ahead of the screen's first cell: the ANSI modes (ESC [ n h, or l),
+// then the DEC private ones (ESC [ ? n h, or l). On the alternate screen the
+// private 47, 1047 or 1049 is set among them, and the history holds that
+// screen alone. Only the lead is read, so a mode sequence later in a history
+// is never taken for one.
+func alternateScreen(vt []byte) bool {
+	for {
+		mode, rest, ok := leadingMode(vt)
+		if !ok {
+			return false
+		}
+		if mode.private && mode.set && slices.ContainsFunc(mode.params, func(param string) bool {
+			return slices.Contains(alternateScreenModes, param)
+		}) {
+			return true
+		}
+		vt = rest
+	}
+}
+
+// modeSequence is a sequence setting or resetting modes: a DEC private one
+// (ESC [ ?) or an ANSI one (ESC [).
+type modeSequence struct {
+	params  []string
+	private bool
+	set     bool
+}
+
+// leadingMode is the mode sequence vt starts with, and what follows it.
+func leadingMode(vt []byte) (mode modeSequence, rest []byte, ok bool) {
+	body, ok := bytes.CutPrefix(vt, []byte("\x1b["))
+	if !ok {
+		return modeSequence{}, nil, false
+	}
+	body, mode.private = bytes.CutPrefix(body, []byte("?"))
+	end := bytes.IndexFunc(body, func(r rune) bool { return r != ';' && (r < '0' || r > '9') })
+	if end < 0 || body[end] != 'h' && body[end] != 'l' {
+		return modeSequence{}, nil, false
+	}
+	mode.params, mode.set = strings.Split(string(body[:end]), ";"), body[end] == 'h'
+	return mode, body[end+1:], true
 }
 
 // write replaces the file target with vt, making the scrollback directory
@@ -177,20 +256,21 @@ func (sb *scrollback) saved(named []capture) {
 // the index as written, names: a capture the index didn't name, or a file an
 // entry left for a later creation's. It removes too each temp file a write
 // left there abandonedAfter ago or more. Anything else there, a legacy
-// <name>.bin among it, is not the saver's to remove.
-func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
+// <name>.bin among it, is not the saver's to remove. It returns how many
+// files it removed.
+func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) int {
 	if !sb.cleaned.IsZero() && at.Sub(sb.cleaned) < cleanEvery {
-		return
+		return 0
 	}
 	sb.cleaned = at
 	dir := state.ScrollbackDir(sb.dir)
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return
+		return 0
 	}
 	if err != nil {
 		captureLogger.Warn("clean failed", "path", dir, "error", err)
-		return
+		return 0
 	}
 	named := namedFiles(idx)
 	reaped := 0
@@ -200,8 +280,9 @@ func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
 		}
 	}
 	if reaped > 0 {
-		captureLogger.Info("cleaned", "reaped", reaped)
+		captureLogger.Debug("cleaned", "reaped", reaped)
 	}
+	return reaped
 }
 
 func reapable(f fs.DirEntry, named map[string]bool, at time.Time) bool {

@@ -1,7 +1,8 @@
 // Package saver is one poll of the saver's cycle: it keeps sessions.json in
 // step with the backend's live sessions, dropping the entries of sessions that
 // ended, and saves each session's scrollback beside its entry. Nothing here
-// runs a poll; `portal state daemon` does, on a tick.
+// runs a poll; `portal state daemon` does, on a tick, and flushes once as it
+// shuts down.
 package saver
 
 import (
@@ -22,9 +23,24 @@ const via = "internal"
 
 var logger = log.For("sessions")
 
-// ErrRestoring is the stand-down of a poll that found a bootstrap restoring
-// sessions.
+// SessionName is the session `portal state daemon` runs in, one of Portal's
+// own.
+const SessionName = "_portal-saver"
+
+// ErrRestoring is the stand-down of a poll or a flush that found a bootstrap
+// restoring sessions.
 var ErrRestoring = errors.New("a restore is in progress")
+
+// Result is what a poll or a flush did, once its write to the index landed:
+// the entries it claimed, making, adopting, replacing or filling one in; the
+// entries of ended sessions it dropped; the sessions whose scrollback it saved
+// and named; and the scrollback files no entry names it removed.
+type Result struct {
+	Claimed, Dropped, Captured, Removed int
+}
+
+// Quiet reports whether it did nothing.
+func (r Result) Quiet() bool { return r == Result{} }
 
 // Config is what a Saver works over.
 type Config struct {
@@ -76,24 +92,46 @@ func New(cfg Config) *Saver {
 // Otherwise it saves the listed sessions' scrollback, outside the commit lock,
 // then under it claims each session that answers, records where it works,
 // drops the entries of sessions that ended and names the scrollback saved.
-// What a drop or a replace dropped is forgotten before the lock goes.
-func (s *Saver) Poll(ctx context.Context) error {
-	switch restoring, err := state.Restoring.Exists(s.dir); {
-	case err != nil:
-		return fmt.Errorf("read the restoring flag: %w", err)
-	case restoring:
-		return ErrRestoring
-	}
-	l, err := s.list(ctx)
+// What a drop or a replace dropped is forgotten before the lock goes. It
+// returns what it did, nothing when it fails.
+func (s *Saver) Poll(ctx context.Context) (Result, error) {
+	l, err := s.begin(ctx)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	s.drops.seen(l)
 	captures := s.scrollback.capture(ctx, l)
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		return Result{}, context.Cause(ctx)
 	}
 	return s.commit(ctx, l, captures)
+}
+
+// Flush saves, once, the scrollback of each session the listing shows
+// answering whose history differs from the one its entry last named, for a
+// daemon shutting down. It asks every such session, with no limit but ctx's
+// and none of a poll's spacing, then names what it saved in one hold of the
+// commit lock whatever ctx says by then, under the rules a poll names by. It
+// claims, drops and removes nothing. It stands down as a poll does, and
+// returns what it did, nothing when it fails.
+func (s *Saver) Flush(ctx context.Context) (Result, error) {
+	l, err := s.begin(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.name(s.scrollback.flush(ctx, l))
+}
+
+// begin lists the sessions for a poll or a flush, unless the restoring flag
+// is raised or can't be read.
+func (s *Saver) begin(ctx context.Context) (listing, error) {
+	switch restoring, err := state.Restoring.Exists(s.dir); {
+	case err != nil:
+		return listing{}, fmt.Errorf("read the restoring flag: %w", err)
+	case restoring:
+		return listing{}, ErrRestoring
+	}
+	return s.list(ctx)
 }
 
 // listing is one successful List, taken at at: every name it shows, and the
@@ -126,12 +164,21 @@ func (s *Saver) list(ctx context.Context) (listing, error) {
 // restore can have landed since. What goes with an entry dropped, and the
 // files no entry names, are removed before the lock goes, against the index as
 // written.
-func (s *Saver) commit(ctx context.Context, l listing, captures []capture) error {
+//
+// A commit whose ctx ended while it waited for the lock writes nothing: the
+// daemon's shutdown bound could otherwise end the process between a drop's
+// write and the forgetting that goes with it. One that held the lock first
+// finishes, within the bound.
+func (s *Saver) commit(ctx context.Context, l listing, captures []capture) (Result, error) {
 	rule := state.ClaimRule(s.dir)
+	var result Result
 	var written *sessionindex.Index
 	var named []capture
 	_, err := sessionindex.UpdateThen(s.dir, via, func(idx *sessionindex.Index) error {
-		s.claim(ctx, idx, l, rule)
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		result.Claimed = s.claim(ctx, idx, l, rule)
 		drop(idx, s.drops.judge(idx, l, rule))
 		named = s.scrollback.name(idx, captures)
 		written = idx
@@ -142,11 +189,32 @@ func (s *Saver) commit(ctx context.Context, l listing, captures []capture) error
 		}
 		s.drops.dropped(outcome.Removed, l.at)
 		s.scrollback.saved(named)
-		s.scrollback.clean(written, l.at)
+		result.Dropped, result.Captured = len(outcome.Removed), len(named)
+		result.Removed = s.scrollback.clean(written, l.at)
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("update the session index: %w", err)
+		return Result{}, fmt.Errorf("update the session index: %w", err)
 	}
-	return nil
+	return result, nil
+}
+
+// name names, under the commit lock, the file of each of a flush's captures
+// whose entry still records the creation captured and is not restoring.
+func (s *Saver) name(captures []capture) (Result, error) {
+	if len(captures) == 0 {
+		return Result{}, nil
+	}
+	var named []capture
+	_, err := sessionindex.UpdateThen(s.dir, via, func(idx *sessionindex.Index) error {
+		named = s.scrollback.name(idx, captures)
+		return nil
+	}, func(sessionindex.Outcome) error {
+		s.scrollback.saved(named)
+		return nil
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("update the session index: %w", err)
+	}
+	return Result{Captured: len(named)}, nil
 }
