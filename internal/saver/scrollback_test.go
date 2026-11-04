@@ -1,6 +1,7 @@
 package saver_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -219,6 +221,81 @@ func TestPoll_CapturesScrollback(t *testing.T) {
 	})
 }
 
+func TestPoll_BoundsItsCapturesTogether(t *testing.T) {
+	t.Run("a poll's History calls share one deadline, 3 s at most", func(t *testing.T) {
+		w := newWorld(t)
+		for i, name := range []string{"api", "web"} {
+			w.live(name, i)
+			w.fake.SetHistory(name, []byte(name+"'s screen"))
+		}
+		var deadlines []time.Time
+		w.race.onHistory = func(ctx context.Context, _ string) {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Error("a capture ran with no deadline")
+			}
+			if left := time.Until(deadline); left > 3*time.Second {
+				t.Errorf("a capture had %s left, want 3 s at most", left)
+			}
+			deadlines = append(deadlines, deadline)
+		}
+
+		w.poll()
+
+		if len(deadlines) != 2 || !deadlines[0].Equal(deadlines[1]) {
+			t.Errorf("captures ran to deadlines %v, want both to one", deadlines)
+		}
+	})
+
+	t.Run("a session the budget doesn't reach is asked at the next poll, and one it ran out on a minute on", func(t *testing.T) {
+		saver.SetCaptureBudget(t, 20*time.Millisecond)
+		w := newWorld(t)
+		stalled, reached := w.live("api", 1), w.live("web", 2)
+		w.fake.SetHistory("api", []byte("api's screen"))
+		w.fake.SetHistory("web", []byte("web's screen"))
+		w.race.onHistory = func(ctx context.Context, name string) {
+			if name != "api" {
+				return
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+				t.Error("api's History ran 5 s, want it cut short by the poll's budget")
+			}
+		}
+		sink := logtest.Install(t)
+
+		mark := w.mark()
+		w.poll()
+		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "api" {
+			t.Errorf("History asked %+v, want api alone, the budget spent on it", calls)
+		}
+		rec := sink.Records().Matching("capture", "capture skipped").AtExactLevel(slog.LevelDebug).Only(t, "api's skipped capture")
+		if err := rec.ErrorAttr(t, "error"); rec.AttrString(t, "session") != "api" || !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("record = %+v, want api's capture skipped on the budget's ErrTimeout", rec)
+		}
+
+		w.race.onHistory = nil
+		mark = w.mark()
+		w.after(time.Second)
+		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "web" {
+			t.Errorf("History asked %+v at the next poll, want web alone", calls)
+		}
+		if got, _ := w.read(scrollbackFile(t, reached)); got != "web's screen" {
+			t.Errorf("web's scrollback = %q, want its history", got)
+		}
+
+		mark = w.mark()
+		w.after(59 * time.Second)
+		if calls := w.calls(backendtest.OpHistory, mark); len(calls) != 1 || calls[0].Name != "api" {
+			t.Errorf("History asked %+v a minute on, want api alone", calls)
+		}
+		if got, _ := w.read(scrollbackFile(t, stalled)); got != "api's screen" {
+			t.Errorf("api's scrollback = %q, want its history", got)
+		}
+	})
+}
+
 func failHistory(err error) func(w *world) {
 	return func(w *world) {
 		w.fake.SetHistory("api", []byte("the screen"))
@@ -238,13 +315,12 @@ func TestPoll_RemovesScrollbackNoEntryNames(t *testing.T) {
 		left := []string{
 			"scrollback/api.bin",
 			"scrollback/notes.txt",
-			"scrollback/.atomic-1.tmp",
 			scrollbackFile(t, backend.Session{Name: "linked", Created: w.thisBoot(6), PID: 4006}),
 		}
-		for _, rel := range left[:3] {
+		for _, rel := range left[:2] {
 			w.write(rel, "not the saver's")
 		}
-		if err := os.Symlink(filepath.Join(w.dir, named), filepath.Join(w.dir, filepath.FromSlash(left[3]))); err != nil {
+		if err := os.Symlink(filepath.Join(w.dir, named), filepath.Join(w.dir, filepath.FromSlash(left[2]))); err != nil {
 			t.Fatal(err)
 		}
 		folder := scrollbackFile(t, backend.Session{Name: "folder", Created: w.thisBoot(7), PID: 4007})
@@ -267,6 +343,50 @@ func TestPoll_RemovesScrollbackNoEntryNames(t *testing.T) {
 		}
 	})
 
+	t.Run("it removes the temp files a write left there an hour ago or more, and no other", func(t *testing.T) {
+		w := newWorld(t)
+		w.live("api", 1)
+		aged := func(rel string, age time.Duration) string {
+			target := filepath.Join(w.dir, filepath.FromSlash(rel))
+			if err := os.Chtimes(target, w.clock.at.Add(-age), w.clock.at.Add(-age)); err != nil {
+				t.Fatal(err)
+			}
+			return target
+		}
+		var abandoned, kept []string
+		for rel, age := range map[string]time.Duration{"scrollback/.atomic-123.tmp": time.Hour, "scrollback/.atomic-9.tmp": 25 * time.Hour} {
+			w.write(rel, "half a transcript")
+			abandoned = append(abandoned, aged(rel, age))
+		}
+		for rel, age := range map[string]time.Duration{"scrollback/.atomic-456.tmp": 59 * time.Minute, "scrollback/.atomic-x.tmp": 2 * time.Hour, ".atomic-789.tmp": 2 * time.Hour} {
+			w.write(rel, "not the saver's")
+			kept = append(kept, aged(rel, age))
+		}
+		folder := "scrollback/.atomic-5.tmp"
+		if err := os.Mkdir(filepath.Join(w.dir, filepath.FromSlash(folder)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, aged(folder, 2*time.Hour))
+		sink := logtest.Install(t)
+
+		w.poll()
+
+		for _, target := range abandoned {
+			if _, err := os.Lstat(target); !os.IsNotExist(err) {
+				t.Errorf("%s: %v, want it removed", target, err)
+			}
+		}
+		for _, target := range kept {
+			if _, err := os.Lstat(target); err != nil {
+				t.Errorf("%s: %v, want it left", target, err)
+			}
+		}
+		rec := sink.Records().Matching("capture", "cleaned").Only(t, "the clean")
+		if got := rec.IntAttr(t, "reaped"); got != 2 {
+			t.Errorf("the clean reaped %d, want the two abandoned temp files", got)
+		}
+	})
+
 	t.Run("it removes at most once a minute", func(t *testing.T) {
 		w := newWorld(t)
 		w.live("api", 1)
@@ -285,7 +405,7 @@ func TestPoll_RemovesScrollbackNoEntryNames(t *testing.T) {
 		}
 	})
 
-	t.Run("an adopted entry's earlier file stays until the later creation's own is named", func(t *testing.T) {
+	t.Run("an adopted entry's earlier file, once the entry names the later creation's, goes at the next removal due", func(t *testing.T) {
 		w := newWorld(t)
 		saved := labelled(w.beforeBoot(), 1717)
 		w.seed(saved)

@@ -60,13 +60,14 @@ func (w *world) restart() {
 }
 
 // thisBoot is a creation n minutes into the hour after this boot began: past
-// the claim rule's leeway, and before the saver's clock.
+// the claim rule's leeway, and before the saver's clock. Like every creation
+// zmx reports, it is to the whole second.
 func (w *world) thisBoot(n int) time.Time {
-	return w.boot.Add(time.Hour + time.Duration(n)*time.Minute)
+	return w.boot.Truncate(time.Second).Add(time.Hour + time.Duration(n)*time.Minute)
 }
 
 // beforeBoot is a creation saved a day before this boot.
-func (w *world) beforeBoot() time.Time { return w.boot.Add(-24 * time.Hour) }
+func (w *world) beforeBoot() time.Time { return w.boot.Truncate(time.Second).Add(-24 * time.Hour) }
 
 // live holds an answering session named name, created n minutes into this
 // boot, and returns it as the backend lists it.
@@ -76,7 +77,6 @@ func (w *world) live(name string, n int) backend.Session {
 	return s
 }
 
-// held is the session the Fake holds as name.
 func (w *world) held(name string) backend.Session {
 	w.t.Helper()
 	s, ok := w.fake.Held(name)
@@ -216,7 +216,7 @@ func (w *world) lower(flag state.SessionFlag, name string) {
 	}
 }
 
-// calls counts the calls of op the Fake has taken since mark.
+// calls is each call of op the Fake has taken since mark.
 func (w *world) calls(op backendtest.Op, mark int) []backendtest.Call {
 	var out []backendtest.Call
 	for _, c := range w.fake.Calls()[mark:] {
@@ -227,7 +227,6 @@ func (w *world) calls(op backendtest.Op, mark int) []backendtest.Call {
 	return out
 }
 
-// mark is where the Fake's call log stands now.
 func (w *world) mark() int { return len(w.fake.Calls()) }
 
 type clock struct{ at time.Time }
@@ -235,13 +234,14 @@ type clock struct{ at time.Time }
 func (c *clock) now() time.Time { return c.at }
 
 // racing is the Fake, running what a test stages at the exact points a poll
-// reaches, once each: as List has answered, and as History has. onSession
-// sees every Session call's context, as it is made.
+// reaches, once each: as List has answered, and as History has. onSession and
+// onHistory see every Session and History call as it is made.
 type racing struct {
 	*backendtest.Fake
 	afterList    func()
 	afterHistory func(name string)
 	onSession    func(ctx context.Context)
+	onHistory    func(ctx context.Context, name string)
 }
 
 func (r *racing) Session(ctx context.Context, name string) (backend.Session, error) {
@@ -261,6 +261,9 @@ func (r *racing) List(ctx context.Context) ([]backend.Session, error) {
 }
 
 func (r *racing) History(ctx context.Context, name string, rows int) ([]byte, error) {
+	if r.onHistory != nil {
+		r.onHistory(ctx, name)
+	}
 	vt, err := r.Fake.History(ctx, name, rows)
 	if run := r.afterHistory; run != nil {
 		r.afterHistory = nil

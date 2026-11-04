@@ -151,10 +151,10 @@ func TestPoll_HoldsAMassVanish(t *testing.T) {
 		vanish, total int
 		held          bool
 	}{
-		{"exactly three, half the index, are held", 3, 6, true},
-		{"exactly half the index, more than three, are held", 4, 8, true},
-		{"three, under half the index, are dropped", 3, 7, false},
-		{"two, half the index, are dropped", 2, 4, false},
+		{"exactly three, half of those it may drop, are held", 3, 6, true},
+		{"exactly half of those it may drop, more than three, are held", 4, 8, true},
+		{"three, under half of those it may drop, are dropped", 3, 7, false},
+		{"two, half of those it may drop, are dropped", 2, 4, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newWorld(t)
@@ -210,6 +210,73 @@ func TestPoll_HoldsAMassVanish(t *testing.T) {
 		}
 	})
 
+	t.Run("a vanish split across polls is held whole, those still waiting among it", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 10)
+		w.poll()
+		sink := logtest.Install(t)
+
+		for _, name := range names[:2] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+		for _, name := range names[2:6] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+		w.after(10 * time.Second)
+		w.after(time.Minute)
+
+		if got := w.names(); !slices.Equal(got, names) {
+			t.Errorf("entries = %v, want every one held", got)
+		}
+		rec := sink.Records().Matching("sessions", "drops-held").Only(t, "the one hold")
+		if got := rec.IntAttr(t, "sessions"); got != 6 {
+			t.Errorf("the hold counts %d sessions, want all 6 missing", got)
+		}
+	})
+
+	t.Run("a session ending on its own after a held vanish is dropped, those held not counted", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 6)
+		w.poll()
+		for _, name := range names[:3] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+
+		w.fake.Remove(names[3])
+		w.after(5 * time.Second)
+		w.after(10 * time.Second)
+
+		if got, want := w.names(), slices.Concat(names[:3], names[4:]); !slices.Equal(got, want) {
+			t.Errorf("entries = %v, want %v: %s dropped, the three held kept", got, want, names[3])
+		}
+	})
+
+	t.Run("a held name whose entry now records another creation is judged afresh, its wait begun anew", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 6)
+		w.poll()
+		w.fake.Remove(names[0])
+		w.after(5 * time.Second)
+		for _, name := range names[1:3] {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+
+		w.claim(backend.Session{Name: names[0], Created: w.thisBoot(30), PID: 5000}, "/proj/"+names[0])
+		w.after(5 * time.Second)
+		if _, ok := w.entry(names[0]); !ok {
+			t.Fatalf("%s's later creation was dropped on its first poll missing, want its wait begun anew", names[0])
+		}
+		w.after(10 * time.Second)
+
+		if got, want := w.names(), names[1:]; !slices.Equal(got, want) {
+			t.Errorf("entries = %v, want %v: %s's later creation, never listed, dropped", got, want, names[0])
+		}
+	})
+
 	t.Run("a fresh saver counts what is missing on its first poll", func(t *testing.T) {
 		w := newWorld(t)
 		names := stageLive(w, 4)
@@ -226,7 +293,7 @@ func TestPoll_HoldsAMassVanish(t *testing.T) {
 		}
 	})
 
-	t.Run("only names not starting with _ count in the index", func(t *testing.T) {
+	t.Run("only names not starting with _ count among those it may drop", func(t *testing.T) {
 		w := newWorld(t)
 		names := stageLive(w, 6)
 		var own []sessionindex.Entry
@@ -266,6 +333,28 @@ func TestPoll_HoldsAMassVanish(t *testing.T) {
 
 		if got, want := w.names(), append([]string{"_one", "_three", "_two"}, names[2:]...); !slices.Equal(got, want) {
 			t.Errorf("entries = %v, want %v: two of six missing is no mass vanish", got, want)
+		}
+	})
+
+	t.Run("entries that may predate this boot count in neither the missing nor those it may drop", func(t *testing.T) {
+		w := newWorld(t)
+		names := stageLive(w, 4)
+		var failed []sessionindex.Entry
+		for i := range 6 {
+			failed = append(failed, sessionindex.Entry{Name: fmt.Sprintf("restore-%d", i), CreatedAt: w.beforeBoot(), PID: 100 + i})
+		}
+		w.seed(append(entriesOf(w, names), failed...)...)
+		w.poll()
+
+		for _, name := range names {
+			w.fake.Remove(name)
+		}
+		w.after(5 * time.Second)
+		w.after(10 * time.Second)
+		w.after(time.Minute)
+
+		if got := w.names(); len(got) != 10 {
+			t.Errorf("entries = %v, want all ten kept: every session of this boot gone is a mass vanish beside six failed restores", got)
 		}
 	})
 

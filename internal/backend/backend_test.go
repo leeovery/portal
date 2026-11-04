@@ -23,7 +23,7 @@ func TestSession(t *testing.T) {
 		}
 	})
 
-	t.Run("it is Portal's own when its name starts with an underscore", func(t *testing.T) {
+	t.Run("it is Portal's own when its name starts with an underscore, judged alike from the name alone", func(t *testing.T) {
 		for name, want := range map[string]bool{
 			"_portal-saver":   true,
 			"_":               true,
@@ -33,6 +33,9 @@ func TestSession(t *testing.T) {
 		} {
 			if got := (backend.Session{Name: name}).PortalOwned(); got != want {
 				t.Errorf("PortalOwned() for %q = %v, want %v", name, got, want)
+			}
+			if got := backend.IsPortalOwned(name); got != want {
+				t.Errorf("IsPortalOwned(%q) = %v, want %v", name, got, want)
 			}
 		}
 	})

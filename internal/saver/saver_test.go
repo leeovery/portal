@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"slices"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
@@ -318,7 +320,7 @@ func TestPoll_ConfirmsUnderTheLockOnlyWhatTheListingMayHaveWrong(t *testing.T) {
 	}
 }
 
-func TestPoll_BoundsItsConfirmationsTogetherWellInsideTheCommitLocksBound(t *testing.T) {
+func TestPoll_BoundsItsConfirmationsTogetherInsideTheCommitLocksBound(t *testing.T) {
 	w := newWorld(t)
 	w.live("api", 1)
 	w.live("web", 2)
@@ -328,8 +330,8 @@ func TestPoll_BoundsItsConfirmationsTogetherWellInsideTheCommitLocksBound(t *tes
 		if !ok {
 			t.Error("a confirmation ran with no deadline")
 		}
-		if left := time.Until(deadline); left > 2*time.Second {
-			t.Errorf("a confirmation had %s left, want 2 s at most", left)
+		if left := time.Until(deadline); left > 500*time.Millisecond {
+			t.Errorf("a confirmation had %s left, want 500 ms at most", left)
 		}
 		deadlines = append(deadlines, deadline)
 	}
@@ -341,21 +343,80 @@ func TestPoll_BoundsItsConfirmationsTogetherWellInsideTheCommitLocksBound(t *tes
 	}
 }
 
-func TestPoll_LeavesTheEntryOfASessionReportingNoCreation(t *testing.T) {
+func TestPoll_LeavesAClaimItsConfirmationsRanOutOfTimeForToTheNextPoll(t *testing.T) {
+	saver.SetConfirmBudget(t, 20*time.Millisecond)
 	w := newWorld(t)
-	w.fake.Add(backend.Session{Name: "api", Dir: "/srv/api", PID: 4001})
-	held := labelled(w.thisBoot(0), 1717)
-	w.seed(held)
+	w.live("api", 1)
+	w.live("web", 2)
+	w.race.onSession = func(ctx context.Context) { <-ctx.Done() }
+	sink := logtest.Install(t)
 
-	mark := w.mark()
 	w.poll()
 
-	if got, _ := w.entry("api"); !sameEntry(got, held) {
-		t.Errorf("api = %+v, want %+v untouched", got, held)
+	if got := w.names(); len(got) != 0 {
+		t.Errorf("entries = %v, want no claim made past the budget", got)
 	}
-	if got := w.calls(backendtest.OpSession, mark); len(got) != 0 {
-		t.Errorf("the poll confirmed %+v, want no backend call for a claim that can change nothing", got)
+	skips := sink.Records().Matching("sessions", "claim-skipped").AtExactLevel(slog.LevelDebug)
+	if len(skips) != 2 {
+		t.Fatalf("logged %d skipped claims, want api's and web's: %+v", len(skips), skips)
 	}
+	for i, name := range []string{"api", "web"} {
+		if got := skips[i].AttrString(t, "session"); got != name {
+			t.Errorf("skip %d names %s, want %s", i, got, name)
+		}
+		if got := skips[i].AttrString(t, "detail"); got != "it was not confirmed in time" {
+			t.Errorf("%s's skip says %q, want it not confirmed in time", name, got)
+		}
+		if err := skips[i].ErrorAttr(t, "error"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("%s's skip carries %v, want the budget's ErrTimeout", name, err)
+		}
+	}
+
+	w.race.onSession = nil
+	w.after(5 * time.Second)
+
+	if got := w.names(); !slices.Equal(got, []string{"api", "web"}) {
+		t.Errorf("entries at the next poll = %v, want both claimed", got)
+	}
+}
+
+func TestPoll_NeverClaimsForASessionReportingNoCreation(t *testing.T) {
+	t.Run("its entry is left as it is", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Add(backend.Session{Name: "api", Dir: "/srv/api", PID: 4001})
+		held := labelled(w.thisBoot(0), 1717)
+		w.seed(held)
+
+		mark := w.mark()
+		w.poll()
+
+		if got, _ := w.entry("api"); !sameEntry(got, held) {
+			t.Errorf("api = %+v, want %+v untouched", got, held)
+		}
+		if got := w.calls(backendtest.OpSession, mark); len(got) != 0 {
+			t.Errorf("the poll confirmed %+v, want no backend call for a claim that can change nothing", got)
+		}
+	})
+
+	t.Run("it gets no entry, which no drop could remove", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Add(backend.Session{Name: "api", Dir: "/srv/api", PID: 4001})
+		sink := logtest.Install(t)
+
+		mark := w.mark()
+		w.poll()
+
+		if got := w.names(); len(got) != 0 {
+			t.Errorf("entries = %v, want none", got)
+		}
+		if got := w.calls(backendtest.OpSession, mark); len(got) != 0 {
+			t.Errorf("the poll confirmed %+v, want no backend call for a claim it won't make", got)
+		}
+		rec := sink.Records().Matching("sessions", "claim-skipped").AtExactLevel(slog.LevelDebug).Only(t, "the skipped claim")
+		if rec.AttrString(t, "session") != "api" || rec.AttrString(t, "detail") != "it reports no creation" {
+			t.Errorf("record = %+v, want api skipped as reporting no creation", rec)
+		}
+	})
 }
 
 // labelled is api's entry holding all a claim must not lose, created at at,

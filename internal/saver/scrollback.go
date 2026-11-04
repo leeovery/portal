@@ -25,7 +25,15 @@ const (
 	// cleanEvery is the least time between two removals of the scrollback
 	// files no entry names.
 	cleanEvery = time.Minute
+	// abandonedAfter is how old a write's temp file in the scrollback
+	// directory must be to be one a crash left, not one a write has under
+	// way.
+	abandonedAfter = time.Hour
 )
+
+// captureBudget bounds, together, the History calls one poll makes, so
+// sessions that don't answer delay the poll's commit by no more than it.
+var captureBudget = 3 * time.Second
 
 var captureLogger = log.For("capture")
 
@@ -41,10 +49,10 @@ type scrollback struct {
 	cleaned time.Time
 }
 
-// creation is when the saver last asked a creation for its history, and the
-// hash of the history the index last named its file with.
 type creation struct {
 	asked time.Time
+	// named and sum are the history the index last named the file with, not
+	// the last written: a write the index didn't name is made again.
 	named bool
 	sum   [sha256.Size]byte
 }
@@ -65,8 +73,11 @@ type capture struct {
 // is due a capture, outside the commit lock, as History can take seconds: at
 // most once every captureEvery per creation, never while Portal is restoring
 // the session, and writing only a history that differs from the one the
-// index last named. It returns what it wrote, for the index to name.
+// index last named. A session the poll's captureBudget runs out before is not
+// asked, so stays due. It returns what it wrote, for the index to name.
 func (sb *scrollback) capture(ctx context.Context, l listing) []capture {
+	ctx, cancel := context.WithTimeoutCause(ctx, captureBudget, fmt.Errorf("the poll's %s for captures ran out: %w", captureBudget, backend.ErrTimeout))
+	defer cancel()
 	listed := map[string]creation{}
 	var written []capture
 	for _, live := range l.answered {
@@ -162,7 +173,8 @@ func (sb *scrollback) saved(named []capture) {
 // clean removes, at most once every cleanEvery, each file in the scrollback
 // directory that Portal names for a creation of a session and no entry of idx,
 // the index as written, names: a capture the index didn't name, or a file an
-// entry left for a later creation's. Anything else there, a legacy
+// entry left for a later creation's. It removes too each temp file a write
+// left there abandonedAfter ago or more. Anything else there, a legacy
 // <name>.bin among it, is not the saver's to remove.
 func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
 	if !sb.cleaned.IsZero() && at.Sub(sb.cleaned) < cleanEvery {
@@ -181,7 +193,7 @@ func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
 	named := namedFiles(idx)
 	reaped := 0
 	for _, f := range files {
-		if f.Type().IsRegular() && !named[f.Name()] && state.IsSessionScrollbackFile(f.Name()) && removed(filepath.Join(dir, f.Name())) {
+		if reapable(f, named, at) && removed(filepath.Join(dir, f.Name())) {
 			reaped++
 		}
 	}
@@ -190,7 +202,17 @@ func (sb *scrollback) clean(idx *sessionindex.Index, at time.Time) {
 	}
 }
 
-// removed removes the file target, reporting whether it did.
+func reapable(f fs.DirEntry, named map[string]bool, at time.Time) bool {
+	switch {
+	case !f.Type().IsRegular():
+		return false
+	case fileutil.IsAtomicTemp(f.Name()):
+		info, err := f.Info()
+		return err == nil && at.Sub(info.ModTime()) >= abandonedAfter
+	}
+	return !named[f.Name()] && state.IsSessionScrollbackFile(f.Name())
+}
+
 func removed(target string) bool {
 	err := os.Remove(target)
 	switch {
@@ -203,7 +225,6 @@ func removed(target string) bool {
 	return false
 }
 
-// namedFiles is the base name of every file an entry of idx names.
 func namedFiles(idx *sessionindex.Index) map[string]bool {
 	named := map[string]bool{}
 	for _, e := range idx.Entries() {

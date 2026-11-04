@@ -125,6 +125,29 @@ func TestPoll_MintRaces(t *testing.T) {
 		}
 	})
 
+	t.Run("a session made again within the second between the listing and the commit is claimed from the next listing", func(t *testing.T) {
+		w := newWorld(t)
+		listed := w.live("api", 1)
+		again := listed
+		again.PID = 4999
+		w.race.afterList = func() {
+			w.fake.Remove("api")
+			w.fake.Add(again)
+		}
+
+		w.poll()
+		if got := w.names(); len(got) != 0 {
+			t.Fatalf("entries = %v, want no claim of the creation the listing showed", got)
+		}
+
+		w.after(5 * time.Second)
+		want := entryOf(again)
+		want.Cwd = again.Dir
+		if got, _ := w.entry("api"); !sameEntry(got, want) {
+			t.Errorf("api = %+v, want the creation made again %+v", got, want)
+		}
+	})
+
 	t.Run("a mint replacing a session the listing showed is never replaced by that listing", func(t *testing.T) {
 		w := newWorld(t)
 		w.live("api", 1)
@@ -217,6 +240,16 @@ func TestPoll_FlagRaisedDuringTheCaptureLeavesItUnnamed(t *testing.T) {
 	}
 	if got, ok := w.read(scrollbackFile(t, api)); ok {
 		t.Errorf("the capture = %q, want it removed, no entry naming it", got)
+	}
+
+	w.lower(state.ResumePending, "api")
+	w.after(time.Minute)
+
+	if got, _ := w.read(scrollbackFile(t, api)); got != "the screen" {
+		t.Errorf("the capture once the flag went = %q, want the same history written again", got)
+	}
+	if got, _ := w.entry("api"); got.ScrollbackFile != scrollbackFile(t, api) {
+		t.Errorf("ScrollbackFile once the flag went = %q, want the capture named", got.ScrollbackFile)
 	}
 }
 

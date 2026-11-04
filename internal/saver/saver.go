@@ -66,7 +66,7 @@ func New(cfg Config) *Saver {
 		dir:        cfg.StateDir,
 		hooks:      cfg.Hooks,
 		now:        now,
-		drops:      &drops{missing: map[string]time.Time{}, held: map[string]bool{}},
+		drops:      &drops{missing: map[string]time.Time{}, held: map[string]sessionindex.Entry{}},
 		scrollback: &scrollback{backend: cfg.Backend, dir: cfg.StateDir, creations: map[string]creation{}},
 	}
 }
