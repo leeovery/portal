@@ -83,4 +83,4 @@ jobs:
         if: steps.zmx.outputs.skip != 'true'
         run: |
           go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/runner/... ./internal/spawn/... ./internal/zmxtest/...
-          go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd ./internal/portaltest ./internal/saver
+          go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd ./internal/portaltest ./internal/vtcapture

@@ -217,6 +217,22 @@ func TestParkedResumeChain_Backstop(t *testing.T) {
 		})
 	}
 
+	// The tail's login /bin/sh reads its home's profile, so the home is the
+	// test's own.
+	t.Run("a tail gone from the baked path hands the session /bin/sh when the user's shell is gone too", func(t *testing.T) {
+		_, flag := backstopFlag(t, true)
+
+		run := runParkedChain(t, filepath.Join(t.TempDir(), "portal"), flag,
+			"SHELL="+filepath.Join(t.TempDir(), "zsh"), "HOME="+t.TempDir())
+
+		if want := hydrateResetPreamble + "stty sane\n"; run.transcript != want {
+			t.Errorf("session transcript = %q, want %q", run.transcript, want)
+		}
+		if run.backstopStderr != "" || run.status != 0 {
+			t.Errorf("stderr %q, status %d; want /bin/sh run, exiting 0 with nothing to read", run.backstopStderr, run.status)
+		}
+	})
+
 	lowered := []struct {
 		name  string
 		stage func(t *testing.T) string

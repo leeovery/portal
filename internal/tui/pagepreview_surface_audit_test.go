@@ -195,6 +195,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"tmuxtest":        {},
 		"transienttest":   {},
 		"tui":             {},
+		"vtcapture":       {},
 		"warning":         {},
 		"xdg":             {},
 		"zmxtest":         {},

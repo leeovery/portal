@@ -193,12 +193,12 @@ func TestHydrate_Replay(t *testing.T) {
 		}
 	})
 
-	t.Run("it replays a capture without the screen state zmx closed it with, so the prompt lands below its rows", func(t *testing.T) {
+	t.Run("it replays a capture's rows alone, without the modes its program left on or the state zmx closed it with", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		const rows = "line-1\r\n\x1b[1mline-2\x1b[0m\r\n$ ls\r\n$"
 		stdout := new(bytes.Buffer)
 		cfg := w.config(&stubExecShell{})
-		cfg.File, cfg.Stdout = transcript(t, rows+"\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\"), stdout
+		cfg.File, cfg.Stdout = transcript(t, "\x1b[?1000h\x1b[?1004h\x1b[?2004h"+rows+"\x1b[3;3H\x1b[0m\x1b]7;file://host/work\x1b\\"), stdout
 
 		runHydrate(t.Context(), cfg)
 
@@ -207,7 +207,7 @@ func TestHydrate_Replay(t *testing.T) {
 		}
 	})
 
-	t.Run("it streams a large transcript whole, but for the state closing it", func(t *testing.T) {
+	t.Run("it streams a large transcript whole, but for the modes opening it and the state closing it", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		body := make([]byte, 5*1024*1024)
 		for i := range body {
@@ -215,7 +215,7 @@ func TestHydrate_Replay(t *testing.T) {
 		}
 		stdout := new(bytes.Buffer)
 		cfg := w.config(&stubExecShell{})
-		cfg.File, cfg.Stdout = transcript(t, string(body)+"\x1b[24;120H\x1b[0m"), stdout
+		cfg.File, cfg.Stdout = transcript(t, "\x1b[?1004h"+string(body)+"\x1b[24;120H\x1b[0m"), stdout
 
 		runHydrate(t.Context(), cfg)
 
@@ -228,7 +228,7 @@ func TestHydrate_Replay(t *testing.T) {
 		}
 	})
 
-	for name, body := range map[string]string{"an empty transcript": "", "a capture of a blank screen": "\x1b[1;1H\x1b[0m"} {
+	for name, body := range map[string]string{"an empty transcript": "", "a capture of a blank screen": "\x1b[?1004h\x1b[1;1H\x1b[0m"} {
 		t.Run("it writes nothing for "+name+", not even the reset sequences", func(t *testing.T) {
 			w := newHydrateWorld(t)
 			stdout := new(bytes.Buffer)
@@ -368,9 +368,10 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 		}
 	})
 
-	// What a part-read set, a pen or the alternate screen among it, must not
-	// reach the shell, and a state that looks like zmx's closing one is no
-	// end the read reached.
+	// The modes a part-read opened with are cut as a whole one's are; what its
+	// rows set, a pen or the alternate screen among it, must not reach the
+	// shell, and a state that looks like zmx's closing one is no end the read
+	// reached.
 	t.Run("a transcript failing part way is closed and settled as a whole one is, and logged as cut short", func(t *testing.T) {
 		w := newHydrateWorld(t)
 		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
@@ -381,7 +382,7 @@ func TestHydrate_TranscriptUnreadable(t *testing.T) {
 		const read = "row-1\x1b[?1049h\x1b[31mrow-2\x1b[2;6H\x1b[0m"
 		cfg.File, cfg.Stdout, cfg.Logger = "/saved/proj-a1b2.bin", stdout, logger
 		cfg.OpenTranscript = func(string) (io.ReadCloser, error) {
-			return io.NopCloser(io.MultiReader(strings.NewReader(read), failingReader{errors.New("device went away")})), nil
+			return io.NopCloser(io.MultiReader(strings.NewReader("\x1b[?1004h"+read), failingReader{errors.New("device went away")})), nil
 		}
 		cfg.Settle = func() { settled = true }
 
@@ -456,15 +457,16 @@ func TestHydrate_HandOff(t *testing.T) {
 		} {
 			t.Run(store.name, func(t *testing.T) {
 				w := newHydrateWorld(t)
-				t.Setenv("SHELL", "/usr/local/bin/myshell")
+				shell := stageExecutable(t, t.TempDir(), "myshell", "#!/bin/sh\n")
+				t.Setenv("SHELL", shell)
 				exec := &stubExecShell{}
 				cfg := w.config(exec)
 				cfg.File, cfg.HookStore = transcript(t, ""), store.store(t)
 
 				runHydrate(t.Context(), cfg)
 
-				if exec.target != "/usr/local/bin/myshell" || !reflect.DeepEqual(exec.args, []string{"-myshell"}) {
-					t.Errorf("exec = %q %q, want /usr/local/bin/myshell run as -myshell", exec.target, exec.args)
+				if exec.target != shell || !reflect.DeepEqual(exec.args, []string{"-myshell"}) {
+					t.Errorf("exec = %q %q, want %s run as -myshell", exec.target, exec.args, shell)
 				}
 			})
 		}

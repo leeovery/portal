@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 )
 
@@ -106,7 +107,7 @@ func TestResumeAnswerDiscard_RefusedWrite(t *testing.T) {
 		if probe.stdout.Len() != 0 {
 			t.Errorf("the answer wrote %q to the pane, want nothing: the confirmation stays up", probe.stdout.String())
 		}
-		if probe.execProg == resolveShell() {
+		if probe.execProg == resolveShell(log.Discard()) {
 			t.Errorf("exec target = %q, want no shell while the registration stands", probe.execProg)
 		}
 	})

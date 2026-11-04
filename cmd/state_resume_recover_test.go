@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/leeovery/portal/internal/state"
@@ -222,7 +223,7 @@ func assertRecovered(t *testing.T, p *resumeRecoverProbe, sink *logtest.Sink) {
 	if p.execCalls != 1 {
 		t.Fatalf("ExecShell called %d times, want exactly 1", p.execCalls)
 	}
-	shell := resolveShell()
+	shell := resolveShell(log.Discard())
 	if p.execProg != shell {
 		t.Errorf("exec target = %q, want %q", p.execProg, shell)
 	}

@@ -19,7 +19,7 @@ func TestHydrateReplayedLog(t *testing.T) {
 		{name: "a populated transcript", body: "line1\r\nline2\x00\xff\x1b[31mred\x1b[0m", replayed: len("line1\r\nline2\x00\xff\x1b[31mred\x1b[0m")},
 		{name: "an empty transcript", body: "", replayed: 0},
 		{name: "a 5MB transcript", body: string(bytes.Repeat([]byte("A"), 5*1024*1024)), replayed: 5 * 1024 * 1024},
-		{name: "a capture zmx closed with its screen state", body: "row-1\r\nrow-2\x1b[2;6H\x1b[0m", replayed: 12},
+		{name: "a capture zmx opened with modes and closed with its screen state", body: "\x1b[?1004hrow-1\r\nrow-2\x1b[2;6H\x1b[0m", replayed: 12},
 	} {
 		t.Run("it records the bytes a replay of "+tc.name+" wrote", func(t *testing.T) {
 			w := newHydrateWorld(t)

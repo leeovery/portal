@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/vtcapture"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -162,6 +163,19 @@ func screenRows(history string) []string {
 		rows[i] = strings.TrimRight(row, " ")
 	}
 	return rows
+}
+
+// setModes is the DEC private modes a capture's lead has set: those its
+// terminal had on.
+func setModes(capture []byte) []string {
+	modes, _ := vtcapture.Modes(capture)
+	var set []string
+	for _, m := range modes {
+		if m.Private && m.Set {
+			set = append(set, m.Param)
+		}
+	}
+	return set
 }
 
 // awaitPromptBelow waits for the session's shell to draw its prompt, then
@@ -310,6 +324,29 @@ func TestHydrateReplaysWhateverTheScreenAgainstZmx(t *testing.T) {
 		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
 	})
 
+	// A program such as Claude Code leaves focus reporting on, and with it a
+	// shell that read it would type ^[[I and ^[[O at its prompt on every
+	// focus change.
+	t.Run("the modes the saved program left on are off in the restored session", func(t *testing.T) {
+		w := newRestoreWorld(t, binary)
+		script := `printf '\033[?1004h\033[?1000h$ claude\r\nworking on it\r\n'`
+		transcript := w.capture(t, "focused", script, "working on it")
+		if left := setModes(transcript); !slices.Contains(left, "1004") || !slices.Contains(left, "1000") {
+			t.Fatalf("the saved transcript %q leads with %q, want focus and mouse reporting set", transcript, left)
+		}
+
+		w.restore(t, restoredSession, transcript)
+
+		w.awaitPromptBelow(t, restoredSession, shownRows(transcript))
+		restored, err := w.b.History(t.Context(), restoredSession, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if on := setModes(restored); slices.Contains(on, "1004") || slices.Contains(on, "1000") {
+			t.Errorf("the restored session leads with %q: the saved program's modes are on in its shell", on)
+		}
+	})
+
 	t.Run("the prompt lands below a transcript replayed into a taller terminal", func(t *testing.T) {
 		w := newRestoreWorld(t, binary)
 		script := `until [ "$(stty size)" = "10 120" ]; do sleep 0.05; done; i=1; while [ $i -le 30 ]; do printf 'line-%d\r\n' $i; i=$((i+1)); done; printf '$ '`
@@ -386,9 +423,9 @@ func TestResumeResetOnTheMainScreenAgainstZmx(t *testing.T) {
 }
 
 // A session whose program has switched to the alternate screen, as an editor
-// or a pager does, saves that screen alone. Replayed, it is drawn on the
-// alternate screen and gone when the helper leaves it, and the restored
-// session is at a usable shell.
+// or a pager does, saves that screen alone. The saver skips such a capture,
+// but one saved before it is replayed as any capture is: its rows alone, on
+// the main screen, with the restored session at a usable shell below them.
 func TestHydrateAltScreenTranscriptAgainstZmx(t *testing.T) {
 	binary := buildPortalBinary(t)
 	w := newRestoreWorld(t, binary)
@@ -406,7 +443,13 @@ func TestHydrateAltScreenTranscriptAgainstZmx(t *testing.T) {
 	w.awaitHydrated(t, restoredSession)
 	w.awaitLoginShell(t, restoredSession)
 
-	w.awaitPromptBelow(t, restoredSession, []string{""})
+	restored := w.awaitHistory(t, restoredSession, "its prompt", func(history string) bool {
+		return slices.Contains(screenRows(history), promptMark)
+	})
+	if strings.Contains(restored, altScreenEnter) {
+		t.Errorf("history = %q, want the main screen", restored)
+	}
+	w.awaitPromptBelow(t, restoredSession, []string{altLine})
 	c := zmxtest.Attach(t, w.b, restoredSession)
 	w.awaitClients(t, restoredSession, 1)
 	c.Type(t, "echo usable-$((40+2))\r")

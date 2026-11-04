@@ -14,13 +14,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resumemode"
 	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/vtcapture"
 	"github.com/spf13/cobra"
 )
 
@@ -153,13 +153,15 @@ func sessionNameRefusal(session, current string) error {
 }
 
 // replayTranscript writes the session's saved transcript to its terminal
-// between the reset sequences, then lets the terminal take it in. The
-// transcript goes without the screen state zmx closed its capture with, so the
-// cursor ends where its last row does and the prompt lands below it, whatever
-// the terminal's height. Only a transcript with something in it is replayed:
-// one that saved none, an empty one and one that can't be read write nothing
-// at all. One failing part way is closed as a whole one is, so the shell
-// inherits nothing its bytes set; its cause is recorded.
+// between the reset sequences, then lets the terminal take it in. Only its
+// rows are replayed, without the modes its capture opened with and the screen
+// state it closed with: the program that set those modes is gone, so the
+// shell must not inherit them, and the cursor ends where the last row does,
+// so the prompt lands below it whatever the terminal's height. Only a
+// transcript with something in it is replayed: one that saved none, an empty
+// one and one that can't be read write nothing at all. One failing part way is
+// closed as a whole one is, so the shell inherits nothing its bytes set; its
+// cause is recorded.
 func replayTranscript(cfg hydrateConfig) {
 	if cfg.File == "" {
 		return
@@ -200,21 +202,36 @@ func settleReplay(cfg hydrateConfig) {
 	time.Sleep(hydrateSettleSleep)
 }
 
-// copyTranscriptContent copies the transcript to w without the screen state
-// zmx closed it with, holding back the end that state sits in until the read
-// is done. A read failing part way never reached that end, so what it held
-// back goes out whole.
+// copyTranscriptContent copies the transcript's rows to w: it reads the head
+// first and cuts the modes its capture opened with from it, then holds back
+// the end the closing state sits in until the read is done. A read failing
+// part way never reached that end, so what it held back goes out whole.
 func copyTranscriptContent(w io.Writer, r io.Reader) error {
-	held := &heldEnd{w: w}
-	_, err := io.Copy(held, r)
+	head, err := readTranscriptHead(r)
+	_, rows := vtcapture.Modes(head)
+	held := &heldEnd{w: w, end: rows}
+	if err == nil {
+		_, err = io.Copy(held, r)
+	}
 	end := held.end
 	if err == nil {
-		end = zmx.HistoryContent(end)
+		end = vtcapture.TrimClose(end)
 	}
 	if _, writeErr := w.Write(end); err == nil {
 		err = writeErr
 	}
 	return err
+}
+
+// readTranscriptHead reads the first hydrateStateWindow bytes of r, which
+// hold the modes its capture opened with, or the whole of a shorter one.
+func readTranscriptHead(r io.Reader) ([]byte, error) {
+	head := make([]byte, hydrateStateWindow)
+	n, err := io.ReadFull(r, head)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		err = nil
+	}
+	return head[:n], err
 }
 
 // heldEnd passes what is written to it on to w, but for the last
@@ -471,14 +488,16 @@ const parkedChainTrap = "trap : INT QUIT TERM; "
 // path while an answered session's shell runs, so the tail's own gate comes
 // first: a flag proved lowered ends the chain, and one that can't be looked
 // for counts as still raised. Past the gate it takes the tail's own steps in
-// the tail's order, since no Portal binary is left to take them.
+// the tail's order, since no Portal binary is left to take them, the shell
+// that can't be found among them: it is /bin/sh, as resolveShell has it.
 func parkedChainBackstop(parked parkedChain) string {
 	answeredGate := `if ` + flagProvedLowered(parked.Flag) + `; then exit $s; fi`
 	reset := `printf '%s' ` + shellquote.Single(hydrateResetPreamble)
 	clearFlag := shellquote.Join([]string{"rm", "-f", "--", parked.Flag}) + ` 2>/dev/null`
+	shell := `command -v "$SHELL" >/dev/null 2>&1 || SHELL=` + fallbackShell + `; exec "$SHELL" ` + loginShellFlag
 	return `; s=$?; case $s in 126|127) if [ ! -x ` + shellquote.Single(parked.Exe) + ` ]; then ` +
 		answeredGate + `; ` + reset + `; ` + clearFlag +
-		`; stty sane 2>/dev/null; exec "${SHELL:-/bin/sh}" ` + loginShellFlag + `; fi;; esac; exit $s`
+		`; stty sane 2>/dev/null; ` + shell + `; fi;; esac; exit $s`
 }
 
 // flagProvedLowered is a shell test that succeeds only when the flag at path

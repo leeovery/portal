@@ -153,7 +153,7 @@ func execHandOff(logger *slog.Logger, execShell func(prog string, args []string)
 // the tail the same invocation as one that never waited. An empty command
 // means no registration.
 func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args []string), command string) {
-	shell := resolveShell()
+	shell := resolveShell(logger)
 	if command == "" {
 		execHandOff(logger, execShell, shell, loginShellArgv(shell), false)
 		return
@@ -162,21 +162,27 @@ func handOffToHookOrShell(logger *slog.Logger, execShell func(prog string, args 
 	execHandOff(logger, execShell, prog, args, true)
 }
 
+// fallbackShell is the shell a session is handed when $SHELL names none: the
+// one zmx starts a fresh session's with.
+const fallbackShell = "/bin/sh"
+
 // resolveShell is the shell a session is handed: $SHELL, or else /bin/sh, as
 // zmx picks a fresh session's. A $SHELL naming no path is found on PATH, as
-// zmx's execvpe finds it: the exec it is handed to searches nothing. One PATH
-// doesn't hold is left as named, so its exec fails as zmx's would.
-func resolveShell() string {
+// zmx's execvpe finds it: the exec it is handed to searches nothing. One that
+// can't be found, at its path or on PATH, is /bin/sh, with one WARN: an exec
+// that failed would end the session, and the saver would drop it and its
+// transcript with it.
+func resolveShell(logger *slog.Logger) string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		return "/bin/sh"
+		return fallbackShell
 	}
-	if !strings.Contains(shell, "/") {
-		if found, err := exec.LookPath(shell); err == nil {
-			return found
-		}
+	found, err := exec.LookPath(shell)
+	if err != nil {
+		logger.Warn("shell not found, so the session gets "+fallbackShell, "path", shell, "error", err)
+		return fallbackShell
 	}
-	return shell
+	return found
 }
 
 // loginShellArgv is the argv a session's shell is exec'd with: a login shell,
