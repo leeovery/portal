@@ -304,11 +304,17 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool { return !p.alive(t, name) }) {
 			t.Fatal("the session outlived y")
 		}
-		idx, err := sessionindex.Read(p.stateDir)
-		if err != nil {
-			t.Fatalf("read index: %v", err)
-		}
-		if _, ok := idx.Lookup(name); ok {
+		// Kill ends the session before it removes the entry, so the entry
+		// can outlive the session by a moment.
+		var idx sessionindex.Index
+		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+			var err error
+			if idx, err = sessionindex.Read(p.stateDir); err != nil {
+				t.Fatalf("read index: %v", err)
+			}
+			_, ok := idx.Lookup(name)
+			return !ok
+		}) {
 			t.Errorf("index = %+v, want the killed session's entry gone", idx.Entries())
 		}
 
