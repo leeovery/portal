@@ -34,12 +34,12 @@ func (r *stepRecorder) Clear() error {
 	return r.ClearErr
 }
 
-func (r *stepRecorder) SweepOrphanDaemons() error {
+func (r *stepRecorder) SweepOrphanDaemons(context.Context) error {
 	r.calls = append(r.calls, "SweepOrphanDaemons")
 	return r.SweepOrphanDaemonsErr
 }
 
-func (r *stepRecorder) EnsureSaver() error {
+func (r *stepRecorder) EnsureSaver(context.Context) error {
 	r.calls = append(r.calls, "EnsureSaver")
 	return r.EnsureSaverErr
 }

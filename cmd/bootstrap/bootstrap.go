@@ -48,10 +48,10 @@ type RestoringMarker interface {
 	Clear() error
 }
 
-// SaverBootstrapper ensures the _portal-saver detached session exists
-// and matches the current binary version.
+// SaverBootstrapper ensures the _portal-saver session runs the current
+// binary's daemon, as saverhost.Ensurer does.
 type SaverBootstrapper interface {
-	EnsureSaver() error
+	EnsureSaver(ctx context.Context) error
 }
 
 // Restorer performs session restoration. err is non-nil only when corrupt is
@@ -117,7 +117,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// uncontested by leftover daemons from prior server lifetimes.
 	o.Logger.Debug("step entering", "step", stepSweepOrphanDaemons)
 	stepStart = time.Now()
-	if err := o.OrphanSweeper.SweepOrphanDaemons(); err != nil {
+	if err := o.OrphanSweeper.SweepOrphanDaemons(ctx); err != nil {
 		o.Logger.Warn("step failed", "step", stepSweepOrphanDaemons, "error", err)
 	}
 	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, log.Took(stepStart))
@@ -125,7 +125,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	o.Logger.Debug("step entering", "step", stepEnsureSaver)
 	stepStart = time.Now()
-	if err := o.Saver.EnsureSaver(); err != nil {
+	if err := o.Saver.EnsureSaver(ctx); err != nil {
 		warnings = append(warnings, SaverDownWarning())
 		o.Logger.Warn("step failed", "step", stepEnsureSaver, "error", err)
 	}

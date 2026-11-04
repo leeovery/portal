@@ -932,6 +932,20 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
 | Bootstrap observes a saver pane's host process has exited (e.g. during the kill-barrier exit-poll) | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
 
+The rows above are the tmux version's. On zmx the saver's lifecycle is `internal/saverhost`'s: EnsureSaver (the bootstrap's), and the stop EnsureSaver and `portal uninstall` share, each run holding `saver.lock`:
+
+| Site | msg | Required attrs |
+|---|---|---|
+| EnsureSaver creates `_portal-saver` running `<exe> state daemon` | `session created` | `target_pid` (the session's process, the daemon) |
+| EnsureSaver finds `daemon.pid` naming the session's process and `daemon.version` holding its version | `daemon ready` | `target_pid`, `took` |
+| EnsureSaver finds the saver running at this version (INFO: the operator sees a recycle considered and declined) | `daemon kept` | `target_pid` |
+| EnsureSaver decides to replace the running saver, which it stops before creating another | `recycle` | `target_pid`, `reason` ∈ {`version`, `unknown`} |
+| The stop sends its proved SIGTERM | `stop started` | `target_pid` |
+| The stop's wait for the daemon's exit runs out, and it sends its re-proved SIGKILL | `stop escalated` | `target_pid`, `reason="term-timeout"` |
+| The stop finds the daemon finished exiting, just before it kills the session | `daemon exited` | `target_pid`, `took` (from the stop's start) |
+
+Beside them, not INFO: a WARN `stop refused` (`target_pid`, `error`) when the stop refuses its pid before any proof (this process, or one the saver session no longer runs) or the proof before a signal fails or can't be read, so that signal is not sent and the stop fails; and a DEBUG `session created elsewhere` (`error`) when another process created `_portal-saver` first, which counts once its daemon is ready.
+
 **Daemon lifecycle events (component: `daemon`):**
 
 | Site | msg | Required attrs |
@@ -949,6 +963,8 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 
 - `kill-barrier escalated reason`: `kill-session-timeout` (only value today; new values require amendment).
 - `placeholder died reason`: `signal` / `exit` / `unknown`.
+- `recycle reason`: `version` (the daemon records another version, a dev build's naming its build) / `unknown` (once ReadyWait has passed, no `daemon.pid` naming the session's process, or no `daemon.version`; or this build's version is the unidentified `dev`, which names no one build).
+- `stop escalated reason`: `term-timeout` (only value today).
 - `daemon shutdown reason`: `sighup` / `signal` / `exit`. (`self-eject` is **not** a `daemon: shutdown` reason — the self-eject path emits `daemon: self-eject` + `process: exit` instead, see *Defensive invariants* § sanctioned exception.)
 
 Reason value spaces are closed sets per event — spec writers MAY NOT introduce new reason values without amending this catalog.
@@ -964,6 +980,7 @@ Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're co
 - `cmd/bootstrap/` — all `saver:` lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation, and `placeholder died` — bootstrap observes the saver from outside, per *Subsystem prefix taxonomy* § Process/subsystem boundary).
 - `cmd/state_daemon.go` — daemon lifecycle (`lock acquired`, `self-eject`, `shutdown`). The daemon's process startup is marked by `process: start process_role=daemon`, not a `daemon:` event.
 - `internal/tmux/portal_saver.go` — kill-barrier escalation.
+- `internal/saverhost/` — the zmx saver's lifecycle (`session created`, `daemon ready`, `daemon kept`, `recycle`, `stop started`, `stop escalated`, `daemon exited`), observing the saver from outside as bootstrap's tmux events did.
 
 ---
 

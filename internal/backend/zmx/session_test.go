@@ -720,6 +720,43 @@ func TestDirFor(t *testing.T) {
 	}
 }
 
+func TestSessionEntry(t *testing.T) {
+	if got, want := zmx.SessionEntry("_portal-saver"), "ZMX_SESSION=_portal-saver"; got != want {
+		t.Errorf("SessionEntry = %q, want %q", got, want)
+	}
+	if got := zmx.CurrentFor([]string{zmx.SessionEntry("work")}); got != "work" {
+		t.Errorf("CurrentFor(SessionEntry(work)) = %q, want the session it names", got)
+	}
+}
+
+func TestSessionMarks(t *testing.T) {
+	t.Run("they are the session's name and a Backend's reach", func(t *testing.T) {
+		dir := t.TempDir()
+		b, err := zmx.New(zmx.Config{Binary: "zmx", Dir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := zmx.SessionMarks("_portal-saver", b.ReachEnv())
+
+		if want := []string{"ZMX_SESSION=_portal-saver", "ZMX_DIR=" + dir}; err != nil || !slices.Equal(got, want) {
+			t.Errorf("SessionMarks = %q, %v; want %q", got, err, want)
+		}
+	})
+
+	for name, reach := range map[string][]string{
+		"no reach":         nil,
+		"no ZMX_DIR":       {"ZMX_SESSION_PREFIX=work-"},
+		"an empty ZMX_DIR": {"ZMX_DIR="},
+	} {
+		t.Run("it refuses "+name, func(t *testing.T) {
+			if got, err := zmx.SessionMarks("_portal-saver", reach); err == nil {
+				t.Errorf("SessionMarks = %q, want a refusal", got)
+			}
+		})
+	}
+}
+
 func TestReachEnv(t *testing.T) {
 	dir := t.TempDir()
 	env := []string{"ZMX_DIR=/elsewhere", "ZMX_SESSION_PREFIX=work-"}

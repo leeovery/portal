@@ -298,6 +298,26 @@ func CurrentFor(environ []string) string {
 	return lookup(environ, envSession)
 }
 
+// SessionEntry is the entry, ZMX_SESSION=name, that zmx sets in the
+// environment of the process the session name runs. That process carries
+// ReachEnv's entries as well, but only because every zmx run the Backend
+// makes sets them: zmx sets no ZMX_DIR of its own.
+func SessionEntry(name string) string {
+	return envSession + "=" + name
+}
+
+// SessionMarks are the entries the environment of the process session name
+// runs carries, given reach, the ReachEnv of the Backend that made it:
+// SessionEntry, and reach. It refuses a reach naming no directory, since
+// SessionEntry alone marks the session of that name in every directory, a
+// developer's own included.
+func SessionMarks(name string, reach []string) ([]string, error) {
+	if dir, _ := lookupSet(reach, envDir); dir == "" {
+		return nil, fmt.Errorf("mark session %s: %q names no %s", name, reach, envDir)
+	}
+	return append([]string{SessionEntry(name)}, reach...), nil
+}
+
 // ProtocolVersion is the socket protocol version that the daemon of the live
 // session name speaks, read from the header of its answer to Info alone. Any
 // version but ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no

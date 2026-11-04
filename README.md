@@ -306,7 +306,9 @@ xctl theme export nord > ~/.config/portal/themes/mine.theme
 
 ### `portal uninstall`
 
-Remove Portal's tmux-server footprint — kill the save daemon and unregister the global hooks — **without touching any files**. Saved sessions and all config are left in place; the next `x`/`portal open` re-bootstraps the runtime, so it means "deactivate Portal's machinery now," not "destroy my data." Idempotent: a no-op on already-clean state. See [Uninstall](#uninstall).
+Stop Portal's save daemon **without touching your saved sessions or config**. It asks the daemon to stop with SIGTERM, so the daemon saves once more first, and waits up to 8 seconds; a daemon still running then gets SIGKILL. Once the daemon has exited, its `_portal-saver` session ends. Saved sessions and all config are left in place, and the next `x`/`portal open` brings the daemon back, so it means "stop Portal's machinery now," not "destroy my data." With no daemon running it says so and succeeds. If another Portal command is starting the daemon at that moment, it waits for that to finish, then stops the daemon just started.
+
+Before each signal it checks that the process is Portal's save daemon. If that check fails before the SIGTERM, nothing is sent; if it fails before the SIGKILL, the daemon has had the SIGTERM but not the SIGKILL. Either way the session is left and `portal uninstall` exits non-zero, saying which. See [Uninstall](#uninstall).
 
 ```bash
 portal uninstall
@@ -646,11 +648,11 @@ Two paths depending on whether you want to keep your saved state:
   Portal's tmux hooks check for the binary before they run, so tmux keeps working
   normally once it is gone. Your saved state is preserved, and reinstalling picks
   up where it left off.
-- **Explicit teardown:** run `portal uninstall` (kills the daemon and unregisters
-  Portal's global tmux hooks). It touches **no files** — saved sessions and all
-  config are left in place, and running `x` again re-bootstraps the runtime. To
-  remove Portal completely, uninstall the binary and delete `~/.config/portal/`
-  (which holds both state and config) yourself.
+- **Explicit teardown:** run `portal uninstall`, which stops the save daemon
+  once it has saved. It touches **none of your files** — saved sessions and
+  all config are left in place, and running `x` again brings the daemon back. To remove
+  Portal completely, run `portal uninstall`, then uninstall the binary and
+  delete `~/.config/portal/` (which holds both state and config) yourself.
 
 ## License
 

@@ -38,10 +38,22 @@ func ConfigDirPath(lookup Lookup, id ConfigDirID) (string, error) {
 		return dir, nil
 	}
 
+	portal, err := PortalDir(lookup)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(portal, id.Dirname), nil
+}
+
+// PortalDir is the directory Portal owns under the config base,
+// <config base>/portal, where each file and directory its own variable
+// doesn't override resolves. It resolves and nothing more.
+func PortalDir(lookup Lookup) (string, error) {
 	base, err := ConfigBaseFrom(lookup)
 	if err != nil {
 		return "", err
 	}
 
-	return filepath.Join(base, portalDirName, id.Dirname), nil
+	return filepath.Join(base, portalDirName), nil
 }

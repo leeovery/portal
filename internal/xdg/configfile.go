@@ -77,10 +77,10 @@ func ConfigFilePath(lookup Lookup, id ConfigFileID) (ConfigFile, error) {
 		return ConfigFile{Path: path, Overridden: true}, nil
 	}
 
-	base, err := ConfigBaseFrom(lookup)
+	portal, err := PortalDir(lookup)
 	if err != nil {
 		return ConfigFile{}, err
 	}
 
-	return ConfigFile{Path: filepath.Join(base, portalDirName, id.Filename)}, nil
+	return ConfigFile{Path: filepath.Join(portal, id.Filename)}, nil
 }

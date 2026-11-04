@@ -1,7 +1,7 @@
 // Package proctable reads this user's processes from the kernel: which are
-// running, their parents, whether each has a controlling terminal, and the
-// argv and environment each was exec'd with. It reads them on darwin alone;
-// elsewhere every read fails with ErrUnsupported.
+// running and which have exited, their parents, whether each has a
+// controlling terminal, and the argv and environment each was exec'd with. It
+// reads them on darwin alone; elsewhere every read fails with ErrUnsupported.
 package proctable
 
 import (

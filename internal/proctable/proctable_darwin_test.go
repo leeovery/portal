@@ -147,6 +147,67 @@ func TestGoneFrom(t *testing.T) {
 	}
 }
 
+func TestExited(t *testing.T) {
+	t.Run("a running process has not exited", func(t *testing.T) {
+		if exited, err := Exited(os.Getpid()); exited || err != nil {
+			t.Errorf("Exited(this process) = %v, %v; want false, nil", exited, err)
+		}
+	})
+
+	t.Run("a zombie has", func(t *testing.T) {
+		child := exec.Command("/usr/bin/true")
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = child.Wait() }()
+		var exited bool
+		var err error
+		for range 200 {
+			if exited, err = Exited(child.Process.Pid); exited || err != nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !exited || err != nil {
+			t.Errorf("Exited(zombie) = %v, %v; want true, nil", exited, err)
+		}
+	})
+
+	t.Run("a reaped process has", func(t *testing.T) {
+		child := exec.Command("/usr/bin/true")
+		if err := child.Run(); err != nil {
+			t.Fatal(err)
+		}
+		if exited, err := Exited(child.Process.Pid); !exited || err != nil {
+			t.Errorf("Exited(reaped) = %v, %v; want true, nil", exited, err)
+		}
+	})
+}
+
+func TestExitedFrom(t *testing.T) {
+	listed := func(stat int8, flag int32) []unix.KinfoProc {
+		var p unix.KinfoProc
+		p.Proc.P_stat, p.Proc.P_flag = stat, flag
+		return []unix.KinfoProc{p}
+	}
+	const running, flags = 2, 0x4006
+	for name, tc := range map[string]struct {
+		procs []unix.KinfoProc
+		want  bool
+	}{
+		"not listed":                      {procs: nil, want: true},
+		"a zombie":                        {procs: listed(zombie, flags), want: true},
+		"running, exiting, holding still": {procs: listed(running, flags|exiting), want: false},
+		"running":                         {procs: listed(running, flags), want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := exitedFrom(tc.procs); got != tc.want {
+				t.Errorf("exitedFrom = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListTellsWhetherAProcessHasATerminal(t *testing.T) {
 	onTerminal := exec.Command("sleep", "30")
 	tty, err := pty.Start(onTerminal)

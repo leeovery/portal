@@ -56,10 +56,27 @@ func gone(pid int) bool {
 	return err == nil && goneFrom(procs)
 }
 
-// goneFrom reports whether a kern.proc.pid listing shows a process gone: not
-// listed, a zombie, or exiting.
+// goneFrom reports whether a kern.proc.pid listing shows a process gone:
+// exited, or exiting.
 func goneFrom(procs []unix.KinfoProc) bool {
-	return len(procs) == 0 || procs[0].Proc.P_stat == zombie || procs[0].Proc.P_flag&exiting != 0
+	return exitedFrom(procs) || procs[0].Proc.P_flag&exiting != 0
+}
+
+// Exited reports whether pid has finished exiting: the kernel no longer lists
+// it, or lists it a zombie, which holds no descriptor and no lock. A process
+// still exiting has not.
+func Exited(pid int) (bool, error) {
+	procs, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
+	if err != nil {
+		return false, fmt.Errorf("read process %d: %w", pid, err)
+	}
+	return exitedFrom(procs), nil
+}
+
+// exitedFrom reports whether a kern.proc.pid listing shows a process that
+// has finished exiting: not listed, or a zombie.
+func exitedFrom(procs []unix.KinfoProc) bool {
+	return len(procs) == 0 || procs[0].Proc.P_stat == zombie
 }
 
 // Parent is pid's parent, read from the kernel as it is called.

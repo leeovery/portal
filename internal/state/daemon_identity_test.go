@@ -2,7 +2,9 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"testing"
 )
@@ -108,7 +110,7 @@ func TestIdentifyDaemon_DeadForNonExistentPID(t *testing.T) {
 
 func TestIdentifyDaemon_DeadWhenPSExitsNonZeroWithEmptyStdout(t *testing.T) {
 	withIdentifyPSFake(t, func(pid int) (string, error) {
-		return "", &fakePSExitError{}
+		return "", psExited()
 	})
 
 	got, err := IdentifyDaemon(1234)
@@ -120,9 +122,32 @@ func TestIdentifyDaemon_DeadWhenPSExitsNonZeroWithEmptyStdout(t *testing.T) {
 	}
 }
 
+// psExited is a ps that ran and exited non-zero, as the exec helper wraps it.
+func psExited() error { return fmt.Errorf("/bin/ps [-p 1234]: %w", &exec.ExitError{}) }
+
+func TestIdentifyDaemon_ErrorWhenPSCannotRun(t *testing.T) {
+	t.Run("a ps that never ran says nothing of the pid", func(t *testing.T) {
+		withIdentifyPSFake(t, func(pid int) (string, error) {
+			return "", fmt.Errorf("ps [-p 1234]: %w", exec.ErrNotFound)
+		})
+
+		if got, err := IdentifyDaemon(1234); !errors.Is(err, exec.ErrNotFound) {
+			t.Errorf("IdentifyDaemon = %v, %v; want the failure to run ps, not the pid read as dead", got, err)
+		}
+	})
+
+	t.Run("with no ps on PATH", func(t *testing.T) {
+		t.Setenv("PATH", "")
+
+		if got, err := IdentifyDaemon(0x7FFFFFFE); err == nil {
+			t.Errorf("IdentifyDaemon = %v, nil; want an error, not a result", got)
+		}
+	})
+}
+
 func TestIdentifyDaemon_TransientErrorWhenPSExitsNonZeroWithNonEmptyStdout(t *testing.T) {
 	withIdentifyPSFake(t, func(pid int) (string, error) {
-		return "portal portal state daemon\n", &fakePSExitError{}
+		return "portal portal state daemon\n", psExited()
 	})
 
 	got, err := IdentifyDaemon(1234)
@@ -297,11 +322,35 @@ func TestPortalDaemonArgvPattern(t *testing.T) {
 	}
 }
 
-type fakePSExitError struct{}
-
-func (fakePSExitError) Error() string { return "fake ps exit error" }
-
-var _ error = fakePSExitError{}
+func TestIsDaemonArgv(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		argv := []string{tc.program, "state", "daemon"}
+		if got := IsDaemonArgv(argv); got != tc.daemon {
+			t.Errorf("IsDaemonArgv(%q) = %v; want %v", argv, got, tc.daemon)
+		}
+	}
+	for _, argv := range [][]string{
+		{"/x/y/portal", "state", "daemon", "--flag"},
+	} {
+		if !IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = false; want true", argv)
+		}
+	}
+	for _, argv := range [][]string{
+		nil,
+		{"/bin/sh", "-c", "/x/y/portal state daemon"},
+		{"/x/y/portal", "state"},
+		{"/x/y/portal", "state", "daemon-foo"},
+		{"/x/y/portal", "state", "hydrate"},
+		{"/x/y/portal", "state daemon"},
+		{"portal state daemon"},
+		{"/x/y z/portal", "state", "daemon"},
+	} {
+		if IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = true; want false", argv)
+		}
+	}
+}
 
 func TestIdentifyDaemon_TransientErrorPreservesUnderlyingErrorViaWrap(t *testing.T) {
 	sentinel := errors.New("ps boom")

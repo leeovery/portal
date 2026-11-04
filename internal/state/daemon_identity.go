@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -36,7 +37,18 @@ const portalProgram = `(/([^ ]*/)?)?portal`
 // flags while rejecting a suffix such as "portal state daemon-foo".
 const PortalDaemonArgvPattern = `^` + portalProgram + ` state daemon( |$)`
 
-var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
+var (
+	daemonArgvPattern    = regexp.MustCompile(PortalDaemonArgvPattern)
+	portalProgramPattern = regexp.MustCompile(`^` + portalProgram + `$`)
+)
+
+// IsDaemonArgv reports whether argv, as a process exec'd it, is a portal state
+// daemon's, word by word: portal, bare or at an absolute path, then state,
+// then daemon, then any flags. A word holding a space is no daemon's, though
+// ps would show it as one.
+func IsDaemonArgv(argv []string) bool {
+	return len(argv) >= 3 && portalProgramPattern.MatchString(argv[0]) && argv[1] == "state" && argv[2] == "daemon"
+}
 
 var identifyPS = defaultIdentifyPS
 
@@ -62,8 +74,9 @@ func IdentifyDaemon(pid int) (IdentifyResult, error) {
 	trimmed := strings.TrimSpace(stdout)
 
 	if execErr != nil {
-		// Non-zero exit with no output is the canonical pid-not-found shape.
-		if trimmed == "" {
+		// A ps that ran and exited non-zero with no output is the canonical
+		// pid-not-found shape; one that never ran says nothing of the pid.
+		if _, exited := errors.AsType[*exec.ExitError](execErr); exited && trimmed == "" {
 			return IdentifyDead, nil
 		}
 		return 0, fmt.Errorf("identify pid %d: ps failed with stdout %q: %w", pid, trimmed, execErr)

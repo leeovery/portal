@@ -69,6 +69,27 @@ func TestLatch(t *testing.T) {
 		})
 	}
 
+	t.Run("a dev build's latch is current to that build and to no rebuild of its tree", func(t *testing.T) {
+		const built = "dev-754e31b498e0-modified-20261103T231632.195584591Z"
+		dir := t.TempDir()
+		if err := state.WriteLatch(dir, state.Latch{BootID: running.BootID, Version: built}); err != nil {
+			t.Fatal(err)
+		}
+
+		if !state.LatchCurrent(dir, state.Latch{BootID: running.BootID, Version: built}) {
+			t.Error("LatchCurrent = false for the build that wrote it, want true")
+		}
+		for name, rebuilt := range map[string]string{
+			"the same modified tree, written later": "dev-754e31b498e0-modified-20261103T231632.195584592Z",
+			"its revision committed":                "dev-754e31b498e0-20261103T231632.195584591Z",
+			"another revision":                      "dev-0a1b2c3d4e5f-modified-20261103T231632.195584591Z",
+		} {
+			if state.LatchCurrent(dir, state.Latch{BootID: running.BootID, Version: rebuilt}) {
+				t.Errorf("LatchCurrent = true for a rebuild from %s (%s), want false", name, rebuilt)
+			}
+		}
+	})
+
 	t.Run("a latch an unidentified build wrote is not current to the same build", func(t *testing.T) {
 		dir := t.TempDir()
 		unidentified := state.Latch{BootID: running.BootID, Version: devversion.Unidentified}

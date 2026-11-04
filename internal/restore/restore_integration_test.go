@@ -447,7 +447,7 @@ func TestRestoreAgainstZmx(t *testing.T) {
 	t.Run("a saver running across the reboot keeps the session and saves it once hydrated", func(t *testing.T) {
 		w := saveSession(t, binary, "eager")
 		b := w.reboot(t)
-		portaltest.StartSaverDaemonIn(t, w.binary, b, w.bootEnv(), w.saver.StateDir)
+		portaltest.StartSaverDaemonIn(t, w.binary, portaltest.SaverDir{Backend: b, Env: w.bootEnv(), StateDir: w.saver.StateDir})
 		if harnesstest.PollUntil(t, dropSettle, 100*time.Millisecond, func() bool {
 			idx, err := sessionindex.Read(w.saver.StateDir)
 			if err != nil {

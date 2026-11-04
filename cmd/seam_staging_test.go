@@ -28,6 +28,7 @@ func seamStagingCases() []seamStagingCase {
 		{"listDeps", func(t *testing.T) { withListDeps(t, ListDeps{}) }, func() bool { return listDeps != nil }},
 		{"openBurstDeps", func(t *testing.T) { withOpenBurstDeps(t, OpenBurstDeps{}) }, func() bool { return openBurstDeps != nil }},
 		{"openDeps", func(t *testing.T) { withOpenDeps(t, OpenDeps{}) }, func() bool { return openDeps != nil }},
+		{"uninstallDeps", func(t *testing.T) { withUninstallDeps(t, UninstallDeps{}) }, func() bool { return uninstallDeps != nil }},
 	}
 }
 
