@@ -52,7 +52,7 @@ func Start(t testing.TB, cmd *exec.Cmd, marker string) *Held {
 		t.Fatalf("proctest: start %s: %v", cmd.Path, err)
 	}
 	pid := cmd.Process.Pid
-	exit, err := holdExit(pid)
+	exit, err := holdExit(pid, watchFailure(t, pid))
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -75,11 +75,12 @@ func Start(t testing.TB, cmd *exec.Cmd, marker string) *Held {
 // PID is the held process's pid.
 func (h *Held) PID() int { return h.cmd.Process.Pid }
 
-// Exited closes once the held process has exited, reaped or not.
+// Exited closes once the held process has exited, reaped or not, or once the
+// watch on it has failed, which fails the test.
 func (h *Held) Exited() <-chan struct{} { return h.exit.done }
 
 // Status is how the held process ended, once Exited has closed. A watch that
-// failed before the exit was reported fails t.
+// failed before the exit was reported has no status to give, and stops t.
 func (h *Held) Status(t testing.TB) syscall.WaitStatus {
 	t.Helper()
 	<-h.exit.done
@@ -120,12 +121,13 @@ func (h *Held) SignalGroup(sig syscall.Signal) error {
 }
 
 // Watch proves pid the held process's own, as Signal does, and returns a
-// channel that closes once pid exits. A pid already gone closes it at once. It
-// proves pid after the watch is in place, so the process it watches is the
-// one it proved, and stops watching at the test's cleanup.
+// channel that closes once pid exits, or once the watch has failed, which fails
+// the test. A pid already gone closes it at once. It proves pid after the watch
+// is in place, so the process it watches is the one it proved, and stops
+// watching at the test's cleanup.
 func (h *Held) Watch(t testing.TB, pid int) <-chan struct{} {
 	t.Helper()
-	exit, err := watchExit(pid)
+	exit, err := watchExit(pid, watchFailure(t, pid))
 	if errors.Is(err, syscall.ESRCH) {
 		gone := make(chan struct{})
 		close(gone)
@@ -161,7 +163,8 @@ func (h *Held) proves(pid int) bool {
 }
 
 // release kills what the test left running, the group while its leader is
-// still unreaped, and then reaps the held process.
+// still unreaped, and then reaps the held process and ends its watch, so no
+// watch reports into a test that has ended.
 func (h *Held) release(t testing.TB) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -171,6 +174,7 @@ func (h *Held) release(t testing.TB) {
 	}
 	_ = syscall.Kill(target, syscall.SIGKILL)
 	_ = h.cmd.Wait()
+	h.exit.stop()
 	h.released = true
 	if h.leads && !groupGoneWithin(h.PID(), waitDelay) {
 		t.Errorf("proctest: process group %d outlived its SIGKILL", h.PID())
@@ -192,23 +196,42 @@ func groupGoneWithin(pgid int, d time.Duration) bool {
 	return true
 }
 
-// exitWatch is one process's exit as the kernel reports it. done closes on
-// every way the watch ends: with status once the exit is reported, and with
-// err when it ended without one.
+// exitWatch is one process's exit as the kernel reports it. done closes once
+// the exit is reported, with status, or once the watch has failed, with err
+// and after fail has reported it; a stopped watch never closes it. finished
+// closes however the watch ends.
 type exitWatch struct {
 	done   chan struct{}
 	status syscall.WaitStatus
 	err    error
 
+	fail     func(error)
+	finished chan struct{}
 	stopOnce sync.Once
 	stopped  chan struct{}
 }
 
-func newExitWatch() *exitWatch {
-	return &exitWatch{done: make(chan struct{}), stopped: make(chan struct{})}
+func newExitWatch(fail func(error)) *exitWatch {
+	return &exitWatch{
+		done:     make(chan struct{}),
+		fail:     fail,
+		finished: make(chan struct{}),
+		stopped:  make(chan struct{}),
+	}
 }
 
-func (w *exitWatch) stop() { w.stopOnce.Do(func() { close(w.stopped) }) }
+// watchFailure fails t from the goroutine a watch waits in, which only Errorf
+// is safe from. The watch's own stop, at the test's cleanup, waits for that
+// goroutine, so it never reports into a test that has ended.
+func watchFailure(t testing.TB, pid int) func(error) {
+	return func(err error) { t.Errorf("proctest: watch pid %d: %v", pid, err) }
+}
+
+// stop ends the watch and waits until it has.
+func (w *exitWatch) stop() {
+	w.stopOnce.Do(func() { close(w.stopped) })
+	<-w.finished
+}
 
 func (w *exitWatch) exited(status syscall.WaitStatus) {
 	w.status = status
@@ -217,40 +240,61 @@ func (w *exitWatch) exited(status syscall.WaitStatus) {
 
 func (w *exitWatch) failed(err error) {
 	w.err = err
+	w.fail(err)
 	close(w.done)
 }
-
-// errWatchStopped ends a watch the test's cleanup stopped before the exit.
-var errWatchStopped = errors.New("the watch was stopped before the process exited")
 
 // szomb is xnu's SZOMB, a process's state once it has exited and before it
 // is reaped.
 const szomb = 5
 
+// zombieFor bounds how long a child kevent finds gone is read again before
+// the process table shows it a zombie.
+const zombieFor = time.Second
+
 // holdExit watches pid, a child of the test's not yet reaped, for its exit. A
-// child already exited is a zombie the kernel won't watch, and its status is
-// read from the process table, which reaps nothing either.
-func holdExit(pid int) (*exitWatch, error) {
-	w, err := watchExit(pid)
+// child already exited is one the kernel won't watch, and its status is read
+// from the process table, which reaps nothing either.
+func holdExit(pid int, fail func(error)) (*exitWatch, error) {
+	w, err := watchExit(pid, fail)
 	if !errors.Is(err, syscall.ESRCH) {
 		return w, err
 	}
-	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	status, err := zombieStatus(pid)
 	if err != nil {
-		return nil, fmt.Errorf("read exited pid %d: %w", pid, err)
+		return nil, err
 	}
-	if p.Proc.P_stat != szomb {
-		return nil, fmt.Errorf("pid %d can't be watched and is no zombie (state %d)", pid, p.Proc.P_stat)
-	}
-	w = newExitWatch()
-	w.exited(syscall.WaitStatus(p.Proc.P_xstat))
+	w = newExitWatch(fail)
+	w.exited(status)
+	close(w.finished)
 	return w, nil
 }
 
+// zombieStatus reads how pid, a child kevent finds gone, ended. kevent finds
+// a child gone as it starts to exit, while the process table still shows it
+// running, so it is read again until it is a zombie; unreaped, its pid can't
+// pass to another process meanwhile.
+func zombieStatus(pid int) (syscall.WaitStatus, error) {
+	deadline := time.Now().Add(zombieFor)
+	for {
+		p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+		if err != nil {
+			return 0, fmt.Errorf("read exited pid %d: %w", pid, err)
+		}
+		if p.Proc.P_stat == szomb {
+			return syscall.WaitStatus(p.Proc.P_xstat), nil
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("pid %d can't be watched and is no zombie after %s (state %d)", pid, zombieFor, p.Proc.P_stat)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // watchExit asks the kernel to report pid's exit and its status, with
-// EVFILT_PROC's NOTE_EXIT, which reaps nothing. A process already exited is
-// ESRCH.
-func watchExit(pid int) (*exitWatch, error) {
+// EVFILT_PROC's NOTE_EXIT, which reaps nothing, reporting a failed watch to
+// fail. A process already exited, or exiting, is ESRCH.
+func watchExit(pid int, fail func(error)) (*exitWatch, error) {
 	kq, err := unix.Kqueue()
 	if err != nil {
 		return nil, fmt.Errorf("kqueue: %w", err)
@@ -270,7 +314,7 @@ func watchExit(pid int) (*exitWatch, error) {
 		_ = unix.Close(kq)
 		return nil, fmt.Errorf("watch pid %d: %w", pid, errno)
 	}
-	w := newExitWatch()
+	w := newExitWatch(fail)
 	go w.await(kq, unix.Kevent)
 	return w, nil
 }
@@ -279,15 +323,15 @@ func watchExit(pid int) (*exitWatch, error) {
 type keventFunc func(kq int, changes, events []unix.Kevent_t, timeout *unix.Timespec) (int, error)
 
 // await waits for the exit through kevent, looking up between waits for a
-// stop. done closes whichever way it ends.
+// stop.
 func (w *exitWatch) await(kq int, kevent keventFunc) {
+	defer close(w.finished)
 	defer func() { _ = unix.Close(kq) }()
 	events := make([]unix.Kevent_t, 1)
 	timeout := unix.NsecToTimespec(pollEvery.Nanoseconds())
 	for {
 		select {
 		case <-w.stopped:
-			w.failed(errWatchStopped)
 			return
 		default:
 		}

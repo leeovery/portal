@@ -118,11 +118,8 @@ func runnerWords(err error) string {
 }
 
 // unanswered reports whether err is a request cut by a deadline: the
-// runner's own, its connection's or Escape's bound.
+// runner's own, or its connection's, which Escape's bound ends at the latest.
 func unanswered(err error) bool {
-	if _, bound := errors.AsType[backTimeout](err); bound {
-		return true
-	}
 	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
 }
 

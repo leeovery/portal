@@ -732,4 +732,30 @@ func TestHydrateLazy_LowersAFlagASetLeftBehindWhenItFailed(t *testing.T) {
 			t.Errorf("lowering WARN does not name the session: %q", warn)
 		}
 	})
+
+	// Set's mkdir fails with ENOTDIR, and a lowering would too: nothing can
+	// stand at the flag's path, so none is owed and no lowering is logged.
+	t.Run("a set refused for a file where the flag's directory goes owes no lowering", func(t *testing.T) {
+		exec := &stubExecShell{}
+		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+		opts := lazyOpts(t, hydrateStoreWithMode(t, lazySession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+		opts.Logger = logger
+		flags := filepath.Join(os.Getenv("PORTAL_STATE_DIR"), string(state.ResumePending))
+		if err := os.WriteFile(flags, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		lazyRun(t, lazyTails()[0], opts)
+
+		if exec.target != "/bin/sh" || !reflect.DeepEqual(exec.args, eagerHookArgs) {
+			t.Errorf("exec = %q %v, want the eager hook %v", exec.target, exec.args, eagerHookArgs)
+		}
+		assertOneFlagRefusalWarn(t, sink, lazySession)
+		if refusal := execLogLine(t, sink.Body(), "WARN", "set resume pending flag failed"); !strings.Contains(refusal, "not a directory") {
+			t.Errorf("refusal WARN = %q, want the mkdir's ENOTDIR", refusal)
+		}
+		if n := strings.Count(sink.Body(), "WARN"); n != 1 {
+			t.Errorf("got %d WARNs, want the refusal alone: %q", n, sink.Body())
+		}
+	})
 }

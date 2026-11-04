@@ -543,9 +543,10 @@ and the command's own process starts only for the work you go back to.
   command is written to `portal.log` (`grep 'op=discard' portal.log`), so it can be
   copied back out.
 - **Esc backs out without answering.** Every terminal showing the session through Portal
-  goes back to the session picker; one attached with a plain `zmx attach` is detached to
-  its shell instead. The session keeps waiting — nothing about its resume changes, and
-  the panel is there the next time you open it.
+  goes back to the session picker. A terminal attached with a plain `zmx attach` is
+  detached to its shell only when no Portal terminal shows the session; beside one, it
+  stays attached, still showing the panel. The session keeps waiting — nothing about
+  its resume changes, and the panel is there the next time you open it.
 - **Every other key is swallowed**, including `Ctrl-C`, `Ctrl-\`, `Ctrl-Z` and
   `Ctrl-D`. A key counts only when it arrives on its own, so a stray paste can't answer
   the panel, and input already in flight when the confirmation opens can't confirm it.
