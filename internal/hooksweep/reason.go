@@ -15,13 +15,15 @@ type Reason string
 // The reasons a cycle declined to run under, which the logged reason attr also
 // names. Every surface that renders one works from this set, so their
 // vocabularies cannot drift from it. A sweep that ran and failed is not among
-// them: it declined nothing.
+// them: it declined nothing. A hooks.json that can't be read or doesn't parse
+// is such a failure, a defect to report rather than a condition to wait out.
 const (
 	ReasonRestoring           Reason = "restoring"
 	ReasonRestoringReadFailed Reason = "restoring-read-failed"
-	ReasonStoreReadFailed     Reason = "store-read-failed"
+	ReasonStateDirUnresolved  Reason = "state-dir-unresolved"
 	ReasonListFailed          Reason = "session-list-failed"
 	ReasonIndexUnusable       Reason = "index-unusable"
+	ReasonNoSessions          Reason = "no-sessions"
 	ReasonLockTimeout         Reason = "lock-timeout"
 )
 
@@ -36,8 +38,9 @@ const (
 var Reasons = []Reason{
 	ReasonRestoring,
 	ReasonRestoringReadFailed,
-	ReasonStoreReadFailed,
+	ReasonStateDirUnresolved,
 	ReasonListFailed,
 	ReasonIndexUnusable,
+	ReasonNoSessions,
 	ReasonLockTimeout,
 }

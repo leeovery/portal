@@ -236,7 +236,7 @@ func TestAdvisories_NeverDriveExitCode(t *testing.T) {
 	if doctorUnhealthy(results) {
 		t.Error("doctorUnhealthy = true after rendering five advisories; an advisory must never reach the exit decision")
 	}
-	if got, want := lines[len(lines)-1], "  6 checks passed · 5 advisories"; got != want {
+	if got, want := lines[len(lines)-1], "  7 checks passed · 5 advisories"; got != want {
 		t.Errorf("rendered summary = %q; want %q — five advisories are counted, and the run is still healthy", got, want)
 	}
 }
@@ -265,7 +265,7 @@ func TestAdvisories_FailingCheckAndAdvisoriesShareOneSummary(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summary line count = %d, want 1:\n%s", len(summaries), strings.Join(lines, "\n"))
 	}
-	if got, want := summaries[0], "  5 of 6 checks passed · 2 advisories"; got != want {
+	if got, want := summaries[0], "  6 of 7 checks passed · 2 advisories"; got != want {
 		t.Errorf("summary = %q; want %q", got, want)
 	}
 }

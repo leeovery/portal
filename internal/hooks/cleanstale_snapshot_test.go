@@ -218,29 +218,38 @@ func TestCleanStaleSnapshotNarrowing(t *testing.T) {
 		}
 	})
 
-	t.Run("an unreadable file aborts before the listing", func(t *testing.T) {
-		// A directory at the hooks.json path is what makes the read fail:
-		// malformed JSON decodes to an empty map instead of erroring.
-		_, path := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-		read := false
+	// A file read as empty would pass for one with nothing to sweep, so a
+	// file that doesn't parse aborts the clean as one that can't be read does.
+	for _, tc := range []struct {
+		name    string
+		staging hookstest.Staging
+		want    error
+	}{
+		{name: "an unreadable file", staging: hookstest.Staging{Unreadable: true}, want: hooks.ErrStoreRead},
+		{name: "a file that doesn't parse", staging: hookstest.Staging{Seed: "{invalid json!!!"}, want: hooks.ErrMalformed},
+	} {
+		t.Run(tc.name+" aborts before the listing", func(t *testing.T) {
+			_, path := hookstest.StageStore(t, tc.staging)
+			read := false
 
-		removed, err := hooks.NewStore(path).CleanStale(func(hooks.Snapshot) ([]string, error) {
-			read = true
-			return nil, nil
-		}, func() ([]string, error) {
-			read = true
-			return nil, nil
+			removed, err := hooks.NewStore(path).CleanStale(func(hooks.Snapshot) ([]string, error) {
+				read = true
+				return nil, nil
+			}, func() ([]string, error) {
+				read = true
+				return nil, nil
+			})
+			if !errors.Is(err, hooks.ErrStoreRead) || !errors.Is(err, tc.want) {
+				t.Fatalf("CleanStale error = %v, want errors.Is ErrStoreRead and %v", err, tc.want)
+			}
+			if read {
+				t.Error("the listing or the index was read despite a file it could not judge")
+			}
+			if len(removed) != 0 {
+				t.Errorf("removed = %v, want none", removed)
+			}
 		})
-		if !errors.Is(err, hooks.ErrStoreRead) {
-			t.Fatalf("CleanStale error = %v, want errors.Is ErrStoreRead", err)
-		}
-		if read {
-			t.Error("the listing or the index was read despite an unreadable file — it was never judgeable")
-		}
-		if len(removed) != 0 {
-			t.Errorf("removed = %v, want none", removed)
-		}
-	})
+	}
 }
 
 var errSentinel = errors.New("nothing to read")

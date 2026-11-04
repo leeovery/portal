@@ -54,7 +54,7 @@ var errNoStateDir = errors.New("no state directory")
 // reported under must not claim a restore the user is not running.
 func restoringStandDown(dir string) StandDown {
 	if dir == "" {
-		return decline(ReasonRestoringReadFailed, "error", errNoStateDir)
+		return decline(ReasonStateDirUnresolved, "error", errNoStateDir)
 	}
 	switch raised, err := state.Restoring.Exists(dir); {
 	case err != nil:
@@ -96,6 +96,18 @@ func indexedNames(dir string) ([]string, StandDown) {
 	return names, StandDown{}
 }
 
+// nothingProtects stands the judgement down when no session is listed and
+// none saved, so no key could be protected: the shape of a state dir and a
+// zmx dir pointed somewhere fresh beside a hooks.json that isn't, which would
+// otherwise lose every hook in it. An install with no sessions at all loses
+// nothing by the wait.
+func nothingProtects(listed, indexed []string) StandDown {
+	if len(listed) == 0 && len(indexed) == 0 {
+		return decline(ReasonNoSessions)
+	}
+	return StandDown{}
+}
+
 // Stale reports the keys of persisted the sweep would remove at this moment,
 // or the stand-down that forbids judging them. It takes the sweep's reads in
 // the sweep's order and removes nothing, so a diagnosis answers the reaper's
@@ -115,6 +127,9 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 	if d.Declined() {
 		return nil, d
 	}
+	if d := nothingProtects(listed, indexed); d.Declined() {
+		return nil, d
+	}
 	return hooks.StaleKeys(persisted, listed, indexed), StandDown{}
 }
 
@@ -122,39 +137,47 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 // clean with the file untouched, which is the point of returning it as an error.
 var errNothingPersisted = errors.New("no hook entries to sweep")
 
-// listing answers the clean with the names the backend lists, or with the
-// stand-down that forbids judging any key at all.
-func listing(ctx context.Context, list func(context.Context) ([]backend.Session, error)) func(hooks.Snapshot) ([]string, error) {
-	return func(snapshot hooks.Snapshot) ([]string, error) {
-		// Nothing persisted is nothing to sweep, and everything past this point
-		// costs: a listing that asks every session's daemon, and a deletion
-		// that creates the config directory, creates the sidecar and takes an
-		// exclusive hold. An install that has never registered a hook would
-		// otherwise pay them on every cycle, in every `hook set`'s way. The
-		// counts line carries no session figure, because none was taken.
-		if len(snapshot) == 0 {
-			logger.Debug(countsMsg, "entries", 0)
-			return nil, errNothingPersisted
-		}
-		listed, d := listedNames(ctx, list)
-		if d.Declined() {
-			return nil, declinedError{d}
-		}
-		logger.Debug(countsMsg, "sessions", len(listed), "entries", len(snapshot))
-		return listed, nil
-	}
+// clean answers the store's clean with the names that protect a key, or with
+// the stand-down that forbids judging any key at all. It carries the listing
+// to the index read, which the clean takes later under its hold, because only
+// the two together say whether anything protects a key.
+type clean struct {
+	ctx    context.Context
+	src    Sources
+	listed []string
 }
 
-// indexing answers the clean, under its hold, with the names sessions.json
-// holds, or with the stand-down that forbids judging any key at all.
-func indexing(dir string) func() ([]string, error) {
-	return func() ([]string, error) {
-		indexed, d := indexedNames(dir)
-		if d.Declined() {
-			return nil, declinedError{d}
-		}
-		return indexed, nil
+// listing answers with the names the backend lists.
+func (c *clean) listing(snapshot hooks.Snapshot) ([]string, error) {
+	// Nothing persisted is nothing to sweep, and everything past this point
+	// costs: a listing that asks every session's daemon, and a deletion that
+	// creates the config directory, creates the sidecar and takes an exclusive
+	// hold. An install that has never registered a hook would otherwise pay
+	// them on every cycle, in every `hook set`'s way. The counts line carries
+	// no session figure, because none was taken.
+	if len(snapshot) == 0 {
+		logger.Debug(countsMsg, "entries", 0)
+		return nil, errNothingPersisted
 	}
+	listed, d := listedNames(c.ctx, c.src.List)
+	if d.Declined() {
+		return nil, declinedError{d}
+	}
+	logger.Debug(countsMsg, "sessions", len(listed), "entries", len(snapshot))
+	c.listed = listed
+	return listed, nil
+}
+
+// indexing answers with the names sessions.json holds.
+func (c *clean) indexing() ([]string, error) {
+	indexed, d := indexedNames(c.src.StateDir)
+	if !d.Declined() {
+		d = nothingProtects(c.listed, indexed)
+	}
+	if d.Declined() {
+		return nil, declinedError{d}
+	}
+	return indexed, nil
 }
 
 // Run runs one hook-staleness cycle, reporting what it removed or the reason it
@@ -166,7 +189,8 @@ func Run(ctx context.Context, src Sources, store *hooks.Store) (Outcome, error) 
 		return standDownOutcome(d)
 	}
 
-	removed, err := store.CleanStale(listing(ctx, src.List), indexing(src.StateDir))
+	c := &clean{ctx: ctx, src: src}
+	removed, err := store.CleanStale(c.listing, c.indexing)
 	if err != nil {
 		return declinedSweep(err)
 	}
@@ -177,10 +201,11 @@ func Run(ctx context.Context, src Sources, store *hooks.Store) (Outcome, error) 
 }
 
 // declinedSweep renders the outcome of a clean that wrote nothing. A guard's
-// own stand-down carries the reason it decided on; the store's own failure
-// modes are named here because only this cycle knows what they cost it. A
-// failure none of them classifies is reported here and still returned: the
-// error is what drives a caller's own rendered output, not a second log line.
+// own stand-down carries the reason it decided on, and a held lock is named
+// here because only this cycle knows it costs nothing. Any other failure,
+// an unreadable or corrupt hooks.json among them, is a defect: it is reported
+// here and still returned, the error driving a caller's own rendered output
+// rather than a second log line.
 func declinedSweep(err error) (Outcome, error) {
 	var declined declinedError
 	switch {
@@ -193,10 +218,6 @@ func declinedSweep(err error) (Outcome, error) {
 		// and nothing is wrong, so the cycle stands down rather than reporting a
 		// defect, and the next cadence retries.
 		return standDownOutcome(decline(ReasonLockTimeout, "error", err))
-	case errors.Is(err, hooks.ErrStoreRead):
-		// A hooks.json the cycle could not read, at either of the two reads it
-		// takes, is a decline like any other: it wrote nothing.
-		return standDownOutcome(decline(ReasonStoreReadFailed, "error", err))
 	}
 	logger.Warn(sweepFailedMsg, "error", err)
 	return Outcome{}, err

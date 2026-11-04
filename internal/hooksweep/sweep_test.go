@@ -130,8 +130,12 @@ func standDownCases() []standDownCase {
 		{name: "the restoring flag unreadable", reason: ReasonRestoringReadFailed, stage: func(t *testing.T, w *world) {
 			makeUnreadableAt(t, w.dir)
 		}},
-		{name: "no state directory", reason: ReasonRestoringReadFailed, stage: func(t *testing.T, w *world) {
+		{name: "no state directory", reason: ReasonStateDirUnresolved, stage: func(t *testing.T, w *world) {
 			w.dir = ""
+		}},
+		{name: "nothing listed and no sessions.json", reason: ReasonNoSessions, listed: true, stage: func(*testing.T, *world) {}},
+		{name: "nothing listed and an empty sessions.json", reason: ReasonNoSessions, listed: true, stage: func(t *testing.T, w *world) {
+			w.index(t)
 		}},
 	}
 }
@@ -176,8 +180,7 @@ func TestSweepStandsDown(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 		if outcome.DeclineReason != ReasonRestoring {
-			t.Errorf("DeclineReason = %q, want %q (a store read would have declined with %q)",
-				outcome.DeclineReason, ReasonRestoring, ReasonStoreReadFailed)
+			t.Errorf("DeclineReason = %q, want %q (a store read would have failed the cycle)", outcome.DeclineReason, ReasonRestoring)
 		}
 	})
 

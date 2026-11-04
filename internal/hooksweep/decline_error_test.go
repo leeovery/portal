@@ -36,7 +36,7 @@ func TestHookSweepDeclineReasonTravelsWithTheError(t *testing.T) {
 		w := newWorld(t)
 		w.backend.Fail(backendtest.OpList, errZmxDown)
 
-		names, err := listing(t.Context(), w.list)(hooks.Snapshot{hookstest.ReapableSeedA: {"on-resume": {Command: "cmd-gone"}}})
+		names, err := (&clean{ctx: t.Context(), src: w.sources()}).listing(hooks.Snapshot{hookstest.ReapableSeedA: {"on-resume": {Command: "cmd-gone"}}})
 		assertDeclined(t, names, err, ReasonListFailed)
 	})
 
@@ -47,8 +47,16 @@ func TestHookSweepDeclineReasonTravelsWithTheError(t *testing.T) {
 			t.Fatalf("fixture: Read = %v, want a version 1 index", err)
 		}
 
-		names, err := indexing(w.dir)()
+		names, err := (&clean{src: w.sources(), listed: []string{hookstest.LiveSeedA}}).indexing()
 		assertDeclined(t, names, err, ReasonIndexUnusable)
+	})
+
+	t.Run("it carries no-sessions inside the error the index read returns, with nothing listed", func(t *testing.T) {
+		w := newWorld(t)
+		w.index(t)
+
+		names, err := (&clean{src: w.sources()}).indexing()
+		assertDeclined(t, names, err, ReasonNoSessions)
 	})
 
 	t.Run("it leaves DeclineReason empty for a cycle that ran and removed nothing", func(t *testing.T) {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -83,6 +84,27 @@ func TestSweepStaleHooks(t *testing.T) {
 		if got := rec.AttrOrEmpty("component"); got != "hooks" || rec.Msg != "stale-hook cleanup failed" {
 			t.Errorf("WARN = %s %q, want the sweep's own failure on the hooks component", got, rec.Msg)
 		}
+		if !deps.lastHookSweep.Equal(at) {
+			t.Errorf("last sweep = %v, want %v", deps.lastHookSweep, at)
+		}
+	})
+
+	t.Run("a hooks.json that doesn't parse is one WARN, and left as it is", func(t *testing.T) {
+		deps, path := hookSweepDaemon(t)
+		if err := os.WriteFile(path, []byte("{invalid json!!!"), 0o600); err != nil {
+			t.Fatalf("write hooks.json: %v", err)
+		}
+		before := readFileBytes(t, path)
+		sink := logtest.Install(t)
+
+		at := epoch.Add(hookSweepInterval)
+		deps.sweepStaleHooks(t.Context(), at)
+
+		rec := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the corrupt store's WARN")
+		if got := rec.AttrOrEmpty("component"); got != "hooks" || rec.Msg != "stale-hook cleanup failed" {
+			t.Errorf("WARN = %s %q, want the sweep's own failure on the hooks component", got, rec.Msg)
+		}
+		assertHooksFileUnchanged(t, path, before, "rewritten while malformed")
 		if !deps.lastHookSweep.Equal(at) {
 			t.Errorf("last sweep = %v, want %v", deps.lastHookSweep, at)
 		}

@@ -1,6 +1,8 @@
 package hooksweep
 
 import (
+	"errors"
+	"log/slog"
 	"os"
 	"testing"
 
@@ -9,66 +11,75 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 )
 
-// preReadFailureCycle runs a cycle over a hooks.json unreadable from the outset,
-// so the snapshot read is the one that fails.
-func preReadFailureCycle(t *testing.T) Outcome {
-	t.Helper()
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-	return readFailureCycle(t, newWorld(t, hookstest.LiveSeedA), store)
-}
+// A hooks.json the cycle can't read, or that doesn't parse, is a defect rather
+// than a condition to wait out: no cadence repairs it, so it is reported as a
+// failure, at WARN, at whichever of the cycle's two reads meets it.
+func TestHookSweepReportsAStoreItCannotReadAsADefect(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stage func(t *testing.T) (*world, *hooks.Store, string)
+		// malformed is whether the failure is a file that doesn't parse.
+		malformed bool
+	}{
+		{name: "a hooks.json unreadable from the outset", stage: func(t *testing.T) (*world, *hooks.Store, string) {
+			store, path := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
+			return newWorld(t, hookstest.LiveSeedA), store, path
+		}},
+		{name: "a hooks.json that goes unreadable while the listing is out", stage: func(t *testing.T) (*world, *hooks.Store, string) {
+			store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
+			w := newWorld(t, hookstest.LiveSeedA)
+			w.during = func() {
+				if err := os.Remove(path); err != nil {
+					t.Errorf("remove the staged hooks.json: %v", err)
+					return
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Errorf("stage a directory at the hooks.json path: %v", err)
+				}
+			}
+			return w, store, path
+		}},
+		{name: "a hooks.json that doesn't parse", malformed: true, stage: func(t *testing.T) (*world, *hooks.Store, string) {
+			store, path := hookstest.StageStore(t, hookstest.Staging{Seed: `{"` + hookstest.ReapableSeedA + `": {`})
+			return newWorld(t, hookstest.LiveSeedA), store, path
+		}},
+	} {
+		t.Run("it fails, at WARN, on "+tc.name, func(t *testing.T) {
+			w, store, path := tc.stage(t)
+			var before []byte
+			if tc.malformed {
+				before = hookstest.HooksFileBytes(t, path)
+			}
+			sink := logtest.Install(t)
 
-// deletePhaseReadFailureCycle runs a cycle over a hooks.json that goes
-// unreadable while the listing is out: readable when the snapshot was taken,
-// unreadable by the time the deletion reads it under its own hold.
-func deletePhaseReadFailureCycle(t *testing.T) Outcome {
-	t.Helper()
-	store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-	w := newWorld(t, hookstest.LiveSeedA)
-	w.during = func() {
-		if err := os.Remove(path); err != nil {
-			t.Errorf("remove the staged hooks.json: %v", err)
-			return
-		}
-		if err := os.Mkdir(path, 0o755); err != nil {
-			t.Errorf("stage a directory at the hooks.json path: %v", err)
-		}
+			outcome, err := Run(t.Context(), w.sources(), store)
+
+			if !errors.Is(err, hooks.ErrStoreRead) {
+				t.Fatalf("Run error = %v, want errors.Is ErrStoreRead", err)
+			}
+			if tc.malformed && !errors.Is(err, hooks.ErrMalformed) {
+				t.Errorf("Run error = %v, want errors.Is ErrMalformed", err)
+			}
+			if outcome.DeclineReason != "" || len(outcome.Removed) != 0 {
+				t.Errorf("outcome = %+v, want neither a stand-down nor a removal", outcome)
+			}
+			rec := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the failure's WARN")
+			if rec.Msg != sweepFailedMsg || rec.AttrOrEmpty("component") != "hooks" {
+				t.Errorf("WARN = %s %q, want %q on hooks", rec.AttrOrEmpty("component"), rec.Msg, sweepFailedMsg)
+			}
+			if recs := sink.Records().WithMessage(standDownMsg); len(recs) != 0 {
+				t.Errorf("stand-down records = %+v, want none for a defect", recs)
+			}
+			if tc.malformed {
+				if w.lists != 0 {
+					t.Errorf("listings = %d, want 0: a file that doesn't parse is never judged", w.lists)
+				}
+				hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten while malformed")
+			}
+		})
 	}
-	return readFailureCycle(t, w, store)
-}
 
-// readFailureCycle runs one cycle that must stand down rather than fail: a read
-// it could not take is a decline, so the error belongs to the emitted line and
-// not to the caller.
-func readFailureCycle(t *testing.T, w *world, store *hooks.Store) Outcome {
-	t.Helper()
-	logtest.Install(t)
-
-	outcome, err := Run(t.Context(), w.sources(), store)
-	if err != nil {
-		t.Fatalf("Run on an unreadable hooks.json: want a stand-down, got %v", err)
-	}
-	return outcome
-}
-
-// A cycle reads hooks.json twice, and the file is as capable of being
-// unreadable at the second read as at the first. Both land on one reason, so
-// the words a user meets do not depend on which read happened to be the one
-// that failed; only a cycle that genuinely could not write leaves the
-// vocabulary.
-func TestHookSweepClassifiesEitherReadFailure(t *testing.T) {
-	t.Run("it classifies a failed pre-read as store-read-failed", func(t *testing.T) {
-		if reason := preReadFailureCycle(t).DeclineReason; reason != ReasonStoreReadFailed {
-			t.Errorf("DeclineReason = %q, want %q", reason, ReasonStoreReadFailed)
-		}
-	})
-
-	t.Run("it classifies a failed delete-phase load as store-read-failed", func(t *testing.T) {
-		if reason := deletePhaseReadFailureCycle(t).DeclineReason; reason != ReasonStoreReadFailed {
-			t.Errorf("DeclineReason = %q, want %q", reason, ReasonStoreReadFailed)
-		}
-	})
-
-	t.Run("it leaves a failed save on the unclassified path", func(t *testing.T) {
+	t.Run("it leaves a failed save on the same path", func(t *testing.T) {
 		logtest.Install(t)
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed, WritesDenied: true})
 

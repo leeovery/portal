@@ -49,36 +49,45 @@ func (s *Store) Load(via Via) (Snapshot, error) {
 	return s.loadShared(via)
 }
 
+// LoadStrict reads hooks as Load does, but reports a file that does not parse
+// as ErrMalformed rather than as empty: a diagnosis that read a corrupt file as
+// holding no hooks would call it healthy.
+func (s *Store) LoadStrict(via Via) (Snapshot, error) {
+	return s.loadSharedBounded(via, lockTimeout, s.load)
+}
+
 // loadSnapshot is the clean's advisory pre-read. It reads at the derived
 // pre-read bound, so a clean — which takes the sidecar twice, shared here and
 // exclusive in deleteStale — never spends two full lockTimeouts waiting on a
-// wedged writer.
+// wedged writer. It refuses a file that does not parse, as the clean's load
+// under its hold does: read as empty, a corrupt file would pass for one with
+// nothing to sweep.
 func (s *Store) loadSnapshot() (Snapshot, error) {
-	return s.loadSharedBounded(ViaInternal, snapshotLockBound())
+	return s.loadSharedBounded(ViaInternal, snapshotLockBound(), s.load)
 }
 
 // loadShared reads under the shared hold every ordinary read takes.
 func (s *Store) loadShared(via Via) (Snapshot, error) {
-	return s.loadSharedBounded(via, lockTimeout)
+	return s.loadSharedBounded(via, lockTimeout, func() (Snapshot, error) { return s.loadDegrading(via) })
 }
 
-// loadSharedBounded reads under a shared hold acquired at bound, releasing it
-// before returning so no read ever hands a lock to its caller. Any acquisition
-// failure — an absent sidecar, an absent directory, an unreadable file, or the
-// bound elapsing — falls through to the non-locking read after one DEBUG
-// record: correctness never depends on the shared lock (AtomicWrite renames, so
-// a reader sees the pre-state or the post-state, never a torn one), and failing
-// a read would forfeit a hook for nothing. The bound is a parameter and is
-// never derived from via, which is a log attr.
-func (s *Store) loadSharedBounded(via Via, bound time.Duration) (Snapshot, error) {
+// loadSharedBounded runs read under a shared hold acquired at bound, releasing
+// it before returning so no read ever hands a lock to its caller. Any
+// acquisition failure — an absent sidecar, an absent directory, an unreadable
+// file, or the bound elapsing — falls through to the read with no hold after
+// one DEBUG record: correctness never depends on the shared lock (AtomicWrite
+// renames, so a reader sees the pre-state or the post-state, never a torn one),
+// and failing a read would forfeit a hook for nothing. The bound is a parameter
+// and is never derived from via, which is a log attr.
+func (s *Store) loadSharedBounded(via Via, bound time.Duration, read func() (Snapshot, error)) (Snapshot, error) {
 	f, err := s.acquireSharedLock(bound)
 	if err != nil {
 		logger.Debug("load-unlocked", "op", "load-unlocked", "via", via.String(), "error", err)
-		return s.loadDegrading(via)
+		return read()
 	}
 	defer func() { _ = f.Close() }()
 
-	return s.loadDegrading(via)
+	return read()
 }
 
 // loadDegrading is the read doors' view of the file: a malformed hooks.json
@@ -403,8 +412,9 @@ var ErrStoreRead = errors.New("failed to read hooks store")
 
 // ErrMalformed reports a hooks.json that exists but does not parse. A read
 // degrades it to an empty map — a resume must not forfeit a hook over a file
-// that can still be repaired by hand — while a mutation refuses it: a map
-// loaded from nothing and written back is every other entry gone.
+// that can still be repaired by hand — while a mutation, a clean and LoadStrict
+// refuse it: a map loaded from nothing and written back is every other entry
+// gone, and one judged as empty passes for healthy.
 var ErrMalformed = errors.New("hooks.json holds malformed JSON")
 
 // CleanStale removes and returns the hook entries the staleness rule judges
@@ -425,8 +435,8 @@ var ErrMalformed = errors.New("hooks.json holds malformed JSON")
 // listSessions is handed that snapshot and returns the names the backend
 // lists; readIndex returns the names sessions.json holds. An error either one
 // returns aborts the clean with the file untouched and is returned unwrapped,
-// so a caller can carry its own reasons through. A failed snapshot read
-// returns ErrStoreRead and calls neither.
+// so a caller can carry its own reasons through. A snapshot read that fails,
+// or finds a file that does not parse, returns ErrStoreRead and calls neither.
 func (s *Store) CleanStale(listSessions func(Snapshot) ([]string, error), readIndex func() ([]string, error)) ([]string, error) {
 	snapshot, err := s.loadSnapshot()
 	if err != nil {

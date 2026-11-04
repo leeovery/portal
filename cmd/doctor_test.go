@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -96,6 +97,9 @@ func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 	}
 	if deps.Resolve == nil {
 		deps.Resolve = doctorUnsupportedResolve
+	}
+	if deps.HookStore == nil {
+		deps.HookStore = hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json"))
 	}
 	return deps
 }

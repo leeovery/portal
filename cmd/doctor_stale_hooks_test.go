@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -93,15 +95,26 @@ func staleHooksStandDowns() []staleHooksStandDown {
 		{hooksweep.ReasonRestoringReadFailed, func(t *testing.T, install staleHooksInstall) {
 			install.deps.StateDir = unreadableDir(t)
 		}},
-		{hooksweep.ReasonStoreReadFailed, func(t *testing.T, install staleHooksInstall) {
-			_, path := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-			install.deps.HookStore = hooks.NewStore(path)
+		{hooksweep.ReasonStateDirUnresolved, func(t *testing.T, install staleHooksInstall) {
+			install.deps.StateDir = ""
+			t.Setenv("PORTAL_STATE_DIR", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("HOME", "")
+			if dir, err := state.Dir(); err == nil {
+				t.Fatalf("state.Dir() = %q with no env var, no XDG_CONFIG_HOME and no HOME; this case would be vacuous", dir)
+			}
 		}},
 		{hooksweep.ReasonListFailed, func(t *testing.T, install staleHooksInstall) {
 			install.backend.Fail(backendtest.OpList, errZmxDirUnreadable)
 		}},
 		{hooksweep.ReasonIndexUnusable, func(t *testing.T, install staleHooksInstall) {
 			writeSessionsJSON(t, install.deps.StateDir, []byte(`{"version": 1, "sessions": []}`))
+		}},
+		{hooksweep.ReasonNoSessions, func(t *testing.T, install staleHooksInstall) {
+			install.deps.ListSessions = backendtest.New().List
+			if err := os.Remove(sessionindex.Path(install.deps.StateDir)); err != nil {
+				t.Fatalf("remove sessions.json: %v", err)
+			}
 		}},
 	}
 }
@@ -122,12 +135,6 @@ func TestDoctorStaleHooksCheckStandsDown(t *testing.T) {
 		})
 	}
 
-	t.Run("it words a store it could not open as the file it could not read", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
-		got := checkStaleHooks(t.Context(), nil, hookSweepSources(install.deps, install.deps.StateDir))
-		assertCheck(t, got, checkNotEvaluable, storeReadStandDownPhrase)
-	})
-
 	t.Run("it renders a stand-down with the not-evaluable marker", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
 		install.backend.Fail(backendtest.OpList, errZmxDirUnreadable)
@@ -137,6 +144,75 @@ func TestDoctorStaleHooksCheckStandsDown(t *testing.T) {
 			t.Errorf("report missing %q:\n%s", want, outBuf.String())
 		}
 	})
+}
+
+// A hooks.json that can't be read or doesn't parse is a defect no cadence
+// repairs, so the check fails on it rather than waiting it out, and no other
+// line reports it.
+func TestDoctorStaleHooksCheckFailsOnAStoreItCannotRead(t *testing.T) {
+	for _, tc := range storeDefects() {
+		t.Run("it fails, once, on "+tc.name, func(t *testing.T) {
+			install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+			tc.stage(t, install)
+
+			assertCheck(t, staleHooksCheck(t, install), checkFail, tc.phrase)
+
+			outBuf, _, err := runDoctorWith(t, install.deps)
+			if err != ErrDoctorUnhealthy {
+				t.Errorf("Execute err = %v; want ErrDoctorUnhealthy over a hooks.json doctor cannot judge", err)
+			}
+			var lines []string
+			for line := range strings.Lines(outBuf.String()) {
+				if strings.Contains(line, "hooks.json") {
+					lines = append(lines, line)
+				}
+			}
+			if want := "  ✗ stale hooks: " + tc.phrase + "\n"; len(lines) != 1 || lines[0] != want {
+				t.Errorf("hooks.json lines = %q, want only %q", lines, want)
+			}
+		})
+	}
+
+	t.Run("it fails on a store it could not open, as the file it could not read", func(t *testing.T) {
+		install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+		got := checkStaleHooks(t.Context(), nil, hooksweep.Sources{List: install.deps.ListSessions, StateDir: install.deps.StateDir})
+		assertCheck(t, got, checkFail, storeReadPhrase)
+	})
+}
+
+// storeDefect is an install whose hooks.json doctor cannot judge, and the
+// words both surfaces give it.
+type storeDefect struct {
+	name   string
+	phrase string
+	stage  func(t *testing.T, install staleHooksInstall)
+}
+
+func storeDefects() []storeDefect {
+	return []storeDefect{
+		{name: "an unreadable hooks.json", phrase: storeReadPhrase, stage: func(t *testing.T, install staleHooksInstall) {
+			_, path := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
+			install.deps.HookStore = hooks.NewStore(path)
+		}},
+		{name: "a hooks.json that doesn't parse", phrase: storeMalformedPhrase, stage: func(t *testing.T, install staleHooksInstall) {
+			if err := os.WriteFile(install.hooksPath, []byte("{invalid json!!!"), 0o600); err != nil {
+				t.Fatalf("write hooks.json: %v", err)
+			}
+		}},
+	}
+}
+
+// The sessions are listed once a diagnosis, so a session that doesn't answer
+// costs the sessions check and the stale-hooks check one bound between them.
+func TestDoctorListsSessionsOnce(t *testing.T) {
+	install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+
+	results := diagnose(t, install.deps)
+
+	assertCheck(t, findCheck(t, results, "stale hooks"), checkFail, "1 stale hook entry")
+	if calls := install.backend.CallsTo(backendtest.OpList); len(calls) != 1 {
+		t.Errorf("listed %d times in one diagnosis, want 1", len(calls))
+	}
 }
 
 // --fix prunes through the daemon's sweep, says how many it removed, then
@@ -151,7 +227,7 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 		}
 
 		out := outBuf.String()
-		pruned := "Pruned 1 stale hook: " + hookstest.ReapableSeedA + "\n"
+		pruned := "Pruned 1 stale hook:\n  " + hookstest.ReapableSeedA + "\n"
 		first, second, ok := strings.Cut(out, pruned)
 		if !ok {
 			t.Fatalf("output missing %q:\n%s", pruned, out)
@@ -171,14 +247,14 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("it names how many it pruned, in the plural", func(t *testing.T) {
+	t.Run("it names how many it pruned, then each key on its own line, sorted", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB))
 
 		outBuf, _, err := runDoctorWith(t, install.deps, "--fix")
 		if err != nil {
 			t.Fatalf("Execute err = %v; want nil", err)
 		}
-		if want := "Pruned 2 stale hooks: " + hookstest.TmuxEraSeedB + ", " + hookstest.ReapableSeedA + "\n"; !strings.Contains(outBuf.String(), want) {
+		if want := "Pruned 2 stale hooks:\n  " + hookstest.TmuxEraSeedB + "\n  " + hookstest.ReapableSeedA + "\n"; !strings.Contains(outBuf.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, outBuf.String())
 		}
 	})
@@ -213,22 +289,38 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 		})
 	}
 
-	t.Run("it says so when the sweep fails", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Dir:           filepath.Join(t.TempDir(), "lock-open-denied"),
-			Seed:          hookstest.StaleHookSeed,
-			SidecarAbsent: true,
-			WritesDenied:  true,
+	failures := append(storeDefects(),
+		storeDefect{name: "a sweep that fails", phrase: sweepFailedPhrase, stage: func(t *testing.T, install staleHooksInstall) {
+			store, _ := hookstest.StageStore(t, hookstest.Staging{
+				Dir:           filepath.Join(t.TempDir(), "lock-open-denied"),
+				Seed:          hookstest.StaleHookSeed,
+				SidecarAbsent: true,
+				WritesDenied:  true,
+			})
+			install.deps.HookStore = store
+		}},
+		storeDefect{name: "a hook store it could not open", phrase: storeReadPhrase, stage: func(t *testing.T, install staleHooksInstall) {
+			install.deps.HookStore = nil
+			t.Setenv("PORTAL_HOOKS_FILE", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("HOME", "")
+			if _, err := loadHookStore(); err == nil {
+				t.Fatal("loadHookStore succeeded with no env var, no XDG_CONFIG_HOME and no HOME; this case would be vacuous")
+			}
+		}},
+	)
+	for _, tc := range failures {
+		t.Run("it says so on "+tc.name, func(t *testing.T) {
+			install := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+			tc.stage(t, install)
+
+			outBuf, _, _ := runDoctorWith(t, install.deps, "--fix")
+
+			if want := "Skipped stale hook prune: " + tc.phrase + "\n"; !strings.Contains(outBuf.String(), want) {
+				t.Errorf("output missing %q:\n%s", want, outBuf.String())
+			}
 		})
-		install.deps.HookStore = store
-
-		outBuf, _, _ := runDoctorWith(t, install.deps, "--fix")
-
-		if want := "Skipped stale hook prune: " + sweepFailedStandDownPhrase + "\n"; !strings.Contains(outBuf.String(), want) {
-			t.Errorf("output missing %q:\n%s", want, outBuf.String())
-		}
-	})
+	}
 }
 
 // Every reason the sweep can stand down under has its words on both

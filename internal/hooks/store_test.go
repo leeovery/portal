@@ -97,6 +97,47 @@ func TestLoad(t *testing.T) {
 	})
 }
 
+// A diagnosis reads strictly: a corrupt file read as empty would pass for one
+// holding no hooks.
+func TestLoadStrict(t *testing.T) {
+	t.Run("it reports malformed JSON rather than reading it as empty", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: "{invalid json!!!"})
+
+		h, err := store.LoadStrict(hooks.ViaInternal)
+		if !errors.Is(err, hooks.ErrMalformed) {
+			t.Errorf("err = %v, want errors.Is ErrMalformed", err)
+		}
+		if h != nil {
+			t.Errorf("got %v, want no snapshot", h)
+		}
+	})
+
+	t.Run("it reads a missing file as empty", func(t *testing.T) {
+		store := hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json"))
+
+		h, err := store.LoadStrict(hooks.ViaInternal)
+		if err != nil || len(h) != 0 {
+			t.Errorf("LoadStrict = (%v, %v), want an empty snapshot", h, err)
+		}
+	})
+
+	t.Run("it reads a well-formed file as Load does", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
+
+		strict, err := store.LoadStrict(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("LoadStrict: %v", err)
+		}
+		loaded, err := store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !reflect.DeepEqual(strict, loaded) || len(strict) == 0 {
+			t.Errorf("LoadStrict = %v, Load = %v; want the same, non-empty", strict, loaded)
+		}
+	})
+}
+
 func TestPersistence(t *testing.T) {
 	t.Run("creates parent directory if missing", func(t *testing.T) {
 		dir := t.TempDir()
