@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -1163,6 +1164,8 @@ func TestRunsHelper(t *testing.T) {
 		{"a binary not named portal", []string{"/usr/local/bin/portal-dev", "state", "hydrate", "--session", "work"}},
 		{"another program, given the helper's arguments", []string{"/bin/echo", "state", "hydrate", "--session", "work"}},
 		{"another of portal's commands", []string{exe, "state", "resume-wait", "--session", "work"}},
+		{"another program, running a portal it names", []string{"env", "X=1", "/x/portal", "state", "hydrate", "--session", "work"}},
+		{"another program, reading as the helper cut short, then going on", []string{portalPathOf(237), "state", "hydrate...", "x"}},
 		{"another program", []string{"vim", "notes.md"}},
 		{"the user's shell", nil},
 	} {
@@ -1184,6 +1187,60 @@ func TestRunsHelper(t *testing.T) {
 			t.Error("RunsHelper = true for a session that told nothing of its command")
 		}
 	})
+
+	// zmx cuts the command it reports before the first argument past 256
+	// bytes, marking the cut with "..." where that fits. The helper's own
+	// arguments, with "work", run to 29 bytes past its path.
+	transcript := []string{"--file", "/tmp/work.vt"}
+	for _, tc := range []struct {
+		name    string
+		command []string
+		counted bool
+	}{
+		{"the helper, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), transcript), true},
+		{"the helper, whole, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), transcript), true},
+		{"the helper, whole, its transcript's path cut", slices.Concat(helperAt(portalPathOf(215), "work"), transcript), true},
+		{"the helper for another name, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), transcript), false},
+		{"a binary not named portal, cut", slices.Concat(helperAt(portalPathOf(237)+"-dev", "work"), transcript), false},
+		{"another of portal's commands, cut", []string{portalPathOf(237), "state", "resume-wait", "--session", "work"}, false},
+	} {
+		t.Run(fmt.Sprintf("it counts %s: %v", tc.name, tc.counted), func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if whole := uncut(w.fake, tc.command); s.Command == whole || len(s.Command) > 256 {
+				t.Fatalf("command = %q, want it cut from %q", s.Command, whole)
+			}
+
+			if got := w.r.RunsHelper(s); got != tc.counted {
+				t.Errorf("RunsHelper(%q) = %v, want %v", s.Command, got, tc.counted)
+			}
+		})
+	}
+}
+
+// helperAt is the hydrate helper's argv for the named session, run by the
+// portal at exe.
+func helperAt(exe, name string) []string {
+	return []string{exe, "state", "hydrate", "--session", name}
+}
+
+// portalPathOf is a path n bytes long to a binary named portal.
+func portalPathOf(n int) string {
+	const base = "/portal"
+	return "/" + strings.Repeat("d", n-len(base)-1) + base
+}
+
+// uncut is command as the backend shows each of its arguments, joined by
+// spaces, however long that is.
+func uncut(b backend.Backend, command []string) string {
+	words := make([]string, len(command))
+	for i, arg := range command {
+		words[i] = b.DisplayCommand([]string{arg})
+	}
+	return strings.Join(words, " ")
 }
 
 func TestRestore_RecordsTheCreation(t *testing.T) {

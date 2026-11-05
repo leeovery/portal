@@ -161,6 +161,7 @@ func TestKillCommand(t *testing.T) {
 		withBootstrapDeps(t, BootstrapDeps{})
 		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 		blockStateDir(t)
+		withFuncSeam(t, &holdBootstrapLock, func(context.Context, string) (func(), error) { return func() {}, nil })
 
 		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
 
@@ -236,6 +237,127 @@ func TestKillCommand(t *testing.T) {
 		}
 		if calls := fake.Calls(); len(calls) != 0 {
 			t.Errorf("backend calls = %+v, want none", calls)
+		}
+	})
+}
+
+// bootstrapHold is bootstrap.lock's hold, staged: under runs once it is
+// taken, standing in for what x <name> did while the kill waited, and
+// keptAtRelease is whether the index held the session's entry as it was let
+// go.
+type bootstrapHold struct {
+	taken         int
+	dir           string
+	keptAtRelease bool
+}
+
+func stageBootstrapHold(t *testing.T, name string, under func()) *bootstrapHold {
+	t.Helper()
+	h := &bootstrapHold{}
+	withFuncSeam(t, &holdBootstrapLock, func(_ context.Context, dir string) (func(), error) {
+		h.taken++
+		h.dir = dir
+		if under != nil {
+			under()
+		}
+		return func() {
+			idx := readIndex(t, dir)
+			_, h.keptAtRelease = idx.Lookup(name)
+		}, nil
+	})
+	return h
+}
+
+// x <name> brings a kept session back under bootstrap.lock, so a kill that
+// finds the session not running judges it again under that lock, held through
+// the discard.
+func TestKillCommand_JudgesASessionNotRunningAgainUnderBootstrapLock(t *testing.T) {
+	const name = "api-x7Kd9a"
+
+	t.Run("a session brought back while it waited is killed as a live one", func(t *testing.T) {
+		fake := backendtest.New()
+		dir := stageKill(t, fake, name)
+		hold := stageBootstrapHold(t, name, func() { fake.Add(backend.Session{Name: name}) })
+
+		stdout, _, err := runRootCmd(t, "kill", name)
+
+		if err != nil || stdout.Len() != 0 {
+			t.Errorf("kill = %q, %v; want nothing printed and no error", stdout, err)
+		}
+		if _, held := fake.Held(name); held {
+			t.Error("the backend still holds the session brought back")
+		}
+		if hold.taken != 1 || hold.dir != dir || hold.keptAtRelease {
+			t.Errorf("hold = %+v, want the state dir's lock taken once and its entry forgotten under it", hold)
+		}
+		assertIndexed(t, dir, name, false)
+	})
+
+	t.Run("an entry gone while it waited is no session found", func(t *testing.T) {
+		fake := backendtest.New()
+		dir := stageKill(t, fake, name)
+		hold := stageBootstrapHold(t, name, func() {
+			if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+				idx.Remove(name)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		stdout, _, err := runRootCmd(t, "kill", name)
+
+		if want := "No session found: " + name; err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if stdout.Len() != 0 || hold.taken != 1 {
+			t.Errorf("stdout = %q, hold = %+v; want nothing discarded, judged under the lock", stdout, hold)
+		}
+	})
+
+	t.Run("a session still kept is discarded under it", func(t *testing.T) {
+		fake := backendtest.New()
+		dir := stageKill(t, fake, name)
+		hold := stageBootstrapHold(t, name, nil)
+
+		stdout, _, err := runRootCmd(t, "kill", name)
+
+		if want := fmt.Sprintf(discardedCopy, name) + "\n"; err != nil || stdout.String() != want {
+			t.Errorf("kill = %q, %v; want %q", stdout, err, want)
+		}
+		if hold.taken != 1 || hold.keptAtRelease {
+			t.Errorf("hold = %+v, want its entry discarded under the lock", hold)
+		}
+		assertIndexed(t, dir, name, false)
+	})
+
+	t.Run("a lock it can't take is the failure, and nothing is discarded", func(t *testing.T) {
+		fake := backendtest.New()
+		dir := stageKill(t, fake, name)
+		held := errors.New("bootstrap.lock is held by another process")
+		withFuncSeam(t, &holdBootstrapLock, func(context.Context, string) (func(), error) { return nil, held })
+
+		stdout, _, err := runRootCmd(t, "kill", name)
+
+		if !errors.Is(err, held) || stdout.Len() != 0 {
+			t.Errorf("kill = %q, %v; want the lock's failure and nothing discarded", stdout, err)
+		}
+		if calls := fake.CallsTo(backendtest.OpKill); len(calls) != 1 {
+			t.Errorf("Kill calls = %+v, want none after the lock failed", calls)
+		}
+		assertIndexed(t, dir, name, true)
+	})
+
+	t.Run("a live session is killed without it", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: name})
+		stageKill(t, fake, name)
+		hold := stageBootstrapHold(t, name, nil)
+
+		if _, _, err := runRootCmd(t, "kill", name); err != nil {
+			t.Fatalf("kill: %v", err)
+		}
+		if hold.taken != 0 {
+			t.Errorf("bootstrap.lock taken %d times, want none for a live session", hold.taken)
 		}
 	})
 }

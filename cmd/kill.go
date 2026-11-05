@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -21,7 +22,8 @@ var killCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		err = killSession(cmd.Context(), b, args[0], "cli")
+		ctx := bootstrap.WithProgressEmitter(cmd.Context(), waitNotice(cmd.ErrOrStderr()))
+		err = killSession(ctx, b, args[0], "cli")
 		if _, ok := errors.AsType[discardedError](err); ok {
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), discardedCopy+"\n", args[0])
 			return nil
@@ -48,10 +50,22 @@ func (e discardedError) Unwrap() error { return e.gone }
 // Portal keeps beside it. A session not running whose entry it removes is
 // discarded, a discardedError; with no entry either, the session is not
 // found. One held under another spelling, or that may still be running, keeps
-// everything. via is the surface asking, as the index write records it.
+// everything. A session not running is judged again under bootstrap.lock,
+// held through its discard, so the discard never races x <name> bringing it
+// back: live by then, it is killed as a live session is. ctx's progress
+// emitter hears of a long wait for the lock. via is the surface asking, as
+// the index write records it.
 func killSession(ctx context.Context, b backend.Backend, name, via string) error {
 	killed := b.Kill(ctx, name)
-	if killed != nil && (heldUnderAnotherSpelling(killed) || !errors.Is(killed, backend.ErrNoSuchSession)) {
+	if notRunning(killed) {
+		release, err := holdStateBootstrapLock(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		killed = b.Kill(ctx, name)
+	}
+	if killed != nil && !notRunning(killed) {
 		return killError(name, killed)
 	}
 	removed, err := forgetSession(name, via)
@@ -66,6 +80,22 @@ func killSession(ctx context.Context, b backend.Backend, name, via string) error
 		return killError(name, killed)
 	}
 	return discardedError{gone: killError(name, killed)}
+}
+
+// notRunning reports whether err, a kill's, is the backend's refusal of a
+// name no session holds, under it or another spelling.
+func notRunning(err error) bool {
+	return errors.Is(err, backend.ErrNoSuchSession) && !heldUnderAnotherSpelling(err)
+}
+
+// holdStateBootstrapLock takes the state directory's bootstrap.lock as
+// holdBootstrapLock does.
+func holdStateBootstrapLock(ctx context.Context) (release func(), err error) {
+	dir, err := state.Dir()
+	if err != nil {
+		return nil, err
+	}
+	return holdBootstrapLock(ctx, dir)
 }
 
 // heldUnderAnotherSpelling reports whether err is the backend's refusal of a
@@ -169,7 +199,7 @@ type goneCountsKilled struct {
 
 func (b goneCountsKilled) Kill(ctx context.Context, name string) error {
 	err := b.Backend.Kill(ctx, name)
-	if !heldUnderAnotherSpelling(err) && errors.Is(err, backend.ErrNoSuchSession) {
+	if notRunning(err) {
 		return nil
 	}
 	return err

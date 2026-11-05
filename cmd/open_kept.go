@@ -77,7 +77,7 @@ func bringBack(cmd *cobra.Command, name string) (restore.Brought, error) {
 		return 0, err
 	}
 	ctx := bootstrap.WithProgressEmitter(cmd.Context(), waitNotice(cmd.ErrOrStderr()))
-	release, err := bootstrap.Locked{Lock: bootstrapLock(dir), Logger: bootstrapLogger}.Hold(ctx)
+	release, err := holdBootstrapLock(ctx, dir)
 	if err != nil {
 		return 0, err
 	}

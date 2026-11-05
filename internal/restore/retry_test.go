@@ -548,6 +548,91 @@ func TestRestore_CountsWhatTheListingsShow(t *testing.T) {
 		}
 	})
 
+	// A helper that dies every time ends each session the retries make too.
+	t.Run("a session its retries made whose helper died too counts failed, its entry owed, judged by the last listing", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.witness.listing = func(n int) {
+			if n > 1 { // the listings after the first pass and once the retries end
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made again once", got)
+		}
+		if got, ok := w.lookup(t, "work"); !ok || !got.Owed {
+			t.Errorf("entry = %+v, %v; want it kept, owed", got, ok)
+		}
+		failures := w.sink.Records().WithMessage("restore session failed").AtExactLevel(slog.LevelWarn)
+		var details []string
+		for _, rec := range failures {
+			if !strings.Contains(rec.AttrString(t, "error"), "ended before its helper finished") {
+				t.Errorf("failure = %v, want the helper's death named", rec.Attrs)
+			}
+			details = append(details, rec.AttrString(t, "detail"))
+		}
+		if want := []string{"may be tried again within this bootstrap", "left owed for the next bootstrap"}; !slices.Equal(details, want) {
+			t.Errorf("failures say %q, want %q", details, want)
+		}
+		if w.witness.lists != restore.Listings {
+			t.Errorf("listed the sessions %d times, want %d", w.witness.lists, restore.Listings)
+		}
+	})
+
+	t.Run("a session gone whose entry records another creation is no restore's to judge", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				other := saved
+				other.CreatedAt, other.PID, other.Owed = saved.CreatedAt.Add(time.Hour), 99, true
+				w.save(t, other)
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once", got)
+		}
+		if warnings := w.warnings(); len(warnings) > 0 {
+			t.Errorf("logged %v, want no warning", warnings)
+		}
+	})
+
+	// A session that reported no creation records none, so its entry still
+	// records the creation restore read.
+	t.Run("a session that reported no creation whose helper died is warned of, and made again", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		saved.Owed = true
+		w.save(t, saved)
+		w.createWith(func(_ context.Context, name, _ string, command []string) (backend.Session, error) {
+			w.fake.Add(backend.Session{Name: name, PID: 7, Command: w.fake.DisplayCommand(command)})
+			return backend.Session{Name: name}, nil
+		})
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made again", got)
+		}
+		w.failureLogged(t, "work")
+	})
+
 	// The user can close a session the moment its helper has claimed it.
 	t.Run("a session that ended once its helper claimed it counts restored, never made again", func(t *testing.T) {
 		w := newWorld(t)

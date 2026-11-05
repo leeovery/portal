@@ -42,7 +42,7 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 
 	// The sweep won't reap the tmux version's keys, so the count waits on
 	// them, and says so.
-	t.Run("it is not evaluable while hooks.json holds keys the tmux version wrote, saying why", func(t *testing.T) {
+	t.Run("it is not evaluable while hooks.json holds keys in the tmux version's shape, saying why", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB))
 
 		outBuf, _, err := runDoctorWith(t, install.deps)
@@ -283,7 +283,7 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("it prunes nothing while hooks.json holds keys the tmux version wrote, saying why", func(t *testing.T) {
+	t.Run("it prunes nothing while hooks.json holds keys in the tmux version's shape, saying why", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB))
 		before := readFileBytes(t, install.hooksPath)
 

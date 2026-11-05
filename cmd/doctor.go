@@ -289,7 +289,7 @@ const (
 	indexStandDownPhrase         = "could not read sessions.json"
 	noSessionsStandDownPhrase    = "no sessions listed or saved"
 	lockStandDownPhrase          = "hooks.json is locked"
-	tmuxKeysStandDownPhrase      = "hooks.json holds hooks the tmux version wrote"
+	tmuxKeysStandDownPhrase      = "hooks.json holds keys in the tmux version's shape"
 )
 
 // The phrases of a hook store or sweep that failed. They read alongside the

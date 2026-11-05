@@ -31,6 +31,10 @@ var (
 	// ErrUnread is a saver whose session couldn't be read, so couldn't be
 	// judged.
 	ErrUnread = errors.New("the saver couldn't be read")
+	// ErrVersionUnproved, beside ErrUnread, is a saver unread whose daemon
+	// isn't proved this version: daemon.version names another, or can't be
+	// read. It may still run the version before an upgrade.
+	ErrVersionUnproved = errors.New("its daemon isn't proved this version")
 	// ErrNotReplaced is a saver a recycle couldn't stop, whose daemon still
 	// runs.
 	ErrNotReplaced = errors.New("the saver's daemon couldn't be replaced")
@@ -85,16 +89,16 @@ func (e *Ensurer) EnsureSaver(ctx context.Context, made func(context.Context) er
 // given, judges the saver created, and its error ends ensure. It holds
 // saver.lock throughout, creating the state directory for it. A saver another
 // process creates first counts once its daemon does the same. A saver that
-// can't be read (ErrUnread), can't be stopped while its daemon runs
-// (ErrNotReplaced) or doesn't come up (ErrNotReady) is an error, never a wait
-// past its bounds.
+// can't be read (ErrUnread, with ErrVersionUnproved unless daemon.version
+// names d's version), can't be stopped while its daemon runs (ErrNotReplaced)
+// or doesn't come up (ErrNotReady) is an error, never a wait past its bounds.
 func (h *Host) ensure(ctx context.Context, d Daemon, made func(context.Context) error) error {
 	release, err := h.lockCreating(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	r, err := h.settled(ctx)
+	r, err := h.settled(ctx, d.Version)
 	if err != nil {
 		return err
 	}
@@ -133,13 +137,17 @@ func (h *Host) notStopped(pid int, err error) error {
 // its session runs a daemon still starting: daemon.pid not yet naming the
 // session's process, or daemon.version not yet written. Judged sooner, a
 // saver whose ensure gave up on it under load would be stopped on its way up.
-func (h *Host) settled(ctx context.Context) (readiness, error) {
+// A saver whose session can't be read is ErrUnread, and ErrVersionUnproved
+// too unless daemon.version names version.
+func (h *Host) settled(ctx context.Context, version string) (readiness, error) {
 	r, _, err := h.watch(ctx, func(r readiness) bool { return r.sessionErr != nil || !r.present || r.recorded() })
 	switch {
 	case err != nil:
 		return r, fmt.Errorf("wait for the saver's daemon: %w", err)
-	case r.sessionErr != nil:
+	case r.sessionErr != nil && r.records(version):
 		return r, fmt.Errorf("%w: %w", ErrUnread, r.sessionErr)
+	case r.sessionErr != nil:
+		return r, fmt.Errorf("%w, and %w: %w", ErrUnread, ErrVersionUnproved, r.sessionErr)
 	}
 	return r, nil
 }
@@ -232,6 +240,12 @@ func (r readiness) recorded() bool {
 // version.
 func (r readiness) ready(version string) bool {
 	return r.recorded() && r.version == version
+}
+
+// records reports whether daemon.version names version, whoever wrote it. An
+// unidentified build's version names no one build, so never does.
+func (r readiness) records(version string) bool {
+	return version != devversion.Unidentified && r.versionErr == nil && r.version == version
 }
 
 // replacing is why the saver read is replaced, or "" when it is kept: its

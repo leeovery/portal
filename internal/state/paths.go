@@ -59,7 +59,8 @@ func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubd
 
 // TmuxStateDir is where the migration from the tmux version moves that
 // version's state: state-tmux, beside the state directory dir. It exists only
-// once that migration has run.
+// once that migration has run. dir is cleaned first: filepath.Dir of a path
+// ending in a separator is that path itself.
 func TmuxStateDir(dir string) string {
-	return filepath.Join(filepath.Dir(dir), tmuxStateName)
+	return filepath.Join(filepath.Dir(filepath.Clean(dir)), tmuxStateName)
 }

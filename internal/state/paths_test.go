@@ -183,6 +183,7 @@ func TestAccessors(t *testing.T) {
 			{"portal.log.old", state.PortalLogOld(dir), filepath.Join(dir, "portal.log.old")},
 			{"scrollback dir", state.ScrollbackDir(dir), filepath.Join(dir, "scrollback")},
 			{"the tmux version's migrated state, beside it", state.TmuxStateDir(dir), "/tmp/state-tmux"},
+			{"the tmux version's migrated state, beside it given with a trailing separator", state.TmuxStateDir(dir + "/"), "/tmp/state-tmux"},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {

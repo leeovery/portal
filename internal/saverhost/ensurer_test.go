@@ -673,6 +673,41 @@ func TestEnsureSaver(t *testing.T) {
 			t.Errorf("calls = %q, events = %q; want none", got, p.events)
 		}
 	})
+
+	// An unread saver is read before any version is compared, so ErrUnread
+	// alone says nothing of its daemon's version: under load at an upgrade, it
+	// may be the old daemon still saving.
+	for _, tc := range []struct {
+		name     string
+		version  string
+		stage    func(t *testing.T, dir string)
+		unproved bool
+	}{
+		{"names this version", release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID, release) }, false},
+		{"names another version", release, func(t *testing.T, dir string) { writeDaemon(t, dir, daemonPID, older) }, true},
+		{"is missing", release, func(*testing.T, string) {}, true},
+		{"can't be read", release, func(t *testing.T, dir string) {
+			if err := os.Mkdir(state.DaemonVersion(dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"names an unidentified build, as this one is", devversion.Unidentified, func(t *testing.T, dir string) {
+			writeDaemon(t, dir, daemonPID, devversion.Unidentified)
+		}, true},
+	} {
+		t.Run("a saver unread whose daemon.version "+tc.name+" is ErrUnread, its version proved only by a match", func(t *testing.T) {
+			fake := withSaver(daemonPID)
+			fake.StopAnswering(saver.SessionName)
+			dir := t.TempDir()
+			tc.stage(t, dir)
+
+			err := newEnsurer(t, fake, newProcs(nil), dir, tc.version).EnsureSaver(t.Context(), nil)
+
+			if !errors.Is(err, saverhost.ErrUnread) || errors.Is(err, saverhost.ErrVersionUnproved) != tc.unproved {
+				t.Errorf("EnsureSaver = %v, want ErrUnread, ErrVersionUnproved %v", err, tc.unproved)
+			}
+		})
+	}
 }
 
 func TestEnsureSaverHoldsSaverLock(t *testing.T) {

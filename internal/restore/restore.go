@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,6 +89,10 @@ const exeName = "portal"
 // within it. A retry started inside it runs to its end.
 const RetryBudget = 15 * time.Second
 
+// Listings is the most times a Restore lists the sessions: before its first
+// session, after its first pass, and once its retries end.
+const Listings = 3
+
 // retryBackoff is the wait before each round of retries, the last repeating.
 var retryBackoff = []time.Duration{time.Second, 3 * time.Second}
 
@@ -160,9 +165,10 @@ func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
 // by, every entry may predate the boot. A session it couldn't make for a
 // reason that may pass it tries again, within RetryBudget, once every other
 // has had its first try, with any it made whose helper died before finishing,
-// as a listing after the first pass shows; one a listing once the retries end
-// finds running its helper counts restored all the same. A session it can't
-// make keeps its entry for the next bootstrap. It asks the backend nothing
+// as a listing after the first pass shows. A listing once the retries end
+// counts restored one it couldn't make that runs its helper all the same, and
+// failed one its retries made whose helper died too. A session it can't make
+// keeps its entry for the next bootstrap. It asks the backend nothing
 // when sessions.json can't be read, makes nothing when the backend can't be
 // listed, and makes no further session once ctx ends or the backend refuses
 // one it made as speaking a protocol Portal doesn't support.
@@ -306,18 +312,17 @@ func (r *run) restore(ctx context.Context) {
 		}
 	}
 	again = append(again, r.helpersDied(ctx)...)
-	r.res.Failed += len(r.madeAfterAll(ctx, r.retry(ctx, again)))
+	firstPass := len(r.made)
+	left := r.retry(ctx, again)
+	r.res.Failed += r.lastListing(ctx, left, r.made[firstPass:])
 }
 
 // errHelperDied is a session restore made that ended before its helper
 // finished restoring it.
 var errHelperDied = errors.New("its session ended before its helper finished restoring it")
 
-// helpersDied is the sessions the first pass made that a listing taken after
-// it no longer holds, whose restores never finished: each entry still owed,
-// recording the creation restore made. A helper that dies before its claim,
-// on a panic or an exec that fails, ends its session at once. Each is warned
-// of, counted restored no more, and returned, as its entry now reads, to be
+// helpersDied is the sessions the first pass made whose helpers died, as a
+// listing taken after it shows, each returned as its entry now reads, to be
 // tried again.
 func (r *run) helpersDied(ctx context.Context) []sessionindex.Entry {
 	if len(r.made) == 0 {
@@ -328,45 +333,63 @@ func (r *run) helpersDied(ctx context.Context) []sessionindex.Entry {
 	if !ok {
 		return nil
 	}
-	idx, err := sessionindex.Read(r.dir)
-	if err != nil {
-		r.logger.Warn("sessions.json unreadable", "detail", unchecked, "error", err)
-		return nil
-	}
-	var again []sessionindex.Entry
-	for _, m := range r.made {
-		latest, ok := idx.Lookup(m.read.Name)
-		if _, listed := live[m.read.Name]; listed || !ok || !latest.Owed || !m.recordedIn(latest) {
-			continue
-		}
-		r.res.Restored--
-		r.warn("restore session failed", latest.Name, "error", errHelperDied, "detail", retried)
-		again = append(again, latest)
-	}
-	return again
+	return r.died(live, r.made, unchecked, retried)
 }
 
-// madeAfterAll is left, the sessions restore couldn't make, less those a
-// listing taken now finds running restore's helper, which count restored: a
-// Create that timed out under load, its every lookup timing out too, may have
-// made one all the same.
-func (r *run) madeAfterAll(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
-	if len(left) == 0 {
-		return nil
+// leftOwed is the detail of a session whose helper died that no retry is left
+// to make again.
+const leftOwed = "left owed for the next bootstrap"
+
+// lastListing is how many sessions fail, judged once the retries end by one
+// listing taken then. Of left, the sessions restore couldn't make, each fails
+// unless the listing finds it running restore's helper, which counts
+// restored: a Create that timed out under load, its every lookup timing out
+// too, may have made it all the same. Of remade, the sessions the retries
+// made, each whose helper died too fails, its entry left owed. It lists
+// nothing when there is neither.
+func (r *run) lastListing(ctx context.Context, left []sessionindex.Entry, remade []made) int {
+	if len(left) == 0 && len(remade) == 0 {
+		return 0
 	}
-	live, ok := r.relisted(ctx, "the sessions restore couldn't make are counted failed unchecked")
+	live, ok := r.relisted(ctx, "the sessions restore couldn't make are counted failed, and those its retries made restored, unchecked")
 	if !ok {
-		return left
+		return len(left)
 	}
-	var still []sessionindex.Entry
+	failed := len(r.died(live, remade, "the sessions restore's retries made are counted restored unchecked", leftOwed))
 	for _, e := range left {
 		if s, ok := live[e.Name]; ok && r.RunsHelper(s) {
 			r.restored(e, s, startDir(e))
 			continue
 		}
-		still = append(still, e)
+		failed++
 	}
-	return still
+	return failed
+}
+
+// died is those of sessions, made by this run, that live no longer holds,
+// whose restores never finished: each entry still owed, recording the
+// creation restore made. A helper that dies before its claim, on a panic or
+// an exec that fails, ends its session at once. Each is warned of, detail
+// saying what follows, counted restored no more, and returned as its entry
+// now reads. With sessions.json unreadable, it warns so, unchecked saying
+// what that leaves, and returns none.
+func (r *run) died(live map[string]backend.Session, sessions []made, unchecked, detail string) []sessionindex.Entry {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		r.logger.Warn("sessions.json unreadable", "detail", unchecked, "error", err)
+		return nil
+	}
+	var died []sessionindex.Entry
+	for _, m := range sessions {
+		latest, ok := idx.Lookup(m.read.Name)
+		if _, listed := live[m.read.Name]; listed || !ok || !latest.Owed || !m.recordedIn(latest) {
+			continue
+		}
+		r.res.Restored--
+		r.warn("restore session failed", latest.Name, "error", errHelperDied, "detail", detail)
+		died = append(died, latest)
+	}
+	return died
 }
 
 // relisted is the sessions the backend lists now, by name, and whether it
@@ -860,15 +883,24 @@ func (r *run) warn(msg, name string, attrs ...any) {
 func (r *run) command(e sessionindex.Entry) []string {
 	argv := r.helper(e.Name)
 	if file, ok := r.transcript(e); ok {
-		argv = append(argv, "--file", file)
+		argv = append(argv, fileFlag, file)
 	}
 	return argv
 }
 
+// fileFlag names the transcript the hydrate helper replays.
+const fileFlag = "--file"
+
 // helper is the hydrate helper's argv for the named session, before the
 // transcript it may name.
 func (r *Restorer) helper(name string) []string {
-	return []string{r.exe, "state", "hydrate", "--session", name}
+	return helperAt(r.exe, name)
+}
+
+// helperAt is the hydrate helper's argv for the named session run by the
+// portal at exe, before the transcript it may name.
+func helperAt(exe, name string) []string {
+	return []string{exe, "state", "hydrate", "--session", name}
 }
 
 // RunsHelper reports whether s was made running the hydrate helper restore
@@ -876,22 +908,60 @@ func (r *Restorer) helper(name string) []string {
 // without: such a session's hydrating flag is its helper's to lower, never
 // restore's or a sweep's. Any binary named portal counts, wherever it is: a
 // session restored by one at another path, a dev build or another install,
-// keeps its flag under this one. zmx reports a session's command as it was
-// made, so a helper that has handed the session to its shell still counts.
+// keeps its flag under this one. The path is read from s's command as
+// reported, as the words before one of its spaces, and counts only when the
+// helper run from it would be reported as s's command is: so the words
+// `env X=1 /x/portal`, which that path's own argument would show quoted, name
+// no portal. zmx reports a session's command as it was made, so a helper that
+// has handed the session to its shell still counts.
 func (r *Restorer) RunsHelper(s backend.Session) bool {
-	args := " " + r.backend.DisplayCommand(r.helper(s.Name)[1:])
-	exe, rest, ok := strings.Cut(s.Command, args)
-	return ok && (rest == "" || strings.HasPrefix(rest, " ")) && r.namesPortal(exe)
+	for end := 0; end <= len(s.Command); end++ {
+		if end < len(s.Command) && s.Command[end] != ' ' {
+			continue
+		}
+		if path, ok := portalPath(s.Command[:end]); ok && r.showsHelper(s.Command, helperAt(path, s.Name)) {
+			return true
+		}
+	}
+	return false
 }
 
-// namesPortal reports whether word, one argument as the backend displays it,
-// is a path to a binary named portal.
-func (r *Restorer) namesPortal(word string) bool {
+// portalPath is the path word, one argument as the backend shows it, names,
+// quoted or not, and whether that path is a binary named portal.
+func portalPath(word string) (string, bool) {
 	path := word
 	if quoted, ok := strings.CutPrefix(word, "'"); ok {
 		path = strings.ReplaceAll(strings.TrimSuffix(quoted, "'"), `'\''`, "'")
 	}
-	return r.backend.DisplayCommand([]string{path}) == word && filepath.Base(path) == exeName
+	return path, filepath.Base(path) == exeName
+}
+
+// showsHelper reports whether shown is the command the backend reports of a
+// session made running argv, a hydrate helper, followed by a transcript's
+// arguments or not. zmx cuts the command it reports before the first argument
+// that would take it past 256 bytes, marking the cut with "..." where that
+// fits: a cut within argv shows as argv alone does, transcript or not, and
+// one after it shows argv whole, then what fits of the transcript's
+// arguments, or the mark alone when even the flag naming it doesn't.
+func (r *Restorer) showsHelper(shown string, argv []string) bool {
+	alone := r.backend.DisplayCommand(argv)
+	switch {
+	case shown == alone:
+		return true
+	case alone != r.uncut(argv):
+		return false
+	}
+	return strings.HasPrefix(shown, alone+" ") || shown == r.backend.DisplayCommand(slices.Concat(argv, []string{fileFlag}))
+}
+
+// uncut is argv as the backend shows each of its arguments, joined by
+// spaces, however long that is.
+func (r *Restorer) uncut(argv []string) string {
+	words := make([]string, len(argv))
+	for i, arg := range argv {
+		words[i] = r.backend.DisplayCommand([]string{arg})
+	}
+	return strings.Join(words, " ")
 }
 
 // transcript is the file holding the entry's saved transcript, and whether

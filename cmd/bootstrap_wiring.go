@@ -112,6 +112,15 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 	return bootstrap.Locked{Lock: bootstrapLock(p.dir), Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
 }
 
+// holdBootstrapLock takes bootstrap.lock in the state directory dir alone, as
+// a bootstrap takes it: within its bound, a wait past its notice told to
+// ctx's progress emitter, and a lock it can't take fatal. It returns the
+// release, for work that must not race a bootstrap's restore or a kept
+// session's bring-back.
+var holdBootstrapLock = func(ctx context.Context, dir string) (release func(), err error) {
+	return bootstrap.Locked{Lock: bootstrapLock(dir), Logger: bootstrapLogger}.Hold(ctx)
+}
+
 // bootstrapLock takes bootstrap.lock in the state directory dir, bounded by
 // the run of a bootstrap restoring every entry sessions.json holds now.
 func bootstrapLock(dir string) func(ctx context.Context) (func(), error) {

@@ -31,10 +31,10 @@ const (
 	// for saver.lock, which an uninstall may hold, then the ensure's own run,
 	// which that wait outlasts.
 	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
-	// restoreRun is restore's three listings: before its first session, after
-	// its first pass, for a session made whose helper died, and once its
-	// retries end, for one made after all.
-	restoreRun = 3 * saverhost.ReadCeiling
+	// restoreRun is restore's listings: before its first session, after its
+	// first pass, for a session made whose helper died, and once its retries
+	// end, for one made after all or remade whose helper died too.
+	restoreRun = restore.Listings * saverhost.ReadCeiling
 	// lookup is restore's lookup of the session holding a name: a read, then,
 	// when the name is held under a spelling the listing doesn't hold, a read
 	// of whether that spelling answers.
@@ -56,15 +56,19 @@ const (
 // LockWait bounds the wait for bootstrap.lock while another bootstrap holds
 // it, given the entries sessions.json holds: the holder's longest run, which
 // looks each up and restores at most that many sessions, then retries those
-// it couldn't make, with lockSlack over. The retries are one term however
-// many there are: no try starts once restore.RetryBudget has run out, so the
-// last starts within it and runs past it: the retry's lookup, then a
-// session's restore. A holder still running past it all is stuck, and the
-// wait gives up rather than queue behind it.
+// it couldn't make, with lockSlack over. Each entry may wait on commit.lock
+// twice besides its session's restore: the last listing records a session
+// it finds made after all, which the first pass recorded too when it made
+// that session first, its helper since dead. The retries are one term
+// however many there are: no try starts once restore.RetryBudget has run
+// out, so the last starts within it and runs past it: the retry's lookup,
+// then a session's restore. A holder still running past it all is stuck, and
+// the wait gives up rather than queue behind it.
 func LockWait(entries int) time.Duration {
 	each := restoreSessionRun + commitlock.Bound()
 	retries := restore.RetryBudget + lookup + each
-	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*(lookup+each) + retries + lockSlack
+	perEntry := lookup + each + commitlock.Bound()
+	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*perEntry + retries + lockSlack
 }
 
 // LockNotice is how long a wait for bootstrap.lock goes unremarked.
