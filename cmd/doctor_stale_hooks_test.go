@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -34,9 +35,24 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 		assertCheck(t, staleHooksCheck(t, install), checkFail, "1 stale hook entry")
 	})
 
-	t.Run("it counts the keys the tmux version wrote, in the plural", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB))
+	t.Run("it counts in the plural", func(t *testing.T) {
+		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.ReapableSeedB))
 		assertCheck(t, staleHooksCheck(t, install), checkFail, "2 stale hook entries")
+	})
+
+	// The sweep won't reap the tmux version's keys, so the count waits on
+	// them, and says so.
+	t.Run("it is not evaluable while hooks.json holds keys the tmux version wrote, saying why", func(t *testing.T) {
+		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB))
+
+		outBuf, _, err := runDoctorWith(t, install.deps)
+
+		if err != nil {
+			t.Errorf("Execute err = %v; want nil: a stand-down never moves the exit code", err)
+		}
+		if want := "  · stale hooks: " + tmuxKeysStandDownPhrase + " (not evaluable)\n"; !strings.Contains(outBuf.String(), want) {
+			t.Errorf("report missing %q:\n%s", want, outBuf.String())
+		}
 	})
 
 	t.Run("it passes when a listed session or an index entry names every key", func(t *testing.T) {
@@ -248,14 +264,28 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 	})
 
 	t.Run("it names how many it pruned, then each key on its own line, sorted", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB))
+		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedB, hookstest.ReapableSeedA))
 
 		outBuf, _, err := runDoctorWith(t, install.deps, "--fix")
 		if err != nil {
 			t.Fatalf("Execute err = %v; want nil", err)
 		}
-		if want := "Pruned 2 stale hooks:\n  " + hookstest.TmuxEraSeedB + "\n  " + hookstest.ReapableSeedA + "\n"; !strings.Contains(outBuf.String(), want) {
+		if want := "Pruned 2 stale hooks:\n  " + hookstest.ReapableSeedA + "\n  " + hookstest.ReapableSeedB + "\n"; !strings.Contains(outBuf.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, outBuf.String())
+		}
+	})
+
+	t.Run("it prunes nothing while hooks.json holds keys the tmux version wrote, saying why", func(t *testing.T) {
+		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB))
+		before := readFileBytes(t, install.hooksPath)
+
+		outBuf, _, _ := runDoctorWith(t, install.deps, "--fix")
+
+		if want := "Skipped stale hook prune: " + tmuxKeysStandDownPhrase + "\n"; !strings.Contains(outBuf.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, outBuf.String())
+		}
+		if after := readFileBytes(t, install.hooksPath); !bytes.Equal(after, before) {
+			t.Errorf("hooks.json changed under a prune that stood down:\n%s", after)
 		}
 	})
 

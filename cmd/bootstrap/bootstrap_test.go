@@ -750,10 +750,8 @@ func TestOrchestratorRun_SoftFailuresStillFinish(t *testing.T) {
 		{"the flag sweep failing", func(r *stepRecorder) { r.FlagsErr = errBoom }, nil},
 		{"the saver's presence unread", func(r *stepRecorder) { r.PresentErr = errBoom }, nil},
 		{"the saver failing to start", func(r *stepRecorder) { r.EnsureErr = errBoom }, []Warning{SaverDownWarning()}},
+		// A saver of this version whose read failed is still this version's.
 		{"the saver unread", func(r *stepRecorder) { r.EnsureErr = fmt.Errorf("%w: %w", saverhost.ErrUnread, errBoom) }, []Warning{SaverUnreadWarning()}},
-		{"the old saver not replaced", func(r *stepRecorder) {
-			r.EnsureErr = fmt.Errorf("recycle the saver: %w: %w", saverhost.ErrNotReplaced, errBoom)
-		}, []Warning{SaverNotReplacedWarning()}},
 		{"the latch unwritten", func(r *stepRecorder) { r.LatchErr = errBoom }, []Warning{LatchUnwrittenWarning()}},
 		{"this boot's id unread", func(r *stepRecorder) { r.LatchErr = fmt.Errorf("%w: %w", ErrNoBootID, errBoom) }, []Warning{BootIDUnreadWarning()}},
 	} {
@@ -774,6 +772,28 @@ func TestOrchestratorRun_SoftFailuresStillFinish(t *testing.T) {
 				t.Error("the WARN does not carry the failure")
 			}
 		})
+	}
+}
+
+// An upgrade whose old saver couldn't be stopped leaves that version's daemon
+// saving. A latch written over it would let every later command run warm,
+// and nothing would try the replacement again until the next boot.
+func TestOrchestratorRun_AnOldSaverNotReplacedRestoresButWritesNoLatch(t *testing.T) {
+	r := newRecorder()
+	r.EnsureErr = fmt.Errorf("recycle the saver: %w: %w", saverhost.ErrNotReplaced, errBoom)
+	sink := &logtest.Sink{}
+
+	warnings := runPass(t, r, sink)
+
+	if want := []Warning{SaverNotReplacedWarning()}; !equalWarnings(warnings, want) {
+		t.Errorf("warnings = %v, want %v", warnings, want)
+	}
+	if !r.called("Restore") || r.called("WriteLatch") {
+		t.Errorf("calls = %v, want the restore run and no latch written", r.calls)
+	}
+	skip := sink.Records().WithMessage("step skipped").Only(t, "the latch's skip")
+	if skip.AttrString(t, "step") != stepWriteLatch || !strings.Contains(skip.AttrString(t, "detail"), "couldn't be replaced") {
+		t.Errorf("skip = %v, want the latch skipped, saying the saver couldn't be replaced", skip.Attrs)
 	}
 }
 

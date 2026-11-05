@@ -417,11 +417,12 @@ func markResumePending(cfg hydrateConfig) (parkedChain, error) {
 // recordCreation records the creation the session's backend reports as its
 // index entry's, through the claim every claimer makes, and, the replay
 // having finished, finishes the session's restore: its entry is owed none any
-// more. It runs while the session is still flagged hydrating, so the rule
-// adopts whatever entry restore saved and never replaces it: a restore that
-// died between creating the session and recording it leaves the entry its
-// saved creation, which the saver would replace once the flag is down. An
-// entry already recording this creation and owed nothing is left as it is. A
+// more. It runs while the session is still flagged hydrating. The rule adopts
+// whatever entry restore saved and never replaces it, since every entry
+// restore makes is owed or from before the boot: a restore that died between
+// creating the session and recording it leaves the entry its saved creation,
+// which any claim adopts, whatever the flag. An entry already recording this
+// creation and owed nothing is left as it is. A
 // failure is the helper's to record, never to wait on: the session is handed
 // on regardless, its restore unfinished until a claim finds it live once the
 // flag is down.

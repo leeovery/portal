@@ -248,8 +248,11 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
+	// Restore lists the sessions three times: before its first session, after
+	// its first pass and once its retries end.
 	t.Run("it holds restore's retries, and the lookup and try that start as their budget ends, as one term", func(t *testing.T) {
-		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
+		listings := 3 * saverhost.ReadCeiling
+		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + listings + lockSlack
 		if got, want := LockWait(0)-rest, restore.RetryBudget+lookup+each; got != want {
 			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}

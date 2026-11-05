@@ -159,11 +159,13 @@ func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
 // while a saver watched and is the saver's to drop; with no boot time to judge
 // by, every entry may predate the boot. A session it couldn't make for a
 // reason that may pass it tries again, within RetryBudget, once every other
-// has had its first try. A session it can't make keeps its entry for the next
-// bootstrap. It asks the backend nothing when sessions.json can't be read,
-// makes nothing when the backend can't be listed, and makes no further session
-// once ctx ends or the backend refuses one it made as speaking a protocol
-// Portal doesn't support.
+// has had its first try, with any it made whose helper died before finishing,
+// as a listing after the first pass shows; one a listing once the retries end
+// finds running its helper counts restored all the same. A session it can't
+// make keeps its entry for the next bootstrap. It asks the backend nothing
+// when sessions.json can't be read, makes nothing when the backend can't be
+// listed, and makes no further session once ctx ends or the backend refuses
+// one it made as speaking a protocol Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r, raised: map[string]bool{}}
@@ -236,14 +238,31 @@ func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
 }
 
 // run is one Restore: what it did, how many warnings its sessions drew, the
-// sessions whose hydrating flag it raised, and its rule over the sessions it
-// listed, which reads each lookup it makes.
+// sessions whose hydrating flag it raised, its rule over the sessions it
+// listed, which reads each lookup it makes, and the sessions it made.
 type run struct {
 	*Restorer
 	res       Result
 	anomalous int
 	raised    map[string]bool
 	listing   judging
+	made      []made
+}
+
+// made is a session a run made: the entry it read, and the session as it
+// recorded it.
+type made struct {
+	read sessionindex.Entry
+	live backend.Session
+}
+
+// recordedIn reports whether e still records the creation restore recorded
+// of m: the session's, or, for one that reported none, the one restore read.
+func (m made) recordedIn(e sessionindex.Entry) bool {
+	if m.live.Created.IsZero() {
+		return e.RecordsCreationOf(m.read)
+	}
+	return e.SameCreation(m.live.Created, m.live.PID)
 }
 
 // retried is the detail of a failure a retry may clear. It says only that
@@ -286,7 +305,87 @@ func (r *run) restore(ctx context.Context) {
 			break
 		}
 	}
-	r.res.Failed += len(r.retry(ctx, again))
+	again = append(again, r.helpersDied(ctx)...)
+	r.res.Failed += len(r.madeAfterAll(ctx, r.retry(ctx, again)))
+}
+
+// errHelperDied is a session restore made that ended before its helper
+// finished restoring it.
+var errHelperDied = errors.New("its session ended before its helper finished restoring it")
+
+// helpersDied is the sessions the first pass made that a listing taken after
+// it no longer holds, whose restores never finished: each entry still owed,
+// recording the creation restore made. A helper that dies before its claim,
+// on a panic or an exec that fails, ends its session at once. Each is warned
+// of, counted restored no more, and returned, as its entry now reads, to be
+// tried again.
+func (r *run) helpersDied(ctx context.Context) []sessionindex.Entry {
+	if len(r.made) == 0 {
+		return nil
+	}
+	const unchecked = "the sessions restore made are left unchecked"
+	live, ok := r.relisted(ctx, unchecked)
+	if !ok {
+		return nil
+	}
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		r.logger.Warn("sessions.json unreadable", "detail", unchecked, "error", err)
+		return nil
+	}
+	var again []sessionindex.Entry
+	for _, m := range r.made {
+		latest, ok := idx.Lookup(m.read.Name)
+		if _, listed := live[m.read.Name]; listed || !ok || !latest.Owed || !m.recordedIn(latest) {
+			continue
+		}
+		r.res.Restored--
+		r.warn("restore session failed", latest.Name, "error", errHelperDied, "detail", retried)
+		again = append(again, latest)
+	}
+	return again
+}
+
+// madeAfterAll is left, the sessions restore couldn't make, less those a
+// listing taken now finds running restore's helper, which count restored: a
+// Create that timed out under load, its every lookup timing out too, may have
+// made one all the same.
+func (r *run) madeAfterAll(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
+	if len(left) == 0 {
+		return nil
+	}
+	live, ok := r.relisted(ctx, "the sessions restore couldn't make are counted failed unchecked")
+	if !ok {
+		return left
+	}
+	var still []sessionindex.Entry
+	for _, e := range left {
+		if s, ok := live[e.Name]; ok && r.RunsHelper(s) {
+			r.restored(e, s, startDir(e))
+			continue
+		}
+		still = append(still, e)
+	}
+	return still
+}
+
+// relisted is the sessions the backend lists now, by name, and whether it
+// could list them, which a context already ended never asks. A listing that
+// fails is warned of, detail saying what it leaves unchecked.
+func (r *run) relisted(ctx context.Context, detail string) (map[string]backend.Session, bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		r.logger.Warn("list sessions failed", "detail", detail, "error", err)
+		return nil, false
+	}
+	byName := make(map[string]backend.Session, len(live))
+	for _, s := range live {
+		byName[s.Name] = s
+	}
+	return byName, true
 }
 
 // firstTry restores e, logging a failure, and reports whether it failed for a
@@ -733,6 +832,7 @@ func heldAs(err error) bool {
 // helper's claim records it.
 func (r *run) restored(e sessionindex.Entry, s backend.Session, dir string) {
 	r.res.Restored++
+	r.made = append(r.made, made{read: e, live: s})
 	if _, err := sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
 		idx.Restored(e, s.Created, s.PID)
 		return nil
@@ -774,11 +874,24 @@ func (r *Restorer) helper(name string) []string {
 // RunsHelper reports whether s was made running the hydrate helper restore
 // gives every session it restores, for s's own name, with a transcript or
 // without: such a session's hydrating flag is its helper's to lower, never
-// restore's or a sweep's. zmx reports a session's command as it was made, so
-// a helper that has handed the session to its shell still counts.
+// restore's or a sweep's. Any binary named portal counts, wherever it is: a
+// session restored by one at another path, a dev build or another install,
+// keeps its flag under this one. zmx reports a session's command as it was
+// made, so a helper that has handed the session to its shell still counts.
 func (r *Restorer) RunsHelper(s backend.Session) bool {
-	rest, ok := strings.CutPrefix(s.Command, r.backend.DisplayCommand(r.helper(s.Name)))
-	return ok && (rest == "" || strings.HasPrefix(rest, " "))
+	args := " " + r.backend.DisplayCommand(r.helper(s.Name)[1:])
+	exe, rest, ok := strings.Cut(s.Command, args)
+	return ok && (rest == "" || strings.HasPrefix(rest, " ")) && r.namesPortal(exe)
+}
+
+// namesPortal reports whether word, one argument as the backend displays it,
+// is a path to a binary named portal.
+func (r *Restorer) namesPortal(word string) bool {
+	path := word
+	if quoted, ok := strings.CutPrefix(word, "'"); ok {
+		path = strings.ReplaceAll(strings.TrimSuffix(quoted, "'"), `'\''`, "'")
+	}
+	return r.backend.DisplayCommand([]string{path}) == word && filepath.Base(path) == exeName
 }
 
 // transcript is the file holding the entry's saved transcript, and whether

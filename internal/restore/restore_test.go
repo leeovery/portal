@@ -1131,12 +1131,37 @@ func TestRunsHelper(t *testing.T) {
 		}
 	})
 
+	// A replay that failed keeps its session's flag up; a bootstrap run by a
+	// portal at another path, a dev build or another install, must not lower
+	// it.
+	for _, tc := range []struct {
+		name    string
+		command []string
+	}{
+		{"a portal at another path", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
+		{"a portal at another path, replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--file", "/tmp/work.vt"}},
+		{"a portal at a path the shell would read specially", []string{"/Users/lee/My Apps/it's/portal", "state", "hydrate", "--session", "work"}},
+	} {
+		t.Run("it counts the helper run by "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = false, want the helper counted", s)
+			}
+		})
+	}
+
 	for _, tc := range []struct {
 		name    string
 		command []string
 	}{
 		{"the helper for another name", []string{exe, "state", "hydrate", "--session", "work-2"}},
-		{"another portal's helper", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
+		{"a binary not named portal", []string{"/usr/local/bin/portal-dev", "state", "hydrate", "--session", "work"}},
+		{"another program, given the helper's arguments", []string{"/bin/echo", "state", "hydrate", "--session", "work"}},
 		{"another of portal's commands", []string{exe, "state", "resume-wait", "--session", "work"}},
 		{"another program", []string{"vim", "notes.md"}},
 		{"the user's shell", nil},

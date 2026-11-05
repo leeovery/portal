@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 )
 
 // stageKill stages fake as the backend in a state directory of the test's own
@@ -91,17 +92,31 @@ func TestKillCommand(t *testing.T) {
 		assertIndexed(t, dir, "my-session-abc123", true)
 	})
 
-	t.Run("it removes the entry of a session that ended on its own", func(t *testing.T) {
+	// A saved session that isn't running, kept for the next restore, is one
+	// the user can see and bring back; killing it discards it for good.
+	t.Run("it discards a saved session that isn't running, saying so, and succeeds", func(t *testing.T) {
 		fake := backendtest.New(backend.Session{Name: "web-Qm3pLz"})
 		dir := stageKill(t, fake, "api-x7Kd9a", "web-Qm3pLz")
 
-		_, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
+		stdout, _, err := runRootCmd(t, "kill", "api-x7Kd9a")
 
-		if err == nil || err.Error() != "No session found: api-x7Kd9a" {
-			t.Errorf("error = %v, want %q", err, "No session found: api-x7Kd9a")
+		if err != nil {
+			t.Fatalf("kill: %v", err)
+		}
+		if want := fmt.Sprintf(discardedCopy, "api-x7Kd9a") + "\n"; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
 		assertIndexed(t, dir, "api-x7Kd9a", false)
 		assertIndexed(t, dir, "web-Qm3pLz", true)
+	})
+
+	t.Run("it says nothing more of a live session it kills", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api-x7Kd9a"})
+		stageKill(t, fake, "api-x7Kd9a")
+
+		if stdout, _, err := runRootCmd(t, "kill", "api-x7Kd9a"); err != nil || stdout.Len() != 0 {
+			t.Errorf("kill = %q, %v; want nothing printed and no error", stdout, err)
+		}
 	})
 
 	t.Run("it names the spelling a session is held under", func(t *testing.T) {
@@ -118,6 +133,28 @@ func TestKillCommand(t *testing.T) {
 			t.Error("a kill under another spelling ended dotfiles-PpaTER")
 		}
 		assertIndexed(t, dir, "dotfiles-PpaTER", true)
+	})
+
+	// The saved foo is kept while Foo lives, a folding filesystem holding
+	// foo's socket as Foo's.
+	t.Run("it removes nothing under a name held under another spelling, its own entry kept", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "Foo"})
+		dir := stageKill(t, fake, "foo", "Foo")
+		stageKept(t, dir, "foo")
+
+		stdout, _, err := runRootCmd(t, "kill", "foo")
+
+		if want := "No session found: foo; did you mean Foo?"; err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing discarded", stdout)
+		}
+		assertIndexed(t, dir, "foo", true)
+		assertIndexed(t, dir, "Foo", true)
+		if raised, err := state.Hydrating.Exists(dir, "foo"); err != nil || !raised {
+			t.Errorf("foo's hydrating flag = %v, %v; want it kept", raised, err)
+		}
 	})
 
 	t.Run("it reports a missing session whose index entry could not be removed", func(t *testing.T) {

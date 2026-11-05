@@ -31,8 +31,10 @@ const (
 	// for saver.lock, which an uninstall may hold, then the ensure's own run,
 	// which that wait outlasts.
 	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
-	// restoreRun is restore's listing, before its first session.
-	restoreRun = saverhost.ReadCeiling
+	// restoreRun is restore's three listings: before its first session, after
+	// its first pass, for a session made whose helper died, and once its
+	// retries end, for one made after all.
+	restoreRun = 3 * saverhost.ReadCeiling
 	// lookup is restore's lookup of the session holding a name: a read, then,
 	// when the name is held under a spelling the listing doesn't hold, a read
 	// of whether that spelling answers.

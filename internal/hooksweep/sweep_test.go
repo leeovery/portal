@@ -77,21 +77,42 @@ func TestSweepRule(t *testing.T) {
 		}
 	})
 
-	t.Run("it reaps the keys the tmux version wrote", func(t *testing.T) {
-		w := newWorld(t, hookstest.LiveSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Seed: hooksBody(hookstest.LiveSeedA, hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB),
-		})
+	// hooks.json is shared with the tmux version, whose keys name no zmx
+	// session: a state dir and a zmx dir pointed somewhere fresh would judge
+	// every one stale.
+	for _, key := range []string{hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB} {
+		t.Run("it stands down rather than reap "+key+", a key the tmux version wrote, warning once", func(t *testing.T) {
+			w := newWorld(t, hookstest.LiveSeedA)
+			store, path := hookstest.StageStore(t, hookstest.Staging{
+				Seed: hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, key),
+			})
+			before := hookstest.HooksFileBytes(t, path)
+			persisted, err := store.Load(hooks.ViaInternal)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			sink := logtest.Install(t)
 
-		outcome, err := Run(t.Context(), w.sources(), store)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		want := []string{hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB}
-		slices.Sort(want)
-		if !slices.Equal(outcome.Removed, want) {
-			t.Errorf("Removed = %v, want %v", outcome.Removed, want)
-		}
+			outcome, err := Run(t.Context(), w.sources(), store)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
+				t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
+			}
+			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that stood down")
+			rec := sink.Records().WithMessage(standDownMsg).AtExactLevel(slog.LevelWarn).Only(t, "the stand-down's warning")
+			if got := rec.AttrString(t, "reason"); got != string(ReasonTmuxKeys) {
+				t.Errorf("reason = %q, want %q", got, ReasonTmuxKeys)
+			}
+			if stale, d := Stale(t.Context(), w.sources(), persisted); d.Reason() != ReasonTmuxKeys || len(stale) != 0 {
+				t.Errorf("Stale = (%v, %q), want none, declined as %q", stale, d.Reason(), ReasonTmuxKeys)
+			}
+		})
+	}
+
+	t.Run("it judges a key in the tmux version's shape that a listed session names as that session's", func(t *testing.T) {
+		survives(t, newWorld(t, hookstest.TmuxEraSeedA), hookstest.TmuxEraSeedA)
 	})
 }
 
@@ -238,7 +259,7 @@ func TestStaleAgreesWithTheSweep(t *testing.T) {
 	t.Run("they judge the same keys stale", func(t *testing.T) {
 		w := newWorld(t, hookstest.LiveSeedA)
 		w.index(t, hookstest.LiveSeedB)
-		keys := []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB}
+		keys := []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.ReapableSeedA, hookstest.ReapableSeedB}
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(keys...)})
 		persisted, err := store.Load(hooks.ViaInternal)
 		if err != nil {

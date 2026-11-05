@@ -21,48 +21,80 @@ var killCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return killSession(cmd.Context(), b, args[0], "cli")
+		err = killSession(cmd.Context(), b, args[0], "cli")
+		if _, ok := errors.AsType[discardedError](err); ok {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), discardedCopy+"\n", args[0])
+			return nil
+		}
+		return err
 	},
 }
 
+// discardedCopy is portal kill's one line for a saved session that wasn't
+// running, which it discards as it would kill a live one: the session named.
+const discardedCopy = "Discarded %s, which wasn't running: Portal won't bring it back."
+
+// discardedError is killSession's answer for a session not running whose
+// saved entry it removed. portal kill counts that a kill, a saved session
+// discarded; the picker, which lists only live sessions, reports the session
+// gone, as gone carries it.
+type discardedError struct{ gone error }
+
+func (e discardedError) Error() string { return e.gone.Error() }
+
+func (e discardedError) Unwrap() error { return e.gone }
+
 // killSession kills the session and forgets it: its index entry, and what
-// Portal keeps beside it. A session already gone keeps nothing either; one
-// that may still be running keeps everything. via is the surface asking, as
-// the index write records it.
+// Portal keeps beside it. A session not running whose entry it removes is
+// discarded, a discardedError; with no entry either, the session is not
+// found. One held under another spelling, or that may still be running, keeps
+// everything. via is the surface asking, as the index write records it.
 func killSession(ctx context.Context, b backend.Backend, name, via string) error {
 	killed := b.Kill(ctx, name)
-	if killed != nil && !errors.Is(killed, backend.ErrNoSuchSession) {
+	if killed != nil && (heldUnderAnotherSpelling(killed) || !errors.Is(killed, backend.ErrNoSuchSession)) {
 		return killError(name, killed)
 	}
-	removed := forgetSession(name, via)
+	removed, err := forgetSession(name, via)
 	switch {
-	case killed != nil && removed != nil:
-		return fmt.Errorf("%w, and its session index entry could not be removed: %w", killError(name, killed), removed)
-	case killed != nil:
+	case killed == nil && err != nil:
+		return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, err)
+	case killed == nil:
+		return nil
+	case err != nil:
+		return fmt.Errorf("%w, and its session index entry could not be removed: %w", killError(name, killed), err)
+	case !removed:
 		return killError(name, killed)
-	case removed != nil:
-		return fmt.Errorf("killed %s, but could not remove it from the session index: %w", name, removed)
 	}
-	return nil
+	return discardedError{gone: killError(name, killed)}
+}
+
+// heldUnderAnotherSpelling reports whether err is the backend's refusal of a
+// name it holds only under another spelling: that session lives.
+func heldUnderAnotherSpelling(err error) bool {
+	_, held := errors.AsType[*backend.HeldAsError](err)
+	return held
 }
 
 // forgetSession removes the session's index entry and forgets what Portal
 // keeps beside it, under the same lock, whether or not the index held one: a
-// hook or flag may be left with no entry to go with it.
-func forgetSession(name, via string) error {
+// hook or flag may be left with no entry to go with it. It reports whether
+// the index held one.
+func forgetSession(name, via string) (removed bool, err error) {
 	dir, err := state.EnsureDir()
 	if err != nil {
-		return err
+		return false, err
 	}
-	return updateSessionIndexLanding(dir, via, func(idx *sessionindex.Index) error {
+	err = updateSessionIndexLanding(dir, via, func(idx *sessionindex.Index) error {
 		idx.Remove(name)
 		return nil
 	}, forgetting(dir, via, func(outcome sessionindex.Outcome) []sessionindex.Entry {
 		if len(outcome.Removed) == 0 {
 			return []sessionindex.Entry{{Name: name}}
 		}
+		removed = true
 		return outcome.Removed
 	}))
+	return removed, err
 }
 
 // killError words the backend's refusals for the user; any other failure is
@@ -110,7 +142,8 @@ func sessionGoneError(name string, err error) (error, bool) {
 	return nil, false
 }
 
-// pickerKiller kills from the picker as portal kill does.
+// pickerKiller kills from the picker as portal kill does, but for a session
+// gone by the kill, which it reports gone: the picker lists live sessions.
 type pickerKiller struct {
 	ctx context.Context
 	b   backend.Backend
@@ -136,7 +169,7 @@ type goneCountsKilled struct {
 
 func (b goneCountsKilled) Kill(ctx context.Context, name string) error {
 	err := b.Backend.Kill(ctx, name)
-	if _, held := errors.AsType[*backend.HeldAsError](err); !held && errors.Is(err, backend.ErrNoSuchSession) {
+	if !heldUnderAnotherSpelling(err) && errors.Is(err, backend.ErrNoSuchSession) {
 		return nil
 	}
 	return err

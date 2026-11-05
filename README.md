@@ -233,7 +233,7 @@ Kill a session by name.
 xctl kill myproject
 ```
 
-A kill is final: the session's saved state, scrollback and resume hooks are removed, and it does not come back after a reboot.
+A kill is final: the session's saved state, scrollback and resume hooks are removed, and it does not come back after a reboot. A saved session that isn't running, which [`xctl doctor`](#xctl-doctor) lists as kept, is discarded the same way, and the kill says so.
 
 ### `xctl alias`
 
@@ -283,7 +283,7 @@ xctl doctor              # health report (subsumes the retired `state status`)
 xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 ```
 
-`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resumes line reports how many live sessions are waiting on their [resume panel](#resume-panel), the kept-sessions line, shown only when there are any, names the saved sessions that aren't running, which `x <name>` brings back (with no save daemon running, every saved session that isn't running, since the next start brings them all back), and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
+`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. While `hooks.json` still holds hooks the tmux version wrote, it counts nothing and says so: neither the daemon nor `--fix` prunes a hook while any of those would be pruned with it. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resumes line reports how many live sessions are waiting on their [resume panel](#resume-panel), the kept-sessions line, shown only when there are any, names the saved sessions that aren't running, which `x <name>` brings back (with no save daemon running, every saved session that isn't running, since the next start brings them all back), and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
 
 A missing `_portal-saver` fails the saver and daemon lines while there is anything to save: a live session, or an entry in `sessions.json`. On an install with nothing to save yet, such as a fresh one, both lines state it instead (`nothing to save yet`) and the report stays healthy; if doctor can't list the sessions or read `sessions.json`, it can't show there is nothing to save, so a missing saver still fails rather than reading not evaluable.
 
@@ -519,15 +519,17 @@ a resume hook comes back holding the resume panel, which runs the command when y
 it. While that runs, the picker shows its loading page.
 
 Only a kill is final. Killing a session in Portal — `k` in the picker or `xctl kill` —
-removes its saved state, scrollback and resume hook for good. A session ended outside
-Portal, by `zmx kill` or by exiting its program, goes the same way once the save daemon
-sees it gone, about ten seconds later, with three exceptions that err towards keeping it:
-when several sessions end at once, the daemon keeps them all, as it would after a crash,
-and they come back after a reboot or the next time the save daemon has to be started;
-a session that ends while the save daemon isn't running comes back with the next
-command; and a restored session whose saved scrollback Portal couldn't replay (it says
-where the file is kept) is kept even once it ends, and comes back at every restore for as
-long as that file can't be replayed.
+removes its saved state, scrollback and resume hook for good, and `xctl kill` on a saved
+session that isn't running discards it the same way. A session ended outside Portal, by
+`zmx kill` or by exiting its program, goes the same way once the save daemon sees it gone,
+about ten seconds later, with four exceptions that err towards keeping it: when several
+sessions end at once, the daemon keeps them all, as it would after a crash, and they come
+back after a reboot or the next time the save daemon has to be started; a session that
+ends while the save daemon isn't running comes back with the next command; a restored
+session closed before Portal finished restoring it comes back at the next restore; and a
+restored session whose saved scrollback Portal couldn't replay (it says where the file is
+kept) is kept even once it ends, and comes back at every restore for as long as that file
+can't be replayed.
 Detaching, logging out and shutting down or rebooting the machine all leave your sessions
 restorable, with nothing to run first.
 
