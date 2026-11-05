@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/restore"
@@ -33,13 +34,14 @@ const (
 	// restoreRun is restore's listing, before its first session.
 	restoreRun = saverhost.ReadCeiling
 	// restoreSessionRun is a session restore makes: its Create, a run of the
-	// binary, with its grace; then either the Create's refusal of a session
-	// an older zmx made (a read in that zmx's framing and its zmx kill, a run
-	// of the binary), or, when the Create fails otherwise, a read, a probe
-	// ceiling's wait and a read again. Its record waits on commit.lock
-	// besides.
+	// binary, with its grace; then the longer of the Create's refusal of a
+	// session an older zmx made (a read in that zmx's framing and its zmx
+	// kill, a run of the binary) and a second ask: of a Create that read back
+	// no creation, that read finding none, or of one that failed otherwise, a
+	// read, then backend.RecheckAfter's wait and a read again. Its record
+	// waits on commit.lock besides.
 	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace +
-		max(3*saverhost.ReadCeiling, saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace)
+		max(saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace, 2*saverhost.ReadCeiling+backend.RecheckAfter)
 	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
 	// and the flag, latch and index files.
 	lockSlack = 15 * time.Second

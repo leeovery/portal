@@ -52,8 +52,8 @@ func TestRestore_UnconfirmedCreate(t *testing.T) {
 			t.Errorf("Create was tried %d times, want it tried again", tries)
 		}
 		rec := w.failureLogged(t, "work")
-		if !strings.Contains(rec.AttrString(t, "error"), "never answered") || rec.AttrString(t, "detail") != "tried again within this bootstrap" {
-			t.Errorf("failure = %v, want the unconfirmed session named, and tried again", rec.Attrs)
+		if !strings.Contains(rec.AttrString(t, "error"), "never answered") || rec.AttrString(t, "detail") != "may be tried again within this bootstrap" {
+			t.Errorf("failure = %v, want the unconfirmed session named, and that it may be tried again", rec.Attrs)
 		}
 	})
 
@@ -183,8 +183,8 @@ func TestRestore_Retries(t *testing.T) {
 			t.Errorf("created %q, want work tried again once notes had its first try", got)
 		}
 		rec := w.failureLogged(t, "work")
-		if rec.AttrString(t, "detail") != "tried again within this bootstrap" {
-			t.Errorf("failure = %v, want it to say it is tried again", rec.Attrs)
+		if rec.AttrString(t, "detail") != "may be tried again within this bootstrap" {
+			t.Errorf("failure = %v, want it to say it may be tried again", rec.Attrs)
 		}
 		if n := len(w.sink.Records().WithMessage("restore retry failed")); n != 0 {
 			t.Errorf("logged %d retries failing, want none", n)
@@ -486,8 +486,10 @@ func TestRestore_RetriesStopOnASessionOfAnUnsupportedProtocol(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			w.save(t, entry(t, "a"), entry(t, "b"))
+			lookups := -1
 			w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
 				if len(w.created()) == tc.refused {
+					lookups = len(w.fake.CallsTo(backendtest.OpSession))
 					return backend.Session{}, fmt.Errorf("create session %q: %w", name, backend.ErrUnsupportedProtocol)
 				}
 				return backend.Session{}, errRefused
@@ -497,6 +499,12 @@ func TestRestore_RetriesStopOnASessionOfAnUnsupportedProtocol(t *testing.T) {
 
 			if !errors.Is(res.Unsupported, backend.ErrUnsupportedProtocol) || res.Failed != 2 || res.Restored != 0 {
 				t.Errorf("Restore = %+v, want both failed, carrying the refusal", res)
+			}
+			if lookups < 0 {
+				t.Fatal("no Create was refused")
+			}
+			if after := len(w.fake.CallsTo(backendtest.OpSession)) - lookups; after != 0 {
+				t.Errorf("looked sessions up %d times after the refusal, want none", after)
 			}
 			if got := w.created(); !slices.Equal(got, tc.created) {
 				t.Errorf("created %q, want %q: nothing made after the refusal", got, tc.created)

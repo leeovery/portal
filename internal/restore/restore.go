@@ -172,9 +172,10 @@ type run struct {
 	raised    map[string]bool
 }
 
-// retried is the detail of a failure restore tries again within the
-// bootstrap.
-const retried = "tried again within this bootstrap"
+// retried is the detail of a failure a retry may clear. It says only that
+// restore may try again: a context ending, or a later session refused as
+// unsupported, stops it before its retries.
+const retried = "may be tried again within this bootstrap"
 
 func (r *run) restore(ctx context.Context) {
 	idx, err := sessionindex.Read(r.dir)

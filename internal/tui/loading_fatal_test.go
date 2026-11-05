@@ -53,6 +53,22 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	}
 }
 
+// A fatal at the first step, as another zmx dir's is, comes before any step
+// completes, yet it names a step, so the frame keeps the step list with that
+// step failed rather than showing the fatal alone.
+func TestFatalMsg_AtTheFirstStepKeepsTheSteps(t *testing.T) {
+	model := fatalModelOnLoading(t)
+
+	model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 1, Message: "Portal can't use this zmx dir", Err: errFatalSentinel})
+
+	visible := ansi.Strip(model.(tui.Model).View().Content)
+	for _, want := range []string{"✗   " + tui.LabelCheckingZmx, tui.LabelStartingTheSaver, tui.LabelRestoringSessions, "Portal can't use this zmx dir"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("frame lacks %q:\n%s", want, visible)
+		}
+	}
+}
+
 func TestFatalMsg_StaysOnLoadingPage(t *testing.T) {
 	model := fatalModelOnLoading(t)
 
