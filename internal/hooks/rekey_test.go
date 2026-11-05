@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 // rekeyBackup holds the tmux version's key shapes: a token in the string form,
 // a token in the object form carrying an attribute the codec doesn't model and
-// a second event, coordinates to remove, and a key no rekey names.
+// a second event, coordinates to remove, and a key carried under its own key.
 var rekeyBackup = fmt.Sprintf(`{
   %q: {"on-resume": "claude --resume token"},
   %q: {"on-resume": {"command": "claude --resume second", "resume": "eager", "nickname": "kept"}, "on-other": "x"},
@@ -28,9 +29,14 @@ var rekeyBackup = fmt.Sprintf(`{
   %q: {"on-resume": "untouched"}
 }`, hookstest.TmuxEraSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB, hookstest.LiveSeedA)
 
-// rekeyMoves and rekeyRemove are the rewrite rekeyBackup is put through.
+// rekeyMoves and rekeyRemove are the rewrite rekeyBackup is put through,
+// accounting for its every key.
 var (
-	rekeyMoves  = map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA, hookstest.ReapableSeedA: hookstest.SubjectSeedB}
+	rekeyMoves = map[string]string{
+		hookstest.TmuxEraSeedA:  hookstest.SubjectSeedA,
+		hookstest.ReapableSeedA: hookstest.SubjectSeedB,
+		hookstest.LiveSeedA:     hookstest.LiveSeedA,
+	}
 	rekeyRemove = []string{hookstest.TmuxEraSeedB}
 )
 
@@ -64,9 +70,9 @@ func TestRekeyFrom(t *testing.T) {
 
 		after := decodeHooksFile(t, path)
 		if got := slices.Sorted(maps.Keys(after)); !slices.Equal(got, []string{hookstest.LiveSeedA, hookstest.SubjectSeedA, hookstest.SubjectSeedB}) {
-			t.Fatalf("keys = %v, want the two moved, the one no rekey names, and nothing of hooks.json's own", got)
+			t.Fatalf("keys = %v, want the three moved, and nothing of hooks.json's own", got)
 		}
-		for from, to := range map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA, hookstest.ReapableSeedA: hookstest.SubjectSeedB, hookstest.LiveSeedA: hookstest.LiveSeedA} {
+		for from, to := range rekeyMoves {
 			if len(after[to]) != len(before[from]) {
 				t.Errorf("%s holds %d events, want the %d %s held", to, len(after[to]), len(before[from]), from)
 			}
@@ -81,8 +87,10 @@ func TestRekeyFrom(t *testing.T) {
 	t.Run("a key both removed and moved onto holds the moved hooks", func(t *testing.T) {
 		backup := stageBackup(t, rekeyBackup)
 		store, path := stageLive(t, hookstest.Staging{})
+		moves := maps.Clone(rekeyMoves)
+		moves[hookstest.TmuxEraSeedA] = hookstest.TmuxEraSeedB
 
-		if err := store.RekeyFrom(backup, map[string]string{hookstest.TmuxEraSeedA: hookstest.TmuxEraSeedB}, []string{hookstest.TmuxEraSeedB}, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, moves, rekeyRemove, hooks.ViaCLI); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		if got := compactJSON(t, decodeHooksFile(t, path)[hookstest.TmuxEraSeedB]["on-resume"]); got != `"claude --resume token"` {
@@ -107,34 +115,21 @@ func TestRekeyFrom(t *testing.T) {
 		hookstest.AssertHooksFileUnchanged(t, path, first, "differs on a second run")
 	})
 
-	t.Run("a key the backup doesn't hold is passed over", func(t *testing.T) {
-		backup := stageBackup(t, rekeyBackup)
+	t.Run("a null backup writes an empty object, which a set then adds to", func(t *testing.T) {
+		backup := stageBackup(t, "null")
 		store, path := stageLive(t, hookstest.Staging{})
 
-		if err := store.RekeyFrom(backup, map[string]string{hookstest.TmuxEraSeedC: hookstest.SubjectSeedC}, []string{hookstest.ReapableSeedB}, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, nil, nil, hooks.ViaCLI); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
-		if got := slices.Sorted(maps.Keys(decodeHooksFile(t, path))); !slices.Equal(got, slices.Sorted(maps.Keys(decodeHooksFile(t, backup)))) {
-			t.Errorf("keys = %v, want the backup's", got)
+		if got := strings.TrimSpace(string(readFileBytes(t, path))); got != "{}" {
+			t.Fatalf("hooks.json = %s, want {}", got)
 		}
-	})
-
-	t.Run("a key moved to itself is no change, neither logged nor counted", func(t *testing.T) {
-		backup := stageBackup(t, rekeyBackup)
-		store, path := stageLive(t, hookstest.Staging{})
-		sink := logtest.Install(t)
-
-		if err := store.RekeyFrom(backup, map[string]string{hookstest.TmuxEraSeedA: hookstest.TmuxEraSeedA}, nil, hooks.ViaCLI); err != nil {
-			t.Fatalf("RekeyFrom: %v", err)
+		if err := store.Set(hookstest.SubjectSeedA, hooks.EventOnResume, hooks.Registration{Command: "set after", Resume: resumemode.Lazy}, hooks.ViaCLI); err != nil {
+			t.Fatalf("Set: %v", err)
 		}
-		if got := compactJSON(t, decodeHooksFile(t, path)[hookstest.TmuxEraSeedA]["on-resume"]); got != `"claude --resume token"` {
-			t.Errorf("%s on-resume = %s, want its own", hookstest.TmuxEraSeedA, got)
-		}
-		if moved := sink.Records().Matching("hooks", "rekey-move"); len(moved) != 0 {
-			t.Errorf("logged %d moves, want none", len(moved))
-		}
-		if got := sink.Records().Matching("hooks", "rekey").Only(t, "rekey summary").AttrString(t, "entries"); got != "0" {
-			t.Errorf("entries = %q, want 0", got)
+		if got := slices.Collect(maps.Keys(decodeHooksFile(t, path))); !slices.Equal(got, []string{hookstest.SubjectSeedA}) {
+			t.Errorf("keys = %v, want the one set", got)
 		}
 	})
 
@@ -152,7 +147,8 @@ func TestRekeyFrom(t *testing.T) {
 	})
 
 	t.Run("it logs each key it moved or removed at DEBUG, and one INFO summary", func(t *testing.T) {
-		backup := stageBackup(t, rekeyBackup)
+		backup := stageBackup(t, fmt.Sprintf(`{%q: {"on-resume": "claude --resume token"}, %q: {"on-resume": {"command": "claude --resume second", "resume": "eager"}, "on-other": "x"}}`,
+			hookstest.TmuxEraSeedA, hookstest.ReapableSeedA))
 		store, _ := stageLive(t, hookstest.Staging{})
 		sink := logtest.Install(t)
 
@@ -185,15 +181,22 @@ func TestRekeyFrom(t *testing.T) {
 		moves  map[string]string
 		remove []string
 		want   error
+		// naming is a key the error names, when it names one.
+		naming string
 	}{
 		"two keys moved onto one": {
-			moves: map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA, hookstest.ReapableSeedA: hookstest.SubjectSeedA},
+			moves:  map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA, hookstest.ReapableSeedA: hookstest.SubjectSeedA, hookstest.LiveSeedA: hookstest.LiveSeedA},
+			remove: rekeyRemove, naming: hookstest.SubjectSeedA,
 		},
 		"a key moved and removed": {
-			moves: map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA}, remove: []string{hookstest.TmuxEraSeedA},
+			moves: rekeyMoves, remove: []string{hookstest.TmuxEraSeedB, hookstest.TmuxEraSeedA}, naming: hookstest.TmuxEraSeedA,
 		},
-		"a move onto a key the rewrite keeps": {
-			moves: map[string]string{hookstest.TmuxEraSeedA: hookstest.LiveSeedA}, want: hooks.ErrKeyHeld,
+		"a backup key neither moved nor removed": {
+			moves:  map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA, hookstest.ReapableSeedA: hookstest.SubjectSeedB},
+			remove: rekeyRemove, want: hooks.ErrUnaccountedKeys, naming: hookstest.LiveSeedA,
+		},
+		"a key the backup doesn't hold": {
+			moves: rekeyMoves, remove: []string{hookstest.TmuxEraSeedB, hookstest.TmuxEraSeedC}, want: hooks.ErrUnaccountedKeys, naming: hookstest.TmuxEraSeedC,
 		},
 		"a backup that doesn't parse": {
 			backup: "{not json", moves: rekeyMoves, want: hooks.ErrMalformed,
@@ -208,6 +211,9 @@ func TestRekeyFrom(t *testing.T) {
 			err := store.RekeyFrom(backup, refused.moves, refused.remove, hooks.ViaCLI)
 			if err == nil || refused.want != nil && !errors.Is(err, refused.want) {
 				t.Fatalf("RekeyFrom = %v, want a refusal (%v)", err, refused.want)
+			}
+			if refused.naming != "" && !strings.Contains(err.Error(), fmt.Sprintf("%q", refused.naming)) {
+				t.Errorf("RekeyFrom = %v, want it naming %q", err, refused.naming)
 			}
 			hookstest.AssertHooksFileUnchanged(t, path, before, "changed by a refused rekey")
 			assertRekeyWarn(t, sink, err, false)

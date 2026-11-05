@@ -7,32 +7,34 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
 )
 
-// ErrKeyHeld refuses a rekey moving a key onto one the backup holds and the
-// rewrite keeps: the move would lose that key's hooks.
-var ErrKeyHeld = errors.New("the backup holds that key, and the rewrite keeps it")
+// ErrUnaccountedKeys refuses a rekey that doesn't account for every key: one
+// the backup holds that it neither moves nor removes, which would be written
+// back unchanged, or one it names that the backup doesn't hold.
+var ErrUnaccountedKeys = errors.New("the rekey doesn't account for every key")
 
 // errNoBackup is a rekey with no backup to write hooks.json from.
 var errNoBackup = errors.New("no backup of hooks.json")
 
-// RekeyFrom writes hooks.json as backup, the copy of it portal migrate keeps,
-// rewritten by migrate's plan: every hook of each key of moves under the key
-// it maps to, each event's value carried as backup holds it, byte for byte,
-// and each key of remove gone. A key both removed and moved onto holds the
-// moved hooks. It never reads hooks.json, so the same backup and plan always
-// write the same file, in one write under the mutation hold. No backup, as
-// when there was never a hooks.json, writes nothing. A key backup doesn't hold
-// is passed over. Two keys moved onto one, a key both moved and removed, a
-// move onto a key backup holds that the rewrite keeps (ErrKeyHeld), a backup
-// that can't be read (ErrStoreRead) or doesn't parse (ErrMalformed), and a
-// lock not granted each refuse it, writing nothing. It logs each key it moved
-// or removed at DEBUG and one INFO summary, or one WARN saying why it wrote
-// nothing.
+// RekeyFrom writes hooks.json from backup, the copy of it portal migrate
+// keeps, by migrate's plan: every hook of each key of moves under the key it
+// maps to, each event's value carried as backup holds it, byte for byte, and
+// each key of remove gone. Every key backup holds must be moved or removed,
+// and every key moved or removed held, so nothing is carried that the plan
+// didn't name. A key removed and moved onto holds the moved hooks. It never
+// reads hooks.json, so the same backup and plan always write the same file, in
+// one write under the mutation hold. No backup, as when there was never a
+// hooks.json, writes nothing. A rekey not accounting for every key
+// (ErrUnaccountedKeys), two keys moved onto one, a key both moved and removed,
+// a backup that can't be read (ErrStoreRead) or doesn't parse (ErrMalformed),
+// and a lock not granted each refuse it, writing nothing. It logs each key at
+// DEBUG and one INFO summary, or one WARN saying why it wrote nothing.
 func (s *Store) RekeyFrom(backup string, moves map[string]string, remove []string, via Via) error {
 	start := time.Now()
 	entries, err := s.rekeyFrom(backup, moves, remove, via)
@@ -63,6 +65,9 @@ func (s *Store) rekeyFrom(backup string, moves map[string]string, remove []strin
 	if err != nil {
 		return 0, err
 	}
+	if err := accountedFor(held, slices.Concat(from, remove)); err != nil {
+		return 0, err
+	}
 
 	lock, err := s.acquireMutationLock()
 	if err != nil {
@@ -70,22 +75,22 @@ func (s *Store) rekeyFrom(backup string, moves map[string]string, remove []strin
 	}
 	defer func() { _ = lock.Close() }()
 
-	r, err := rekey(held, moves, from, remove)
-	if err != nil {
+	file := make(Snapshot, len(from))
+	for _, key := range from {
+		file[moves[key]] = held[key]
+	}
+	if err := s.save(file); err != nil {
 		return 0, err
 	}
-	if err := s.save(r.file); err != nil {
-		return 0, err
-	}
-	for _, key := range r.moved {
+	for _, key := range from {
 		logger.Debug("rekey-move", "op", "rekey-move", "hook_key", key, "value", moves[key], "via", via.String())
 	}
 	// The removed commands are the value, so they can be copied back out of
 	// the log.
-	for _, key := range r.removed {
+	for _, key := range remove {
 		logger.Debug("rekey-rm", "op", "rekey-rm", "hook_key", key, "value", removedValue(held[key]), "via", via.String())
 	}
-	return len(r.moved) + len(r.removed), nil
+	return len(from) + len(remove), nil
 }
 
 // oneKeyEach refuses a rekey that would lose a key's hooks: two keys of moves,
@@ -106,6 +111,27 @@ func oneKeyEach(moves map[string]string, from, remove []string) error {
 	return nil
 }
 
+// accountedFor refuses named, the keys a rekey moves or removes, unless they
+// are the keys held.
+func accountedFor(held Snapshot, named []string) error {
+	unnamed := slices.DeleteFunc(slices.Sorted(maps.Keys(held)), func(key string) bool { return slices.Contains(named, key) })
+	unheld := slices.DeleteFunc(slices.Sorted(slices.Values(named)), func(key string) bool {
+		_, ok := held[key]
+		return ok
+	})
+	var why []string
+	if len(unnamed) > 0 {
+		why = append(why, fmt.Sprintf("the backup holds %q, which it neither moves nor removes", unnamed))
+	}
+	if len(unheld) > 0 {
+		why = append(why, fmt.Sprintf("it names %q, which the backup doesn't hold", unheld))
+	}
+	if why == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrUnaccountedKeys, strings.Join(why, "; "))
+}
+
 // readBackup decodes the backup at path through the codec, so each value keeps
 // its bytes.
 func readBackup(path string) (Snapshot, error) {
@@ -120,40 +146,5 @@ func readBackup(path string) (Snapshot, error) {
 	if err := json.Unmarshal(data, &held); err != nil {
 		return nil, fmt.Errorf("%w: the backup at %s: %w", ErrMalformed, path, err)
 	}
-	if held == nil {
-		held = Snapshot{}
-	}
 	return held, nil
-}
-
-// rekeyed is a rekey's file, and the keys it moved and removed.
-type rekeyed struct {
-	file           Snapshot
-	moved, removed []string
-}
-
-// rekey is held with each key of from that it holds moved to the key moves
-// maps it to, and each key of remove it holds gone.
-func rekey(held Snapshot, moves map[string]string, from, remove []string) (rekeyed, error) {
-	absent := func(key string) bool {
-		_, ok := held[key]
-		return !ok
-	}
-	r := rekeyed{
-		file:    maps.Clone(held),
-		moved:   slices.DeleteFunc(from, func(key string) bool { return absent(key) || moves[key] == key }),
-		removed: slices.DeleteFunc(remove, absent),
-	}
-	for _, key := range slices.Concat(r.moved, r.removed) {
-		delete(r.file, key)
-	}
-	for _, key := range r.moved {
-		if _, kept := r.file[moves[key]]; kept {
-			return rekeyed{}, fmt.Errorf("move %q to %q: %w", key, moves[key], ErrKeyHeld)
-		}
-	}
-	for _, key := range r.moved {
-		r.file[moves[key]] = held[key]
-	}
-	return r, nil
 }

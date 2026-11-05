@@ -7,27 +7,20 @@ import (
 	"github.com/leeovery/portal/internal/nanoid"
 )
 
-// hookIndex finds the session a token key moves to, and judges what any other
-// key was.
+// hookIndex finds the session a token key moves to: byToken is the position
+// of the first pane carrying each token.
 type hookIndex struct {
-	// byToken is the position of the first pane carrying each token.
 	byToken map[string]int
-	// saved holds the name of every tmux session version 1 saved.
-	saved map[string]bool
 }
 
-// newHookIndex indexes legacy's sessions and panes, the panes migrating in the
-// order of the sessions made of them.
-func newHookIndex(legacy Legacy, panes []savedPane) hookIndex {
-	x := hookIndex{byToken: map[string]int{}, saved: map[string]bool{}}
+// newHookIndex indexes panes, in the order of the sessions made of them.
+func newHookIndex(panes []savedPane) hookIndex {
+	x := hookIndex{byToken: map[string]int{}}
 	// Backward, so the first pane carrying a token is the one left holding it.
 	for i, p := range slices.Backward(panes) {
 		if p.pane.PortalPaneID != "" {
 			x.byToken[p.pane.PortalPaneID] = i
 		}
-	}
-	for _, s := range legacy.index.Sessions {
-		x.saved[s.Name] = true
 	}
 	return x
 }
@@ -43,36 +36,32 @@ func (x hookIndex) hooks(keys []string, sessions []Session) ([]HookMove, []HookR
 			moves = append(moves, HookMove{From: key, To: sessions[i].Name})
 			continue
 		}
-		removals = append(removals, HookRemoval{Key: key, Kind: x.kind(key)})
+		removals = append(removals, HookRemoval{Key: key, Kind: kindOf(key)})
 	}
 	return moves, removals
 }
 
-// kind is what key, carried by no saved pane, was. A pane address whose owner
-// is token-shaped is a session token's, unless a saved session has that name.
-func (x hookIndex) kind(key string) HookKeyKind {
-	owner, isAddress := paneAddressOwner(key)
+// kindOf is what key, carried by no saved pane, was.
+func kindOf(key string) HookKeyKind {
 	switch {
 	case nanoid.IsTokenShaped(key):
 		return UnsavedTokenKey
 	case isPaneID(key):
 		return PaneIDKey
-	case !isAddress:
-		return OtherKey
-	case nanoid.IsTokenShaped(owner) && !x.saved[owner]:
-		return PortalIDKey
+	case isPaneAddress(key):
+		return PaneAddressKey
 	}
-	return PaneAddressKey
+	return OtherKey
 }
 
-// paneAddressOwner is the owner of key when it is <owner>:<window>.<pane>.
-func paneAddressOwner(key string) (string, bool) {
+// isPaneAddress reports whether key is <owner>:<window>.<pane>.
+func isPaneAddress(key string) bool {
 	i := strings.LastIndexByte(key, ':')
 	if i < 1 {
-		return "", false
+		return false
 	}
 	window, pane, ok := strings.Cut(key[i+1:], ".")
-	return key[:i], ok && isNumber(window) && isNumber(pane)
+	return ok && isNumber(window) && isNumber(pane)
 }
 
 // isPaneID reports whether key is tmux's %N.

@@ -130,6 +130,18 @@ func (idx *Index) Owe(name string) bool {
 	return i >= 0 && idx.owe(i, "")
 }
 
+// Create makes Update write an index read from no sessions.json, holding
+// whatever entries it holds then, none if need be. An index read from a file
+// it leaves as it is. It is portal migrate's: the state dir it builds holds an
+// index even when no session migrates.
+func (idx *Index) Create() {
+	if !idx.absent {
+		return
+	}
+	idx.absent = false
+	idx.changes = append(idx.changes, change{op: "create"})
+}
+
 // ErrNameHeld refuses an entry Migrated would make under a name another entry
 // holds: portal migrate chose the name as no entry's.
 var ErrNameHeld = errors.New("another entry holds the name")

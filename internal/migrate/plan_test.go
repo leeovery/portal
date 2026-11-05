@@ -89,11 +89,27 @@ func TestNewPlan_Names(t *testing.T) {
 		}
 	})
 
+	t.Run("a generated name is reserved, so a mint drawing the same nanoid again draws another", func(t *testing.T) {
+		dir := legacyDir(t, []v1Session{session("star*", pane(0, orchard)), session("bad/slash", pane(0, orchard))}, nil)
+		n := naming(t)
+		draws := []string{"Same01", "Same01", "Next02"}
+		n.Mint = func() (string, error) {
+			id := draws[0]
+			draws = draws[1:]
+			return id, nil
+		}
+
+		if got := namesOf(planOf(t, dir, nil, n)); !slices.Equal(got, []string{"orchard-pipeline-Same01", "orchard-pipeline-Next02"}) {
+			t.Errorf("names = %v, want two names", got)
+		}
+	})
+
 	t.Run("a generated name's project is the last part of the pane's dir, as a mint's", func(t *testing.T) {
 		long := codeDir + strings.Repeat("p", 120)
 		for cwd, want := range map[string]string{
 			orchard + "/web/src":       "orchard-pipeline-Gen001",
 			"/tmp/scratch":             "scratch-Gen001",
+			goneDir + "old-project":    "old-project-Gen001",
 			codeDir + "My Project/doc": "My Project-Gen001",
 			codeDir + "_hidden":        "hidden-Gen001",
 			"":                         "session-Gen001",
@@ -256,12 +272,15 @@ func TestNewPlan_Panes(t *testing.T) {
 
 func TestNewPlan_DirAndCwd(t *testing.T) {
 	t.Run("the dir is the pane's grouping dir, else its cwd; the cwd is the pane's", func(t *testing.T) {
-		plan := planSessions(t, session("lantern", pane(0, orchard), pane(1, orchard+"/web/src"), pane(2, "/tmp/scratch"), pane(3, "")))
+		plan := planSessions(t, session("lantern",
+			pane(0, orchard), pane(1, orchard+"/web/src"), pane(2, "/tmp/scratch"), pane(3, "/home/user/notes"), pane(4, goneDir+"old"), pane(5, "")))
 
 		for i, want := range []struct{ dir, cwd string }{
 			{orchard, orchard},
 			{orchard, orchard + "/web/src"},
-			{"/tmp/scratch", "/tmp/scratch"},
+			{"/private/tmp/scratch", "/tmp/scratch"},
+			{"/home/user/notes", "/home/user/notes"},
+			{goneDir + "old", goneDir + "old"},
 			{"", ""},
 		} {
 			if got := plan.Sessions[i]; got.Dir != want.dir || got.Cwd != want.cwd {
@@ -302,7 +321,6 @@ func TestNewPlan_Hooks(t *testing.T) {
 		sessionOf("tidepool · flaky test", window(0, pane(0, orchard)), window(1, pane(0, orchard), pane(2, orchard).token("tokTd2"))),
 		session("orchard", pane(0, orchard).token("tokDup")),
 		session("quarry", pane(0, orchard).token("tokDup")),
-		session("Ab3dE6", pane(0, orchard)),
 	}
 	dir := legacyDir(t, sessions, nil)
 	keys := []string{
@@ -311,8 +329,7 @@ func TestNewPlan_Hooks(t *testing.T) {
 		"lantern:0.1",                                   // pane addresses: of a pane carrying a token,
 		"tidepool · flaky test:1.0",                     // of one carrying none,
 		"gone:0.0",                                      // and of no saved pane
-		"Ab3dE6:0.0",                                    // a saved session's address, its name token-shaped
-		"Zq8xW4:1.2",                                    // a session token's address
+		"Zq8xW4:1.2",                                    // a session token's
 		"%12",                                           // a tmux pane id
 		"seed-other", "", "a:b.c", "a:1.", ":0.0", "%x", // anything else
 	}
@@ -331,8 +348,7 @@ func TestNewPlan_Hooks(t *testing.T) {
 		{Key: "%12", Kind: migrate.PaneIDKey},
 		{Key: "%x", Kind: migrate.OtherKey},
 		{Key: ":0.0", Kind: migrate.OtherKey},
-		{Key: "Ab3dE6:0.0", Kind: migrate.PaneAddressKey},
-		{Key: "Zq8xW4:1.2", Kind: migrate.PortalIDKey},
+		{Key: "Zq8xW4:1.2", Kind: migrate.PaneAddressKey},
 		{Key: "a:1.", Kind: migrate.OtherKey},
 		{Key: "a:b.c", Kind: migrate.OtherKey},
 		{Key: "gone:0.0", Kind: migrate.PaneAddressKey},

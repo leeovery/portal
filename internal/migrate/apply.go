@@ -19,8 +19,9 @@ const via = "cli"
 // beside the tmux version's, made 0700 with its scrollback dir if absent:
 // first each scrollback file, copied from the tmux version's state dir through
 // a root on it, so no read leaves it; then sessions.json's entries, owed a
-// restore and recording no creation. A copy that fails writes no entry, so no
-// entry names a file not copied. Each file is written atomically.
+// restore and recording no creation, in a sessions.json written even when no
+// session migrates. A copy that fails writes no sessions.json, so no entry
+// names a file not copied. Each file is written atomically.
 func Build(plan Plan, dir string) error {
 	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
 		return fmt.Errorf("make the state dir: %w", err)
@@ -29,6 +30,7 @@ func Build(plan Plan, dir string) error {
 		return err
 	}
 	if _, err := sessionindex.Update(dir, via, func(idx *sessionindex.Index) error {
+		idx.Create()
 		for _, s := range plan.Sessions {
 			if err := idx.Migrated(s.entry()); err != nil {
 				return err
@@ -44,7 +46,10 @@ func Build(plan Plan, dir string) error {
 // RewriteHooks writes hooks.json through store from backup, the copy of it
 // migrate keeps: each key the plan moves under its session's name, each it
 // removes gone, every value as backup holds it, in one write. It never reads
-// hooks.json, so every run writes the same file. No backup writes nothing.
+// hooks.json, so every run writes the same file. No backup writes nothing. A
+// plan not naming every key backup holds, or naming one it doesn't, was made
+// from other keys: RewriteHooks refuses it with hooks.ErrUnaccountedKeys,
+// writing nothing.
 func RewriteHooks(plan Plan, backup string, store *hooks.Store) error {
 	if err := store.RekeyFrom(backup, plan.moves(), plan.removedKeys(), hooks.ViaCLI); err != nil {
 		return fmt.Errorf("rewrite hooks.json: %w", err)

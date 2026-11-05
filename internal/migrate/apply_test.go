@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/migrate"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
@@ -205,6 +208,24 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	for what, sessions := range map[string][]v1Session{
+		"no session":            nil,
+		"only skipped sessions": {{Name: "windowless"}, sessionOf("paneless", window(0))},
+	} {
+		t.Run("a plan of "+what+" writes a sessions.json holding none", func(t *testing.T) {
+			plan := planOf(t, legacyDir(t, sessions, nil), nil, naming(t))
+			dir := filepath.Join(t.TempDir(), "state")
+
+			if err := migrate.Build(plan, dir); err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			idx, err := sessionindex.Decode(readBytes(t, sessionindex.Path(dir)))
+			if err != nil || idx.Version != sessionindex.SchemaVersion || idx.Len() != 0 {
+				t.Errorf("sessions.json = %+v, %v; want a version 2 index of no entries", idx, err)
+			}
+		})
+	}
+
 	t.Run("an entry under a planned name that isn't migrate's is refused, its sessions.json unchanged", func(t *testing.T) {
 		m := newMigrating(t)
 		if _, err := sessionindex.Update(mkdir(t, m.dir), "cli", func(idx *sessionindex.Index) error {
@@ -259,7 +280,7 @@ func TestRewriteHooks(t *testing.T) {
 		hookstest.AssertHooksFileUnchanged(t, m.hooksPath, before, "written with no backup")
 	})
 
-	t.Run("a backup it can't read fails, writing nothing", func(t *testing.T) {
+	t.Run("a malformed backup fails, writing nothing", func(t *testing.T) {
 		m := newMigrating(t)
 		writeFile(t, m.backup, `{"tokLan": `)
 		before := readBytes(t, m.hooksPath)
@@ -269,6 +290,27 @@ func TestRewriteHooks(t *testing.T) {
 		}
 		hookstest.AssertHooksFileUnchanged(t, m.hooksPath, before, "written from a malformed backup")
 	})
+
+	for what, backup := range map[string]string{
+		"holding a key the plan doesn't name": strings.Replace(migratingBackup, "{\n", "{\n  \"tokNew\": {\"on-resume\": \"set since the plan\"},\n", 1),
+		"lacking a key the plan names":        strings.Replace(migratingBackup, ",\n  \"tokGon\": {\"on-resume\": \"claude --resume gone\"}", "", 1),
+	} {
+		t.Run("a backup "+what+" is refused, writing nothing, with one WARN", func(t *testing.T) {
+			m := newMigrating(t)
+			if backup == migratingBackup {
+				t.Fatal("the backup is unchanged")
+			}
+			writeFile(t, m.backup, backup)
+			before := readBytes(t, m.hooksPath)
+			sink := logtest.Install(t)
+
+			if err := migrate.RewriteHooks(m.plan, m.backup, m.store); !errors.Is(err, hooks.ErrUnaccountedKeys) {
+				t.Fatalf("RewriteHooks = %v, want ErrUnaccountedKeys", err)
+			}
+			hookstest.AssertHooksFileUnchanged(t, m.hooksPath, before, "written for keys the plan didn't account for")
+			sink.Records().AtOrAboveLevel(slog.LevelWarn).Matching("hooks", "rekey").Only(t, "rekey WARN")
+		})
+	}
 }
 
 func readIndex(t *testing.T, dir string) *sessionindex.Index {

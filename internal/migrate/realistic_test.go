@@ -88,7 +88,7 @@ var realisticTaken = []string{"quarry-Pm4sT1", "dotfiles-Aa1Bb2"}
 var realisticUnmapped = map[string]migrate.HookKeyKind{
 	"Yy9Ww8":             migrate.UnsavedTokenKey,
 	"retired-Qa1sW2:0.0": migrate.PaneAddressKey,
-	"Qa1sW2:0.0":         migrate.PortalIDKey,
+	"Qa1sW2:0.0":         migrate.PaneAddressKey,
 	"%12":                migrate.PaneIDKey,
 }
 
@@ -250,7 +250,7 @@ func TestRealisticFixture(t *testing.T) {
 		for _, fixture := range realisticSessions {
 			for i := range fixture.panes {
 				got := byAddress[fmt.Sprintf("%s:0.%d", fixture.tmux, i)]
-				if want := fixtureDir(fixture.project); got.Dir != want || got.Cwd != fixtureCwd(fixture.project, i) {
+				if want := canonical(fixtureDir(fixture.project)); got.Dir != want || got.Cwd != fixtureCwd(fixture.project, i) {
 					t.Errorf("%s: dir %q, cwd %q; want %q, %q", got.Name, got.Dir, got.Cwd, want, fixtureCwd(fixture.project, i))
 				}
 			}

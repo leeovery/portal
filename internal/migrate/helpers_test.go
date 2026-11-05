@@ -139,22 +139,38 @@ func mints() nanoid.Generator {
 // codeDir holds the fixtures' git repositories, one per directory below it.
 const codeDir = "/home/user/code/"
 
-// repoRoot stands in for session.GroupingDir: a working directory below
-// codeDir groups under the repository holding it, and any other under none.
-func repoRoot(cwd string) (string, bool) {
-	rest, ok := strings.CutPrefix(cwd, codeDir)
-	if !ok || rest == "" {
+// goneDir holds working directories gone from disk.
+const goneDir = "/home/user/gone/"
+
+// groupingDir stands in for session.GroupingDir: a working directory below
+// codeDir groups under the repository holding it; an empty one, and one below
+// goneDir, under none; and any other, outside any repository, under its
+// canonical path.
+func groupingDir(cwd string) (string, bool) {
+	if strings.TrimSpace(cwd) == "" || strings.HasPrefix(cwd, goneDir) {
 		return "", false
 	}
-	repo, _, _ := strings.Cut(rest, "/")
-	return codeDir + repo, true
+	if rest, ok := strings.CutPrefix(cwd, codeDir); ok && rest != "" {
+		repo, _, _ := strings.Cut(rest, "/")
+		return codeDir + repo, true
+	}
+	return canonical(cwd), true
+}
+
+// canonical is path as project.CanonicalDirKey gives it on macOS, for the
+// paths the fixtures use: /tmp is a link to /private/tmp.
+func canonical(path string) string {
+	if rest, ok := strings.CutPrefix(path, "/tmp/"); ok {
+		return "/private/tmp/" + rest
+	}
+	return filepath.Clean(path)
 }
 
 // naming judges names as the zmx backend does over zmxDir, with taken held
-// already, minting from mints, grouping by repoRoot.
+// already, minting from mints, grouping by groupingDir.
 func naming(t *testing.T, taken ...string) migrate.Naming {
 	t.Helper()
-	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Mint: mints(), GroupingDir: repoRoot}
+	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Mint: mints(), GroupingDir: groupingDir}
 }
 
 // planOf plans migrating the tmux version's state dir dir with hookKeys under

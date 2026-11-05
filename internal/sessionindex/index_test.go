@@ -301,6 +301,68 @@ func TestMigrated(t *testing.T) {
 	})
 }
 
+func TestCreate(t *testing.T) {
+	create := func(idx *sessionindex.Index) error {
+		idx.Create()
+		return nil
+	}
+
+	t.Run("an index read from no file is written, holding no entry", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := sessionindex.Update(dir, "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		idx, err := sessionindex.Decode(readFile(t, dir))
+		if err != nil || idx.Version != sessionindex.SchemaVersion || idx.Len() != 0 {
+			t.Errorf("sessions.json = %+v, %v; want a version 2 index of no entries", idx, err)
+		}
+	})
+
+	t.Run("it writes the entries the same update makes", func(t *testing.T) {
+		dir := t.TempDir()
+		sink := logtest.Install(t)
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Create()
+			return idx.Migrated(sessionindex.Entry{Name: "api", Dir: "/code/api"})
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		idx, err := sessionindex.Decode(readFile(t, dir))
+		if got := idx.Entries(); err != nil || len(got) != 1 || got[0].Name != "api" {
+			t.Errorf("entries = %+v, %v; want api's", got, err)
+		}
+		sink.Records().Matching("sessions", "migrated").Only(t, "migrated")
+	})
+
+	t.Run("an index read from a file is left as it is", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir)
+		before := readFile(t, dir)
+
+		if _, err := sessionindex.Update(dir, "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if after := readFile(t, dir); string(after) != string(before) {
+			t.Errorf("sessions.json rewritten:\n%s\nwant untouched:\n%s", after, before)
+		}
+	})
+
+	t.Run("it logs one INFO naming no session", func(t *testing.T) {
+		sink := logtest.Install(t)
+		if _, err := sessionindex.Update(t.TempDir(), "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		rec := sink.Records().Matching("sessions", "create").Only(t, "create")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "create", Component: "sessions", Op: "create", Via: "cli"})
+		if rec.HasAttr("session") {
+			t.Errorf("create carries a session: %+v", rec.Attrs)
+		}
+	})
+}
+
 func labelOf(idx sessionindex.Index, name string) string {
 	e, _ := idx.Lookup(name)
 	return e.Label

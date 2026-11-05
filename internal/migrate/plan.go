@@ -71,12 +71,10 @@ type HookMove struct {
 type HookKeyKind int
 
 const (
-	// PaneAddressKey is <session>:<window>.<pane>, the key before pane
-	// tokens.
+	// PaneAddressKey is <session>:<window>.<pane>, or for a while
+	// <@portal-id>:<window>.<pane>, its session's token in place of its name:
+	// the keys by pane position from before pane tokens.
 	PaneAddressKey HookKeyKind = iota + 1
-	// PortalIDKey is <@portal-id>:<window>.<pane>, its session's token in
-	// place of its name, the key for a while before pane tokens.
-	PortalIDKey
 	// PaneIDKey is %N, tmux's own pane id, the earliest key.
 	PaneIDKey
 	// UnsavedTokenKey is a pane token no saved pane carries.
@@ -89,8 +87,6 @@ func (k HookKeyKind) String() string {
 	switch k {
 	case PaneAddressKey:
 		return "pane address"
-	case PortalIDKey:
-		return "session token and pane address"
 	case PaneIDKey:
 		return "tmux pane id"
 	case UnsavedTokenKey:
@@ -218,7 +214,7 @@ func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
 			panes = append(panes, p.savedPane)
 		}
 	}
-	plan.Moves, plan.Removals = newHookIndex(legacy, panes).hooks(hookKeys, plan.Sessions)
+	plan.Moves, plan.Removals = newHookIndex(panes).hooks(hookKeys, plan.Sessions)
 	return plan, nil
 }
 

@@ -3,6 +3,7 @@ package migrate_test
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,18 @@ func TestReadLegacy_Refusals(t *testing.T) {
 	t.Run("it refuses a state dir holding no sessions.json, as a missing file", func(t *testing.T) {
 		if _, err := migrate.ReadLegacy(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("ReadLegacy = %v, want an error matching fs.ErrNotExist", err)
+		}
+	})
+
+	t.Run("it refuses a sessions.json linking out of the state dir", func(t *testing.T) {
+		outside := legacyDir(t, []v1Session{session("lantern", pane(0, "/home/user"))}, nil)
+		dir := t.TempDir()
+		if err := os.Symlink(filepath.Join(outside, "sessions.json"), filepath.Join(dir, "sessions.json")); err != nil {
+			t.Fatalf("link sessions.json out: %v", err)
+		}
+
+		if _, err := migrate.ReadLegacy(dir); err == nil {
+			t.Error("ReadLegacy read a sessions.json outside the state dir")
 		}
 	})
 
