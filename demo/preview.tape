@@ -36,4 +36,6 @@ Sleep 1s
 Hide
 Sleep 500ms
 Escape
+# A beat, past the escape timeout, so the q reads as its own key.
+Sleep 200ms
 Type "q"

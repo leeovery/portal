@@ -456,8 +456,7 @@ func (m Model) SelectedSessionCount() int {
 }
 
 func (m *Model) SetSessionListFilter(text string) {
-	m.sessionList.SetFilterText(text)
-	m.sessionList.SetFilterState(list.FilterApplied)
+	filterList(&m.sessionList, text, list.FilterApplied)
 }
 
 func (m Model) ProjectListFilterValue() string {
@@ -481,8 +480,7 @@ func (m Model) ProjectListVisibleItems() []list.Item {
 }
 
 func (m *Model) SetProjectListFilter(text string) {
-	m.projectList.SetFilterText(text)
-	m.projectList.SetFilterState(list.FilterApplied)
+	filterList(&m.projectList, text, list.FilterApplied)
 }
 
 func (m Model) ActivePage() page {
@@ -1204,6 +1202,31 @@ func sizeList(l *list.Model, width, height int) {
 	l.SetSize(width, height)
 }
 
+// syncPagination re-runs l's pagination at the size it has, so it follows
+// the items l now shows, as a fresh sizeList's would. bubbles/list counts a
+// change of items against the page count it had before, and takes a
+// filter's matches without counting them at all.
+func syncPagination(l *list.Model) {
+	sizeList(l, l.Width(), l.Height())
+}
+
+// filterList filters l to text in the state given, its pagination following
+// the matches.
+func filterList(l *list.Model, text string, state list.FilterState) {
+	l.SetFilterText(text)
+	l.SetFilterState(state)
+	syncPagination(l)
+}
+
+// updateList hands msg to l, its pagination following the items it shows
+// after: a filter keystroke, a filter's matches or a cleared filter.
+func updateList(l *list.Model, msg tea.Msg) tea.Cmd {
+	updated, cmd := l.Update(msg)
+	*l = updated
+	syncPagination(l)
+	return cmd
+}
+
 // Owns the Sessions height budget: header, footer and any active notice band are
 // reserved here as counted rows, so the composed view never overflows termH.
 // Each reserve resolves against the same width as this size-apply.
@@ -1458,8 +1481,7 @@ func (m *Model) applySearchLanding() {
 	// Setting the text is what runs the filter pass, so it must precede the state
 	// flip: the list serves its filtered set in every state but Unfiltered, and an
 	// unpopulated one would hide every session.
-	m.sessionList.SetFilterText(m.searchTerm)
-	m.sessionList.SetFilterState(state)
+	filterList(&m.sessionList, m.searchTerm, state)
 	m.ensureSessionRowSelected()
 }
 
@@ -1468,11 +1490,9 @@ func (m *Model) applyInitialFilter() {
 		return
 	}
 	if m.activePage == PageSessions && !m.commandPending {
-		m.sessionList.SetFilterText(m.initialFilter)
-		m.sessionList.SetFilterState(list.FilterApplied)
+		filterList(&m.sessionList, m.initialFilter, list.FilterApplied)
 	} else {
-		m.projectList.SetFilterText(m.initialFilter)
-		m.projectList.SetFilterState(list.FilterApplied)
+		filterList(&m.projectList, m.initialFilter, list.FilterApplied)
 	}
 	m.initialFilter = ""
 }
@@ -2233,9 +2253,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.projectList, cmd = m.projectList.Update(msg)
-	return m, cmd
+	return m, updateList(&m.projectList, msg)
 }
 
 func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
@@ -2908,8 +2926,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.sessionList, cmd = m.sessionList.Update(msg)
+	cmd := updateList(&m.sessionList, msg)
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		m.skipHeaderRow(keyMsg)
 	}

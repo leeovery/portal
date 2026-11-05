@@ -73,7 +73,15 @@ type swept struct {
 	// resume surface is a card drawn into a pane, with none of them.
 	picker bool
 	tall   map[int]reading
+	// fresh are, of a drawing sweptFresh names, its draws built at each size
+	// rather than resized to it.
+	fresh map[Size]reading
 }
+
+// sweptFresh are the drawings whose list is filtered as they're built, read
+// built at each size as well as resized to it: a filter's matches are paged
+// on a path a resize doesn't take.
+var sweptFresh = []string{"sessions-filtering", "sessions-search-results", "sessions-search-home"}
 
 // reading is a draw as the rules read it: how it misfits its terminal, ""
 // where it fits; its rows as plain text; and its cursor's row, as cursorOf
@@ -123,9 +131,18 @@ func sweptDrawing(name string, th theme.Theme) (swept, error) {
 	if err != nil {
 		return swept{}, err
 	}
+	built, err := builderOf(&d, th)
+	if err != nil {
+		return swept{}, err
+	}
 	for _, at := range d.sizes {
 		if d.at[at], err = readingOf(draw, at, th, d.names); err != nil {
 			return swept{}, err
+		}
+		if built != nil {
+			if d.fresh[at], err = readingOf(built, at, th, d.names); err != nil {
+				return swept{}, err
+			}
 		}
 		if _, drawn := d.tall[at.Width]; d.picker && !drawn {
 			if d.tall[at.Width], err = readingOf(draw, Size{Width: at.Width, Height: tallest}, th, d.names); err != nil {
@@ -161,6 +178,20 @@ func drawnAt(f *Fixture, th theme.Theme) func(w, h int) string {
 		sized, _ := captured.Update(tea.WindowSizeMsg{Width: w, Height: h})
 		return sized.View().Content
 	}
+}
+
+// builderOf is the draw of a drawing sweptFresh names built at a size, nil
+// for any other.
+func builderOf(d *swept, th theme.Theme) (func(w, h int) string, error) {
+	if !slices.Contains(sweptFresh, d.name) {
+		return nil, nil
+	}
+	f, err := FixtureByName(d.name)
+	if err != nil {
+		return nil, err
+	}
+	d.fresh = make(map[Size]reading)
+	return func(w, h int) string { return f.modelAt(f.Deps(th), w, h).View().Content }, nil
 }
 
 // surfaceAt is the resume surface drawn by its renderer at the size given,
@@ -353,6 +384,104 @@ func TestNoPageDrawsOnItsChromeAtAnySweptHeight(t *testing.T) {
 		}
 		return ""
 	})
+}
+
+// R6: every page of the picker whose list fits on one page as tall as
+// everything fits draws its pagination dots, at every height it's swept at
+// from chromeFloor up, exactly when its items outgrow the rows its list has
+// there: resized, and for the drawings sweptFresh names built at the size
+// too.
+func TestEveryListPagesExactlyWhenItsItemsOutgrowItsRows(t *testing.T) {
+	judged := 0
+	sweepRule(t, rulePaging, func(d swept, at Size) string {
+		if !d.picker || at.Height < chromeFloor {
+			return ""
+		}
+		tall := d.tall[at.Width].rows
+		for _, draw := range []struct {
+			how  string
+			read map[Size]reading
+		}{{"resized", d.at}, {"built", d.fresh}} {
+			r, ok := draw.read[at]
+			if !ok {
+				continue
+			}
+			problem, read := pagingMisdrawn(r.rows, tall, at.Height, d.names)
+			if read {
+				judged++
+			}
+			if problem != "" {
+				return draw.how + ", " + problem
+			}
+		}
+		return ""
+	})
+	if judged == 0 {
+		t.Error("no drawing has a list the rule can read")
+	}
+}
+
+// pagingMisdrawn is how a page h rows tall, as rows reads it, draws its
+// pagination dots other than exactly when the items the tall draw shows
+// outgrow the rows its list has: the rows from the items' first to the
+// footer's rule, but the one bubbles/list keeps under them. read is whether
+// the page has a list the rule can read: a footer's rule in both draws, and
+// in the tall one a block of rows over the rule showing a known name, with no
+// dots under it.
+func pagingMisdrawn(rows, tall []string, h int, names []string) (problem string, read bool) {
+	tallRule, rule := tallest-2-tui.Vinset, h-2-tui.Vinset
+	if !isFooterRule(pageOf(tall[tallRule])) || !isFooterRule(pageOf(rows[rule])) {
+		return "", false
+	}
+	first, last, ok := itemBlock(tall[:tallRule], names)
+	if !ok || slices.ContainsFunc(tall[first:tallRule], isDotsRow) {
+		return "", false
+	}
+	items, room := last-first+1, rule-1-first
+	if dots := slices.ContainsFunc(rows[first:rule], isDotsRow); dots != (items > room) {
+		return fmt.Sprintf("%d rows of items, %d rows for them, draws dots %t", items, room, dots), true
+	}
+	return "", true
+}
+
+// itemBlock is the first and last of the last run of rows that aren't blank,
+// where one of them shows a known name.
+func itemBlock(rows []string, names []string) (first, last int, ok bool) {
+	last = len(rows) - 1
+	for last >= 0 && pageOf(rows[last]) == "" {
+		last--
+	}
+	if last < 0 {
+		return 0, 0, false
+	}
+	first = last
+	for first > 0 && pageOf(rows[first-1]) != "" {
+		first--
+	}
+	return first, last, slices.ContainsFunc(rows[first:last+1], func(r string) bool { return showsAName(pageOf(r), names) })
+}
+
+// pageOf is the row's text the page beneath the theme panel shows, trimmed:
+// all of it, or what's left of the panel's border.
+func pageOf(row string) string {
+	page, _, _ := strings.Cut(row, "│")
+	return strings.TrimSpace(page)
+}
+
+func isFooterRule(text string) bool {
+	return text != "" && strings.Trim(text, "▔") == ""
+}
+
+// isDotsRow reports whether the row is a list's pagination: dots, or the
+// count bubbles/list draws where they don't fit, as "2/5".
+func isDotsRow(row string) bool {
+	text := pageOf(row)
+	if text != "" && strings.Trim(text, "•") == "" {
+		return true
+	}
+	var page, pages int
+	n, err := fmt.Sscanf(text, "%d/%d", &page, &pages)
+	return err == nil && n == 2 && fmt.Sprintf("%d/%d", page, pages) == text
 }
 
 // R3: every page of the picker with a session or project under its cursor as

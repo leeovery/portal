@@ -564,6 +564,7 @@ func TestTypedKeysAreTimedByTypingSpeed(t *testing.T) {
 		{name: "the command's own speed", src: `Type@300ms "ab"` + "\nType \"c\"", ms: []time.Duration{0, 300, 600}},
 		{name: "a count of presses", src: "Down@120ms 3\nUp", ms: []time.Duration{0, 120, 240, 360}},
 		{name: "a sleep between", src: "Type \"a\"\nSleep 450ms\nType \"b\"", ms: []time.Duration{0, 500}},
+		{name: "a sleep before the program draws", src: "Hide\nType \"x\"\nEnter\nSleep 2s\nWait+Screen /x/\nType \"ab\"", ms: []time.Duration{0, 50}},
 	}
 	for _, tt := range tests {
 		src := tt.src
@@ -615,6 +616,50 @@ func TestTapeKeysAreAsBubbleTeaDecodesThem(t *testing.T) {
 		}
 		if len(tp.keys) != 1 || tp.keys[0].key != want {
 			t.Errorf("%s presses %#v, want %#v", command, tp.keys, want)
+		}
+	}
+}
+
+// keysCrowdingAnEscape are the keys a tape presses no later than the
+// decoder's escape timeout after an Escape: a terminal's reader may take the
+// two as one key, alt and the second, where the parser reads two.
+func keysCrowdingAnEscape(keys []tapeKey) []string {
+	var crowded []string
+	for i := 1; i < len(keys); i++ {
+		escape, k := keys[i-1], keys[i]
+		if escape.key.Code == tea.KeyEscape && k.at-escape.at <= uv.DefaultEscTimeout {
+			crowded = append(crowded, fmt.Sprintf("%s at %s, %s after an Escape", k.key, k.at, k.at-escape.at))
+		}
+	}
+	return crowded
+}
+
+// No tape presses a key within the decoder's escape timeout of an Escape.
+func TestNoTapeKeyFollowsAnEscapeWithinTheEscapeTimeout(t *testing.T) {
+	for _, name := range demoTapeNames(t) {
+		for _, crowded := range keysCrowdingAnEscape(readTape(t, name).keys) {
+			t.Errorf("demo/%s.tape presses %s, within the escape timeout of %s", name, crowded, uv.DefaultEscTimeout)
+		}
+	}
+}
+
+func TestAKeyCrowdingAnEscapeIsCaught(t *testing.T) {
+	const start = "Hide\nType \"x\"\nEnter\nWait+Screen /x/\n"
+	for _, tt := range []struct {
+		name, src string
+		crowded   int
+	}{
+		{name: "a key at the typing speed after it", src: "Escape\nType \"q\"", crowded: 1},
+		{name: "a key at the timeout exactly", src: "Escape@0ms\nSleep 50ms\nType \"q\"", crowded: 1},
+		{name: "a key a beat after it", src: "Escape\nSleep 200ms\nType \"q\"", crowded: 0},
+		{name: "an Escape last", src: "Type \"q\"\nEscape", crowded: 0},
+	} {
+		tp, err := parseTape(tt.name, start+tt.src)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if got := keysCrowdingAnEscape(tp.keys); len(got) != tt.crowded {
+			t.Errorf("%s: caught %q, want %d", tt.name, got, tt.crowded)
 		}
 	}
 }

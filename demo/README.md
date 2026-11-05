@@ -69,7 +69,9 @@ ever written. The preview reads each session's scrollback from the scenario's hi
 shell output, naming no tool and nothing personal.
 
 The picker runs as it does live. `Scenario.Model` builds the world first, then reads the clock, so
-a cue at 2.5 seconds plays 2.5 seconds after the tape's first frame; the picker's own timers, such
+a cue at 2.5 seconds plays 2.5 seconds after the capture tool builds the model. That is a little
+before the program's first screen, which the tape's zero waits for, so a recording's cues land a
+little early against its clock (see the quarter-second rule below). The picker's own timers, such
 as the loading page's minimum time on screen, run in real time beside the cues. The scenario plays
 the same way every time: what it shows is set by its cues and the keys pressed. In the tests the
 same model plays on `testing/synctest`'s virtual clock, so a scenario's seconds pass in no time,
@@ -110,15 +112,19 @@ hands them to `finalize.sh`, which makes the art:
   and the stills at 430, so a high-density screen draws them sharp.
 - **The colours** are the themes' own: nothing is graded.
 
-`demo/out/` is remade each time and never committed: `art/` is.
+`demo/out/` is never committed: `art/` is. `record.sh` removes only the folder of each tape it
+records, so what else `demo/out/` holds stays.
 
 ## The tape test
 
 `go test ./internal/capture` plays every tape in `demo/` as it's recorded. `tape_test.go` parses the
 tapes themselves, so a tape and its test can't drift: a strict subset of vhs's language (comments,
 `Output`, the header's `Set`s, `Hide` and `Show`, `Type`, `Sleep`, the named keys with a count,
-`Shift+Tab`, `Ctrl+<key>` and `Wait+Screen`), anything else refused. The clock starts at the first
-`Wait+Screen`, and each key typed takes the tape's typing speed, 50 ms where it sets none.
+`Shift+Tab`, `Ctrl+<letter>` and `Wait+Screen`), anything else refused. The clock starts at the
+first `Wait+Screen`, so a `Sleep` before it takes no time on the program's clock, and each key typed
+takes the tape's typing speed, 50 ms where it sets none. No key follows an `Escape` within the
+terminal reader's escape timeout (ultraviolet's `DefaultEscTimeout`, 50 ms), where it could be read
+with the `Escape` as one key, alt and the key: the tapes give it a 200 ms beat.
 
 `tapes_test.go` holds each tape, in `held`, to what it launches and what its screen shows at
 checkpoints: text it says, text it no longer says, a golden frame whose text it is, or the built-in

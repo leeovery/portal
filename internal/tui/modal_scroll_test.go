@@ -219,3 +219,17 @@ func borderProblem(view string, h int) string {
 	}
 	return ""
 }
+
+// Resized taller with the help scrolled further than the new room lets it,
+// the help draws at the furthest it now scrolls, and the first ↑ moves it
+// from there.
+func TestTheHelpScrollsUpAtOnceAfterAResizeShortensItsScroll(t *testing.T) {
+	bottom := pressed(t, helpOpenAt(t, shortModalWidth, shortModalHeight), slices.Repeat([]tea.KeyPressMsg{down()}, 30)...)
+	taller := resizedTo(t, bottom, shortModalWidth, shortModalHeight+4)
+	if !strings.Contains(panelBottom(drawn(taller)), panelMoreAbove) {
+		t.Fatalf("resized taller, the help no longer scrolls: nothing to hold\n%s", drawn(taller))
+	}
+	if scrolled := pressed(t, taller, up()); drawn(scrolled) == drawn(taller) {
+		t.Errorf("the first ↑ after the resize doesn't move the help:\n%s", drawn(scrolled))
+	}
+}

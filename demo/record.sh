@@ -29,6 +29,12 @@ if [ ${#names[@]} -eq 0 ]; then
 fi
 
 for name in "${names[@]}"; do
+  case "$name" in
+  */* | .*)
+    echo "a tape's name is its file's in demo/, without .tape; not $name" >&2
+    exit 1
+    ;;
+  esac
   [ -f "demo/$name.tape" ] || {
     echo "no tape demo/$name.tape" >&2
     exit 1
