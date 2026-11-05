@@ -1028,6 +1028,53 @@ func TestRun_HooksChangedSinceBackup(t *testing.T) {
 		})
 	}
 
+	t.Run("a fresh backup made once the old one is moved aside takes no earlier rewrite's digest", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		w.cutShortAfterRewrite()
+		rewritten := readBytes(t, w.hooksFile)
+		writeFile(t, w.hooksFile, `{"tokLan": {"on-resume": "claude --resume lantern"}, "tokNew": {"on-resume": "registered since"}}`)
+		if _, err := w.run(); !errors.Is(err, migrate.ErrHooksChanged) {
+			t.Fatalf("Run = %v; want hooks.json refused", err)
+		}
+		backup := migrate.HooksBackup(w.dir)
+		if err := os.Rename(backup, filepath.Join(w.root, "hooks.json.tmux.aside")); err != nil {
+			t.Fatal(err)
+		}
+		unreadable := filepath.Join(w.dir, lanternScrollback)
+		if err := os.Chmod(unreadable, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.run(); !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("Run = %v; want the fresh run backed up, then stopped at the build", err)
+		}
+		if err := os.Chmod(unreadable, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !present(t, backup) {
+			t.Fatal("the fresh run made no backup")
+		}
+		writeFile(t, w.hooksFile, string(rewritten))
+		before := w.tree()
+
+		if _, err := w.run(); !errors.Is(err, migrate.ErrHooksChanged) {
+			t.Fatalf("Run = %v; want hooks.json refused: it is neither the fresh backup nor a rewrite of it", err)
+		}
+		assertUnchanged(t, w, before, "refused")
+	})
+
+	t.Run("an earlier backup's rewrite record that can't be removed stops the run before it backs up", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		record := migrate.HooksBackup(w.dir) + ".rewrites"
+		writeFile(t, filepath.Join(record, "held"), "a record no remove takes")
+
+		if _, err := w.run(); err == nil {
+			t.Fatal("Run succeeded beside a stale record it couldn't remove")
+		}
+		if present(t, migrate.HooksBackup(w.dir)) {
+			t.Error("a backup was made beside the stale record")
+		}
+	})
+
 	t.Run("hooks.json gone since a run cut short refuses the re-run", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()
 		w.cutShortBeforeRewrite()
@@ -1044,6 +1091,9 @@ func TestRun_HooksChangedSinceBackup(t *testing.T) {
 
 	t.Run("a rewrite whose digest can't be recorded writes no hooks.json", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()
+		// A backup a run cut short kept, so this run makes none and leaves the
+		// record's path as it finds it: a directory, which no write replaces.
+		writeFile(t, migrate.HooksBackup(w.dir), runHooks)
 		if err := os.MkdirAll(migrate.HooksBackup(w.dir)+".rewrites", 0o700); err != nil {
 			t.Fatal(err)
 		}
