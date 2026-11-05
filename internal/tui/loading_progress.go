@@ -112,6 +112,16 @@ func (p LoadingProgress) clone() LoadingProgress {
 	}
 }
 
+// finished is p with every bootstrap step done, as a picker past its
+// bootstrap reads.
+func (p LoadingProgress) finished() LoadingProgress {
+	next := p.clone()
+	for idx := range stepLabelTable {
+		next.completedSteps[idx] = true
+	}
+	return next
+}
+
 func (p LoadingProgress) View() LoadingProgressView {
 	return p.view(0, "")
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -129,8 +130,51 @@ func TestZmxDirOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := o.Claim(); err == nil || errors.As(err, new(*OtherZmxDirError)) {
-			t.Errorf("Claim = %v, want the read's error", err)
+		err := o.Claim()
+		if record, ok := errors.AsType[*ZmxDirRecordError](err); !ok || record.Write || record.Path != state.ZmxDirRecordPath(o.StateDir) {
+			t.Errorf("Claim = %v, want a read error naming the record", err)
+		}
+		if got := zmxDirFatal(err).UserMessage; !strings.HasPrefix(got, "Portal can't read "+state.ZmxDirRecordPath(o.StateDir)+", which records") || !strings.Contains(got, "doesn't decode") {
+			t.Errorf("fatal = %q, want the unreadable record named, with why", got)
+		}
+	})
+
+	t.Run("a record it can't write names the file", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root writes through 0o500 directory permissions")
+		}
+		o := owner(t, t.TempDir())
+		if err := os.Chmod(o.StateDir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(o.StateDir, 0o700) })
+
+		err := o.Claim()
+		if record, ok := errors.AsType[*ZmxDirRecordError](err); !ok || !record.Write || record.Path != state.ZmxDirRecordPath(o.StateDir) {
+			t.Errorf("Claim = %v, want a write error naming the record", err)
+		}
+	})
+
+	// The record keeps the canonical spelling; the dir it names may go, as
+	// /tmp is swept, and a later spelling of it must still match.
+	t.Run("a recorded dir since removed still matches another spelling of it", func(t *testing.T) {
+		if real, err := filepath.EvalSymlinks("/tmp"); err != nil || real != "/private/tmp" {
+			t.Skip("/tmp is not a link to /private/tmp here")
+		}
+		zmxDir, err := os.MkdirTemp("/tmp", "zx-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := owner(t, zmxDir)
+		if err := o.Claim(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(zmxDir); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := (ZmxDirOwner{StateDir: o.StateDir, ZmxDir: zmxDir + "/", Canonical: zmx.CanonicalDir}).Check(); err != nil {
+			t.Errorf("Check of %s/ once gone = %v, want nil", zmxDir, err)
 		}
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"syscall"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -65,8 +66,15 @@ func bindZmx(binary string) (backend.Backend, error) {
 }
 
 // bindZmxAt does no I/O, so binding per call costs nothing. zmx.New refuses a
-// relative or empty directory, which no command can work around.
+// relative or empty directory, which no command can work around. Its Create
+// ends a session an older zmx made through signalProcess, should that zmx's
+// kill fail.
 func bindZmxAt(binary, dir string) (*zmx.Backend, error) {
+	return zmx.New(zmx.Config{Binary: binary, Dir: dir, Signal: func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) }})
+}
+
+// readZmxAt is bindZmxAt signalling nothing, for doctor, which only reads.
+func readZmxAt(binary, dir string) (*zmx.Backend, error) {
 	return zmx.New(zmx.Config{Binary: binary, Dir: dir})
 }
 

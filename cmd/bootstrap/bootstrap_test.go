@@ -376,10 +376,19 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 			calls:   wantAllCalls[:2],
 		},
 		{
-			name:    "a zmx directory record it can't read or write",
-			stage:   func(r *stepRecorder) { r.ZmxDirErr = errBoom },
+			name:    "a zmx directory record it can't read",
+			stage:   func(r *stepRecorder) { r.ZmxDirErr = &ZmxDirRecordError{Path: "/srv/state/zmx-dir", Err: errBoom} },
 			step:    indexCheckZmx,
-			message: "Portal failed to record the zmx directory its state belongs to: boom",
+			message: "Portal can't read /srv/state/zmx-dir, which records the zmx directory its state belongs to: boom. Delete it, and Portal records the directory in use at its next start.",
+			calls:   wantAllCalls[:2],
+		},
+		{
+			name: "a zmx directory record it can't write",
+			stage: func(r *stepRecorder) {
+				r.ZmxDirErr = &ZmxDirRecordError{Path: "/srv/state/zmx-dir", Write: true, Err: errBoom}
+			},
+			step:    indexCheckZmx,
+			message: "Portal failed to record the zmx directory its state belongs to in /srv/state/zmx-dir: boom",
 			calls:   wantAllCalls[:2],
 		},
 		{
@@ -557,8 +566,9 @@ func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
 	})
 
 	// decision 75: the backend's create judges what it made, ending a session
-	// of zmx 0.8.1's with that zmx's kill before it refuses it.
-	t.Run("one the create refuses as zmx 0.8.1's is fatal, End finding it ended, and nothing restored", func(t *testing.T) {
+	// of zmx 0.8.1's with that zmx's kill, or its daemon's proved signal,
+	// before it refuses it, so the pass ends nothing again.
+	t.Run("one the create refuses as zmx 0.8.1's is fatal, nothing ended again, and nothing restored", func(t *testing.T) {
 		r := newRecorder()
 		r.SaverUp = false
 		r.CreateErr = fmt.Errorf("create the saver session: %w; zmx kill ended the session", backend.ErrUnsupportedProtocol)
@@ -568,24 +578,20 @@ func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
 		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
 			t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, olderZmx, indexEnsureSaver)
 		}
-		if !r.called("End") || r.called("EndMade") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
-			t.Errorf("calls = %v, want End's proved signal for one the kill left, not zmx kill again, and no restore and no latch", r.calls)
-		}
-		if !strings.Contains(fatal.Cause.Error(), "Portal ended the saver it made on it") {
-			t.Errorf("cause = %v, want it to say the saver made was ended", fatal.Cause)
+		if r.called("End") || r.called("EndMade") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
+			t.Errorf("calls = %v, want nothing ended after the create's own end, and no restore and no latch", r.calls)
 		}
 	})
 
-	t.Run("one the create refuses and End can't end is left, and the fatal's cause says so", func(t *testing.T) {
+	t.Run("one the create refuses and couldn't end is fatal, its cause the create's saying so", func(t *testing.T) {
 		r := newRecorder()
 		r.SaverUp = false
-		r.CreateErr = fmt.Errorf("create the saver session: %w; the session is left running: zmx kill failed", backend.ErrUnsupportedProtocol)
-		r.EndErr = errors.New("no one process is proved the session's zmx daemon")
+		r.CreateErr = fmt.Errorf("create the saver session: %w; the session is left running: zmx kill failed; then: no one process is proved the session's zmx daemon", backend.ErrUnsupportedProtocol)
 
 		fatal := fatalOf(t, r)
 
-		if fatal.UserMessage != olderZmx || !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver it made on it, which is left: no one process") {
-			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
+		if fatal.UserMessage != olderZmx || !errors.Is(fatal.Cause, r.CreateErr) {
+			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal carrying the create's refusal", fatal.UserMessage, fatal.Cause)
 		}
 	})
 

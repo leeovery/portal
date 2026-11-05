@@ -300,7 +300,8 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 	case fatal != nil || p.unfinished:
 		return fatal
 	case errors.Is(err, backend.ErrUnsupportedProtocol):
-		return p.refusedMade(ctx, err)
+		// The create has ended what it made, and says in err whether it went.
+		return UnsupportedCreate(err)
 	case err != nil:
 		p.warn(stepEnsureSaver, saverWarning(err), err)
 	}
@@ -390,16 +391,6 @@ func (p *pass) judge(ctx context.Context) (*FatalError, error) {
 // endMade ends the saver the pass made that Portal can't use.
 func (p *pass) endMade(ctx context.Context, unusable *FatalError) {
 	p.endWith(ctx, unusable, p.Saver.EndMade)
-}
-
-// refusedMade is the fatal of a saver the backend's create refused, made by a
-// zmx speaking 0.8.1's protocol. The create has had that zmx's kill end it;
-// End's proved signal ends one that kill left, and finds nothing to end
-// otherwise.
-func (p *pass) refusedMade(ctx context.Context, err error) *FatalError {
-	refused := UnsupportedCreate(err)
-	p.endWith(ctx, refused, p.Saver.End)
-	return refused
 }
 
 // endWith ends the saver the pass made by end, recording in unusable's cause

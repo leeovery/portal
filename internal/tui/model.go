@@ -186,11 +186,13 @@ type Model struct {
 	projectEditor   ProjectEditor
 	aliasEditor     AliasEditor
 	sessionCreator  SessionCreator
-	cwd             string
-	home            string
-	activePage      page
-	projectList     list.Model
-	initialFilter   string
+	// createFatal is the fatal a mint's failure is, nil for one that is none.
+	createFatal   func(error) error
+	cwd           string
+	home          string
+	activePage    page
+	projectList   list.Model
+	initialFilter string
 	// initialCursor is the capture-only cursor anchor, applied and cleared in
 	// evaluateDefaultPage after items ingest. Empty is a no-op.
 	initialCursor string
@@ -675,6 +677,14 @@ func WithProjectStore(s ProjectStore) Option {
 func WithSessionCreator(c SessionCreator) Option {
 	return func(m *Model) {
 		m.sessionCreator = c
+	}
+}
+
+// WithCreateFatal maps a mint's failure to the fatal it is, nil for one that
+// is none; nil maps none, so every failure flashes.
+func WithCreateFatal(fatal func(error) error) Option {
+	return func(m *Model) {
+		m.createFatal = fatal
 	}
 }
 
@@ -1893,17 +1903,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case BootstrapFatalMsg:
 		// The loading page must stay on PageLoading — never a half-restored picker
 		// — and this is a terminal event, so the receiver is not re-issued.
-		m.fatalActive = true
-		m.fatalStep = msg.FailedStep
-		m.fatalMessage = msg.Message
-		m.fatalErr = msg.Err
-		// A command-pending picker has no loading page to render the error frame
-		// on, and nothing it can do against a half-bootstrapped server, so it ends
-		// the run instead: the teardown reports the fatal and exits non-zero.
-		if m.commandPending {
-			return m, tea.Quit
-		}
-		return m, nil
+		return m.enterFatal(msg.FailedStep, msg.Message, msg.Err)
 	case ProjectsLoadedMsg:
 		var setItemsCmd tea.Cmd
 		if msg.Err == nil {
@@ -1928,7 +1928,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		m.selected = msg.SessionName
 		return m, tea.Quit
 	case sessionCreateErrMsg:
-		return m, nil
+		return m.mintFailed(msg.Err)
 	case previewDismissedMsg:
 		// The sessionList is deliberately not mutated: cursor position and filter
 		// state must round-trip byte-identically.
@@ -2086,6 +2086,42 @@ func (m Model) createSession(dir string) (Model, tea.Cmd) {
 	}
 	return m, m.mintSession(dir)
 }
+
+// enterFatal parks the model in the error state, which ends the run non-zero
+// with message on the loading page's error frame. A command-pending picker
+// has no loading page to render the frame on, and nothing it can do, so it
+// ends the run at once: the teardown reports the fatal.
+func (m Model) enterFatal(step int, message string, err error) (Model, tea.Cmd) {
+	m.fatalActive = true
+	m.fatalStep = step
+	m.fatalMessage = message
+	m.fatalErr = err
+	if m.commandPending {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// mintFailed answers a mint that failed. A failure that is a fatal, a session
+// the backend made speaking a protocol Portal can't talk to, ends the run on
+// the error frame, every bootstrap step shown done, as one bootstrap's fatal
+// does: any later mint would fail alike. Any other is flashed, and the picker
+// stays open.
+func (m Model) mintFailed(err error) (Model, tea.Cmd) {
+	if m.createFatal != nil {
+		if fatal := m.createFatal(err); fatal != nil {
+			m.activePage = PageLoading
+			m.loadingProgress = m.loadingProgress.finished()
+			return m.enterFatal(0, fatal.Error(), fatal)
+		}
+	}
+	m.setFlash(fmt.Sprintf(MintFailedFlash, err))
+	return m, nil
+}
+
+// MintFailedFlash is the flash of a mint that failed for a reason that is no
+// fatal, the failure in place of its verb.
+const MintFailedFlash = "Portal couldn't start that session: %v"
 
 // The mint itself, with no gate: reached from the keypress on every model that
 // is not mid-bootstrap, and from the terminal complete event for a staged pick.

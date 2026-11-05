@@ -120,7 +120,7 @@ func resolveDoctorDeps() *DoctorDeps {
 	// Detection runs through the driver bound on the dir doctor judges. A dir
 	// it refuses to bind leaves the host-terminal check out; the dir check
 	// reports why.
-	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
+	if driver, err := readZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
 		// Read-only: detection asks the runner registry, which otherwise
 		// removes the entry of a runner it proves dead.
 		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
@@ -171,7 +171,7 @@ func resolveDoctorDeps() *DoctorDeps {
 // zmxSessionReads are the driver's listing and protocol read, both bound on
 // dir. A dir the driver refuses to bind answers every read with that refusal.
 func zmxSessionReads(dir string) (func(context.Context) ([]backend.Session, error), func(context.Context, string) (int, error)) {
-	driver, err := bindZmxAt(zmxProgram, dir)
+	driver, err := readZmxAt(zmxProgram, dir)
 	if err != nil {
 		return func(context.Context) ([]backend.Session, error) { return nil, err },
 			func(context.Context, string) (int, error) { return 0, err }
@@ -201,6 +201,12 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 
+		// The repairs write state, so a state directory that belongs to
+		// another zmx directory gets none; the diagnosis above names why.
+		if dir, err := doctorStateDir(deps); err == nil && zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), fixRefusedLine)
+			return ErrDoctorUnhealthy
+		}
 		// The exit is driven solely by the post-repair re-diagnosis below; the
 		// repairs never touch it directly.
 		runDoctorFix(cmd, deps)
@@ -217,6 +223,10 @@ var doctorCmd = &cobra.Command{
 		return nil
 	},
 }
+
+// fixRefusedLine is a --fix that repaired nothing, the state's zmx dir check
+// having failed.
+const fixRefusedLine = "Skipped every repair: state's zmx dir failed"
 
 // runDoctorFix applies only repairs that are reversible by reconstruction, each
 // best-effort so a failure is left for the re-diagnosis to report. Themes get no
@@ -631,10 +641,15 @@ func checkStateDirSane(dir string, dirErr error) checkResult {
 	return checkDirReadable(name, dir)
 }
 
-// otherZmxDirDetail is the state's zmx dir check failing on a state directory
-// that belongs to another zmx directory: the one it belongs to, and the one
-// this Portal uses.
-const otherZmxDirDetail = "belongs to the zmx sessions in %[1]s, but this Portal is using %[2]s; run it with ZMX_DIR=%[1]s, or give it a state of its own with PORTAL_STATE_DIR"
+// The state's zmx dir check's failures.
+const (
+	// otherZmxDirDetail is a state directory that belongs to another zmx
+	// directory: the one it belongs to, the record, and the one this Portal
+	// uses.
+	otherZmxDirDetail = "belongs to the zmx sessions in %[1]s (recorded in %[2]s), but this Portal is using %[3]s; run it with ZMX_DIR=%[1]s, or give it a state of its own with PORTAL_STATE_DIR"
+	// unreadableZmxDirDetail is a record doctor can't read: its path, and why.
+	unreadableZmxDirDetail = "can't read %[1]s: %[2]v; delete it, and Portal records the directory in use at its next start"
+)
 
 // checkStateZmxDir reads, as the bootstrap does but recording nothing, which
 // zmx directory the state directory belongs to. A state directory that
@@ -646,11 +661,12 @@ func checkStateZmxDir(dir string, dirErr error, zmxDir string) checkResult {
 	}
 	recorded, err := zmxDirOwner(dir, zmxDir).Recorded()
 	other, isOther := errors.AsType[*bootstrap.OtherZmxDirError](err)
+	record, isRecord := errors.AsType[*bootstrap.ZmxDirRecordError](err)
 	switch {
 	case isOther:
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(otherZmxDirDetail, other.Recorded, other.Using)}
-	case err != nil:
-		return checkResult{name: name, status: checkFail, detail: "unreadable"}
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(otherZmxDirDetail, other.Recorded, other.Record, other.Using)}
+	case isRecord:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(unreadableZmxDirDetail, record.Path, record.Err)}
 	case recorded == "":
 		return checkResult{name: name, status: checkPass, detail: "not recorded yet"}
 	}

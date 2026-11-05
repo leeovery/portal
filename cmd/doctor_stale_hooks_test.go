@@ -282,7 +282,13 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 
 			outBuf, _, _ := runDoctorWith(t, install.deps, "--fix")
 
-			if want := "Skipped stale hook prune: " + skippedPrunePhrases[tc.reason] + "\n"; !strings.Contains(outBuf.String(), want) {
+			want := "Skipped stale hook prune: " + skippedPrunePhrases[tc.reason] + "\n"
+			// The flag's read fails only in a state dir it can't read, where
+			// the zmx dir record's read fails too, so --fix repairs nothing.
+			if tc.reason == hooksweep.ReasonRestoringReadFailed {
+				want = fixRefusedLine + "\n"
+			}
+			if !strings.Contains(outBuf.String(), want) {
 				t.Errorf("output missing %q:\n%s", want, outBuf.String())
 			}
 			assertHooksFileUnchanged(t, install.hooksPath, before, "touched by a prune that stood down")

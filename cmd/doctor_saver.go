@@ -31,7 +31,7 @@ func readOnlySaver(deps *DoctorDeps) doctorSaver {
 	if err != nil {
 		return nil
 	}
-	driver, err := bindZmxAt(zmxProgram, deps.ZmxDir)
+	driver, err := readZmxAt(zmxProgram, deps.ZmxDir)
 	if err != nil {
 		return nil
 	}

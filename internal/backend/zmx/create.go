@@ -30,8 +30,8 @@ func created(name string) string { return `session "` + name + `" created` + "\n
 // whatever its exit code: when the command exits before the client connects,
 // zmx reports the session made and then fails. A session made that gives no
 // Info within the read-back is judged once that is over, each step within
-// its own ceiling (refuseOlder), so a judgement late in the create's ceiling
-// is never cut short.
+// its own ceiling and past the create's (refuseOlder), so a judgement late in
+// the create's ceiling is never cut short.
 func (b *Backend) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
 	if err := b.ValidateName(name); err != nil {
 		return backend.Session{}, err
@@ -64,19 +64,29 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 
 // refuseOlder refuses the session name, just made, when it answers zmx 0.8.1's
 // framing: the zmx that made it speaks a protocol Portal can't, so every
-// session it made would be one Portal can't talk to. The session is ended
-// first by that zmx's own kill, which speaks its daemon's protocol, and the
-// refusal says whether it went. A session that answers neither framing, or
-// has already ended, is made all the same.
+// session it made would be one Portal can't talk to. A session that answers
+// neither framing, or has already ended, is made all the same.
+//
+// The refused session is ended first by that zmx's own kill, which speaks its
+// daemon's protocol, then, should that fail, by a SIGTERM to the one process
+// proved its daemon, so it never keeps the name for a restore to count held.
+// The refusal says whether it went. Each step runs past a cancelled ctx,
+// within its own ceiling: a caller giving up between the created line and the
+// judgement would otherwise keep a session of 0.8.1's as made.
 func (b *Backend) refuseOlder(ctx context.Context, name string) error {
+	ctx = context.WithoutCancel(ctx)
 	if older, _ := b.OlderZmx(ctx, name); !older {
 		return nil
 	}
 	refused := fmt.Errorf("create session %q: its daemon speaks zmx 0.8.1's framing: %w", name, backend.ErrUnsupportedProtocol)
-	if err := b.KillByCLI(ctx, name); err != nil {
-		return fmt.Errorf("%w; the session is left running: %w", refused, err)
+	killErr := b.KillByCLI(ctx, name)
+	if killErr == nil {
+		return fmt.Errorf("%w; zmx kill ended the session", refused)
 	}
-	return fmt.Errorf("%w; zmx kill ended the session", refused)
+	if err := b.EndDaemon(ctx, name, b.signal); err != nil {
+		return fmt.Errorf("%w; the session is left running: %w; then: %w", refused, killErr, err)
+	}
+	return fmt.Errorf("%w; %w; a SIGTERM to its daemon ended the session", refused, killErr)
 }
 
 // made reads back the session zmx has just made, asking again while its

@@ -120,15 +120,30 @@ func (b *Backend) isDir(dir string) bool {
 	return filepath.IsAbs(dir) && CanonicalDir(dir) == CanonicalDir(b.dir)
 }
 
-// CanonicalDir is dir with its symbolic links resolved, or as written when
-// they can't be: a directory that doesn't resolve is not one that does. Two
-// spellings of one zmx directory, as /tmp and /private/tmp are on macOS,
-// have one canonical form.
+// CanonicalDir is dir with its symbolic links resolved. Two spellings of one
+// zmx directory, as /tmp and /private/tmp are on macOS, have one canonical
+// form, whether or not it exists: an absolute dir that doesn't resolve has its
+// deepest ancestor that does resolved, and the rest appended, cleaned. A path
+// that doesn't exist so never compares equal to one that does, which keeps the
+// holder proof as strict as resolving existing paths alone. A relative dir that
+// doesn't resolve is as written, cleaned.
 func CanonicalDir(dir string) string {
 	if path, err := filepath.EvalSymlinks(dir); err == nil {
 		return path
 	}
-	return filepath.Clean(dir)
+	dir = filepath.Clean(dir)
+	if !filepath.IsAbs(dir) {
+		return dir
+	}
+	var missing []string
+	for p := dir; p != filepath.Dir(p); p = filepath.Dir(p) {
+		missing = append(missing, filepath.Base(p))
+		if path, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+			slices.Reverse(missing)
+			return filepath.Join(append([]string{path}, missing...)...)
+		}
+	}
+	return dir
 }
 
 // errUnproved is a session's daemon the process table doesn't prove.

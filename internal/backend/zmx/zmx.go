@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -62,7 +63,15 @@ type Config struct {
 	// BootTime is when this machine booted, to tell a stale socket from a
 	// session not answering; nil reads it from the kernel.
 	BootTime func() (time.Time, error)
+	// Signal sends sig to pid, a process the process table proves a
+	// session's zmx daemon: Create's end of a session an older zmx made,
+	// should that zmx's own kill fail. Nil signals nothing.
+	Signal func(pid int, sig syscall.Signal) error
 }
+
+// errSignalsNothing is every signal a Backend bound with no Signal is asked
+// to send.
+var errSignalsNothing = errors.New("this zmx backend signals nothing")
 
 // Backend drives the zmx sessions in one zmx directory.
 type Backend struct {
@@ -71,6 +80,7 @@ type Backend struct {
 	environ  func() []string
 	hostname func() (string, error)
 	booted   func() (time.Time, error)
+	signal   func(pid int, sig syscall.Signal) error
 	limits   ceilings
 	// processes is the process table AttachClients, unheld and EndDaemon
 	// read.
@@ -90,6 +100,7 @@ func New(cfg Config) (*Backend, error) {
 		environ:   cfg.Environ,
 		hostname:  cfg.Hostname,
 		booted:    cfg.BootTime,
+		signal:    cfg.Signal,
 		limits:    defaultCeilings,
 		processes: systemProcesses,
 	}
@@ -101,6 +112,9 @@ func New(cfg Config) (*Backend, error) {
 	}
 	if b.booted == nil {
 		b.booted = bootid.BootTime
+	}
+	if b.signal == nil {
+		b.signal = func(int, syscall.Signal) error { return errSignalsNothing }
 	}
 	return b, nil
 }

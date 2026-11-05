@@ -7,14 +7,24 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// OtherZmxDirMessage is the fatal of a Portal run against another zmx
-// directory than the one its state directory belongs to: the state
-// directory, the zmx directory it belongs to, and the one this Portal uses.
-const OtherZmxDirMessage = "Portal's state in %[1]s belongs to the zmx sessions in %[2]s, but this Portal is using %[3]s. Run it with ZMX_DIR=%[2]s, or give it a state of its own with PORTAL_STATE_DIR."
+// The fatals of a state directory Portal can't claim for its zmx directory.
+const (
+	// OtherZmxDirMessage is a Portal run against another zmx directory than
+	// the one its state directory belongs to: the state directory, the zmx
+	// directory it belongs to, and the one this Portal uses. It names no
+	// deletion: a record of another directory means sessions live there.
+	OtherZmxDirMessage = "Portal's state in %[1]s belongs to the zmx sessions in %[2]s, but this Portal is using %[3]s. Run it with ZMX_DIR=%[2]s, or give it a state of its own with PORTAL_STATE_DIR."
+	// ZmxDirUnreadableMessage is a record Portal can't read: its path, and why.
+	ZmxDirUnreadableMessage = "Portal can't read %[1]s, which records the zmx directory its state belongs to: %[2]v. Delete it, and Portal records the directory in use at its next start."
+	// ZmxDirUnwritableMessage is a record Portal can't write: its path, and
+	// why.
+	ZmxDirUnwritableMessage = "Portal failed to record the zmx directory its state belongs to in %[1]s: %[2]v"
+)
 
 // ZmxDirClaimer claims the state directory for the zmx directory Portal runs
 // against. Its error is an *OtherZmxDirError for a state directory that
-// belongs to another.
+// belongs to another, and a *ZmxDirRecordError for a record it can't read or
+// write.
 type ZmxDirClaimer interface {
 	Claim() error
 }
@@ -23,6 +33,8 @@ type ZmxDirClaimer interface {
 // than the one this Portal runs against.
 type OtherZmxDirError struct {
 	StateDir string
+	// Record is the file that records it.
+	Record string
 	// Recorded is the zmx directory the state directory belongs to, as
 	// recorded, canonical.
 	Recorded string
@@ -33,6 +45,23 @@ type OtherZmxDirError struct {
 func (e *OtherZmxDirError) Error() string {
 	return fmt.Sprintf("the state directory %s belongs to the zmx directory %s, not %s", e.StateDir, e.Recorded, e.Using)
 }
+
+// ZmxDirRecordError is a zmx directory record Portal can't read, or, with
+// Write, can't write.
+type ZmxDirRecordError struct {
+	Path  string
+	Write bool
+	Err   error
+}
+
+func (e *ZmxDirRecordError) Error() string {
+	if e.Write {
+		return fmt.Sprintf("write %s: %v", e.Path, e.Err)
+	}
+	return fmt.Sprintf("read %s: %v", e.Path, e.Err)
+}
+
+func (e *ZmxDirRecordError) Unwrap() error { return e.Err }
 
 // ZmxDirOwner is a state directory and the zmx directory a Portal runs
 // against. A state directory belongs to one zmx directory, which the first
@@ -50,11 +79,20 @@ type ZmxDirOwner struct {
 }
 
 // Check reports nil when the state directory belongs to ZmxDir or records no
-// zmx directory, an *OtherZmxDirError when it belongs to another, and the
-// read's error when its record can't be read. It writes nothing.
+// zmx directory, an *OtherZmxDirError when it belongs to another, and a
+// *ZmxDirRecordError when its record can't be read. It writes nothing.
 func (o ZmxDirOwner) Check() error {
 	_, err := o.Recorded()
 	return err
+}
+
+// Refusal is Check's failure as the fatal a bootstrap that can't claim the
+// state directory ends on, nil when Check passes. It writes nothing.
+func (o ZmxDirOwner) Refusal() error {
+	if err := o.Check(); err != nil {
+		return zmxDirFatal(err)
+	}
+	return nil
 }
 
 // Claim is Check, recording ZmxDir, canonical, when the state directory
@@ -64,26 +102,40 @@ func (o ZmxDirOwner) Claim() error {
 	if err != nil || recorded != "" {
 		return err
 	}
-	return state.RecordZmxDir(o.StateDir, o.Canonical(o.ZmxDir))
+	if err := state.RecordZmxDir(o.StateDir, o.Canonical(o.ZmxDir)); err != nil {
+		return &ZmxDirRecordError{Path: state.ZmxDirRecordPath(o.StateDir), Write: true, Err: err}
+	}
+	return nil
 }
 
 // Recorded is the zmx directory the state directory records, empty when it
 // records none, failing as Check does. It writes nothing.
 func (o ZmxDirOwner) Recorded() (string, error) {
+	path := state.ZmxDirRecordPath(o.StateDir)
 	recorded, err := state.ReadZmxDir(o.StateDir)
-	if err != nil || recorded == "" {
-		return "", err
-	}
-	if o.Canonical(recorded) != o.Canonical(o.ZmxDir) {
-		return recorded, &OtherZmxDirError{StateDir: o.StateDir, Recorded: recorded, Using: o.ZmxDir}
+	switch {
+	case err != nil:
+		return "", &ZmxDirRecordError{Path: path, Err: err}
+	case recorded == "":
+		return "", nil
+	case o.Canonical(recorded) != o.Canonical(o.ZmxDir):
+		return recorded, &OtherZmxDirError{StateDir: o.StateDir, Record: path, Recorded: recorded, Using: o.ZmxDir}
 	}
 	return recorded, nil
 }
 
-// zmxDirFatal is the fatal of a state directory Portal can't claim.
+// zmxDirFatal is the fatal of a state directory Portal can't claim. An error
+// of neither kind ZmxDirClaimer names is worded by itself.
 func zmxDirFatal(err error) *FatalError {
-	if other, ok := errors.AsType[*OtherZmxDirError](err); ok {
+	other, isOther := errors.AsType[*OtherZmxDirError](err)
+	record, isRecord := errors.AsType[*ZmxDirRecordError](err)
+	switch {
+	case isOther:
 		return NewFatal(fmt.Sprintf(OtherZmxDirMessage, other.StateDir, other.Recorded, other.Using), err)
+	case isRecord && record.Write:
+		return NewFatal(fmt.Sprintf(ZmxDirUnwritableMessage, record.Path, record.Err), err)
+	case isRecord:
+		return NewFatal(fmt.Sprintf(ZmxDirUnreadableMessage, record.Path, record.Err), err)
 	}
-	return NewFatal("Portal failed to record the zmx directory its state belongs to: "+err.Error(), err)
+	return NewFatal(err.Error(), err)
 }

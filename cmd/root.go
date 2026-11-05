@@ -7,9 +7,12 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +47,36 @@ var stateCheckExempt = map[string]bool{
 	"doctor":  true,
 	"state":   true,
 	"version": true,
+}
+
+// Exempt from the bootstrap, these still write state: sessions.json's claims,
+// a label, hooks.json. Run against another zmx directory than the one the
+// state directory belongs to, they would claim entries for sessions the state
+// doesn't hold, so they make the check the bootstrap's gate makes, recording
+// nothing. Keyed on the command's path below the root, so the silent `hooks`
+// alias rides on "hook". Doctor's --fix makes the same check itself, after
+// its diagnosis.
+var exemptStateWriters = map[string]bool{
+	"hook rm":  true,
+	"hook set": true,
+	"rename":   true,
+}
+
+// refuseOtherZmxDir is the fatal of a state directory that belongs to another
+// zmx directory than this Portal's, or whose record can't be read. One that
+// records none passes, as does one that can't be resolved.
+func refuseOtherZmxDir() error {
+	dir, err := state.Dir()
+	if err != nil {
+		return nil
+	}
+	return zmxDirOwner(dir, zmx.DirFor(os.Environ())).Refusal()
+}
+
+// pathBelowRoot is cmd's path without the root's name, "hook set" for
+// `portal hook set`.
+func pathBelowRoot(cmd *cobra.Command) string {
+	return strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
 }
 
 var bootstrapDeps *BootstrapDeps
@@ -110,6 +143,9 @@ var rootCmd = &cobra.Command{
 			if err := refuseUnusableState(); err != nil {
 				return err
 			}
+		}
+		if exemptStateWriters[pathBelowRoot(cmd)] {
+			return refuseOtherZmxDir()
 		}
 		if inChain(cmd, bootstrapExempt) {
 			return nil
@@ -206,6 +242,15 @@ func shouldRunConcurrentBootstrap(cmd *cobra.Command, args []string, runner boot
 
 var fatalErrorStderr io.Writer = os.Stderr
 
+// createFatal is the fatal a create's failure is, nil for one that is none:
+// the one mapping Execute and the picker's mints share.
+func createFatal(err error) error {
+	if fatal := bootstrap.UnsupportedCreate(err); fatal != nil {
+		return fatal
+	}
+	return nil
+}
+
 // Execute writes a *bootstrap.FatalError's UserMessage to stderr before
 // returning it, and never calls os.Exit — the caller maps the returned error to
 // the process exit code. A create's refusal of a session made by a zmx Portal
@@ -217,7 +262,7 @@ func Execute() error {
 		return nil
 	}
 	if _, ok := errors.AsType[*bootstrap.FatalError](err); !ok {
-		if refused := bootstrap.UnsupportedCreate(err); refused != nil {
+		if refused := createFatal(err); refused != nil {
 			err = refused
 		}
 	}

@@ -506,3 +506,15 @@ func nonDefaultFlagValue(t *testing.T, f *pflag.Flag) string {
 	t.Fatalf("no non-default value known for --%s of type %s", f.Name, f.Value.Type())
 	return ""
 }
+
+// The one mapping from a create's error to its fatal, shared by the picker's
+// mint and Execute: the older-zmx fatal for a refusal, and none otherwise.
+func TestCreateFatal(t *testing.T) {
+	refusal := fmt.Errorf("create session %q: %w", "x", backend.ErrUnsupportedProtocol)
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](createFatal(refusal)); !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("createFatal(refusal) = %v, want the older-zmx fatal carrying it", createFatal(refusal))
+	}
+	if err := createFatal(errors.New("boom")); err != nil {
+		t.Errorf("createFatal(boom) = %#v, want nil", err)
+	}
+}

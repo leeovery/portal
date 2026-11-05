@@ -176,9 +176,10 @@ func TestLockWait(t *testing.T) {
 	})
 
 	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
-		// The Create's refusal of an older zmx's session, a read and a zmx
-		// kill, outlasts the lookup a failed Create makes.
-		refusal := saverhost.ReadCeiling + saverhost.KillCeiling + saverhost.RunGrace
+		// The Create's refusal of an older zmx's session, a read, a zmx kill
+		// and the wait for a proved signal's end should that fail, outlasts
+		// the lookup a failed Create makes.
+		refusal := saverhost.ReadCeiling + 2*saverhost.KillCeiling + saverhost.RunGrace
 		each := saverhost.CreateCeiling + saverhost.RunGrace + refusal + commitlock.Bound()
 		if got := LockWait(20) - LockWait(0); got != 20*each {
 			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)

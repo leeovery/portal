@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -599,18 +600,82 @@ func TestDoctorStateZmxDirCheck(t *testing.T) {
 	t.Run("a state dir of another zmx dir fails, naming both and the way out", func(t *testing.T) {
 		zmxDir, other := t.TempDir(), t.TempDir()
 		real := zmx.CanonicalDir(zmxDir)
+		stateDir := recorded(t, zmxDir)
 
-		want := "belongs to the zmx sessions in " + real + ", but this Portal is using " + other + "; run it with ZMX_DIR=" + real + ", or give it a state of its own with PORTAL_STATE_DIR"
-		assertCheck(t, check(t, recorded(t, zmxDir), other), checkFail, want)
+		want := "belongs to the zmx sessions in " + real + " (recorded in " + state.ZmxDirRecordPath(stateDir) + "), but this Portal is using " + other + "; run it with ZMX_DIR=" + real + ", or give it a state of its own with PORTAL_STATE_DIR"
+		assertCheck(t, check(t, stateDir, other), checkFail, want)
 	})
 
-	t.Run("a record it can't read fails", func(t *testing.T) {
+	t.Run("a record it can't read fails, naming it and the way out", func(t *testing.T) {
 		stateDir := t.TempDir()
-		if err := os.WriteFile(state.ZmxDirRecordPath(stateDir), []byte("{"), 0o600); err != nil {
+		if err := os.WriteFile(state.ZmxDirRecordPath(stateDir), []byte(`{"zmx_dir":"zmx"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		assertCheck(t, check(t, stateDir, t.TempDir()), checkFail, "unreadable")
+		want := "can't read " + state.ZmxDirRecordPath(stateDir) + `: "zmx" is not an absolute directory; delete it, and Portal records the directory in use at its next start`
+		assertCheck(t, check(t, stateDir, t.TempDir()), checkFail, want)
+	})
+}
+
+// --fix writes state, so it repairs nothing in a state directory that belongs
+// to another zmx directory, or whose record it can't read.
+func TestDoctorFixUnderAnotherZmxDir(t *testing.T) {
+	staleProject := filepath.Join(t.TempDir(), "gone")
+	install := func(t *testing.T) (staleHooksInstall, string) {
+		t.Helper()
+		in := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+		projects, projectsFile := seedProjectsJSON(t, staleProject)
+		in.deps.ProjectStore = projects
+		return in, projectsFile
+	}
+
+	for name, record := range map[string]func(t *testing.T, stateDir string){
+		"another zmx dir recorded": func(t *testing.T, stateDir string) {
+			if err := state.RecordZmxDir(stateDir, zmx.CanonicalDir(t.TempDir())); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a record it can't read": func(t *testing.T, stateDir string) {
+			if err := os.WriteFile(state.ZmxDirRecordPath(stateDir), []byte("{"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run("under "+name+" it repairs nothing and exits non-zero", func(t *testing.T) {
+			in, projectsFile := install(t)
+			record(t, in.deps.StateDir)
+			hooksBefore, projectsBefore := readFileBytes(t, in.hooksPath), readFileBytes(t, projectsFile)
+
+			outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+			if !errors.Is(err, ErrDoctorUnhealthy) {
+				t.Errorf("Execute err = %v, want ErrDoctorUnhealthy", err)
+			}
+			out := outBuf.String()
+			if !strings.Contains(out, "  ✗ state's zmx dir: ") || !strings.HasSuffix(out, "\n"+fixRefusedLine+"\n") || strings.Count(out, "Portal doctor:") != 1 {
+				t.Errorf("output = %q, want one diagnosis naming the check, then %q", out, fixRefusedLine)
+			}
+			assertHooksFileUnchanged(t, in.hooksPath, hooksBefore)
+			if got := readFileBytes(t, projectsFile); !bytes.Equal(got, projectsBefore) {
+				t.Errorf("projects.json = %s, want %s untouched", got, projectsBefore)
+			}
+		})
+	}
+
+	t.Run("with no record it repairs", func(t *testing.T) {
+		in, projectsFile := install(t)
+
+		outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+		if err != nil {
+			t.Fatalf("Execute err = %v, want nil", err)
+		}
+		if out := outBuf.String(); strings.Contains(out, fixRefusedLine) || !strings.Contains(out, "Pruned 1 stale hook:") || !strings.Contains(out, "Pruned stale project: proj0") {
+			t.Errorf("output = %q, want both repairs made", out)
+		}
+		if got := readFileBytes(t, projectsFile); bytes.Contains(got, []byte(staleProject)) {
+			t.Errorf("projects.json = %s, want %s pruned", got, staleProject)
+		}
 	})
 }
 

@@ -19,6 +19,9 @@ type Deps struct {
 	Killer   SessionKiller
 	Labeller SessionLabeller
 	Creator  SessionCreator
+	// CreateFatal is the fatal a mint's failure is, nil for one that is none
+	// and so flashes. Nil maps none.
+	CreateFatal func(error) error
 
 	ProjectStore  ProjectStore
 	ProjectEditor ProjectEditor
@@ -122,6 +125,7 @@ func Build(deps Deps) Model {
 		WithLabeller(deps.Labeller),
 		WithProjectStore(deps.ProjectStore),
 		WithSessionCreator(deps.Creator),
+		WithCreateFatal(deps.CreateFatal),
 		WithCWD(deps.CWD),
 	}
 	if deps.Home != "" {
