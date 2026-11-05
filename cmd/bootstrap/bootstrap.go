@@ -97,9 +97,14 @@ type FlagSweeper interface {
 type Saver interface {
 	// Present reports whether the saver session is there, whatever it runs.
 	Present(ctx context.Context) (bool, error)
+	// CheckStateDir fails with a *saverhost.OtherStateDirError when the saver
+	// session runs a daemon proved another state directory's, and passes
+	// anything else.
+	CheckStateDir(ctx context.Context) error
 	// EnsureSaver ensures the saver session runs this binary's daemon. It
 	// judges a saver it creates by made before waiting for its daemon, and
-	// made's error is its own; its other failures wrap saverhost's causes.
+	// made's error is its own; its other failures wrap saverhost's causes, a
+	// saver proved another state directory's among them.
 	EnsureSaver(ctx context.Context, made func(context.Context) error) error
 	// Protocol is the zmx protocol the saver session's daemon speaks:
 	// ErrOlderZmx for an older zmx's daemon, and ErrSaverGone for a saver
@@ -149,11 +154,12 @@ type Orchestrator struct {
 // Run executes the steps in order and returns the soft warnings in step order.
 // Checking zmx, claiming the state directory for its zmx directory, removing
 // the latch, and raising and lowering the restoring flag are fatal, as is a
-// saver Portal can't use that it made, or found and can't end, and a session
-// restore made that the backend refused as one Portal can't talk to; every
-// other failure is logged, and those a user can act on are warned of. The
-// latch goes before the first change and is written only by a pass that ran
-// to the end, so a pass cut short leaves none, and so does one that leaves the
+// saver proved another state directory's, a saver Portal can't use that it
+// made, or found and can't end, and a session restore made that the backend
+// refused as one Portal can't talk to; every other failure is logged, and
+// those a user can act on are warned of. The latch goes before the first
+// change and is written only by a pass that ran to the end, so a pass cut
+// short leaves none, and so does one that leaves the
 // restore unfinished: its context's end, a saver it can't judge, sessions it
 // can't mark owed or a listing it can't read. One whose saver may still run a
 // daemon of another version, one it couldn't replace or one it couldn't read,
@@ -265,10 +271,16 @@ func (p *pass) leaveUnfinished(step string, w Warning, err error) {
 
 // checkZmx checks zmx runs, then claims the state directory for the zmx
 // directory Portal runs against, before the latch goes: a state directory
-// that belongs to another is refused with nothing changed.
+// that belongs to another is refused with nothing changed, and so is a zmx
+// directory whose saver is proved another state directory's, nothing sent to
+// it. That refusal comes before the claim, which would otherwise tie a new
+// state directory to the zmx directory ZMX_DIR is the way out of.
 func (p *pass) checkZmx(ctx context.Context) *FatalError {
 	if err := p.Zmx.CheckZmx(ctx); err != nil {
 		return NewFatal(err.Error(), err)
+	}
+	if fatal := OtherStateDir(p.Saver.CheckStateDir(ctx)); fatal != nil {
+		return fatal
 	}
 	if err := p.ZmxDir.Claim(); err != nil {
 		return zmxDirFatal(err)
@@ -307,10 +319,11 @@ func (p *pass) sweep(ctx context.Context) *FatalError {
 }
 
 // ensureSaver judges a saver it finds before anything is made, ending one
-// Portal can't use. Finding none, or ending one, it marks owed the sessions no
-// saver saw end before any saver can commit, then ensures the saver, judging
-// one it makes before waiting for its daemon. Restore runs only once a saver
-// is judged to speak Portal's protocol: Portal creates no session on a zmx it
+// Portal can't use. Finding none, or ending one, it marks owed the sessions
+// no saver saw end before any saver can commit, then ensures the saver,
+// judging one it makes before waiting for its daemon; the ensure refuses a
+// saver proved another state directory's. Restore runs only once a saver is
+// judged to speak Portal's protocol: Portal creates no session on a zmx it
 // hasn't proved it speaks.
 func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 	kept, fatal := p.keepFound(ctx)
@@ -335,6 +348,8 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 	case errors.Is(err, backend.ErrUnsupportedProtocol):
 		// The create has ended what it made, and says in err whether it went.
 		return UnsupportedCreate(err)
+	case OtherStateDir(err) != nil:
+		return OtherStateDir(err)
 	case err != nil:
 		p.warn(stepEnsureSaver, saverWarning(err), err)
 		p.withheld = withholding(err)

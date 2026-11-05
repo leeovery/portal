@@ -88,7 +88,9 @@ func (e *Ensurer) EnsureSaver(ctx context.Context, made func(context.Context) er
 // to hold the lock and record the version. Before that wait, made, when
 // given, judges the saver created, and its error ends ensure. It holds
 // saver.lock throughout, creating the state directory for it. A saver another
-// process creates first counts once its daemon does the same. A saver that
+// process creates first counts once its daemon does the same. A saver proved
+// another state directory's, found or created first by another process, is
+// an *OtherStateDirError, with nothing sent and nothing made. A saver that
 // can't be read (ErrUnread, with ErrVersionUnproved unless daemon.version
 // names d's version), can't be stopped while its daemon runs (ErrNotReplaced)
 // or doesn't come up (ErrNotReady) is an error, never a wait past its bounds.
@@ -103,6 +105,9 @@ func (h *Host) ensure(ctx context.Context, d Daemon, made func(context.Context) 
 		return err
 	}
 	if r.present {
+		if err := h.checkStateDir(r.session); err != nil {
+			return err
+		}
 		reason := r.replacing(d.Version)
 		if reason == "" {
 			logger.Info("daemon kept", "target_pid", r.session)
@@ -137,10 +142,13 @@ func (h *Host) notStopped(pid int, err error) error {
 // its session runs a daemon still starting: daemon.pid not yet naming the
 // session's process, or daemon.version not yet written. Judged sooner, a
 // saver whose ensure gave up on it under load would be stopped on its way up.
-// A saver whose session can't be read is ErrUnread, and ErrVersionUnproved
-// too unless daemon.version names version.
+// One proved another state directory's never records itself here, so it is
+// never waited for. A saver whose session can't be read is ErrUnread, and
+// ErrVersionUnproved too unless daemon.version names version.
 func (h *Host) settled(ctx context.Context, version string) (readiness, error) {
-	r, _, err := h.watch(ctx, func(r readiness) bool { return r.sessionErr != nil || !r.present || r.recorded() })
+	r, _, err := h.watch(ctx, func(r readiness) bool {
+		return r.sessionErr != nil || !r.present || r.recorded() || h.checkStateDir(r.session) != nil
+	})
 	switch {
 	case err != nil:
 		return r, fmt.Errorf("wait for the saver's daemon: %w", err)
@@ -152,14 +160,16 @@ func (h *Host) settled(ctx context.Context, version string) (readiness, error) {
 	return r, nil
 }
 
-// create creates the saver session running `exe state daemon`. A name another
-// process created first counts as made.
+// create creates the saver session running `exe state daemon`, with the
+// state directory's mark in its environment. A name another process created
+// first counts as made, unless its saver is proved another state
+// directory's.
 func (h *Host) create(ctx context.Context, exe string) error {
-	session, err := h.backend.Create(ctx, saver.SessionName, h.stateDir, []string{exe, "state", "daemon"})
+	session, err := h.backend.Create(ctx, saver.SessionName, h.stateDir, []string{exe, "state", "daemon"}, h.stateMark)
 	switch {
 	case errors.Is(err, backend.ErrSessionExists):
 		logger.Debug("session created elsewhere", "error", err)
-		return nil
+		return h.CheckStateDir(ctx)
 	case err != nil:
 		return fmt.Errorf("create the saver session: %w", err)
 	}

@@ -17,12 +17,14 @@ import (
 )
 
 // doctorSaver is what doctor reads of the saver, and all it may: whether the
-// saver session is there, the process it runs, and a proof, read from the
-// process table, that a pid is its daemon.
+// saver session is there, the process it runs, and the proofs, read from the
+// process table, that a pid is its daemon and that the saver running is no
+// other state directory's.
 type doctorSaver interface {
 	Present(ctx context.Context) (bool, error)
 	SaverPID(ctx context.Context) (pid int, present bool, err error)
 	Prove(pid int) error
+	CheckStateDir(ctx context.Context) error
 }
 
 // readOnlySaver is the saver doctor reads over the driver bound on its zmx
@@ -73,12 +75,14 @@ func missingSaver(name string, nothingToSave bool, idle, failed string) checkRes
 }
 
 // saverPresence is one read of whether the saver session runs, which the
-// saver check judges and the kept line reads. unread is no read at all, with
-// no saver to read.
+// saver check judges and the kept line reads, and, when it does, whether it
+// is proved another state directory's. unread is no read at all, with no
+// saver to read.
 type saverPresence struct {
 	present bool
 	err     error
 	unread  bool
+	other   *saverhost.OtherStateDirError
 }
 
 func readSaverPresence(ctx context.Context, s doctorSaver) saverPresence {
@@ -86,7 +90,18 @@ func readSaverPresence(ctx context.Context, s doctorSaver) saverPresence {
 		return saverPresence{unread: true}
 	}
 	present, err := s.Present(ctx)
-	return saverPresence{present: present, err: err}
+	p := saverPresence{present: present, err: err}
+	if present && err == nil {
+		p.other = otherStateDir(ctx, s)
+	}
+	return p
+}
+
+// otherStateDir is the saver s reads proved another state directory's, nil
+// for any other.
+func otherStateDir(ctx context.Context, s doctorSaver) *saverhost.OtherStateDirError {
+	other, _ := errors.AsType[*saverhost.OtherStateDirError](s.CheckStateDir(ctx))
+	return other
 }
 
 // absent reports whether the read found no saver session running.
@@ -103,17 +118,20 @@ func checkSaver(p saverPresence, nothingToSave bool) checkResult {
 		return missingSaver(name, nothingToSave,
 			saver.SessionName+" not running — nothing to save yet",
 			saver.SessionName+" not running — run portal open to start it")
+	case p.other != nil:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%s saves the state in %s, not this one", saver.SessionName, p.other.Other)}
 	}
 	return checkResult{name: name, status: checkPass, detail: saver.SessionName + " up"}
 }
 
 // checkDaemon judges the daemon alive when daemon.pid names the process the
 // saver session runs and Prove, reading the process table, finds that process
-// Portal's save daemon. A daemon still starting is waited for up to settle,
-// as the saver's own ensure waits, so one on its way up isn't failed. A
-// daemon recording another version, or none, still runs and saves; the next
-// bootstrap replaces it, so it is reported, never failed. With no saver, it
-// reads as checkSaver does.
+// Portal's save daemon. A daemon proved another state directory's fails,
+// naming that state directory, unwaited for: it never records itself here.
+// Any other still starting is waited for up to settle, as the saver's own
+// ensure waits, so one on its way up isn't failed. A daemon recording another
+// version, or none, still runs and saves; the next bootstrap replaces it, so
+// it is reported, never failed. With no saver, it reads as checkSaver does.
 func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, version string, settle time.Duration, nothingToSave bool) checkResult {
 	const name = "daemon"
 	if s == nil {
@@ -121,6 +139,9 @@ func checkDaemon(ctx context.Context, s doctorSaver, dir string, dirErr error, v
 	}
 	if dirErr != nil {
 		return checkResult{name: name, status: checkNotEvaluable, detail: stateDirStandDownPhrase}
+	}
+	if other := otherStateDir(ctx, s); other != nil {
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("pid %d, which %s runs, saves the state in %s, not this one", other.PID, saver.SessionName, other.Other)}
 	}
 	r := settledDaemon(ctx, s, dir, settle)
 	switch {

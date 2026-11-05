@@ -41,7 +41,7 @@ func TestGateOwed(t *testing.T) {
 		t.Run("a bootstrap is owed with "+name+", the saver unasked", func(t *testing.T) {
 			saver := &presence{present: true}
 
-			if !(Gate{StateDir: dir(t), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
+			if !(Gate{StateDir: dir(t), Running: running, ZmxDir: thisZmxDir, Saver: saver.check}).Owed(t.Context()) {
 				t.Error("Owed = false, want a bootstrap owed")
 			}
 			if saver.asks != 0 {
@@ -58,7 +58,7 @@ func TestGateOwed(t *testing.T) {
 		"a saver that can't be told there, its read answering there as well": {present: true, err: errBoom},
 	} {
 		t.Run("a bootstrap is owed with the latch current and "+name, func(t *testing.T) {
-			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
+			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Saver: saver.check}).Owed(t.Context()) {
 				t.Error("Owed = false, want a bootstrap owed")
 			}
 		})
@@ -72,7 +72,7 @@ func TestGateOwed(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if (Gate{StateDir: dir, Running: running, ZmxDir: thisZmxDir, Present: (&presence{present: true}).check}).Owed(t.Context()) {
+		if (Gate{StateDir: dir, Running: running, ZmxDir: thisZmxDir, Saver: (&presence{present: true}).check}).Owed(t.Context()) {
 			t.Error("Owed = true, want the warm path: the flag is no record of a bootstrap")
 		}
 	})
@@ -80,7 +80,7 @@ func TestGateOwed(t *testing.T) {
 	t.Run("a warm run owes none, and asks only whether the saver is there, once", func(t *testing.T) {
 		saver := &presence{present: true}
 
-		if (Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
+		if (Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Saver: saver.check}).Owed(t.Context()) {
 			t.Error("Owed = true, want the warm path")
 		}
 		if saver.asks != 1 {
@@ -98,7 +98,7 @@ func TestGateOwed(t *testing.T) {
 		t.Run("a bootstrap is owed with the latch current and "+name+", the saver unasked", func(t *testing.T) {
 			saver := &presence{present: true}
 
-			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: check, Present: saver.check}).Owed(t.Context()) {
+			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: check, Saver: saver.check}).Owed(t.Context()) {
 				t.Error("Owed = false, want the bootstrap that refuses it owed")
 			}
 			if saver.asks != 0 {

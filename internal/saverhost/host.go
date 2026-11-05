@@ -2,8 +2,9 @@
 // _portal-saver session. It brings the saver up as this binary, replacing one
 // running another version, and stops it, one run at a time under saver.lock.
 // It signals a process only once it has proved it, as each signal is sent,
-// the saver's daemon of this backend's sessions; a proof that fails or can't
-// be read sends nothing more.
+// the saver's daemon of this backend's sessions and this state directory; a
+// proof that fails or can't be read sends nothing more. A saver proved
+// another state directory's is neither kept, replaced nor stopped.
 package saverhost
 
 import (
@@ -43,6 +44,9 @@ var (
 	ErrNoProcess = errors.New("the saver session names no process")
 	// ErrReplaced is a stop of a pid the saver session no longer runs.
 	ErrReplaced = errors.New("the saver session runs another process now")
+	// ErrUnrecorded is a saver session running a process the state
+	// directory's daemon.pid doesn't name.
+	ErrUnrecorded = errors.New("daemon.pid doesn't name the saver session's process")
 )
 
 // Config is what a Host works over.
@@ -50,7 +54,9 @@ type Config struct {
 	// Backend holds the saver session.
 	Backend backend.Backend
 	// StateDir is the state directory the saver's daemon records itself in,
-	// the saver session's working directory, and the home of saver.lock.
+	// the saver session's working directory, and the home of saver.lock. Its
+	// mark, StateDirMark, is the saver's third: the Host creates the saver
+	// with it, and proves its daemon by it beside Marks.
 	StateDir string
 	// Marks are the entries, KEY=value, that the environment of every process
 	// the backend's saver session runs carries, and that no other process's
@@ -60,10 +66,10 @@ type Config struct {
 	Marks []string
 	// Canonical, keyed by a mark's variable, names that variable a directory
 	// and gives its canonical spelling, as the backend compares directories:
-	// on zmx, ZMX_DIR's is zmx.CanonicalDir. An absolute value then carries
-	// the mark when it spells the mark's directory, so only the spelling may
-	// differ, never which directory it is. Any other value of any mark must be
-	// the mark's value exactly.
+	// on zmx, ZMX_DIR's and the state directory's are zmx.CanonicalDir. An
+	// absolute value then carries the mark when it spells the mark's
+	// directory, so only the spelling may differ, never which directory it
+	// is. Any other value of any mark must be the mark's value exactly.
 	Canonical map[string]func(dir string) string
 	// Signal sends sig to pid. Only a pid proved the saver's daemon as it is
 	// sent is ever its target.
@@ -87,6 +93,7 @@ type Config struct {
 type Host struct {
 	backend   backend.Backend
 	stateDir  string
+	stateMark string
 	proof     proof
 	signal    func(pid int, sig syscall.Signal) error
 	running   func(pid int) bool
@@ -112,10 +119,15 @@ func NewHost(cfg Config) (*Host, error) {
 		return nil, fmt.Errorf("saverhost: %w", err)
 	}
 	cfg = cfg.withDefaults()
+	stateMark := StateDirMark(cfg.StateDir)
 	return &Host{
 		backend:   cfg.Backend,
 		stateDir:  cfg.StateDir,
-		proof:     proof{marks: cfg.Marks, canonical: cfg.Canonical, running: cfg.Running, identify: cfg.Identify, args: cfg.Args},
+		stateMark: stateMark,
+		proof: proof{
+			marks: cfg.Marks, stateDir: cfg.StateDir, state: stateMark, canonical: cfg.Canonical,
+			running: cfg.Running, identify: cfg.Identify, args: cfg.Args,
+		},
 		signal:    cfg.Signal,
 		running:   cfg.Running,
 		lockWait:  cfg.LockWait,
@@ -172,10 +184,56 @@ func (h *Host) Present(ctx context.Context) (bool, error) {
 	return h.backend.Exists(ctx, saver.SessionName)
 }
 
-// Prove proves pid the saver's daemon of the Host's backend, read as it is
-// called. Its error wraps ErrGone, ErrNotSaverDaemon or ErrUnreadable.
+// Recorded reports whether the saver session is there, as Present does, and
+// fails, ErrUnrecorded, when it runs a process the state directory's
+// daemon.pid doesn't name, or when daemon.pid can't be read: a saver this
+// state directory's daemon hasn't recorded, which may be another's. It reads
+// the session and that one small file, and no process table. A session that
+// answers naming no process is ErrNoProcess.
+func (h *Host) Recorded(ctx context.Context) (bool, error) {
+	pid, present, err := h.SaverPID(ctx)
+	if err != nil || !present {
+		return false, err
+	}
+	switch recorded, err := state.ReadPIDFile(h.stateDir); {
+	case err != nil:
+		return true, fmt.Errorf("%w: %w", ErrUnrecorded, err)
+	case recorded != pid:
+		return true, fmt.Errorf("%w: it runs pid %d, and daemon.pid names %d", ErrUnrecorded, pid, recorded)
+	}
+	return true, nil
+}
+
+// Prove proves pid the saver's daemon of the Host's backend and state
+// directory, read as it is called. Its error wraps ErrGone, ErrNotSaverDaemon
+// or ErrUnreadable; one proved another state directory's saver is an
+// *OtherStateDirError, wrapping ErrNotSaverDaemon.
 func (h *Host) Prove(pid int) error {
 	return h.proof.prove(pid)
+}
+
+// CheckStateDir fails with an *OtherStateDirError when the saver session
+// runs a daemon proved another state directory's, as checkStateDir judges
+// it. No saver, or one whose session can't be read, passes.
+func (h *Host) CheckStateDir(ctx context.Context) error {
+	pid, present, err := h.SaverPID(ctx)
+	if err != nil || !present {
+		return nil
+	}
+	return h.checkStateDir(pid)
+}
+
+// checkStateDir fails with an *OtherStateDirError when pid is proved the
+// saver's daemon of another state directory, as the proof proves it.
+// Anything else passes: a daemon proved this state directory's, and a pid not
+// proved the saver's daemon at all, gone, another program or unread, which a
+// stop's own proof refuses.
+func (h *Host) checkStateDir(pid int) error {
+	other, theirs := errors.AsType[*OtherStateDirError](h.proof.prove(pid))
+	if !theirs {
+		return nil
+	}
+	return other
 }
 
 // SaverPID is the process the saver session runs, and whether there is a saver
@@ -207,7 +265,8 @@ func (h *Host) Stop(ctx context.Context) (bool, error) {
 // orElse, still holding it, and reports what orElse does: a saver whose
 // daemon the stop can't read, as one speaking a zmx protocol Portal can't
 // use, is judged and ended there, so never in place of one an ensure makes
-// meanwhile. A nil orElse is Stop.
+// meanwhile. A saver proved another state directory's is no stop's to fail:
+// its *OtherStateDirError is returned, orElse unasked. A nil orElse is Stop.
 func (h *Host) StopOr(ctx context.Context, orElse func(ctx context.Context, err error) (bool, error)) (bool, error) {
 	release, err := h.lock(ctx)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -222,7 +281,7 @@ func (h *Host) StopOr(ctx context.Context, orElse func(ctx context.Context, err 
 	}
 	defer release()
 	stopped, err := h.stopHeld(ctx)
-	if err != nil && orElse != nil {
+	if _, theirs := errors.AsType[*OtherStateDirError](err); err != nil && !theirs && orElse != nil {
 		return orElse(ctx, err)
 	}
 	return stopped, err
@@ -245,7 +304,8 @@ func (h *Host) stopHeld(ctx context.Context) (bool, error) {
 // may still be exiting, so that too is waited for. Only once the daemon has
 // exited does it kill the session, which zmx ends with its process in any
 // case. A proof that fails or can't be read fails the stop, sending nothing
-// more and killing no session.
+// more and killing no session; one that finds another state directory's
+// saver fails it carrying its *OtherStateDirError.
 func (h *Host) stop(ctx context.Context, pid int) error {
 	if err := h.stillSaver(ctx, pid); err != nil {
 		return err

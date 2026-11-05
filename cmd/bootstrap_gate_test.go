@@ -15,11 +15,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// gateSaverPID is the process productionGate's saver session runs.
+const gateSaverPID = 4242
+
 // productionGate stages a state directory and a backend for the production
-// gate, with this boot's latch and the zmx dir in use recorded, as a finished
-// bootstrap leaves them, when latched, and the saver session up
-// when saverUp. Nothing past the gate is staged: the bootstrap's exe seam
-// panics under cmd's TestMain.
+// gate, with this boot's latch and the zmx dir in use recorded, and daemon.pid
+// naming the saver's process, as a finished bootstrap leaves them, when
+// latched, and the saver session up when saverUp. Nothing past the gate is
+// staged: the bootstrap's exe seam panics under cmd's TestMain.
 func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, string) {
 	t.Helper()
 	resetBootstrapOnce(t)
@@ -36,11 +39,14 @@ func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, str
 		if err := state.RecordZmxDir(dir, zmx.CanonicalDir(zmx.DirFor(os.Environ()))); err != nil {
 			t.Fatalf("record the zmx dir: %v", err)
 		}
+		if err := state.WritePIDFile(dir, gateSaverPID); err != nil {
+			t.Fatalf("write daemon.pid: %v", err)
+		}
 	}
 	fake := backendtest.New()
 	fake.SetReachEnv([]string{"ZMX_DIR=" + filepath.Join(t.TempDir(), "zmx")})
 	if saverUp {
-		fake.Add(backend.Session{Name: saver.SessionName})
+		fake.Add(backend.Session{Name: saver.SessionName, PID: gateSaverPID})
 	}
 	withBackendDeps(t, BackendDeps{Backend: fake})
 	return fake, dir
@@ -52,10 +58,10 @@ var everyOp = []backendtest.Op{
 	backendtest.OpKill, backendtest.OpDetach, backendtest.OpHistory, backendtest.OpLeaderEnv, backendtest.OpAttachClients,
 }
 
-func TestProductionGate_WarmPathAsksTheBackendOnlyWhetherTheSaverIsThere(t *testing.T) {
+func TestProductionGate_WarmPathReadsTheSaverOnce(t *testing.T) {
 	fake, dir := productionGate(t, true, true)
 	for _, op := range everyOp {
-		if op != backendtest.OpExists {
+		if op != backendtest.OpSession {
 			fake.Fail(op, fmt.Errorf("%s called on the warm path", op))
 		}
 	}
@@ -65,11 +71,37 @@ func TestProductionGate_WarmPathAsksTheBackendOnlyWhetherTheSaverIsThere(t *test
 	if runner != nil || err != nil {
 		t.Fatalf("owedBootstrap = %v, %v; want no bootstrap owed", runner, err)
 	}
-	if calls := fake.Calls(); len(calls) != 1 || calls[0].Op != backendtest.OpExists || calls[0].Name != saver.SessionName {
-		t.Errorf("backend calls = %+v, want the one presence check of %s", calls, saver.SessionName)
+	if calls := fake.Calls(); len(calls) != 1 || calls[0].Op != backendtest.OpSession || calls[0].Name != saver.SessionName {
+		t.Errorf("backend calls = %+v, want the one read of %s", calls, saver.SessionName)
 	}
 	if _, err := os.Stat(state.BootstrapLock(dir)); !os.IsNotExist(err) {
 		t.Errorf("stat bootstrap.lock = %v; want it never taken on the warm path", err)
+	}
+}
+
+// A saver its own daemon.pid doesn't record may be another state directory's,
+// which only the bootstrap judges: a warm command never runs on it.
+func TestProductionGate_ASaverDaemonPIDDoesntNameOwesTheBootstrap(t *testing.T) {
+	for name, stage := range map[string]func(t *testing.T, dir string){
+		"daemon.pid naming another process": func(t *testing.T, dir string) {
+			if err := state.WritePIDFile(dir, gateSaverPID+1); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"no daemon.pid": func(t *testing.T, dir string) {
+			if err := os.Remove(state.DaemonPID(dir)); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, dir := productionGate(t, true, true)
+			stage(t, dir)
+
+			if got := panicOf(func() { _, _, _ = runRootCmd(t, "list") }); !strings.Contains(got, "bootstrapExe reached") {
+				t.Errorf("portal list panicked with %q; want the bootstrap's exe seam reached", got)
+			}
+		})
 	}
 }
 
@@ -101,8 +133,8 @@ func TestProductionGate_WarmCommandRunsNoBootstrap(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if exists := fake.CallsTo(backendtest.OpExists); len(exists) != 1 || exists[0].Name != saver.SessionName {
-				t.Errorf("Exists calls = %+v, want the one presence check of %s", exists, saver.SessionName)
+			if reads := fake.CallsTo(backendtest.OpSession); len(reads) != 1 || reads[0].Name != saver.SessionName {
+				t.Errorf("Session calls = %+v, want the one read of %s", reads, saver.SessionName)
 			}
 			if _, err := os.Stat(state.BootstrapLock(dir)); !os.IsNotExist(err) {
 				t.Errorf("stat bootstrap.lock = %v; want it never taken on the warm path", err)

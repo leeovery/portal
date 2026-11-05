@@ -37,8 +37,9 @@ type stepRecorder struct {
 	// is.
 	SaverUp, Recycles bool
 	// CreateErr fails EnsureSaver's create, so it makes no saver; EnsureErr
-	// fails it after. EndErr fails End, and EndMadeErr EndMade.
-	PresentErr, CreateErr, EnsureErr, MarkErr, EndErr, EndMadeErr error
+	// fails it after. EndErr fails End, and EndMadeErr EndMade. StateDirErr
+	// fails CheckStateDir, as a saver proved another state directory's does.
+	PresentErr, CreateErr, EnsureErr, MarkErr, EndErr, EndMadeErr, StateDirErr error
 	// Answers are the protocol's readings in turn, the last repeating.
 	Answers []answer
 	Result  restore.Result
@@ -112,6 +113,11 @@ func (r *stepRecorder) SweepStaleFlags(context.Context) error {
 func (r *stepRecorder) Present(context.Context) (bool, error) {
 	r.record("Present")
 	return r.SaverUp, r.PresentErr
+}
+
+func (r *stepRecorder) CheckStateDir(context.Context) error {
+	r.record("CheckStateDir")
+	return r.StateDirErr
 }
 
 func (r *stepRecorder) EnsureSaver(ctx context.Context, made func(context.Context) error) error {
@@ -192,7 +198,7 @@ func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 // wantAllCalls is every seam call a bootstrap that finds its saver running
 // makes, in the order Run makes them.
 var wantAllCalls = []string{
-	"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+	"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 	"Present", "Protocol", "EnsureSaver", "Raise", "Restore", "Lower", "WriteLatch",
 }
 
@@ -246,7 +252,7 @@ func TestOrchestratorRun_RunsTheSixStepsInOrder(t *testing.T) {
 		runPass(t, r, &logtest.Sink{})
 
 		want := []string{
-			"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+			"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 			"Present", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 		}
 		if !slices.Equal(r.calls, want) {
@@ -274,7 +280,7 @@ func TestOrchestratorRun_LatchAndRestoringFlag(t *testing.T) {
 
 		runPass(t, r, &logtest.Sink{})
 
-		if got := r.calls[:3]; !slices.Equal(got, []string{"CheckZmx", "ClaimZmxDir", "RemoveLatch"}) {
+		if got := r.calls[:4]; !slices.Equal(got, []string{"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch"}) {
 			t.Errorf("calls begin %v, want the latch removed straight after zmx is checked", got)
 		}
 	})
@@ -304,7 +310,7 @@ func TestOrchestratorRun_LatchAndRestoringFlag(t *testing.T) {
 
 		runPass(t, r, sink)
 
-		if got := r.calls[:4]; !slices.Equal(got, []string{"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower"}) {
+		if got := r.calls[:5]; !slices.Equal(got, []string{"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower"}) {
 			t.Errorf("calls begin %v, want the flag lowered with the latch removed", got)
 		}
 		rec := sink.Records().WithMessage("restoring flag lowered").AtExactLevel(slog.LevelInfo).Only(t, "the flag left raised")
@@ -373,14 +379,14 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 			},
 			step:    indexCheckZmx,
 			message: "Portal's state in /srv/state belongs to the zmx sessions in /srv/zmx, but this Portal is using /tmp/scratch. Run it with ZMX_DIR=/srv/zmx, or give it a state of its own with PORTAL_STATE_DIR.",
-			calls:   wantAllCalls[:2],
+			calls:   wantAllCalls[:3],
 		},
 		{
 			name:    "a zmx directory record it can't read",
 			stage:   func(r *stepRecorder) { r.ZmxDirErr = &ZmxDirRecordError{Path: "/srv/state/zmx-dir", Err: errBoom} },
 			step:    indexCheckZmx,
 			message: "Portal can't read /srv/state/zmx-dir, which records the zmx directory its state belongs to: boom. Delete it, and Portal records the directory in use at its next start.",
-			calls:   wantAllCalls[:2],
+			calls:   wantAllCalls[:3],
 		},
 		{
 			name: "a zmx directory record it can't write",
@@ -389,35 +395,49 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 			},
 			step:    indexCheckZmx,
 			message: "Portal failed to record the zmx directory its state belongs to in /srv/state/zmx-dir: boom",
-			calls:   wantAllCalls[:2],
+			calls:   wantAllCalls[:3],
 		},
 		{
 			name:    "removing the latch",
 			stage:   func(r *stepRecorder) { r.RemoveErr = errBoom },
 			step:    indexRemoveLatch,
 			message: "Portal failed to remove the bootstrapped latch: boom",
-			calls:   wantAllCalls[:3],
+			calls:   wantAllCalls[:4],
 		},
 		{
 			name:    "lowering a restoring flag left raised",
 			stage:   func(r *stepRecorder) { r.LowerErrs = []error{errBoom} },
 			step:    indexRemoveLatch,
 			message: "Portal failed to lower the restoring flag: boom",
-			calls:   wantAllCalls[:4],
+			calls:   wantAllCalls[:5],
+		},
+		{
+			name:    "a zmx directory whose saver is another state directory's, before the state directory is claimed",
+			stage:   func(r *stepRecorder) { r.StateDirErr = theirs },
+			step:    indexCheckZmx,
+			message: theirsMessage,
+			calls:   wantAllCalls[:2],
+		},
+		{
+			name:    "a saver the ensure finds another state directory's",
+			stage:   func(r *stepRecorder) { r.EnsureErr = fmt.Errorf("create the saver: %w", theirs) },
+			step:    indexEnsureSaver,
+			message: theirsMessage,
+			calls:   wantAllCalls[:10],
 		},
 		{
 			name:    "raising the restoring flag",
 			stage:   func(r *stepRecorder) { r.RaiseErr = errBoom },
 			step:    indexRestore,
 			message: "Portal failed to raise the restoring flag: boom",
-			calls:   wantAllCalls[:10],
+			calls:   wantAllCalls[:11],
 		},
 		{
 			name:    "lowering the restoring flag after restore",
 			stage:   func(r *stepRecorder) { r.LowerErrs = []error{nil, errBoom} },
 			step:    indexRestore,
 			message: "Portal failed to lower the restoring flag: boom",
-			calls:   wantAllCalls[:12],
+			calls:   wantAllCalls[:13],
 		},
 	} {
 		t.Run(tc.name+" is fatal, and nothing runs after it, the latch least of all", func(t *testing.T) {
@@ -448,6 +468,12 @@ func TestOrchestratorRun_FatalSteps(t *testing.T) {
 	}
 }
 
+// theirs is a saver proved another state directory's, and theirsMessage its
+// fatal.
+var theirs = &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other: "/srv/portal/state", PID: 4242}
+
+const theirsMessage = "The _portal-saver running in this zmx directory saves Portal's state in /srv/portal/state, not this Portal's state in /tmp/scratch/state. Run it with PORTAL_STATE_DIR=/srv/portal/state, or give it a zmx directory of its own with ZMX_DIR. If the state in /srv/portal/state is gone, end its saver with zmx kill _portal-saver."
+
 // olderZmx is the fatal of a saver answering zmx 0.8.1's framing.
 const olderZmx = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1."
 
@@ -475,7 +501,7 @@ func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
 			}
 
 			want := []string{
-				"CheckZmx", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+				"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
 				"Present", "Protocol", "End", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
 			}
 			if !slices.Equal(r.calls, want) {

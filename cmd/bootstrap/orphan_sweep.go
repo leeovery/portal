@@ -20,11 +20,12 @@ type OrphanSweeper interface {
 
 // OrphanSweepCore SIGKILLs every orphaned saver daemon, and waits for each to
 // finish exiting. An orphan is a pid pgrep found that Prove proves, read just
-// before its kill, the saver's daemon of this backend's sessions, and that is
-// neither the saver session's own process nor this one. Argv alone never
-// kills: a sweep would otherwise kill another install's daemon, the tmux
-// version's among them, which lacks one of the saver session's marks. Every
-// field must be supplied; a sweep missing one kills nothing.
+// before its kill, the saver's daemon of this backend's sessions and this
+// state directory, and that is neither the saver session's own process nor
+// this one. Argv alone never kills: a sweep would otherwise kill another
+// install's daemon, the tmux version's among them, or another state
+// directory's, each lacking one of the saver session's marks. Every field
+// must be supplied; a sweep missing one kills nothing.
 type OrphanSweepCore struct {
 	// Pgrep finds the candidates. No default: shelling out would pull
 	// os/exec into this pure-orchestration package.
@@ -35,8 +36,9 @@ type OrphanSweepCore struct {
 	// unknown, and the sweep then kills nothing, since it can't spare it.
 	SaverPID func(ctx context.Context) (pid int, present bool, err error)
 
-	// Prove proves a pid the saver's daemon of this backend's sessions, as
-	// saverhost.Host.Prove does, its error wrapping saverhost's.
+	// Prove proves a pid the saver's daemon of this backend's sessions and
+	// this state directory, as saverhost.Host.Prove does, its error wrapping
+	// saverhost's.
 	Prove func(pid int) error
 
 	// Signal sends sig to pid; the sweep sends only SIGKILL, and only to a

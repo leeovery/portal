@@ -552,7 +552,7 @@ type lockCheckedBackend struct {
 	dir string
 }
 
-func (b lockCheckedBackend) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+func (b lockCheckedBackend) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	release, err := state.AcquireBootstrapLock(ctx, b.dir, 0)
 	switch {
 	case err == nil:
@@ -561,7 +561,7 @@ func (b lockCheckedBackend) Create(ctx context.Context, name, dir string, comman
 	case !errors.Is(err, state.ErrBootstrapLockHeld):
 		b.t.Errorf("take bootstrap.lock during Create(%s): %v", name, err)
 	}
-	return b.Backend.Create(ctx, name, dir, command)
+	return b.Backend.Create(ctx, name, dir, command, env...)
 }
 
 // syncBuffer is a buffer a command writes from one goroutine while the test

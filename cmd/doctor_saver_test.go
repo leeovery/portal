@@ -49,6 +49,9 @@ type saverAnswers struct {
 	proved  []int
 	reads   int
 	onRead  func(n int)
+	// theirs is the state directory the saver saves when it is proved
+	// another state directory's.
+	theirs string
 }
 
 func (s *saverAnswers) Present(context.Context) (bool, error) { return s.present, s.err }
@@ -64,6 +67,13 @@ func (s *saverAnswers) SaverPID(context.Context) (int, bool, error) {
 func (s *saverAnswers) Prove(pid int) error {
 	s.proved = append(s.proved, pid)
 	return s.proof
+}
+
+func (s *saverAnswers) CheckStateDir(context.Context) error {
+	if s.theirs == "" {
+		return nil
+	}
+	return &saverhost.OtherStateDirError{StateDir: "/srv/scratch/state", Other: s.theirs, PID: s.pid}
 }
 
 // runningSaver is a saver at doctorSaverPID whose daemon has recorded itself
@@ -98,6 +108,11 @@ func TestDoctorSaverCheck(t *testing.T) {
 
 	t.Run("it fails when there is no saver session", func(t *testing.T) {
 		assertCheck(t, saverCheck(t, &saverAnswers{}), checkFail, "_portal-saver not running — run portal open to start it")
+	})
+
+	t.Run("it fails a saver another state directory's, naming it", func(t *testing.T) {
+		got := saverCheck(t, &saverAnswers{present: true, pid: doctorSaverPID, theirs: "/srv/portal/state"})
+		assertCheck(t, got, checkFail, "_portal-saver saves the state in /srv/portal/state, not this one")
 	})
 
 	t.Run("it is not evaluable when the backend can't tell", func(t *testing.T) {
@@ -265,6 +280,20 @@ func TestDoctorDaemonCheck(t *testing.T) {
 			assertCheck(t, d.check(t, doctorVersion), checkFail, tc.detail)
 		})
 	}
+
+	// It never records itself in this state dir, so it is never waited for.
+	t.Run("it fails a daemon another state directory's, naming it, waiting for nothing", func(t *testing.T) {
+		d := newDaemonInstall(t)
+		d.saver.theirs = "/srv/portal/state"
+		start := time.Now()
+
+		got := d.checkWithin(t, doctorVersion, time.Minute)
+
+		assertCheck(t, got, checkFail, "pid 4242, which _portal-saver runs, saves the state in /srv/portal/state, not this one")
+		if took := time.Since(start); took >= time.Minute {
+			t.Errorf("judged after %v, want no wait for a daemon starting", took)
+		}
+	})
 
 	t.Run("it never proves a pid the saver doesn't run", func(t *testing.T) {
 		d := newDaemonInstall(t)
@@ -498,9 +527,9 @@ func TestDoctorLeavesTheInstallAsItFoundIt(t *testing.T) {
 	}
 }
 
-// The host doctor reads through holds the saver host's three reads and no
+// The host doctor reads through holds the saver host's four reads and no
 // host, so what it can do is its method set: no stop, no ensure, no signal.
-// Its proof reads a live process, this test's own, from the process table.
+// Its proofs read a live process, this test's own, from the process table.
 func TestReadOnlySaverHostOnlyReads(t *testing.T) {
 	withFuncSeam(t, &signalProcess, func(pid int, sig syscall.Signal) error {
 		t.Errorf("signalProcess(%d, %v) through the read-only host", pid, sig)
@@ -518,7 +547,7 @@ func TestReadOnlySaverHostOnlyReads(t *testing.T) {
 	for m := range typ.Methods() {
 		methods = append(methods, m.Name)
 	}
-	if want := []string{"Present", "Prove", "SaverPID"}; !slices.Equal(methods, want) {
+	if want := []string{"CheckStateDir", "Present", "Prove", "SaverPID"}; !slices.Equal(methods, want) {
 		t.Errorf("%v's methods = %q, want only the reads %q", typ, methods, want)
 	}
 	for field := range typ.Fields() {
@@ -535,5 +564,8 @@ func TestReadOnlySaverHostOnlyReads(t *testing.T) {
 	}
 	if err := host.Prove(os.Getpid()); !errors.Is(err, saverhost.ErrNotSaverDaemon) {
 		t.Errorf("Prove(this test) = %v; want it read and found no save daemon", err)
+	}
+	if err := host.CheckStateDir(t.Context()); err != nil {
+		t.Errorf("CheckStateDir = %v; want this test, no save daemon, proved no other state directory's", err)
 	}
 }

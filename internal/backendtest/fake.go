@@ -35,13 +35,14 @@ const (
 // AttachProgram is Argv[0] of every command AttachCommand returns.
 const AttachProgram = "backendtest-attach"
 
-// Call is one recorded Backend call. Dir and Command are set for Create only,
-// Rows for History only.
+// Call is one recorded Backend call. Dir, Command and Env are set for Create
+// only, Rows for History only.
 type Call struct {
 	Op      Op
 	Name    string
 	Dir     string
 	Command []string
+	Env     []string
 	Rows    int
 }
 
@@ -247,10 +248,10 @@ func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 // Create reports the session as zmx does: its Dir with symlinks resolved, as
 // the session's own working directory reads, and its Command rendered by
 // DisplayCommand.
-func (f *Fake) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+func (f *Fake) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.record(Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command)}); err != nil {
+	if err := f.record(Call{Op: OpCreate, Name: name, Dir: dir, Command: slices.Clone(command), Env: slices.Clone(env)}); err != nil {
 		return backend.Session{}, err
 	}
 	if err := f.validate(name); err != nil {

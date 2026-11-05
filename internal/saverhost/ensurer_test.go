@@ -55,8 +55,8 @@ type startingDaemon struct {
 	version string
 }
 
-func (b *startingDaemon) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	s, err := b.Fake.Create(ctx, name, dir, command)
+func (b *startingDaemon) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command, env...)
 	if err != nil {
 		return s, err
 	}
@@ -71,8 +71,8 @@ type versionOnly struct {
 	version string
 }
 
-func (b *versionOnly) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	s, err := b.Fake.Create(ctx, name, dir, command)
+func (b *versionOnly) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command, env...)
 	if err != nil {
 		return s, err
 	}
@@ -88,8 +88,8 @@ type slowToRecord struct {
 	version string
 }
 
-func (b *slowToRecord) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	s, err := b.Fake.Create(ctx, name, dir, command)
+func (b *slowToRecord) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command, env...)
 	if err != nil {
 		return s, err
 	}
@@ -115,7 +115,7 @@ type beatenToIt struct {
 	version string
 }
 
-func (b *beatenToIt) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+func (b *beatenToIt) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	theirs, err := b.Fake.Create(ctx, name, dir, []string{"/usr/local/bin/portal", "state", "daemon"})
 	if err != nil {
 		return theirs, err
@@ -123,15 +123,15 @@ func (b *beatenToIt) Create(ctx context.Context, name, dir string, command []str
 	if err := record(b.dir, theirs.PID, b.version); err != nil {
 		return theirs, err
 	}
-	return b.Fake.Create(ctx, name, dir, command)
+	return b.Fake.Create(ctx, name, dir, command, env...)
 }
 
 // refusingDaemon is the Fake whose saver session ends as it is made, its
 // daemon refusing to run.
 type refusingDaemon struct{ *backendtest.Fake }
 
-func (b *refusingDaemon) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	s, err := b.Fake.Create(ctx, name, dir, command)
+func (b *refusingDaemon) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command, env...)
 	if err == nil {
 		b.Remove(name)
 	}
@@ -155,8 +155,8 @@ func newLateDaemon(fake *backendtest.Fake, dir, version string) *lateDaemon {
 		created: make(chan struct{}), open: make(chan struct{}), recorded: make(chan error, 1)}
 }
 
-func (b *lateDaemon) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	s, err := b.Fake.Create(ctx, name, dir, command)
+func (b *lateDaemon) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	s, err := b.Fake.Create(ctx, name, dir, command, env...)
 	if err != nil {
 		return s, err
 	}

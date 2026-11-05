@@ -58,10 +58,11 @@ func sweepMarks(t *testing.T) []string {
 	return []string{zmx.SessionEntry(saver.SessionName), "ZMX_DIR=" + filepath.Join(blocker, "zmx")}
 }
 
-// sweepWith runs the production sweep's proof over candidates, signalling
-// only through held, which proves each pid the test's own as it is sent.
-// No saver session is running, so every proved daemon is an orphan.
-func sweepWith(t *testing.T, marks []string, pgrep func() ([]int, error), held ...*proctest.Held) {
+// sweepWith runs the production sweep's proof of the saver of stateDir over
+// candidates, signalling only through held, which proves each pid the test's
+// own as it is sent. No saver session is running, so every proved daemon is
+// an orphan.
+func sweepWith(t *testing.T, stateDir string, marks []string, pgrep func() ([]int, error), held ...*proctest.Held) {
 	t.Helper()
 	signal := func(pid int, sig syscall.Signal) error {
 		for _, h := range held {
@@ -71,7 +72,7 @@ func sweepWith(t *testing.T, marks []string, pgrep func() ([]int, error), held .
 		}
 		return fmt.Errorf("pid %d is none of the test's processes, so it is not signalled", pid)
 	}
-	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Marks: marks, Signal: signal})
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: stateDir, Marks: marks, Signal: signal})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,13 +84,14 @@ func sweepWith(t *testing.T, marks []string, pgrep func() ([]int, error), held .
 
 // startDaemon holds `binary state daemon` over a state directory of its own,
 // which the sandbox's pgrep surfaces, with env and extra, and returns once it
-// holds its lock.
-func startDaemon(t *testing.T, binary string, env []string, extra ...string) *proctest.Held {
+// holds its lock, with that directory, which its environment names as a
+// saver's does.
+func startDaemon(t *testing.T, binary string, env []string, extra ...string) (*proctest.Held, string) {
 	t.Helper()
 	dir := t.TempDir()
 	portaltest.OwnStateDir(t, dir)
 	cmd := exec.Command(binary, "state", "daemon")
-	cmd.Env = append(slices.Clone(env), append([]string{"PORTAL_STATE_DIR=" + dir}, extra...)...)
+	cmd.Env = append(slices.Clone(env), append([]string{saverhost.StateDirMark(dir)}, extra...)...)
 	h := proctest.Start(t, cmd, "")
 	if !harnesstest.PollUntil(t, daemonSettle, 20*time.Millisecond, func() bool {
 		pid, err := state.ReadPIDFile(dir)
@@ -97,7 +99,7 @@ func startDaemon(t *testing.T, binary string, env []string, extra ...string) *pr
 	}) {
 		t.Fatalf("the daemon %d never held its lock\n--- portal.log ---\n%s", h.PID(), portaltest.ReadPortalLogSafe(dir))
 	}
-	return h
+	return h, dir
 }
 
 // awaitEnviron waits for pid to carry every entry of marks, read as the
@@ -128,8 +130,9 @@ func survives(t *testing.T, h *proctest.Held, what string) {
 // candidates are the test's own children, so a failure kills nothing the test
 // doesn't own.
 func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
-	env, _ := portaltest.IsolateStateForTest(t)
+	env, stateDir := portaltest.IsolateStateForTest(t)
 	marks := sweepMarks(t)
+	carried := append(slices.Clone(marks), saverhost.StateDirMark(stateDir))
 
 	sleeper := proctest.Start(t, exec.Command("sh", "-c", "exec sleep 30"), "")
 	exe, err := os.Executable()
@@ -137,15 +140,15 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	helper := exec.Command(exe, "-test.run=^TestMarkedHelperProcess$")
-	helper.Env = append(slices.Clone(env), append(slices.Clone(marks), markedHelperEnv+"=1")...)
+	helper.Env = append(slices.Clone(env), append(slices.Clone(carried), markedHelperEnv+"=1")...)
 	marked := proctest.Start(t, helper, "")
-	awaitEnviron(t, marked.PID(), marks)
+	awaitEnviron(t, marked.PID(), carried)
 
-	sweepWith(t, marks, func() ([]int, error) { return []int{sleeper.PID(), marked.PID()}, nil }, sleeper, marked)
+	sweepWith(t, stateDir, marks, func() ([]int, error) { return []int{sleeper.PID(), marked.PID()}, nil }, sleeper, marked)
 
 	survives(t, sleeper, "a sleep the pgrep hit named")
 	survives(t, marked, "a process carrying the saver session's marks")
-	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Marks: marks, Signal: func(int, syscall.Signal) error {
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: stateDir, Marks: marks, Signal: func(int, syscall.Signal) error {
 		return errors.New("no signal")
 	}})
 	if err != nil {
@@ -156,25 +159,28 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 	}
 }
 
-// Two of the test's daemons, both found by the sandboxed pgrep and both
-// identified by argv: the one carrying the saver session's environment is an
-// orphaned saver daemon and is killed, while the one without it, as another
-// install's daemon would be, the tmux version's among them, survives.
+// Three of the test's daemons, all found by the sandboxed pgrep and all
+// identified by argv: the one carrying the saver session's environment and
+// the sweep's state directory is an orphaned saver daemon and is killed,
+// while the one without the session's name, as another install's daemon
+// would be, the tmux version's among them, and the one of another state
+// directory, as a saver another Portal's state started would be, survive.
 func TestSweepOrphanDaemons_Integration_KillsOnlyTheMarkedDaemon(t *testing.T) {
 	// Built before the isolation scrubs HOME, which go build's caches hang off.
 	binary := portalbintest.Build(t)
 	env, _ := portaltest.IsolateStateForTest(t)
 	marks := sweepMarks(t)
-	orphan := startDaemon(t, binary, env, marks...)
-	unmarked := startDaemon(t, binary, env, marks[1])
+	orphan, stateDir := startDaemon(t, binary, env, marks...)
+	unmarked, _ := startDaemon(t, binary, env, marks[1])
+	theirs, _ := startDaemon(t, binary, env, marks...)
 
-	if pids, err := portaltest.PgrepPortalDaemons(); err != nil || !slices.Contains(pids, orphan.PID()) || !slices.Contains(pids, unmarked.PID()) {
-		t.Fatalf("PgrepPortalDaemons = %v, %v; want both daemons, %d and %d", pids, err, orphan.PID(), unmarked.PID())
+	if pids, err := portaltest.PgrepPortalDaemons(); err != nil || !slices.Contains(pids, orphan.PID()) || !slices.Contains(pids, unmarked.PID()) || !slices.Contains(pids, theirs.PID()) {
+		t.Fatalf("PgrepPortalDaemons = %v, %v; want all three daemons, %d, %d and %d", pids, err, orphan.PID(), unmarked.PID(), theirs.PID())
 	}
 
 	sink := logtest.Install(t)
 
-	sweepWith(t, marks, state.PgrepPortalDaemons, orphan, unmarked)
+	sweepWith(t, stateDir, marks, state.PgrepPortalDaemons, orphan, unmarked, theirs)
 
 	// Counted only once it has finished exiting, a zombie the test holds.
 	summary := sink.Records().Matching("clean", "orphan-daemon sweep complete").Only(t, "the sweep's summary")
@@ -190,4 +196,5 @@ func TestSweepOrphanDaemons_Integration_KillsOnlyTheMarkedDaemon(t *testing.T) {
 		t.Errorf("the orphan ended %v, want by SIGKILL", status)
 	}
 	survives(t, unmarked, "the daemon without the saver session's environment")
+	survives(t, theirs, "the daemon of another state directory")
 }

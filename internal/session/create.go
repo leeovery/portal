@@ -50,7 +50,7 @@ type ProjectStore interface {
 type Backend interface {
 	Exists(ctx context.Context, name string) (bool, error)
 	ValidateName(name string) error
-	Create(ctx context.Context, name, dir string, command []string) (backend.Session, error)
+	Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error)
 }
 
 // Created is a session a SessionCreator made.

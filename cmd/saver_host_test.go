@@ -21,26 +21,28 @@ func TestNewSaverHost(t *testing.T) {
 		}
 	})
 
-	t.Run("it compares the saver's zmx directory as the zmx-dir claim does", func(t *testing.T) {
+	t.Run("it compares the saver's zmx directory and state directory as the zmx-dir claim does", func(t *testing.T) {
 		dir := t.TempDir()
 		link := filepath.Join(t.TempDir(), "link")
 		if err := os.Symlink(dir, link); err != nil {
 			t.Fatal(err)
 		}
 		b := backendtest.New()
-		b.SetReachEnv([]string{"ZMX_DIR=" + dir})
+		b.SetReachEnv([]string{"ZMX_DIR=" + t.TempDir()})
 
 		cfg, err := saverHostConfig(b, t.TempDir())
 		if err != nil {
 			t.Fatalf("saverHostConfig: %v", err)
 		}
-		canonical := cfg.Canonical["ZMX_DIR"]
-		if canonical == nil {
-			t.Fatalf("Canonical = %v, want ZMX_DIR compared canonically", cfg.Canonical)
-		}
-		for _, spelling := range []string{dir + "/", link} {
-			if got, want := canonical(spelling), zmx.CanonicalDir(dir); got != want {
-				t.Errorf("canonical(%q) = %q, want zmx.CanonicalDir's %q", spelling, got, want)
+		for _, key := range []string{"ZMX_DIR", "PORTAL_STATE_DIR"} {
+			canonical := cfg.Canonical[key]
+			if canonical == nil {
+				t.Fatalf("Canonical = %v, want %s compared canonically", cfg.Canonical, key)
+			}
+			for _, spelling := range []string{dir + "/", link} {
+				if got, want := canonical(spelling), zmx.CanonicalDir(dir); got != want {
+					t.Errorf("%s: canonical(%q) = %q, want zmx.CanonicalDir's %q", key, spelling, got, want)
+				}
 			}
 		}
 	})

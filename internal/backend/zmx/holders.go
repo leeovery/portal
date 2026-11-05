@@ -179,15 +179,18 @@ const endPoll = 20 * time.Millisecond
 // ran holds anything. A session whose socket has already gone is ended, and a
 // daemon gone or exiting by the second read, as another's SIGTERM leaves one,
 // is waited for as one signalled. It signals nothing without the proof: no
-// such process or more than one, or a table it can't read, as off darwin.
-func (b *Backend) EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error) error {
-	if err := b.endDaemon(ctx, name, signal); err != nil {
+// such process or more than one, a table it can't read, as off darwin, or a
+// daemon whose environment doesn't set each of dirs' variables, KEY=dir, to
+// that directory every time, compared canonically, a relative value only
+// ever itself.
+func (b *Backend) EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error {
+	if err := b.endDaemon(ctx, name, signal, dirs); err != nil {
 		return fmt.Errorf("end the daemon of session %q: %w", name, err)
 	}
 	return nil
 }
 
-func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error) error {
+func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs []string) error {
 	if err := b.ValidateName(name); err != nil {
 		return err
 	}
@@ -197,6 +200,9 @@ func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid in
 	d, err := b.sessionDaemon(ctx, name)
 	if err != nil {
 		return err
+	}
+	if !setsDirs(d.args.Env, dirs) {
+		return fmt.Errorf("%w: pid %d's environment doesn't name %q", errUnproved, d.PID, dirs)
 	}
 	switch err := b.stillDaemon(ctx, d); {
 	case errors.Is(err, proctable.ErrGone):
@@ -277,6 +283,30 @@ func detached(p proctable.Process) bool { return p.PPID == 1 && !p.Terminal }
 func (b *Backend) runsDaemonOf(args proctable.Args, name string) bool {
 	started, ok := startedName(args.Argv)
 	return ok && len(args.Env) > 0 && lookup(args.Env, envPrefix)+started == name && b.isDir(DirFor(args.Env))
+}
+
+// setsDirs reports whether env sets each of dirs' variables, KEY=dir, and to
+// that directory every time it sets it: the same string, or, both absolute,
+// one directory once canonical.
+func setsDirs(env, dirs []string) bool {
+	for _, entry := range dirs {
+		key, dir, _ := strings.Cut(entry, "=")
+		set := false
+		for _, kv := range env {
+			k, got, _ := strings.Cut(kv, "=")
+			if k != key {
+				continue
+			}
+			if got != dir && (!filepath.IsAbs(got) || !filepath.IsAbs(dir) || CanonicalDir(got) != CanonicalDir(dir)) {
+				return false
+			}
+			set = true
+		}
+		if !set {
+			return false
+		}
+	}
+	return true
 }
 
 // awaitEnded waits, within the kill ceiling, for the session name's socket to

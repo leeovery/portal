@@ -230,14 +230,14 @@ const saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
 // doctorSaverReads are the saverhost Host methods a doctor source may reach:
 // the reads. Every other method of the host takes saver.lock, signals or
 // creates, so a method it gains is one of those until it is named here.
-var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
+var doctorSaverReads = []string{"Present", "SaverPID", "Prove", "CheckStateDir"}
 
 // doctorSignallers are cmd's ways to a process: the seam, the hosts that
 // signal through it, and the full bootstrap, whose sweeps and saver ending
 // signal.
 var doctorSignallers = []string{
 	"signalProcess",
-	"newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon", "endBySignal",
+	"newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon",
 	"newProductionBootstrap", "owedBootstrap", "bootstrapFor", "runBootstrap",
 }
 
@@ -412,6 +412,7 @@ type doctorSaver interface {
 	Present(ctx context.Context) (bool, error)
 	SaverPID(ctx context.Context) (int, bool, error)
 	Prove(pid int) error
+	CheckStateDir(ctx context.Context) error
 }
 
 var _ doctorSaver = (*saverhost.Host)(nil)
@@ -420,7 +421,9 @@ func checkSaver(ctx context.Context, s doctorSaver, h *saverhost.Host) {
 	_, _ = s.Present(ctx)
 	_, _, _ = s.SaverPID(ctx)
 	_ = s.Prove(1)
+	_ = s.CheckStateDir(ctx)
 	_, _ = h.Present(ctx)
+	_ = h.CheckStateDir(ctx)
 }`,
 			nil},
 	} {

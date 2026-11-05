@@ -40,17 +40,17 @@ func uninstallSaver() (saverStopper, unusableSaver, error) {
 	if uninstallDeps != nil {
 		deps = *uninstallDeps
 	}
+	dir, err := state.Dir()
+	if err != nil {
+		return nil, nil, err
+	}
 	if deps.Daemon == nil {
-		deps.Daemon = newSaverDaemon()
+		deps.Daemon = newSaverDaemon(dir)
 	}
 	if deps.Saver != nil {
 		return deps.Saver, deps.Daemon, nil
 	}
 	b, err := sessionBackend()
-	if err != nil {
-		return nil, nil, err
-	}
-	dir, err := state.Dir()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -82,15 +82,20 @@ var uninstallCmd = &cobra.Command{
 // stopSaver stops the saver, and reports whether there was one. A saver the
 // stop fails on whose daemon speaks a zmx protocol Portal can't use is ended
 // as the bootstrap ends one, still under saver.lock, so no saver an ensure
-// makes meanwhile is ended in its place.
+// makes meanwhile is ended in its place. A saver proved another state
+// directory's is refused in the bootstrap's terms, sent nothing.
 func stopSaver(ctx context.Context) (bool, error) {
 	stopper, daemon, err := uninstallSaver()
 	if err != nil {
 		return false, err
 	}
-	return stopper.StopOr(ctx, func(ctx context.Context, stopErr error) (bool, error) {
+	stopped, err := stopper.StopOr(ctx, func(ctx context.Context, stopErr error) (bool, error) {
 		return endUnusable(ctx, daemon, stopErr)
 	})
+	if refusal := bootstrap.OtherStateDir(err); refusal != nil {
+		return false, refusal
+	}
+	return stopped, err
 }
 
 // endUnusable ends the saver a stop failed on with stopErr when its daemon

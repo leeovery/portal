@@ -31,8 +31,9 @@ func created(name string) string { return `session "` + name + `" created` + "\n
 // zmx reports the session made and then fails. A session made that gives no
 // Info within the read-back is judged once that is over, each step within
 // its own ceiling and past the create's (refuseOlder), so a judgement late in
-// the create's ceiling is never cut short.
-func (b *Backend) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+// the create's ceiling is never cut short. env reaches the session through
+// zmx's environment, which its daemon keeps and its program inherits.
+func (b *Backend) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	if err := b.ValidateName(name); err != nil {
 		return backend.Session{}, err
 	}
@@ -41,7 +42,7 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 	if err := b.refuseHeld(run, name); err != nil {
 		return backend.Session{}, err
 	}
-	stdout, runErr := b.attach(run, name, dir, command)
+	stdout, runErr := b.attach(run, name, dir, command, env)
 	if strings.HasPrefix(stdout, created(name)) {
 		s := b.made(run, name)
 		if s.Answered {
@@ -158,10 +159,11 @@ func (b *Backend) holder(ctx context.Context, name string) (string, error) {
 // soon as the daemon is up, and returns what it printed on stdout. The run
 // drops ZMX_SESSION, which would turn the attach into a switch of the
 // caller's session, ZMX_SESSION_PREFIX, which zmx would prepend to the name,
-// and tmux's variables (see env).
-func (b *Backend) attach(ctx context.Context, name, dir string, command []string) (string, error) {
+// and tmux's variables (see env). extra's entries are set over the rest: exec
+// keeps the last of a repeated variable.
+func (b *Backend) attach(ctx context.Context, name, dir string, command, extra []string) (string, error) {
 	cmd := exec.CommandContext(ctx, b.binary, append([]string{"attach", name}, command...)...)
-	cmd.Env = b.env(envSession, envPrefix)
+	cmd.Env = append(b.env(envSession, envPrefix), extra...)
 	cmd.Dir = dir
 	cmd.WaitDelay = pipeGrace
 	var stdout, stderr bytes.Buffer
