@@ -75,7 +75,7 @@ For load generators, match the exact command (`ps -eo ppid,command | awk '$1==1 
 ## Architecture
 
 Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2, over zmx (see `docs/design/zmx-backend.md`). `main.go` → `cmd/root.go` → subcommands. `PersistentPreRunE` runs:
-1. the `sessions.json` stop, refusing a version 1, corrupt or newer index, or a migration cut short between its renames (`state.MigrationCutShort`), which the daemon refuses to start on too (every command but `version`, `doctor`, `current`, `migrate` and the `state` tree);
+1. the `sessions.json` stop, refusing a version 1, corrupt or newer index, or a migration cut short between its renames (`state.MigrationCutShort`), which the daemon refuses to start on too (every command but `version`, `init`, `doctor`, `current`, `migrate` and the `state` tree);
 2. for the exempt commands that write state (`exemptStateWriters`: `hook set`, `hook rm`, `rename`), the bootstrap gate's `zmx-dir` check, recording nothing (`refuseOtherZmxDir`, the fatal `ZmxDirOwner.Refusal` names; doctor's `--fix` makes the same check after its diagnosis);
 3. the `bootstrapExempt` check (`__complete`, `alias`, `current`, `doctor`, `help`, `hook`, `init`, `migrate`, `rename`, `state`, `theme`, `uninstall`, `version`; a match anywhere in the parent chain exempts);
 4. for `open`, the zmx binary lookup;

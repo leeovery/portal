@@ -52,7 +52,6 @@ func TestLegacyIndexStop(t *testing.T) {
 		{"list"},
 		{"open"},
 		{"alias", "list"},
-		{"init", "zsh"},
 		{"__complete", "open", ""},
 		{"hook", "list"},
 		{"uninstall"},

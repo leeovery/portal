@@ -39,7 +39,8 @@ var bootstrapExempt = map[string]bool{
 	"version":    true,
 }
 
-// The state check spares version, which reads no state; doctor, which reports
+// The state check spares version and init, which read no state, so a new
+// shell's eval of init's script keeps working before portal migrate; doctor, which reports
 // an unusable sessions.json, or a migration cut short, itself, and repairs
 // nothing on either; current, which only reads
 // it and shows the name alone when it can't, since footers run it on every
@@ -50,6 +51,7 @@ var bootstrapExempt = map[string]bool{
 var stateCheckExempt = map[string]bool{
 	"current": true,
 	"doctor":  true,
+	"init":    true,
 	"migrate": true,
 	"state":   true,
 	"version": true,
