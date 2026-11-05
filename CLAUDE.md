@@ -77,7 +77,7 @@ Cobra CLI + Bubble Tea v2 TUI + Lipgloss v2, over zmx (see `docs/design/zmx-back
 4. for `open`, the zmx binary lookup;
 5. `bootstrapFor`.
 
-`bootstrapFor` runs the bootstrap a command owes (see Server bootstrap). Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Only `portal migrate` knows tmux: `migrate.Tmux`, built only by `cmd/migrate.go`'s `migrateTmux`; nothing else runs the tmux binary (`internal/migrate/tmux_owner_guard_test.go`: a string naming tmux appears only in the files it lists, and none of those but migrate's client and tmuxtest hands one to a runner). Across the module, only `cmd/state_daemon.go` (the idle-tick sweep) and `cmd/doctor.go` (the count, and `--fix`'s prune) may reach `hooksweep` or `(*hooks.Store).CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, judged by type-checked object).
+`bootstrapFor` runs the bootstrap a command owes (see Server bootstrap). Commands reach zmx through `cmd/backend.go` (`withBackendDeps` in tests; `userSessions` hides `_` names). Only `portal migrate` knows tmux: `migrate.Tmux`, built only by `cmd/migrate.go`'s `migrateTmux`; nothing else runs the tmux binary (`internal/migrate/tmux_owner_guard_test.go`: a Go string literal naming tmux as a word, in any case, appears only in the files it lists, and of those only migrate's client and tmuxtest hand one straight to an exec call; its doc states the reach). Across the module, only `cmd/state_daemon.go` (the idle-tick sweep) and `cmd/doctor.go` (the count, and `--fix`'s prune) may reach `hooksweep` or `(*hooks.Store).CleanStale` (`cmd/hook_sweep_caller_guard_test.go`, judged by type-checked object).
 
 ### Commands
 
