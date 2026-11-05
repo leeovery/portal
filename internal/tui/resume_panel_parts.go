@@ -28,7 +28,7 @@ func sanitiseCommandText(s string) string {
 }
 
 func resumeCommandLines(command string, width int) []string {
-	return wrapCapped(sanitiseCommandText(command), width, resumeCommandMaxLines, resumeEllipsis)
+	return wrapCappedAtSpaces(sanitiseCommandText(command), width, resumeCommandMaxLines, resumeEllipsis)
 }
 
 func resumeCommandRows(command string, width int, tok theme.Token, bold bool, th theme.Theme, colourless bool) []string {

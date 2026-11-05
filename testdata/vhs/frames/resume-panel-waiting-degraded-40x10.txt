@@ -1,7 +1,7 @@
 Resume session
-cd ~/code/portal/internal/capture &&
-./scripts/watch --session 45604077-a9d0-
-41bd-9692-b97f63f237fc
+cd ~/code/portal/internal &&
+./scripts/watch --session
+45604077-a9d0-41bd-9692-b97f63f237fc
 ⏎ resume   d discard   esc back
 
 

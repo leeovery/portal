@@ -16,7 +16,7 @@ import (
 // Restated rather than read off the surface, so a seed that drifts is a failure
 // here rather than an expectation that drifts with it.
 const (
-	surfaceCommand       = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+	surfaceCommand       = "cd ~/code/portal/internal && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
 	surfaceReport        = "can't unpause this session: permission denied"
 	discardSurfaceReport = "can't write hooks.json: permission denied"
 )
