@@ -21,6 +21,10 @@ const (
 	ZmxDirUnwritableMessage = "Portal failed to record the zmx directory its state belongs to in %[1]s: %[2]v"
 )
 
+// ErrZmxDirUnrecorded is a state directory that records no zmx directory
+// yet: the next bootstrap records the one in use.
+var ErrZmxDirUnrecorded = errors.New("the state directory records no zmx directory")
+
 // ZmxDirClaimer claims the state directory for the zmx directory Portal runs
 // against. Its error is an *OtherZmxDirError for a state directory that
 // belongs to another, and a *ZmxDirRecordError for a record it can't read or
@@ -83,6 +87,17 @@ type ZmxDirOwner struct {
 // *ZmxDirRecordError when its record can't be read. It writes nothing.
 func (o ZmxDirOwner) Check() error {
 	_, err := o.Recorded()
+	return err
+}
+
+// Claimed is Check, failing besides with ErrZmxDirUnrecorded when the state
+// directory records no zmx directory: the gate's read, which owes the
+// bootstrap that records one. It writes nothing.
+func (o ZmxDirOwner) Claimed() error {
+	recorded, err := o.Recorded()
+	if err == nil && recorded == "" {
+		return ErrZmxDirUnrecorded
+	}
 	return err
 }
 

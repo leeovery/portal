@@ -67,7 +67,8 @@ func visible(model tea.Model) string { return ansi.Strip(model.(tui.Model).View(
 // decision 75: a mint a zmx Portal can't talk to refused ends the run on the
 // error frame, as a bootstrap's fatal does; any other failure is flashed.
 func TestMintFailure(t *testing.T) {
-	t.Run("a refused create shows the fatal on the error frame, every step done, and ends the run with it", func(t *testing.T) {
+	// No loading step ran in a warm picker's process, so none is shown.
+	t.Run("a refused create in a warm picker shows the fatal alone, and ends the run with it", func(t *testing.T) {
 		model, _ := mint(t, warmProjectsModel(t, errRefusedCreate))
 
 		got := model.(tui.Model)
@@ -75,9 +76,12 @@ func TestMintFailure(t *testing.T) {
 			t.Fatalf("page %d, FatalError %v; want the error frame carrying the fatal", got.ActivePage(), got.FatalError())
 		}
 		view := visible(model)
-		for _, want := range []string{errOlderFatal.Error(), "✓   Checking zmx", "✓   Starting the saver", "✓   Restoring sessions"} {
-			if !strings.Contains(view, want) {
-				t.Errorf("frame lacks %q:\n%s", want, view)
+		if !strings.Contains(view, errOlderFatal.Error()) {
+			t.Errorf("frame lacks the fatal %q:\n%s", errOlderFatal.Error(), view)
+		}
+		for _, label := range []string{tui.LabelCheckingZmx, tui.LabelStartingTheSaver, tui.LabelRestoringSessions} {
+			if strings.Contains(view, label) {
+				t.Errorf("frame shows the step %q, which never ran here:\n%s", label, view)
 			}
 		}
 		if _, cmd := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); runCmd(cmd) == nil {
@@ -85,6 +89,37 @@ func TestMintFailure(t *testing.T) {
 		}
 		if _, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); runCmd(cmd) != nil {
 			t.Error("Enter on the error frame minted again")
+		}
+	})
+
+	t.Run("a refused create in a picker whose loading page ran keeps its steps", func(t *testing.T) {
+		deps := tui.Deps{
+			Lister:           &mockSessionLister{sessions: []tui.Session{}},
+			Creator:          &mockSessionCreator{err: errRefusedCreate},
+			CreateFatal:      olderFatal,
+			CWD:              "/tmp/cwd",
+			ProgressReceiver: tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} }),
+		}
+		var model tea.Model = tui.Build(deps)
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		for step := 1; step <= 6; step++ {
+			model, _ = model.Update(tui.BootstrapProgressMsg{Index: step})
+		}
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: stagedMintProjects})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+		if page := model.(tui.Model).ActivePage(); page != tui.PageProjects {
+			t.Fatalf("ActivePage() = %d, want PageProjects", page)
+		}
+
+		model, _ = mint(t, model)
+
+		view := visible(model)
+		for _, want := range []string{errOlderFatal.Error(), "✓   " + tui.LabelCheckingZmx, "✓   " + tui.LabelStartingTheSaver, "✓   " + tui.LabelRestoringSessions} {
+			if !strings.Contains(view, want) {
+				t.Errorf("frame lacks %q:\n%s", want, view)
+			}
 		}
 	})
 

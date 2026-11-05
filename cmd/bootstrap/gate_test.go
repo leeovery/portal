@@ -41,7 +41,7 @@ func TestGateOwed(t *testing.T) {
 		t.Run("a bootstrap is owed with "+name+", the saver unasked", func(t *testing.T) {
 			saver := &presence{present: true}
 
-			if !(Gate{StateDir: dir(t), Running: running, ZmxDir: noRecord, Present: saver.check}).Owed(t.Context()) {
+			if !(Gate{StateDir: dir(t), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
 				t.Error("Owed = false, want a bootstrap owed")
 			}
 			if saver.asks != 0 {
@@ -58,7 +58,7 @@ func TestGateOwed(t *testing.T) {
 		"a saver that can't be told there, its read answering there as well": {present: true, err: errBoom},
 	} {
 		t.Run("a bootstrap is owed with the latch current and "+name, func(t *testing.T) {
-			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: noRecord, Present: saver.check}).Owed(t.Context()) {
+			if !(Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
 				t.Error("Owed = false, want a bootstrap owed")
 			}
 		})
@@ -72,7 +72,7 @@ func TestGateOwed(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if (Gate{StateDir: dir, Running: running, ZmxDir: noRecord, Present: (&presence{present: true}).check}).Owed(t.Context()) {
+		if (Gate{StateDir: dir, Running: running, ZmxDir: thisZmxDir, Present: (&presence{present: true}).check}).Owed(t.Context()) {
 			t.Error("Owed = true, want the warm path: the flag is no record of a bootstrap")
 		}
 	})
@@ -80,7 +80,7 @@ func TestGateOwed(t *testing.T) {
 	t.Run("a warm run owes none, and asks only whether the saver is there, once", func(t *testing.T) {
 		saver := &presence{present: true}
 
-		if (Gate{StateDir: latched(t, running), Running: running, ZmxDir: noRecord, Present: saver.check}).Owed(t.Context()) {
+		if (Gate{StateDir: latched(t, running), Running: running, ZmxDir: thisZmxDir, Present: saver.check}).Owed(t.Context()) {
 			t.Error("Owed = true, want the warm path")
 		}
 		if saver.asks != 1 {
@@ -93,6 +93,7 @@ func TestGateOwed(t *testing.T) {
 	for name, check := range map[string]func() error{
 		"a state directory of another zmx directory": func() error { return &OtherZmxDirError{StateDir: "/s", Recorded: "/z", Using: "/y"} },
 		"a zmx directory record it can't read":       func() error { return errBoom },
+		"no zmx directory recorded":                  func() error { return ErrZmxDirUnrecorded },
 	} {
 		t.Run("a bootstrap is owed with the latch current and "+name+", the saver unasked", func(t *testing.T) {
 			saver := &presence{present: true}
@@ -107,5 +108,5 @@ func TestGateOwed(t *testing.T) {
 	}
 }
 
-// noRecord is a state directory that records no zmx directory, or this one.
-func noRecord() error { return nil }
+// thisZmxDir is a state directory that records the zmx directory in use.
+func thisZmxDir() error { return nil }

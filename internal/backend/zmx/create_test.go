@@ -442,10 +442,81 @@ func TestCreateRefusesASessionOfAnOlderZmx(t *testing.T) {
 		if want := []string{"100 " + syscall.SIGTERM.String()}; !slices.Equal(signals, want) {
 			t.Errorf("signals = %q, want %q: work's daemon alone", signals, want)
 		}
-		if msg := got.err.Error(); !strings.Contains(msg, "SessionUnresponsive") || !strings.Contains(msg, "a SIGTERM to its daemon ended the session") {
+		if msg := got.err.Error(); !strings.Contains(msg, "SessionUnresponsive") || !strings.Contains(msg, "a SIGTERM to its daemon, pid 100, ended the session") {
 			t.Errorf("Create = %v, want the kill's failure, then the session ended by the signal", got.err)
 		}
 	})
+
+	// The fallback signals only the daemon this Create made, pinned before
+	// the judgement and proved again just before the signal.
+	for _, tc := range []struct {
+		name string
+		// before is the table as the pin reads it; after, once zmx kill has
+		// run.
+		before, after func(dir string) []zmx.Process
+		want          string
+	}{
+		{
+			name: "an orphaned daemon of the name, its socket gone, is never signalled",
+			before: func(dir string) []zmx.Process {
+				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
+			},
+			after: func(dir string) []zmx.Process { return []zmx.Process{daemonOf(50, dir, "work")} },
+			want:  "no SIGTERM sent, its daemon not pinned",
+		},
+		{
+			name: "two daemons of the name before the kill pin none, and nothing is signalled",
+			before: func(dir string) []zmx.Process {
+				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
+			},
+			after: func(dir string) []zmx.Process {
+				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
+			},
+			want: "no SIGTERM sent, its daemon not pinned",
+		},
+		{
+			name:   "a daemon of the name made again once the pinned one ended is never signalled",
+			before: func(dir string) []zmx.Process { return []zmx.Process{daemonOf(100, dir, "work")} },
+			after:  func(dir string) []zmx.Process { return []zmx.Process{daemonOf(200, dir, "work")} },
+			want:   "its daemon, pid 100, has exited since, sent nothing",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := socketDir(t)
+			killed := filepath.Join(t.TempDir(), "killed")
+			var (
+				mu      sync.Mutex
+				signals []int
+			)
+			c := creation{
+				probe: ceiling,
+				kill:  ": > " + shellquote.Single(killed) + "; echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1",
+				signal: func(pid int, _ syscall.Signal) error {
+					mu.Lock()
+					defer mu.Unlock()
+					signals = append(signals, pid)
+					return nil
+				},
+				table: func() ([]zmx.Process, error) {
+					if _, err := os.Stat(killed); err == nil {
+						return tc.after(dir), nil
+					}
+					return tc.before(dir), nil
+				},
+			}
+
+			got := c.run(t, dir, "work", func() { serve(t, dir, "work", olderDaemon(552)) })
+
+			if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || !strings.Contains(got.err.Error(), tc.want) {
+				t.Errorf("Create = %v, want ErrUnsupportedProtocol saying %q", got.err, tc.want)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(signals) != 0 {
+				t.Errorf("signalled pids %v, want none", signals)
+			}
+		})
+	}
 
 	t.Run("one neither zmx kill nor the signal ends is refused all the same, carrying both failures", func(t *testing.T) {
 		dir := socketDir(t)

@@ -94,22 +94,37 @@ func TestZmxDirOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("/tmp and /private/tmp are one zmx directory", func(t *testing.T) {
-		if real, err := filepath.EvalSymlinks("/tmp"); err != nil || real != "/private/tmp" {
-			t.Skip("/tmp is not a link to /private/tmp here")
-		}
-		zmxDir, err := os.MkdirTemp("/tmp", "zx-")
-		if err != nil {
+	// As /tmp and /private/tmp are on macOS: one directory reached through a
+	// linked parent and through its real path.
+	t.Run("a dir under a linked parent and its real path are one zmx directory", func(t *testing.T) {
+		real, link := linkedParent(t)
+		if err := os.Mkdir(filepath.Join(real, "zx"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = os.RemoveAll(zmxDir) })
-		o := owner(t, zmxDir)
+		o := owner(t, filepath.Join(link, "zx"))
 		if err := o.Claim(); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := (ZmxDirOwner{StateDir: o.StateDir, ZmxDir: "/private" + zmxDir, Canonical: zmx.CanonicalDir}).Claim(); err != nil {
-			t.Errorf("Claim as /private%s = %v, want nil", zmxDir, err)
+		if err := (ZmxDirOwner{StateDir: o.StateDir, ZmxDir: filepath.Join(real, "zx"), Canonical: zmx.CanonicalDir}).Claim(); err != nil {
+			t.Errorf("Claim as %s/zx = %v, want nil", real, err)
+		}
+	})
+
+	t.Run("Claimed fails a state directory that records none, recording nothing, and passes this one", func(t *testing.T) {
+		o := owner(t, t.TempDir())
+
+		if err := o.Claimed(); !errors.Is(err, ErrZmxDirUnrecorded) {
+			t.Errorf("Claimed = %v, want ErrZmxDirUnrecorded", err)
+		}
+		if _, err := os.Stat(state.ZmxDirRecordPath(o.StateDir)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat the record = %v, want none written", err)
+		}
+		if err := o.Claim(); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.Claimed(); err != nil {
+			t.Errorf("Claimed once recorded = %v, want nil", err)
 		}
 	})
 
@@ -158,11 +173,9 @@ func TestZmxDirOwner(t *testing.T) {
 	// The record keeps the canonical spelling; the dir it names may go, as
 	// /tmp is swept, and a later spelling of it must still match.
 	t.Run("a recorded dir since removed still matches another spelling of it", func(t *testing.T) {
-		if real, err := filepath.EvalSymlinks("/tmp"); err != nil || real != "/private/tmp" {
-			t.Skip("/tmp is not a link to /private/tmp here")
-		}
-		zmxDir, err := os.MkdirTemp("/tmp", "zx-")
-		if err != nil {
+		real, link := linkedParent(t)
+		zmxDir := filepath.Join(link, "zx")
+		if err := os.Mkdir(zmxDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		o := owner(t, zmxDir)
@@ -173,8 +186,25 @@ func TestZmxDirOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := (ZmxDirOwner{StateDir: o.StateDir, ZmxDir: zmxDir + "/", Canonical: zmx.CanonicalDir}).Check(); err != nil {
-			t.Errorf("Check of %s/ once gone = %v, want nil", zmxDir, err)
+		for _, spelling := range []string{zmxDir + "/", filepath.Join(real, "zx")} {
+			if err := (ZmxDirOwner{StateDir: o.StateDir, ZmxDir: spelling, Canonical: zmx.CanonicalDir}).Check(); err != nil {
+				t.Errorf("Check of %s once gone = %v, want nil", spelling, err)
+			}
 		}
 	})
+}
+
+// linkedParent is a directory with no link in its path, and a symbolic link
+// to it, both the test's own.
+func linkedParent(t *testing.T) (real, link string) {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	return real, link
 }

@@ -68,25 +68,49 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 // neither framing, or has already ended, is made all the same.
 //
 // The refused session is ended first by that zmx's own kill, which speaks its
-// daemon's protocol, then, should that fail, by a SIGTERM to the one process
-// proved its daemon, so it never keeps the name for a restore to count held.
-// The refusal says whether it went. Each step runs past a cancelled ctx,
-// within its own ceiling: a caller giving up between the created line and the
-// judgement would otherwise keep a session of 0.8.1's as made.
+// daemon's protocol, then, should that fail, by a SIGTERM to its daemon, so it
+// never keeps the name for a restore to count held. The refusal says what
+// happened. Each step runs past a cancelled ctx, within its own ceiling: a
+// caller giving up between the created line and the judgement would
+// otherwise keep a session of 0.8.1's as made.
+//
+// The SIGTERM reaches only the daemon this Create made, pinned before the
+// judgement: the one process the table proves a daemon of name, taken while
+// the daemon that then answers on the socket was already running, so another
+// daemon of the name, one whose socket has gone, makes two and pins none.
+// The pinned pid is proved again just before the signal, and a pid gone by
+// then, or a name made again since, is sent nothing.
 func (b *Backend) refuseOlder(ctx context.Context, name string) error {
 	ctx = context.WithoutCancel(ctx)
+	pinned, pinErr := b.sessionDaemon(name)
 	if older, _ := b.OlderZmx(ctx, name); !older {
 		return nil
 	}
 	refused := fmt.Errorf("create session %q: its daemon speaks zmx 0.8.1's framing: %w", name, backend.ErrUnsupportedProtocol)
 	killErr := b.KillByCLI(ctx, name)
-	if killErr == nil {
+	switch {
+	case killErr == nil:
 		return fmt.Errorf("%w; zmx kill ended the session", refused)
+	case pinErr != nil:
+		return fmt.Errorf("%w; the session is left running: %w; no SIGTERM sent, its daemon not pinned: %w", refused, killErr, pinErr)
 	}
-	if err := b.EndDaemon(ctx, name, b.signal); err != nil {
-		return fmt.Errorf("%w; the session is left running: %w; then: %w", refused, killErr, err)
+	return b.endPinned(ctx, name, pinned, fmt.Errorf("%w; %w", refused, killErr))
+}
+
+// endPinned ends d, the daemon refuseOlder pinned for the session name, whose
+// kill failed as refused says, and words what happened.
+func (b *Backend) endPinned(ctx context.Context, name string, d daemon, refused error) error {
+	gone, err := b.signalProved(d, b.signal)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w; the session is left running, no SIGTERM sent: %w", refused, err)
+	case gone:
+		return fmt.Errorf("%w; its daemon, pid %d, has exited since, sent nothing", refused, d.PID)
 	}
-	return fmt.Errorf("%w; %w; a SIGTERM to its daemon ended the session", refused, killErr)
+	if err := b.awaitEnded(ctx, name, d.PID); err != nil {
+		return fmt.Errorf("%w; a SIGTERM went to its daemon, pid %d, and the session is left running: %w", refused, d.PID, err)
+	}
+	return fmt.Errorf("%w; a SIGTERM to its daemon, pid %d, ended the session", refused, d.PID)
 }
 
 // made reads back the session zmx has just made, asking again while its

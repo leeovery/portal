@@ -56,7 +56,7 @@ func newProductionBootstrap() (*productionBootstrap, error) {
 	}
 	p := &productionBootstrap{dir: dir, backend: b, host: host, owner: zmxDirOwner(dir, zmx.DirFor(os.Environ()))}
 	p.running, p.bootErr = runningLatch()
-	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, ZmxDir: p.owner.Check, Present: host.Present, Logger: bootstrapLogger}
+	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, ZmxDir: p.owner.Claimed, Present: host.Present, Logger: bootstrapLogger}
 	return p, nil
 }
 

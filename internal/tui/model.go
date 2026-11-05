@@ -2104,14 +2104,14 @@ func (m Model) enterFatal(step int, message string, err error) (Model, tea.Cmd) 
 
 // mintFailed answers a mint that failed. A failure that is a fatal, a session
 // the backend made speaking a protocol Portal can't talk to, ends the run on
-// the error frame, every bootstrap step shown done, as one bootstrap's fatal
-// does: any later mint would fail alike. Any other is flashed, and the picker
-// stays open.
+// the error frame, as one bootstrap's fatal does: any later mint would fail
+// alike. The frame keeps the steps a loading page ran, and shows the fatal
+// alone where none did. Any other failure is flashed, and the picker stays
+// open.
 func (m Model) mintFailed(err error) (Model, tea.Cmd) {
 	if m.createFatal != nil {
 		if fatal := m.createFatal(err); fatal != nil {
 			m.activePage = PageLoading
-			m.loadingProgress = m.loadingProgress.finished()
 			return m.enterFatal(0, fatal.Error(), fatal)
 		}
 	}
@@ -3558,7 +3558,11 @@ func (m Model) viewString() string {
 
 func (m Model) viewLoading() string {
 	view := m.loadingProgress.View()
-	if m.fatalActive {
+	switch {
+	case m.fatalActive && !m.Bootstrapping():
+		// No step ran in this process, so the fatal shows alone.
+		view = LoadingProgressView{Message: m.fatalMessage}
+	case m.fatalActive:
 		// No page transition — the model stays on PageLoading awaiting q/Esc.
 		view = m.loadingProgress.FailedView(m.fatalStep, m.fatalMessage)
 	}

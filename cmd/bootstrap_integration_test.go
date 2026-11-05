@@ -543,6 +543,28 @@ func TestBootstrapRefusesAnotherZmxDirAgainstZmx(t *testing.T) {
 	}
 }
 
+// A warm command against a state dir whose record was deleted owes the
+// bootstrap that records the zmx dir in use again, so the protection is off
+// for one command at most.
+func TestBootstrapRecordsAMissingZmxDirAgainstZmx(t *testing.T) {
+	w := newBootWorld(t)
+	w.portal(t, "list", "--short")
+	w.awaitNoFlags(t)
+	if err := os.Remove(state.ZmxDirRecordPath(w.dir.StateDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	w.portal(t, "list", "--short")
+
+	if n := w.bootstraps(); n != 2 {
+		t.Errorf("bootstraps = %d, want a second, owed by the missing record\n--- portal.log ---\n%s", n, w.log())
+	}
+	if recorded, err := state.ReadZmxDir(w.dir.StateDir); recorded != zmx.CanonicalDir(w.dir.Backend.Dir()) || err != nil {
+		t.Errorf("zmx dir record = %q, %v; want %q, recorded again", recorded, err, zmx.CanonicalDir(w.dir.Backend.Dir()))
+	}
+	w.awaitNoFlags(t)
+}
+
 // Decision 62: a session a restore after a logout can't make again stays
 // owed, which no saver drops, until a bootstrap brings it back.
 func TestBootstrapKeepsWhatItCouldNotRestoreAgainstZmx(t *testing.T) {

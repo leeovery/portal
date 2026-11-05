@@ -225,22 +225,30 @@ func TestOnlyDoctorFixRunsTheHookRepair(t *testing.T) {
 	}
 }
 
-const saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
+const (
+	saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
+	zmxPkgPath       = "github.com/leeovery/portal/internal/backend/zmx"
+)
 
 // doctorSaverReads are the saverhost Host methods a doctor source may reach:
 // the reads. Every other method of the host takes saver.lock, signals or
 // creates, so a method it gains is one of those until it is named here.
 var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
 
-// doctorSignallers are cmd's ways to a process and the hosts that signal
-// through one.
-var doctorSignallers = []string{"signalProcess", "bindZmxAt", "bindZmx", "newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon", "endBySignal"}
+// doctorSignallers are cmd's ways to a process: the seam, the zmx binds whose
+// Create signals through it, what binds one, and the hosts that signal.
+var doctorSignallers = []string{
+	"signalProcess",
+	"zmxConfig", "bindZmxAt", "bindZmx", "sessionBackend", "attachingBackend", "newProductionBootstrap",
+	"newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon", "endBySignal",
+}
 
 // doctorSaverReaches reports each "<file>:<line>: <reach>" a doctor source
 // makes past the saver's reads. The host doctor is given exposes the reads
 // alone, which TestReadOnlySaverHostOnlyReads pins, so this is the way round
-// it: a host doctor builds or holds, any method of it but a read, or one of
-// cmd's signallers.
+// it: a host doctor builds or holds, any method of it but a read, one of
+// cmd's signallers, a zmx Config's Signal, or an EndDaemon, whatever it is
+// called on.
 func doctorSaverReaches(pkg sourceguardtest.TypedPackage) []string {
 	return reachesIn(pkg, doctorSaverReach)
 }
@@ -255,6 +263,12 @@ func doctorSaverReach(pkg sourceguardtest.TypedPackage, ident *ast.Ident, _ stri
 	}
 	if obj.Pkg().Name() == "cmd" && obj.Parent() == obj.Pkg().Scope() && slices.Contains(doctorSignallers, obj.Name()) {
 		return obj.Name()
+	}
+	if v, ok := obj.(*types.Var); ok && v.IsField() && v.Pkg().Path() == zmxPkgPath && v.Name() == "Signal" {
+		return "zmx.Config's Signal"
+	}
+	if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil && fn.Name() == "EndDaemon" {
+		return "EndDaemon"
 	}
 	return ""
 }
@@ -323,6 +337,29 @@ var signalProcess = syscall.Kill
 
 func checkDaemon() { _ = signalProcess(1, syscall.SIGTERM) }`,
 			[]string{"doctor.go:5: signalProcess", "doctor.go:7: signalProcess"}},
+		{"a zmx backend bound to signal", `import (
+	"syscall"
+
+	"github.com/leeovery/portal/internal/backend/zmx"
+)
+
+func bindDriver() { _, _ = zmx.New(zmx.Config{Dir: "/z", Signal: syscall.Kill}) }`,
+			[]string{"doctor.go:9: zmx.Config's Signal"}},
+		{"a daemon ended", `import (
+	"context"
+	"syscall"
+
+	"github.com/leeovery/portal/internal/backend/zmx"
+)
+
+func endIt(ctx context.Context, b *zmx.Backend) { _ = b.EndDaemon(ctx, "x", syscall.Kill) }`,
+			[]string{"doctor.go:10: EndDaemon"}},
+		{"a backend whose creates signal", `func attachingBackend() (any, error) { return nil, nil }
+
+func sessionBackend() (any, error) { return nil, nil }
+
+func listIt() { _, _ = attachingBackend(); _, _ = sessionBackend() }`,
+			[]string{"doctor.go:3: attachingBackend", "doctor.go:5: sessionBackend", "doctor.go:7: attachingBackend", "doctor.go:7: sessionBackend"}},
 		{"the reads, through the host and doctorSaver", `import (
 	"context"
 
