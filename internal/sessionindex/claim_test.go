@@ -324,6 +324,39 @@ func TestClaim(t *testing.T) {
 	})
 }
 
+// The refusal is what rename, the picker's r and hook set show: one sentence
+// naming the session once.
+func TestClaim_RefusalCopy(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason, want string
+	}{
+		{
+			name:   "a reason naming the session stands in for the name",
+			reason: `invalid session name: "notes*" ends with '*', which zmx kill reads as a prefix match`,
+			want:   `Portal could never restore this session: invalid session name: "notes*" ends with '*', which zmx kill reads as a prefix match`,
+		},
+		{
+			name:   "a reason that doesn't name it follows the name",
+			reason: "invalid session name: it ends with '*'",
+			want:   "Portal could never restore notes*: invalid session name: it ends with '*'",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := errors.New(tc.reason)
+			idx := sessionindex.IndexOf(nil)
+
+			_, err := idx.Claim("notes*", "", liveCreation, 4242, ruleRestoring().RefusingNames(func(string) error { return reason }))
+
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("refusal = %v, want %q", err, tc.want)
+			}
+			if !errors.Is(err, sessionindex.ErrNameRefused) || !errors.Is(err, reason) {
+				t.Errorf("refusal = %v, want it to match ErrNameRefused and its reason", err)
+			}
+		})
+	}
+}
+
 // errRefusedName is the name rule refusing's refusal.
 var errRefusedName = errors.New("invalid session name")
 
@@ -620,16 +653,6 @@ func TestHydrated(t *testing.T) {
 			t.Errorf("Hydrated changed %+v, want nothing", idx.Entries())
 		}
 	})
-}
-
-func TestRule_Hydrating(t *testing.T) {
-	if (sessionindex.Rule{}).Hydrating("a") {
-		t.Error("the zero rule reads a as hydrating, want no session")
-	}
-	rule := ruleRestoring().ReadingHydrating(hydrating("a"))
-	if !rule.Hydrating("a") || rule.Hydrating("b") {
-		t.Errorf("Hydrating(a), Hydrating(b) = %v, %v; want true, false", rule.Hydrating("a"), rule.Hydrating("b"))
-	}
 }
 
 func TestSameCreation(t *testing.T) {

@@ -184,9 +184,9 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
-	t.Run("it holds restore's retries, and the try that starts as their budget ends, as one term", func(t *testing.T) {
+	t.Run("it holds restore's retries, and the lookup and try that start as their budget ends, as one term", func(t *testing.T) {
 		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
-		if got, want := LockWait(0)-rest, restore.RetryBudget+each; got != want {
+		if got, want := LockWait(0)-rest, restore.RetryBudget+saverhost.ReadCeiling+each; got != want {
 			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}
 	})

@@ -13,8 +13,8 @@ import (
 )
 
 // decision 72: a restore completes at its helper's claim. Until then the
-// session's hydrating flag is up and its entry owed, and the saver neither
-// repays the entry nor judges it for a drop.
+// session's hydrating flag is up and its entry owed: the saver doesn't repay
+// it, and being owed keeps it from every drop.
 
 // restored is api as restore leaves it: saved before this boot, made again by
 // Create and recorded as that creation, owed, its hydrating flag raised, with
@@ -85,25 +85,34 @@ func TestPoll_RepaysNoEntryOfASessionHydrating(t *testing.T) {
 	}
 }
 
-func TestPoll_NeverJudgesASessionHydratingForADrop(t *testing.T) {
-	w := newWorld(t)
-	gone := backend.Session{Name: "gone", Created: w.thisBoot(0), PID: 4000}
-	w.seed(entryOf(w.live("api", 1)), entryOf(w.live("web", 2)), entryOf(gone))
-	w.raise(state.Hydrating, "gone")
+// decision 72, amended: owed keeps an unfinished restore from a drop, and the
+// flag adds nothing, so one stuck up never turns the user's close into a
+// resurrection.
+func TestPoll_JudgesAFlaggedSessionForADropByItsEntryAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		owed    bool
+		dropped bool
+	}{
+		{"a flagged session whose entry is owed is kept once gone", true, false},
+		{"a flagged session whose entry is repaid is dropped once gone, its flag stuck up", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			gone := entryOf(backend.Session{Name: "gone", Created: w.thisBoot(0), PID: 4000})
+			gone.Owed = tc.owed
+			w.seed(entryOf(w.live("api", 1)), entryOf(w.live("web", 2)), gone)
+			w.raise(state.Hydrating, "gone")
 
-	w.poll()
-	for range 6 {
-		w.after(10 * time.Second)
-	}
-	if _, ok := w.entry("gone"); !ok {
-		t.Fatal("gone was dropped while its hydrating flag was raised, want it kept")
-	}
+			w.poll()
+			for range 6 {
+				w.after(10 * time.Second)
+			}
 
-	w.lower(state.Hydrating, "gone")
-	w.after(5 * time.Second)
-	w.after(10 * time.Second)
-	if _, ok := w.entry("gone"); ok {
-		t.Error("gone is kept missing 10 s once its flag is down, want it dropped")
+			if _, held := w.entry("gone"); held == tc.dropped {
+				t.Errorf("gone held = %v, want dropped %v", held, tc.dropped)
+			}
+		})
 	}
 }
 

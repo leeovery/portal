@@ -346,17 +346,59 @@ func (b bareReadback) Create(ctx context.Context, name, dir string, command []st
 	return backend.Session{Name: name}, nil
 }
 
+// bareMinter is a creator over b that asks again with no wait, recording each
+// wait it would have made.
+func bareMinter(b backend.Backend, waited *[]time.Duration) indexingCreator {
+	c := newIndexingCreator(context.Background(), &recordingProjectStore{}, b, "cli")
+	c.wait = func(_ context.Context, d time.Duration) error {
+		*waited = append(*waited, d)
+		return nil
+	}
+	return c
+}
+
+// A Create whose read of the session it made outlasts its ceiling under load
+// reads back no creation; asked again, the session reports one.
+func TestMint_AsksAgainForACreationItsCreateReadBackNone(t *testing.T) {
+	fake := backendtest.New()
+	stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+	dir := filepath.Join(t.TempDir(), "myproj")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var waited []time.Duration
+
+	minted, err := bareMinter(bareReadback{fake}, &waited).CreateFromDir(dir, nil)
+	if err != nil {
+		t.Fatalf("CreateFromDir: %v", err)
+	}
+
+	held, _ := fake.Held(minted)
+	if e := entryOf(t, stateDir, minted); !e.CreatedAt.Equal(held.Created) || e.PID != held.PID || e.Dir != dir {
+		t.Errorf("entry = %+v, want the creation the second ask read, %v pid %d, and the minted dir %s", e, held.Created, held.PID, dir)
+	}
+	if !slices.Equal(waited, []time.Duration{backend.RecheckAfter}) {
+		t.Errorf("waited %v, want one probe ceiling before the second ask", waited)
+	}
+}
+
 // decision 74: a mint never records an entry without a creation. A session
-// minted with none read back is warned of and left unrecorded, for a claim to
-// record once it reports one: a hook set on it survives a rename.
+// minted with none read back, twice, is warned of and left unrecorded, for a
+// claim to record once it reports one: a hook set on it survives a rename.
 func TestMint_RecordsNoEntryForASessionReportingNoCreation(t *testing.T) {
 	sink := logtest.Install(t)
 	fake := backendtest.New()
 	stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
 	withBackendDeps(t, BackendDeps{Backend: fake})
-	minted, err := newIndexingCreator(context.Background(), &recordingProjectStore{}, bareReadback{fake}, "cli").CreateFromDir(t.TempDir(), nil)
+	fake.Fail(backendtest.OpSession, backend.ErrTimeout)
+	var waited []time.Duration
+	minted, err := bareMinter(bareReadback{fake}, &waited).CreateFromDir(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("CreateFromDir: %v", err)
+	}
+	fake.Fail(backendtest.OpSession, nil)
+	if len(fake.CallsTo(backendtest.OpSession)) != 1 {
+		t.Errorf("Session calls = %d, want the one second ask", len(fake.CallsTo(backendtest.OpSession)))
 	}
 	if idx := readIndex(t, stateDir); idx.Len() != 0 {
 		e, _ := idx.Lookup(minted)

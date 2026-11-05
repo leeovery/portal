@@ -173,45 +173,36 @@ func TestClaimRule_ReadsTheHydratingFlag(t *testing.T) {
 		return blocker
 	}
 	for _, tc := range []struct {
-		name  string
-		stage func(t *testing.T) string
-		want  bool
+		name       string
+		stage      func(t *testing.T) string
+		unfinished bool
 	}{
-		{"a session whose hydrating flag is raised is hydrating", raisedFor(state.Hydrating, forgotten), true},
-		{"a session whose hydrating flag can't be looked for is hydrating", blocked, true},
-		{"a session whose resume-pending flag alone is raised is not", raisedFor(state.ResumePending, forgotten), false},
-		{"a session whose neighbour's hydrating flag alone is raised is not", raisedFor(state.Hydrating, neighbour), false},
+		{"a session whose hydrating flag is raised has its restore unfinished", raisedFor(state.Hydrating, forgotten), true},
+		{"a session whose hydrating flag can't be looked for has its restore unfinished", blocked, true},
+		{"a session whose resume-pending flag alone is raised has not", raisedFor(state.ResumePending, forgotten), false},
+		{"a session whose neighbour's hydrating flag alone is raised has not", raisedFor(state.Hydrating, neighbour), false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+", which a claim of it reads", func(t *testing.T) {
 			for name, boot := range map[string]func() (time.Time, error){
 				"judging by the boot": bootedAt(ruleBooted),
 				"with no boot time":   func() (time.Time, error) { return time.Time{}, errors.New("no sysctl") },
 			} {
 				t.Run(name, func(t *testing.T) {
 					state.SetBootTimeForTest(t, boot)
+					live := ruleBooted.Add(time.Hour)
+					idx := entryIndexOf(t, sessionindex.Entry{Name: forgotten, CreatedAt: live, PID: 4242, Owed: true})
 
-					if got := state.ClaimRule(tc.stage(t), anyName).Hydrating(forgotten); got != tc.want {
-						t.Errorf("Hydrating = %v, want %v", got, tc.want)
+					if _, err := idx.Claim(forgotten, "", live, 4242, state.ClaimRule(tc.stage(t), anyName)); err != nil {
+						t.Fatalf("Claim: %v", err)
+					}
+
+					if got, _ := idx.Lookup(forgotten); got.Owed != tc.unfinished {
+						t.Errorf("entry = %+v; want it owed still %v, its restore unfinished", got, tc.unfinished)
 					}
 				})
 			}
 		})
 	}
-
-	t.Run("a claim of a hydrating session repays nothing", func(t *testing.T) {
-		state.SetBootTimeForTest(t, bootedAt(ruleBooted))
-		dir := raisedFor(state.Hydrating, forgotten)(t)
-		live := ruleBooted.Add(time.Hour)
-		idx := entryIndexOf(t, sessionindex.Entry{Name: forgotten, CreatedAt: live, PID: 4242, Owed: true})
-
-		if _, err := idx.Claim(forgotten, "", live, 4242, state.ClaimRule(dir, anyName)); err != nil {
-			t.Fatalf("Claim: %v", err)
-		}
-
-		if got, _ := idx.Lookup(forgotten); !got.Owed {
-			t.Errorf("entry = %+v, want it owed still", got)
-		}
-	})
 }
 
 // decision 74: no writer of sessions.json keeps an entry under a name restore

@@ -125,10 +125,10 @@ func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
 // restoring.
 //
 // A transcript it couldn't replay leaves the restore unfinished, so the saved
-// one is kept: the session says so and where it is, its entry stays owed and
-// its hydrating flag raised, so the saver neither captures it over that
-// transcript nor drops the session if it ends, and the next restore replays
-// it.
+// one is kept: the session says so and where it is, and its hydrating flag
+// stays raised, so the saver never captures it over that transcript, and its
+// entry owed, so the saver never drops the session if it ends, and the next
+// restore replays it.
 //
 // ExecShell replaces the process image, so in production it never returns.
 func runHydrate(ctx context.Context, cfg hydrateConfig) {

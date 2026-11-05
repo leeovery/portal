@@ -75,11 +75,6 @@ type Restorer struct {
 // go test -c build may.
 const exeName = "portal"
 
-// recheckAfter is how long a session a Create may have made is given to
-// answer before it is asked for again: a probe's ceiling, the second zmx
-// gives one.
-const recheckAfter = time.Second
-
 // RetryBudget bounds, in all, a restore's retries of the sessions its first
 // pass couldn't make for a reason that may pass, as a pty the burst of
 // creates couldn't have: the waits between them, and every retry started
@@ -105,20 +100,8 @@ func New(cfg Config) (*Restorer, error) {
 	return &Restorer{
 		backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger),
 		claimRule: func(dir string) sessionindex.Rule { return state.ClaimRule(dir, cfg.Backend.ValidateName) },
-		now:       time.Now, wait: pause,
+		now:       time.Now, wait: backend.Pause,
 	}, nil
-}
-
-// pause waits d, or until ctx ends, returning its cause then.
-func pause(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	case <-timer.C:
-		return nil
-	}
 }
 
 // SetProgress has Restore report each session it takes up: the nth of the m
@@ -239,7 +222,8 @@ func (r *run) firstTry(ctx context.Context, e sessionindex.Entry) bool {
 // retry tries the sessions left again, in rounds retryBackoff apart, starting
 // a round only while RetryBudget, counted from the first pass's end, has room
 // for its wait, and a session's try only while it lasts. It returns those
-// still unmade but for good, which retryRound counts, and stops once ctx ends.
+// still unmade but for good, which retryRound counts, and stops once ctx
+// ends, saying so when it leaves sessions untried.
 func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
 	deadline := r.now().Add(RetryBudget)
 	for round := 0; len(left) > 0; round++ {
@@ -247,11 +231,13 @@ func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionind
 		if !r.now().Add(backoff).Before(deadline) {
 			break
 		}
-		if err := r.wait(ctx, backoff); err != nil {
+		if r.wait(ctx, backoff) == nil {
+			left = r.retryRound(ctx, left, deadline)
+		}
+		if ctx.Err() != nil && len(left) > 0 {
 			r.cancelled(ctx, fmt.Sprintf("%d sessions it was trying again left for the next bootstrap", len(left)))
 			break
 		}
-		left = r.retryRound(ctx, left, deadline)
 	}
 	return left
 }
@@ -279,16 +265,55 @@ func (r *run) retryRound(ctx context.Context, left []sessionindex.Entry, deadlin
 	return still
 }
 
-// tryAgain restores e once more. A session an earlier try made after all,
-// running restore's helper, is restored as it stands: its flag raised again
-// would outlive a helper that has lowered it already, keeping the saver off
-// the session for good.
+// errUnsettled is why a retry's lookup couldn't settle a session an earlier
+// try may have made.
+var errUnsettled = errors.New("an earlier try left it unsettled")
+
+// tryAgain tries e once more, and returns nil once e needs no more tries. It
+// raises e's flag only once its lookup has found the name free: an earlier
+// try may have made the session after all, whose helper may have lowered the
+// flag already, and raised again it would keep the saver off that session for
+// good. A name found free is made again only while its entry is still due and
+// records the creation restore read: one a helper has claimed since, or the
+// user's end dropped, is restore's no more. A session running restore's
+// helper is restored as it stands, and another holding the name fails for
+// good. One that can't be looked up is left for the next round, nothing
+// raised and nothing made.
 func (r *run) tryAgain(ctx context.Context, e sessionindex.Entry) error {
-	if live, err := r.backend.Session(ctx, e.Name); err == nil && r.RunsHelper(live) {
-		r.restored(e, live, startDir(e))
+	live, err := r.backend.Session(ctx, e.Name)
+	if !errors.Is(err, backend.ErrNoSuchSession) || heldAs(err) {
+		if live, err = r.judge(e.Name, live, err, errUnsettled); err == nil {
+			r.restored(e, live, startDir(e))
+		}
+		return err
+	}
+	why, err := r.noLongerDue(e)
+	switch {
+	case err != nil:
+		return err
+	case why != "":
+		r.logger.Debug("session skipped", "session", e.Name, "reason", why)
 		return nil
 	}
 	return r.restoreOne(ctx, e)
+}
+
+// noLongerDue says why e, read before restore's first pass, is restore's no
+// more as sessions.json holds it now, and is empty while it is still due and
+// records the creation restore read.
+func (r *run) noLongerDue(e sessionindex.Entry) (string, error) {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		return "", fmt.Errorf("read sessions.json again: %w", err)
+	}
+	latest, ok := idx.Lookup(e.Name)
+	switch {
+	case !ok:
+		return "its entry is gone", nil
+	case !latest.RecordsCreationOf(e):
+		return "its entry records another creation", nil
+	}
+	return skipped(latest, nil, r.claimRule(r.dir)), nil
 }
 
 func (r *run) cancelled(ctx context.Context, detail string) {
@@ -386,14 +411,11 @@ func (r *run) madeAnyway(ctx context.Context, name string, createErr error) (bac
 // creation of it.
 var errUnconfirmed = errors.New("zmx reported the session made, but it never answered")
 
-// unconfirmed looks up, a probe's ceiling on, the session a Create reported
-// made but read no creation of, and judges it. zmx reports a session made
-// before its daemon has the session's pty, so one that couldn't have it was
-// never made.
+// unconfirmed looks up again the session a Create reported made but read no
+// creation of, and judges it. zmx reports a session made before its daemon
+// has the session's pty, so one that couldn't have it was never made.
 func (r *run) unconfirmed(ctx context.Context, name string) (backend.Session, error) {
-	ctx = context.WithoutCancel(ctx)
-	_ = r.wait(ctx, recheckAfter)
-	live, err := r.backend.Session(ctx, name)
+	live, err := backend.AskAgain(ctx, r.backend, name, r.wait)
 	return r.judge(name, live, err, errUnconfirmed)
 }
 
@@ -432,7 +454,7 @@ func (r *run) judge(name string, live backend.Session, err, cause error) (backen
 func (r *run) holder(ctx context.Context, name string) (backend.Session, error) {
 	live, err := r.backend.Session(ctx, name)
 	if errors.Is(err, backend.ErrNoSuchSession) && !heldAs(err) {
-		_ = r.wait(ctx, recheckAfter)
+		_ = r.wait(ctx, backend.RecheckAfter)
 		live, err = r.backend.Session(ctx, name)
 	}
 	return live, err

@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -115,7 +116,7 @@ func TestRestore_UnconfirmedCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("a session that can't be looked up on the second ask fails, its flag kept, and is tried again", func(t *testing.T) {
+	t.Run("a session that can't be looked up on the second ask fails, its flag kept, asked for again but never made again", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
 		unconfirmed(w, func(ctx context.Context, name, dir string, command []string) {
@@ -130,8 +131,8 @@ func TestRestore_UnconfirmedCreate(t *testing.T) {
 		if !w.hydrating(t, "work") {
 			t.Error("the hydrating flag of a session that may be the helper's came down")
 		}
-		if tries := len(w.created()); tries < 2 {
-			t.Errorf("Create was tried %d times, want it tried again", tries)
+		if tries, asks := len(w.created()), len(w.fake.CallsTo(backendtest.OpSession)); tries != 1 || asks < 2 {
+			t.Errorf("Create was tried %d times, asking %d times; want one try, its retries asking without making", tries, asks)
 		}
 	})
 }
@@ -209,6 +210,128 @@ func TestRestore_Retries(t *testing.T) {
 		}
 	})
 
+	// decision 72, amended: restore never raises a flag on a name unless a
+	// lookup has just found no session there.
+	t.Run("a retry whose lookup can't tell raises nothing, so a flag the helper lowered stays down", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if len(w.created()) > 1 {
+				return w.fake.Create(ctx, name, dir, command)
+			}
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				t.Fatal(err)
+			}
+			w.fake.StopAnswering(name)
+			return backend.Session{}, errTimedOut
+		})
+		w.asleep = func() {
+			switch len(w.slept) {
+			case 1: // its helper replayed, claimed and lowered the flag; the session is slow to answer still
+				if _, err := state.Hydrating.Clear(w.dir, "work"); err != nil {
+					t.Fatal(err)
+				}
+			case 2:
+				live, _ := w.fake.Held("work")
+				w.fake.Add(live)
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if w.hydrating(t, "work") {
+			t.Error("a retry raised again the flag the session's helper had lowered")
+		}
+		if tries := len(w.created()); tries != 1 {
+			t.Errorf("Create was tried %d times, want once: no retry made what it couldn't look up", tries)
+		}
+	})
+
+	t.Run("a name another program holds by the retry fails for good, nothing raised and nothing made", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+		w.asleep = func() {
+			if len(w.slept) == 2 { // the first round's wait, past the first try's second ask
+				w.fake.Add(backend.Session{Name: "work", Command: "vim notes.md"})
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if tries := len(w.created()); tries != 1 {
+			t.Errorf("Create was tried %d times, want once", tries)
+		}
+		if w.hydrating(t, "work") {
+			t.Error("the hydrating flag is up on another program's session")
+		}
+	})
+
+	for name, since := range map[string]func(t *testing.T, w *world, saved sessionindex.Entry){
+		"claimed by a helper": func(t *testing.T, w *world, saved sessionindex.Entry) {
+			saved.CreatedAt, saved.PID = booted.Add(2*time.Hour), 4242
+			w.save(t, saved)
+		},
+		"dropped by the user's end": func(t *testing.T, w *world, _ sessionindex.Entry) { w.save(t) },
+	} {
+		t.Run("an entry "+name+" between rounds is restore's no more, never made again", func(t *testing.T) {
+			w := newWorld(t)
+			saved := entry(t, "work")
+			w.save(t, saved)
+			w.fake.Fail(backendtest.OpCreate, errRefused)
+			w.asleep = func() {
+				if len(w.slept) == 2 {
+					since(t, w, saved)
+				}
+			}
+			before := w.indexFile(t)
+
+			if res := w.r.Restore(t.Context()); res != (restore.Result{}) {
+				t.Errorf("Restore = %+v, want nothing restored and nothing failed", res)
+			}
+			if tries := len(w.created()); tries != 1 {
+				t.Errorf("Create was tried %d times, want once", tries)
+			}
+			if w.indexFile(t) == before {
+				t.Fatal("the entry never changed under the retry; the test is vacuous")
+			}
+			skip := w.sink.Records().WithMessage("session skipped").AtExactLevel(slog.LevelDebug).Only(t, "skip")
+			if skip.AttrString(t, "session") != "work" {
+				t.Errorf("skip = %v, want work", skip.Attrs)
+			}
+		})
+	}
+
+	t.Run("a context ending during the last round's tries is warned of, the sessions left failed", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cause := errors.New("bootstrap abandoned")
+		w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+			if len(w.created()) == 6 { // at 13 s, the last round no wait can follow
+				cancel(cause)
+			}
+			w.fake.Add(backend.Session{Name: name})
+			w.fake.StopAnswering(name)
+			return backend.Session{}, errTimedOut
+		})
+		w.asleep = func() { w.fake.Remove("work") }
+
+		if res, want := w.r.Restore(ctx), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if tries := len(w.created()); tries != 6 {
+			t.Fatalf("Create was tried %d times, want 6: the cancel never reached the last round", tries)
+		}
+		rec := w.sink.Records().WithMessage("restore cancelled").AtExactLevel(slog.LevelWarn).Only(t, "cancellation")
+		if !errors.Is(rec.ErrorAttr(t, "error"), cause) {
+			t.Errorf("cancellation = %v, want its cause", rec.Attrs)
+		}
+	})
+
 	t.Run("a name Create refuses is never tried again, and waits for nothing", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "foo*"))
@@ -242,7 +365,7 @@ func TestRestore_Retries(t *testing.T) {
 		w.save(t, entry(t, "work"))
 		start := w.clock
 		var tried []time.Time
-		w.createWith(stuckCreate(w, &tried, 0))
+		w.stickCreates(&tried, 0)
 
 		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
 			t.Errorf("Restore = %+v, want %+v", res, want)
@@ -269,7 +392,7 @@ func TestRestore_Retries(t *testing.T) {
 		w.save(t, entry(t, "a"), entry(t, "b"))
 		start := w.clock
 		var tried []time.Time
-		w.createWith(stuckCreate(w, &tried, 5*time.Second))
+		w.stickCreates(&tried, 5*time.Second)
 
 		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 2}); res != want {
 			t.Errorf("Restore = %+v, want %+v", res, want)
@@ -305,18 +428,25 @@ func TestRestore_Retries(t *testing.T) {
 	})
 }
 
-// stuckCreate is a Create each of whose calls takes took on the world's
-// clock, recording the time it started in tried, and fails as a session that
-// can't be looked up does: a failure a retry may clear, judged with no wait.
-func stuckCreate(w *world, tried *[]time.Time, took time.Duration) func(context.Context, string, string, []string) (backend.Session, error) {
-	return func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+// stickCreates makes each Create take took on the world's clock, recording
+// the time it started in tried, and fail as a session that can't be looked up
+// does: a failure a retry may clear, judged with no wait. The wedged session
+// it leaves is gone by the next wait, so each round finds the name free.
+func (w *world) stickCreates(tried *[]time.Time, took time.Duration) {
+	wedged := map[string]bool{}
+	w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
 		*tried = append(*tried, w.clock)
 		w.clock = w.clock.Add(took)
-		if _, held := w.fake.Held(name); !held {
-			w.fake.Add(backend.Session{Name: name})
-			w.fake.StopAnswering(name)
-		}
+		w.fake.Add(backend.Session{Name: name})
+		w.fake.StopAnswering(name)
+		wedged[name] = true
 		return backend.Session{}, errTimedOut
+	})
+	w.asleep = func() {
+		for name := range wedged {
+			w.fake.Remove(name)
+		}
+		clear(wedged)
 	}
 }
 

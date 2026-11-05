@@ -3,18 +3,46 @@ package sessionindex
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var (
-	// ErrNameRefused refuses a claim of a name the backend could never create:
-	// restore could never make the session again, so nothing is kept for it.
-	ErrNameRefused = errors.New("its name is one Portal could never restore")
+	// ErrNameRefused is matched by a claim's refusal of a name the backend
+	// could never create: restore could never make the session again, so
+	// nothing is kept for it.
+	ErrNameRefused = errors.New("a name Portal could never restore")
 	// ErrNoCreation refuses a claim knowing no creation: it can judge no entry
 	// by it, and an entry recording none could never be dropped.
 	ErrNoCreation = errors.New("it reported no creation")
 )
+
+// The refusal of a name the backend's Create refuses, as rename, the picker's
+// r and hook set show it.
+const (
+	// nameRefusedCopy names the session, then the backend's reason.
+	nameRefusedCopy = "Portal could never restore %s: %v"
+	// nameRefusedNamedCopy is for a reason naming the session itself, as
+	// zmx's do, so the name isn't said twice.
+	nameRefusedNamedCopy = "Portal could never restore this session: %v"
+)
+
+// nameRefusal is a claim's refusal of a name the backend's Create refuses,
+// for reason. It matches ErrNameRefused and reason.
+type nameRefusal struct {
+	name   string
+	reason error
+}
+
+func (e nameRefusal) Error() string {
+	if strings.Contains(e.reason.Error(), strconv.Quote(e.name)) {
+		return fmt.Sprintf(nameRefusedNamedCopy, e.reason)
+	}
+	return fmt.Sprintf(nameRefusedCopy, e.name, e.reason)
+}
+
+func (e nameRefusal) Unwrap() []error { return []error{ErrNameRefused, e.reason} }
 
 // Rule is what a claim judges an entry from another creation by. A session
 // recreated under a name outside Portal is a new session and starts clean, so
@@ -43,7 +71,7 @@ func NewRule(booted time.Time, restoring func(name string) bool) Rule {
 // ReadingHydrating is the rule reading, through hydrating, whether a
 // session's restore is unfinished, its hydrating flag raised. A claim of such
 // a session repays no restore, and one taking over its entry owes one: only
-// its helper's claim repays it (Hydrated), and no drop judges it.
+// its helper's claim repays it (Hydrated).
 func (r Rule) ReadingHydrating(hydrating func(name string) bool) Rule {
 	r.hydrating = hydrating
 	return r
@@ -56,16 +84,17 @@ func (r Rule) RefusingNames(names func(name string) error) Rule {
 	return r
 }
 
-// Hydrating reports whether the named session's restore is unfinished, as
-// the rule reads it. Under a rule reading none, no session's is.
-func (r Rule) Hydrating(name string) bool { return r.hydrating != nil && r.hydrating(name) }
+// restoreUnfinished reports whether the named session's restore is
+// unfinished, as the rule reads it. Under a rule reading none, no session's
+// is.
+func (r Rule) restoreUnfinished(name string) bool { return r.hydrating != nil && r.hydrating(name) }
 
 // refusal says why a claim of the session named name, created at created, is
 // refused, nil when it isn't.
 func (r Rule) refusal(name string, created time.Time) error {
 	if r.names != nil {
 		if err := r.names(name); err != nil {
-			return fmt.Errorf("session %s: %w: %w", name, ErrNameRefused, err)
+			return nameRefusal{name: name, reason: err}
 		}
 	}
 	if created.IsZero() {
@@ -156,14 +185,14 @@ func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule)
 			return false, nil
 		}
 	case idx.sessions[i].SameCreation(created, pid):
-		repaid := !rule.Hydrating(name) && idx.repay(i, liveAgain)
+		repaid := !rule.restoreUnfinished(name) && idx.repay(i, liveAgain)
 		if !idx.sessions[i].fillIn(dir, pid) {
 			return repaid, nil
 		}
 	default:
 		if why := rule.adoption(idx.sessions[i]); why != "" {
 			idx.adopt(i, created, pid, "adopt", why)
-			if rule.Hydrating(name) {
+			if rule.restoreUnfinished(name) {
 				idx.owe(i, restoreUnfinished)
 			} else {
 				idx.repay(i, liveAgain)
@@ -204,7 +233,7 @@ func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
 	switch {
 	case e.SameCreation(created, pid):
 		return true
-	case !e.recordsCreationOf(read), created.IsZero():
+	case !e.RecordsCreationOf(read), created.IsZero():
 		return false
 	}
 	idx.adopt(i, created, pid, "restored", restoreMadeIt)
@@ -233,9 +262,9 @@ const (
 	restoreFinished   = "its helper finished its restore"
 )
 
-// recordsCreationOf reports whether the entry still records the creation read
+// RecordsCreationOf reports whether the entry still records the creation read
 // recorded: none, if read recorded none.
-func (e Entry) recordsCreationOf(read Entry) bool {
+func (e Entry) RecordsCreationOf(read Entry) bool {
 	if read.CreatedAt.IsZero() {
 		return e.CreatedAt.IsZero()
 	}

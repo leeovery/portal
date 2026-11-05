@@ -46,11 +46,12 @@ const (
 // restores at most that many sessions, then retries those it couldn't make,
 // with lockSlack over. The retries are one term however many there are: no
 // try starts once restore.RetryBudget has run out, so the last starts within
-// it and runs a session's restore past it. A holder still running past it all
-// is stuck, and the wait gives up rather than queue behind it.
+// it and runs past it: the retry's lookup, a read, then a session's restore.
+// A holder still running past it all is stuck, and the wait gives up rather
+// than queue behind it.
 func LockWait(entries int) time.Duration {
 	each := restoreSessionRun + commitlock.Bound()
-	retries := restore.RetryBudget + each
+	retries := restore.RetryBudget + saverhost.ReadCeiling + each
 	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*each + retries + lockSlack
 }
 

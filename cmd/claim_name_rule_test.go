@@ -42,9 +42,12 @@ func TestClaim_RefusesANameCreateRefuses(t *testing.T) {
 
 		err := pickerLabeller{ctx: context.Background(), b: fake}.SetLabel(unrestorable, "api work")
 
+		if err == nil {
+			t.Fatal("SetLabel = nil, want the name refused")
+		}
 		assertRefused(t, err)
-		if !strings.Contains(err.Error(), "its name is one Portal could never restore") {
-			t.Errorf("err = %q, want words the picker can flash", err)
+		if want := `Portal could never restore this session: invalid session name: "notes*" ends with '*'`; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("err = %q, want the words the picker flashes, %q…", err, want)
 		}
 	})
 
@@ -76,7 +79,7 @@ func TestClaim_RefusesANameCreateRefuses(t *testing.T) {
 		runHydrate(t.Context(), cfg)
 
 		warn := execLogLine(t, sink.Body(), "WARN", "record session creation failed")
-		if !strings.Contains(warn, "its name is one Portal could never restore") {
+		if !strings.Contains(warn, "Portal could never restore this session") {
 			t.Errorf("WARN %q, want it to say the name is refused", warn)
 		}
 		if idx := readIndex(t, w.stateDir); idx.Len() != 0 {

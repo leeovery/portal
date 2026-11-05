@@ -39,8 +39,8 @@ var warnedNoBootTime atomic.Bool
 //     resume-pending flag raised, is adopted. A flag that can't be looked for
 //     counts as raised.
 //   - A session whose hydrating flag is raised, or can't be looked for, has a
-//     restore its helper hasn't finished: no claim repays its entry, and the
-//     saver drops none of it.
+//     restore its helper hasn't finished: no claim repays its entry, and a
+//     claim taking it over leaves it owed.
 //   - A name names refuses is refused. names is the backend's Create rule, so
 //     no entry is kept that restore could never make again. A nil names
 //     refuses every name: a caller that claims gives the backend's, and one

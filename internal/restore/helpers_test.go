@@ -164,6 +164,16 @@ func (w *world) lookup(t *testing.T, name string) (sessionindex.Entry, bool) {
 	return idx.Lookup(name)
 }
 
+// indexFile is sessions.json as it reads now.
+func (w *world) indexFile(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(sessionindex.Path(w.dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func (w *world) hydrating(t *testing.T, name string) bool {
 	t.Helper()
 	up, err := state.Hydrating.Exists(w.dir, name)

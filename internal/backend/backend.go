@@ -113,6 +113,34 @@ func (s Session) PortalOwned() bool { return IsPortalOwned(s.Name) }
 // for a caller holding a name and no Session, such as an index entry's.
 func IsPortalOwned(name string) bool { return strings.HasPrefix(name, portalPrefix) }
 
+// RecheckAfter is how long a session a Create may have made is given to
+// answer before it is asked for again: a probe's ceiling, the second zmx
+// gives one.
+const RecheckAfter = time.Second
+
+// AskAgain asks b once more, RecheckAfter on, for the session a Create
+// returned with only its name: under load the session may not have answered
+// in time, and it may never have been made. The wait goes through wait, and
+// neither it nor the ask ends with ctx, since what they settle Create may
+// already have made.
+func AskAgain(ctx context.Context, b Backend, name string, wait func(context.Context, time.Duration) error) (Session, error) {
+	ctx = context.WithoutCancel(ctx)
+	_ = wait(ctx, RecheckAfter)
+	return b.Session(ctx, name)
+}
+
+// Pause waits d, or until ctx ends, returning its cause then.
+func Pause(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-timer.C:
+		return nil
+	}
+}
+
 // Command is a process to run: its argv, with Argv[0] the program's path, its
 // complete environment, and its working directory, empty to inherit the
 // caller's.
