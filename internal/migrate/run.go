@@ -81,8 +81,9 @@ type Outcome struct {
 // one run at a time: another holding the state dir's parent is ErrLocked.
 // What it does follows from what it finds there:
 //   - A version 1 sessions.json with no state-tmux/ beside it migrates in
-//     full: first every check it can make up front (the hooks the plan reads,
-//     the version 1 index and zmx's sessions); then the tmux side (Portal's
+//     full: first every check it can make up front (the hooks the plan
+//     reads, hooks.json unchanged since an earlier run's backup, the version
+//     1 index and zmx's sessions); then the tmux side (Portal's
 //     tmux hooks unset and the saver killed, when a tmux server answers,
 //     then the wait for the tmux version's daemon to exit); hooks.json
 //     backed up; the plan, from the index read again; the zmx version's
@@ -232,8 +233,9 @@ func (s stage) stopped(err error) error {
 
 // precheck makes, before the tmux side is stopped, every check that can be
 // made up front, so a refusal among them leaves the tmux version saving as
-// it did: the hooks the plan reads, as strictly as it reads them; the
-// version 1 index, as the plan reads it; and zmx's sessions, which it
+// it did: the hooks the plan reads, as strictly as it reads them; hooks.json,
+// unchanged since any backup an earlier run made but by that run's rewrite
+// (hooksUnchanged); the version 1 index, as the plan reads it; and zmx's sessions, which it
 // returns for the plan's names. Neither file can pass now and fail later:
 // the tmux version's writers refuse a hooks.json that doesn't parse, and its
 // daemon's flush writes the index it reads itself, which the plan reads
@@ -244,6 +246,9 @@ func precheck(ctx context.Context, cfg Config, backup string) ([]string, error) 
 		return nil, err
 	}
 	if _, err := readHooks(source); err != nil {
+		return nil, err
+	}
+	if err := hooksUnchanged(cfg.HooksFile, backup); err != nil {
 		return nil, err
 	}
 	if _, err := ReadLegacy(cfg.StateDir); err != nil {

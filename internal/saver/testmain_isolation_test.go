@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 		os.Setenv("PORTAL_ALIASES_FILE", "/nonexistent/portal-test-must-isolate-aliases"),
 		os.Setenv("XDG_CONFIG_HOME", "/nonexistent/portal-test-must-isolate-config"),
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
+		os.Setenv("TMUX_TMPDIR", zmxtest.PoisonedTmpdir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	} {

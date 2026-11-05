@@ -133,6 +133,9 @@ func isolate(t *testing.T) (isolation []string, stateDir string) {
 		// slice (exec.Cmd env dedupe is last-wins), and one that forgets fails
 		// loudly.
 		"TMUX=" + PoisonedTmuxSocket + ",0,0",
+		// A zmx session drops TMUX, so a plain tmux run in one would find the
+		// default socket under TMUX_TMPDIR: poisoned, it fails loudly.
+		"TMUX_TMPDIR=" + zmxtest.PoisonedTmpdir,
 		// The same for zmx: a subprocess that needs sessions appends its own
 		// ZMX_DIR.
 		"ZMX_DIR=" + zmxtest.PoisonedDir,

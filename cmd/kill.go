@@ -54,8 +54,14 @@ func (e discardedError) Unwrap() error { return e.gone }
 // held through its discard, so the discard never races x <name> bringing it
 // back: live by then, it is killed as a live session is. ctx's progress
 // emitter hears of a long wait for the lock. via is the surface asking, as
-// the index write records it.
+// the index write records it. Portal's own sessions are no session found, as
+// every listing hides them: killing the saver would mark every saved session
+// not running owed a restore.
 func killSession(ctx context.Context, b backend.Backend, name, via string) error {
+	if backend.IsPortalOwned(name) {
+		gone, _ := sessionGoneError(name, backend.ErrNoSuchSession)
+		return gone
+	}
 	killed := b.Kill(ctx, name)
 	if notRunning(killed) {
 		release, err := holdStateBootstrapLock(ctx)

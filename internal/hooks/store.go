@@ -128,15 +128,27 @@ func (s *Store) load() (Snapshot, error) {
 // save atomically writes hooks to the JSON file, creating the parent directory
 // if it does not exist. Non-locking, like load: it is called from inside a hold.
 func (s *Store) save(h Snapshot) error {
+	data, err := encode(h)
+	if err != nil {
+		return err
+	}
+	return s.write(data)
+}
+
+// encode is the file save writes for h.
+func encode(h Snapshot) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(h); err != nil {
-		return fmt.Errorf("failed to marshal hooks: %w", err)
+		return nil, fmt.Errorf("failed to marshal hooks: %w", err)
 	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
 
-	return fileutil.AtomicWrite(s.path, bytes.TrimSuffix(buf.Bytes(), []byte("\n")), fileutil.ReportUnsynced(warnUnsynced))
+func (s *Store) write(data []byte) error {
+	return fileutil.AtomicWrite(s.path, data, fileutil.ReportUnsynced(warnUnsynced))
 }
 
 // warnUnsynced logs a write that landed though the directory sync after its

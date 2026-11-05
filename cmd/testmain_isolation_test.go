@@ -119,6 +119,7 @@ func TestMain(m *testing.M) {
 	// ZMX_SESSION_PREFIX would rename every session a test names.
 	for _, err := range []error{
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
+		os.Setenv("TMUX_TMPDIR", zmxtest.PoisonedTmpdir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	} {
@@ -139,6 +140,11 @@ func TestMain(m *testing.M) {
 	// cleanups unrun; it panics here instead.
 	osExit = func(code int) {
 		panic(fmt.Sprintf("cmd tests: osExit(%d) reached without withOsExitFake", code))
+	}
+	// The hold waits for a resize that never comes, so a test reaching it
+	// unstaged would hang until the package's timeout; it panics here instead.
+	upgradeHoldFunc = func(upgradeHold) {
+		panic("cmd tests: an earlier version's form was held without withFuncSeam(&upgradeHoldFunc)")
 	}
 	// A test's backend reports pids that are live processes on the
 	// developer's machine, none of them the test's.

@@ -24,8 +24,13 @@ type Client struct {
 }
 
 // Attach starts a client on the session running the Backend's AttachCommand.
+// It fails the test, starting nothing, for a directory New didn't make in this
+// process.
 func Attach(t *testing.T, b *zmx.Backend, name string) *Client {
 	t.Helper()
+	if err := made.refuse(b.Dir()); err != nil {
+		t.Fatal(err)
+	}
 	attach, err := b.AttachCommand(t.Context(), name)
 	if err != nil {
 		t.Fatalf("attach command for %s: %v", name, err)

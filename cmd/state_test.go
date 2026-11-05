@@ -172,14 +172,6 @@ func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 			name: "missing all flags",
 			args: []string{"state", "hydrate"},
 		},
-		{
-			name: "the tmux helper's --fifo",
-			args: []string{"state", "hydrate", "--session", "proj-a1b2", "--fifo", "/tmp/f"},
-		},
-		{
-			name: "the tmux helper's --hook-key",
-			args: []string{"state", "hydrate", "--session", "proj-a1b2", "--hook-key", "paneTokenA"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -203,13 +195,13 @@ func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 
 // Referenced by their package-level command vars so a rename or a dropped
 // registration is a compile error rather than a silent miss.
-var stateChildCommands = []*cobra.Command{
+var stateChildCommands = append([]*cobra.Command{
 	stateDaemonCmd,
 	stateHydrateCmd,
 	stateResumeDrawCmd,
 	stateResumeWaitCmd,
 	stateResumeRecoverCmd,
-}
+}, stateUpgradeHookCmds...)
 
 func TestStateParentIsHidden(t *testing.T) {
 	if !stateCmd.Hidden {
@@ -221,9 +213,9 @@ func TestStateParentIsHidden(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	t.Run("it registers exactly five hidden state children", func(t *testing.T) {
-		if len(stateChildCommands) != 5 {
-			t.Fatalf("stateChildCommands has %d entries, want 5", len(stateChildCommands))
+	t.Run("it registers exactly eight hidden state children", func(t *testing.T) {
+		if len(stateChildCommands) != 8 {
+			t.Fatalf("stateChildCommands has %d entries, want 8", len(stateChildCommands))
 		}
 		for _, c := range stateChildCommands {
 			if !c.Hidden {
@@ -246,7 +238,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover"}
+	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover", "notify", "commit-now", "signal-hydrate"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()
@@ -269,20 +261,6 @@ func TestStateMigrateRenameIsRetired(t *testing.T) {
 			t.Fatal("portal state migrate-rename still resolves; the subcommand must be retired")
 		}
 	})
-}
-
-// notify, commit-now and signal-hydrate were entry points for tmux hooks,
-// which zmx has none of.
-func TestStateTmuxHookEntryPointsAreRetired(t *testing.T) {
-	for _, name := range []string{"notify", "commit-now", "signal-hydrate"} {
-		t.Run("it does not resolve portal state "+name, func(t *testing.T) {
-			resetRootCmd()
-			found, _, err := rootCmd.Find([]string{"state", name})
-			if err == nil && found.Name() == name {
-				t.Fatalf("portal state %s still resolves; the subcommand must be retired", name)
-			}
-		})
-	}
 }
 
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {

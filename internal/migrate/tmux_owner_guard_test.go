@@ -127,8 +127,6 @@ var tmuxNamingFiles = map[string]string{
 	"cmd/session_index_test.go":          "the refusal of the tmux version's index",
 	"cmd/state_hydrate_steps_test.go":    "hydrate refusing the tmux version's index",
 	"cmd/state_hydrate_test.go":          "a transcript as the tmux backend saved it",
-	"cmd/state_resume_recover_test.go":   "a pane a tmux-era build parked",
-	"cmd/state_test.go":                  "the tmux helper's flags, refused",
 	"cmd/bootstrap/orphan_sweep_test.go": "the tmux Portal's daemon, never signalled",
 
 	// The TMUX poison and fixtures that keep tmux out.

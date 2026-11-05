@@ -34,6 +34,9 @@ var (
 	// ErrDaemonRunning is the tmux version's daemon still running at the
 	// bound: it would write the tmux version's state over migrate's.
 	ErrDaemonRunning = errors.New("the tmux version's daemon is still running")
+	// ErrHooksChanged is hooks.json changed since an earlier run backed it
+	// up, other than by that run's rewrite.
+	ErrHooksChanged = errors.New("hooks.json changed since its backup")
 )
 
 // refusal is an error worded for the user, matching the errors it wraps.

@@ -340,28 +340,6 @@ func TestStateResumeRecoverCommand(t *testing.T) {
 			t.Errorf("session = %q, want %q", got.Session, payload.Session)
 		}
 	})
-
-	t.Run("it recovers a session parked by a build whose tail named no session", func(t *testing.T) {
-		resumeStateDir(t)
-		var probe resumeRecoverProbe
-		sink := logtest.Install(t)
-
-		parsed, err := executeResumeRecover(t, []string{"--pane", "%7", "--pane-key", "proj-a1b2:0.1"}, &probe)
-		if err != nil {
-			t.Fatalf("the tail refused an argv naming no session: %v", err)
-		}
-
-		if parsed.Session != "" {
-			t.Errorf("session = %q, want empty", parsed.Session)
-		}
-		if probe.execCalls != 1 {
-			t.Errorf("ExecShell called %d times, want the session recovered", probe.execCalls)
-		}
-		rec := sink.Records().WithMessage("clear resume pending flag failed").Only(t, "the failed clear's record")
-		if !errors.Is(rec.ErrorAttr(t, "error"), state.ErrUnsafeName) {
-			t.Errorf("WARN error = %v, want the unnamed session's refusal", rec.ErrorAttr(t, "error"))
-		}
-	})
 }
 
 // The production flag seams run here against a state directory of the test's
@@ -513,10 +491,6 @@ func TestStateResumeRecoverCommand_ForeignArgv(t *testing.T) {
 		{
 			name: "a shorthand this build does not register",
 			args: []string{"-q", "--session", recoverSession},
-		},
-		{
-			name: "the pane flags a tmux-era build parked it with",
-			args: []string{"--hook-key", "tok123", "--pane", "%7", "--pane-key", "proj-a1b2:0.1", "--session", recoverSession},
 		},
 	}
 	for _, tc := range cases {
