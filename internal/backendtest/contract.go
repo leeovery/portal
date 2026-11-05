@@ -533,17 +533,14 @@ func switchContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	}{
 		{"home", true},
 		{"work", true},
-		{"wedged", false},
-		{"busy", false},
 		{"gone", false},
+		{"a/b", false},
 		{"", false},
 	} {
 		t.Run("inside "+quoted(tt.current), func(t *testing.T) {
 			s := newSubject(t)
 			s.Hold(t, "work", Answering)
 			s.Hold(t, "home", Answering)
-			s.Hold(t, "wedged", Silent)
-			s.Hold(t, "busy", Refusing)
 			s.SetCurrent(tt.current)
 
 			cmd, err := s.Backend().AttachCommand(t.Context(), "work")
@@ -567,6 +564,36 @@ func switchContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 					t.Errorf("Env ZMX_SESSION = %q, want %q", sessions, want)
 				}
 			})
+		})
+	}
+
+	for _, state := range []struct {
+		name  string
+		state State
+	}{
+		{"silent", Silent},
+		{"refusing", Refusing},
+		{"hanging up", HangingUp},
+	} {
+		t.Run("inside a session "+state.name+", it fails naming that session, as no fault of the target's", func(t *testing.T) {
+			s := newSubject(t)
+			if why := s.Lacks(HangingUpSessions); state.state == HangingUp && why != "" {
+				t.Skip(why)
+			}
+			s.Hold(t, "work", Answering)
+			s.Hold(t, "wedged", state.state)
+			s.SetCurrent("wedged")
+
+			cmd, err := s.Backend().AttachCommand(t.Context(), "work")
+
+			if err == nil || !strings.Contains(err.Error(), "wedged") {
+				t.Fatalf("AttachCommand(work) = %+v, %v; want an error naming wedged, neither switched nor nested in", cmd, err)
+			}
+			for _, fault := range []error{backend.ErrTimeout, backend.ErrNoSuchSession} {
+				if errors.Is(err, fault) {
+					t.Errorf("AttachCommand(work) = %v, which reads as work's fault, %v", err, fault)
+				}
+			}
 		})
 	}
 }

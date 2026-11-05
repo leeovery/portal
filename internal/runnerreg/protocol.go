@@ -53,10 +53,26 @@ type request struct {
 	Request  string    `json:"request"`
 	Session  string    `json:"session,omitempty"`
 	Deadline time.Time `json:"deadline"`
+	// sessionGiven is whether the request read carried a session at all, an
+	// empty or null one included.
+	sessionGiven bool
 }
 
 func (q *request) fields() fields {
-	return fields{"version": &q.Version, "request": &q.Request, "session": &q.Session, "deadline": &q.Deadline}
+	return fields{"version": &q.Version, "request": &q.Request, "session": &given{into: &q.Session, given: &q.sessionGiven}, "deadline": &q.Deadline}
+}
+
+// given decodes a field into into, recording that the field was given,
+// whatever its value: encoding/json decodes a null into a string as nothing
+// at all.
+type given struct {
+	into  any
+	given *bool
+}
+
+func (g *given) UnmarshalJSON(data []byte) error {
+	*g.given = true
+	return json.Unmarshal(data, g.into)
 }
 
 // check refuses a request the runner would not understand in full.
@@ -69,7 +85,7 @@ func (q request) check() error {
 		return fmt.Errorf("unknown request %q", q.Request)
 	case named && q.Session == "":
 		return fmt.Errorf("%s names no session", q.Request)
-	case !named && q.Session != "":
+	case !named && q.sessionGiven:
 		return fmt.Errorf("%s takes no session", q.Request)
 	case q.Deadline.IsZero():
 		return fmt.Errorf("%s names no deadline", q.Request)

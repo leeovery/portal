@@ -20,6 +20,10 @@ import (
 // screenClear is what zmx's client writes as it begins an attach.
 const screenClear = "\x1b[0m\x1b[2J\x1b[H"
 
+// createdLine is what zmx's client prints as an attach makes the session
+// name.
+func createdLine(name string) string { return `session "` + name + `" created` + "\n" }
+
 func TestScanForSwitch(t *testing.T) {
 	t.Run("it finds zmx's reset followed by its screen clear, wherever the reads split them", func(t *testing.T) {
 		if got := runner.ScanForSwitch(switchSignature); got != 0 {
@@ -40,6 +44,57 @@ func TestScanForSwitch(t *testing.T) {
 		for _, before := range []string{"\x1b", "\x1bc", terminalReset[:7], terminalReset, terminalReset + "\x1b"} {
 			if got := runner.ScanForSwitch(before + switchSignature); got != 0 {
 				t.Errorf("after %q: found in read %d, want 0", before, got)
+			}
+		}
+	})
+
+	t.Run("it finds zmx's created line between the reset and the clear, wherever the reads split them", func(t *testing.T) {
+		for _, name := range []string{"scratch", `a" created`, strings.Repeat("n", runner.MaxCreatedName)} {
+			signature := terminalReset + createdLine(name) + screenClear
+			if got := runner.ScanForSwitch(signature); got != 0 {
+				t.Errorf("%q in one read: found in read %d, want 0", name, got)
+			}
+			for i := 1; i < len(signature); i++ {
+				if got := runner.ScanForSwitch("before"+signature[:i], signature[i:]+"after"); got != 1 {
+					t.Errorf("%q split at %d: found in read %d, want 1", name, i, got)
+				}
+			}
+			bytewise := strings.Split(signature, "")
+			if got := runner.ScanForSwitch(bytewise...); got != len(bytewise)-1 {
+				t.Errorf("%q a byte a read: found in read %d, want the last, %d", name, got, len(bytewise)-1)
+			}
+		}
+	})
+
+	t.Run("a break in the created line restarts at the byte that broke it, an ESC beginning a reset", func(t *testing.T) {
+		for _, before := range []string{
+			terminalReset + `session "scr`,
+			terminalReset + `session `,
+			terminalReset + createdLine("scratch")[:len(createdLine("scratch"))-1],
+			terminalReset + createdLine("scratch") + "\x1b",
+			terminalReset + createdLine("scratch") + screenClear[:5],
+		} {
+			if got := runner.ScanForSwitch(before + switchSignature); got != 0 {
+				t.Errorf("after %q: found in read %d, want 0", before, got)
+			}
+		}
+	})
+
+	t.Run("anything but the created line between the reset and the clear is no switch", func(t *testing.T) {
+		for _, between := range []string{
+			createdLine(""),
+			createdLine(strings.Repeat("n", runner.MaxCreatedName+1)),
+			createdLine("scr\x1b[0match"),
+			createdLine("scr\nscratch"),
+			`session "scratch" created` + "\r\n",
+			`session "scratch" made` + "\n",
+			`Session "scratch" created` + "\n",
+			createdLine("scratch") + createdLine("scratch"),
+			createdLine("scratch") + "x",
+			"x" + createdLine("scratch"),
+		} {
+			if got := runner.ScanForSwitch(terminalReset + between + screenClear); got != -1 {
+				t.Errorf("%q between: found in read %d, want none", between, got)
 			}
 		}
 	})

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -182,6 +183,38 @@ func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
 				t.Errorf("Exists(dev) = %v, %v; want ErrRefusing: a proof that can't be read proves nothing", got, err)
 			}
 		})
+	}
+}
+
+// A table of processes it can't read, each read again for a while before it
+// is skipped, takes longer to scan than the probe's ceiling: the scan ends
+// with the ceiling, unproved, and the socket stays refusing.
+func TestRefusingSocket_StaysRefusingWhenTheCeilingCutsTheProofShort(t *testing.T) {
+	dir := socketDir(t)
+	refusing(t, dir, "dev")
+	var unreadable []zmx.Process
+	for pid := range 20 {
+		unreadable = append(unreadable, zmx.Process{
+			Process: proctable.Process{PID: 1000 + pid, PPID: 1, Command: "launchd-helper"},
+			Err:     caught(syscall.EINVAL),
+		})
+	}
+	b := newBackend(t, dir)
+	zmx.FakeProcesses(b, unreadable, nil)
+	// The ceiling, and slack for load, well short of the 2 s a scan settling
+	// every process in turn takes.
+	soon := ceiling + 800*time.Millisecond
+
+	start := time.Now()
+	alive, err := b.Exists(t.Context(), "dev")
+	if took := time.Since(start); !errors.Is(err, zmx.ErrRefusing) || took > soon {
+		t.Errorf("Exists(dev) = %v, %v after %s; want ErrRefusing within %s, the proof unfinished", alive, err, took, soon)
+	}
+
+	start = time.Now()
+	sessions, err := b.List(t.Context())
+	if took := time.Since(start); err != nil || len(sessions) != 1 || sessions[0] != (backend.Session{Name: "dev"}) || took > soon {
+		t.Errorf("List = %+v, %v after %s; want dev listed by name only within %s", sessions, err, took, soon)
 	}
 }
 

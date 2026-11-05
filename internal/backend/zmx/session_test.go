@@ -279,6 +279,28 @@ func TestHistory(t *testing.T) {
 		}
 	})
 
+	t.Run("it reports an answer over zmx's frame limit as too large, with its size, never as a timeout", func(t *testing.T) {
+		for rows, tag := range map[int]byte{0: 8, 300: 22} {
+			dir := socketDir(t)
+			serve(t, dir, "s", answering(frame(1, 1, []byte("output")), oversizedHeader(tag)))
+
+			_, err := newBackend(t, dir).History(t.Context(), "s", rows)
+
+			if !errors.Is(err, backend.ErrHistoryTooLarge) || errors.Is(err, backend.ErrTimeout) || !strings.Contains(err.Error(), strconv.Itoa(overFrameLimit)) {
+				t.Errorf("History(%d) = %v, want ErrHistoryTooLarge naming its %d bytes, and no timeout", rows, err, overFrameLimit)
+			}
+		}
+	})
+
+	t.Run("an oversized frame of the session's output is a corrupt answer, not the history", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "s", answering(oversizedHeader(1)))
+
+		if _, err := newBackend(t, dir).History(t.Context(), "s", 0); !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrHistoryTooLarge) {
+			t.Errorf("History = %v, want ErrTimeout", err)
+		}
+	})
+
 	t.Run("it gives up past its ceiling", func(t *testing.T) {
 		dir := socketDir(t)
 		serve(t, dir, "wedged", silent)
@@ -299,6 +321,19 @@ func TestHistory(t *testing.T) {
 			t.Errorf("History(-1) sent %+v", reqs)
 		}
 	})
+}
+
+// overFrameLimit is one byte over zmx's own framing limit, ipc.zig's
+// MAX_PAYLOAD_LEN.
+const overFrameLimit = 64<<20 + 1
+
+// oversizedHeader is the header of a frame tagged tag whose payload is
+// overFrameLimit bytes, as zmx writes its History answer for a scrollback
+// that large.
+func oversizedHeader(tag byte) []byte {
+	h := []byte{tag, 1, 0, 0, 0, 0, 0, 0}
+	binary.NativeEndian.PutUint32(h[4:], overFrameLimit)
+	return h
 }
 
 // envValues returns every value env gives key, in order.
@@ -351,7 +386,6 @@ func TestAttachCommand(t *testing.T) {
 		}
 		serve(t, dir, "work", answering(infoFrame(t)))
 		home := serve(t, dir, "home", answering(infoFrame(t)))
-		refusing(t, dir, "busy")
 		for _, tt := range []struct {
 			inside   string
 			env      []string
@@ -362,12 +396,11 @@ func TestAttachCommand(t *testing.T) {
 			{"home with no ZMX_DIR, in zmx's default directory, the Backend's", []string{"XDG_RUNTIME_DIR=" + runtimeDir, "ZMX_SESSION=home"}, true},
 			{"home in another directory", []string{"ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=home"}, false},
 			{"home with no ZMX_DIR, in zmx's default directory, another", []string{"TMPDIR=/tmp", "ZMX_SESSION=home"}, false},
-			{"a session that refuses", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=busy"}, false},
 			{"home in another case", []string{"ZMX_DIR=" + dir, "ZMX_SESSION=HOME"}, false},
 		} {
 			t.Run("inside "+tt.inside, func(t *testing.T) {
 				env := append(slices.Clone(tt.env), "TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1")
-				cmd, err := held(newBackend(t, dir, env...), dir, "busy").AttachCommand(t.Context(), "work")
+				cmd, err := newBackend(t, dir, env...).AttachCommand(t.Context(), "work")
 				if err != nil {
 					t.Fatalf("AttachCommand: %v", err)
 				}
@@ -386,6 +419,37 @@ func TestAttachCommand(t *testing.T) {
 		}
 		if reqs := home.received(); len(reqs) != 3 {
 			t.Errorf("home received %+v, want one Info for each attach that could switch it", reqs)
+		}
+	})
+
+	t.Run("inside the session it attaches, it asks that session once, and switches on its one answer", func(t *testing.T) {
+		dir := socketDir(t)
+		work := serve(t, dir, "work", answeringOnce(infoFrame(t)))
+		b := newBackend(t, dir, "ZMX_DIR="+dir, "ZMX_SESSION=work")
+
+		cmd, err := b.AttachCommand(t.Context(), "work")
+
+		if err != nil || !cmd.Switches || !slices.Equal(envValues(cmd.Env, "ZMX_SESSION"), []string{"work"}) {
+			t.Errorf("AttachCommand = %+v, %v; want a switch of work, never a zmx attach nested in it", cmd, err)
+		}
+		if reqs := work.received(); len(reqs) != 1 {
+			t.Errorf("work received %d requests, want one Info", len(reqs))
+		}
+	})
+
+	t.Run("inside a session that answered once and goes silent, it fails naming that session rather than nest", func(t *testing.T) {
+		dir := socketDir(t)
+		serve(t, dir, "work", answering(infoFrame(t)))
+		serve(t, dir, "home", answeringOnce(infoFrame(t)))
+		b := newBackend(t, dir, "ZMX_DIR="+dir, "ZMX_SESSION=home")
+		if cmd, err := b.AttachCommand(t.Context(), "work"); err != nil || !cmd.Switches {
+			t.Fatalf("the first AttachCommand = %+v, %v; want a switch of home, which answers", cmd, err)
+		}
+
+		cmd, err := b.AttachCommand(t.Context(), "work")
+
+		if err == nil || !strings.Contains(err.Error(), "session home") || errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("AttachCommand = %+v, %v; want a failure naming home, not work's timeout", cmd, err)
 		}
 	})
 

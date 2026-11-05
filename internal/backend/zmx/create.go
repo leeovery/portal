@@ -158,11 +158,10 @@ func (b *Backend) holder(ctx context.Context, name string) (string, error) {
 // soon as the daemon is up, and returns what it printed on stdout. The run
 // drops ZMX_SESSION, which would turn the attach into a switch of the
 // caller's session, ZMX_SESSION_PREFIX, which zmx would prepend to the name,
-// and TMUX and TMUX_PANE: the session inherits the run's environment, and
-// must not take itself to be inside the caller's tmux.
+// and tmux's variables (see env).
 func (b *Backend) attach(ctx context.Context, name, dir string, command []string) (string, error) {
 	cmd := exec.CommandContext(ctx, b.binary, append([]string{"attach", name}, command...)...)
-	cmd.Env = b.env(envSession, envPrefix, envTmux, envTmuxPane)
+	cmd.Env = b.env(envSession, envPrefix)
 	cmd.Dir = dir
 	cmd.WaitDelay = pipeGrace
 	var stdout, stderr bytes.Buffer

@@ -1,6 +1,7 @@
 package zmx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -28,19 +29,23 @@ const (
 )
 
 // args reads pid's argv and environment, reading again, every settleEvery
-// until settleWithin has passed, while a read fails and the process hasn't
-// gone: a process caught as it forks or execs fails a read it answers a
-// moment later, and under load the table's scans often catch one.
+// until settleWithin has passed or ctx ends, while a read fails and the
+// process hasn't gone: a process caught as it forks or execs fails a read it
+// answers a moment later, and under load the table's scans often catch one.
 // It fails with proctable.ErrGone for a process gone meanwhile, and otherwise
 // with the last read's failure.
-func (t processTable) args(pid int) (proctable.Args, error) {
+func (t processTable) args(ctx context.Context, pid int) (proctable.Args, error) {
 	deadline := time.Now().Add(settleWithin)
 	for {
 		args, err := t.readArgs(pid)
 		if err == nil || errors.Is(err, proctable.ErrGone) || time.Now().After(deadline) {
 			return args, err
 		}
-		time.Sleep(settleEvery)
+		select {
+		case <-ctx.Done():
+			return args, err
+		case <-time.After(settleEvery):
+		}
 	}
 }
 
@@ -74,7 +79,7 @@ func (b *Backend) AttachClients(name string) ([]backend.ClientProcess, error) {
 		if !p.Terminal || p.Command != program {
 			continue
 		}
-		args, err := b.processes.args(p.PID)
+		args, err := b.processes.args(context.Background(), p.PID)
 		if errors.Is(err, proctable.ErrGone) {
 			continue
 		}

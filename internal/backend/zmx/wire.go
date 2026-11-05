@@ -76,10 +76,24 @@ func decodeHeader(b []byte) (header, error) {
 		return h, fmt.Errorf("%w %d in a frame header", errProtocolVersion, h.version)
 	}
 	if h.len > maxPayload {
-		return h, fmt.Errorf("%w: %d-byte payload", errFrame, h.len)
+		return h, &oversizedFrame{tag: h.tag, len: h.len}
 	}
 	return h, nil
 }
+
+// oversizedFrame is a frame whose header announces a payload over maxPayload,
+// which zmx refuses to read but writes all the same: its answer to History
+// is the whole scrollback, serialised with no cap in bytes.
+type oversizedFrame struct {
+	tag tag
+	len uint32
+}
+
+func (e *oversizedFrame) Error() string {
+	return fmt.Sprintf("%v: a tag %d frame of %d bytes, over the %d zmx frames hold", errFrame, e.tag, e.len, maxPayload)
+}
+
+func (e *oversizedFrame) Unwrap() error { return errFrame }
 
 // encodeCapture is an ipc.Capture request: format u8, three reserved bytes,
 // rows u32.

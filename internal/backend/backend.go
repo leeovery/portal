@@ -38,6 +38,12 @@ var (
 	// answered without the session's screen. It is never a blank transcript.
 	ErrHistoryUnavailable = errors.New("session history unavailable")
 
+	// ErrHistoryTooLarge is returned, wrapped, by History when the session
+	// answered with a history larger than the backend reads. It says so, with
+	// the size, and is no timeout: the session answered, and will answer as
+	// large again.
+	ErrHistoryTooLarge = errors.New("session history too large to read")
+
 	// ErrUnreadableClient is returned, wrapped, by a search for a session's
 	// client processes that met a process it could not read, which might have
 	// been one of them.

@@ -51,6 +51,9 @@ type scrollback struct {
 	creations map[string]creation
 	// cleaned is when the files no entry names were last removed.
 	cleaned time.Time
+	// tooLarge holds each session whose history was too large to read, once
+	// the saver has warned of it.
+	tooLarge map[string]bool
 }
 
 type creation struct {
@@ -128,7 +131,7 @@ func (sb *scrollback) save(ctx context.Context, live backend.Session, file strin
 		err = errAlternateScreen
 	}
 	if err != nil {
-		skipped(live.Name, err)
+		sb.skipped(live.Name, err)
 		return capture{}, false
 	}
 	sum := sha256.Sum256(vt)
@@ -149,9 +152,16 @@ var errAlternateScreen = errors.New("the session is on the alternate screen, who
 // skipped logs a history the saver didn't save: at DEBUG when the session had
 // no screen to give, didn't answer in time, has ended or is on the alternate
 // screen, as the next poll it is due asks again, and at WARN for any other
-// failure.
-func skipped(session string, err error) {
-	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrTimeout, backend.ErrNoSuchSession, errAlternateScreen} {
+// failure. A history too large to read is asked for again too, but will
+// likely stay too large, its saved transcript growing stale: the saver warns
+// of it once for each session in its run, and logs it at DEBUG after.
+func (sb *scrollback) skipped(session string, err error) {
+	if errors.Is(err, backend.ErrHistoryTooLarge) && !sb.tooLarge[session] {
+		sb.tooLarge[session] = true
+		captureLogger.Warn("capture too large", "session", session, "error", err)
+		return
+	}
+	for _, skip := range []error{backend.ErrHistoryUnavailable, backend.ErrHistoryTooLarge, backend.ErrTimeout, backend.ErrNoSuchSession, errAlternateScreen} {
 		if errors.Is(err, skip) {
 			captureLogger.Debug("capture skipped", "session", session, "error", err)
 			return

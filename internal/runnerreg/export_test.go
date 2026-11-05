@@ -1,6 +1,7 @@
 package runnerreg
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -52,6 +53,15 @@ func (g *Registration) Socket() string { return g.registry.socketPath(g.token) }
 // live.
 func (r Registry) EntryPath(token string) string  { return r.entryPath(token) }
 func (r Registry) SocketPath(token string) string { return r.socketPath(token) }
+
+// AnswerClosed answers the request conn carries as a registration answers
+// one whose Close began before the answer did.
+func AnswerClosed(conn net.Conn, h Handler) {
+	g := &Registration{handler: h}
+	g.ctx, g.cancel = context.WithCancel(context.Background())
+	g.cancel()
+	g.answer(conn)
+}
 
 // ServeThrough serves a registration of token on session through ln, as
 // Register does once it has bound the socket, until Close.

@@ -80,7 +80,7 @@ func (b *Backend) KillByCLI(ctx context.Context, name string) error {
 	ctx, cancel := b.bound(ctx, b.limits.kill, "; the kill may still land")
 	defer cancel()
 	cmd := exec.CommandContext(ctx, b.binary, "kill", name)
-	cmd.Env = b.env(envSession, envPrefix, envTmux, envTmuxPane)
+	cmd.Env = b.env(envSession, envPrefix)
 	cmd.WaitDelay = pipeGrace
 	out, err := cmd.CombinedOutput()
 	switch {

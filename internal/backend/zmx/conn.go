@@ -162,7 +162,7 @@ func (c *conn) hangupAfter(t tag) error {
 func (b *Backend) connect(ctx context.Context, entry string) (*conn, error) {
 	c, err := dial(ctx, b.path(entry))
 	if err != nil {
-		return nil, b.dialFailure(entry, err)
+		return nil, b.dialFailure(ctx, entry, err)
 	}
 	return c, nil
 }
@@ -171,12 +171,12 @@ func (b *Backend) connect(ctx context.Context, entry string) (*conn, error) {
 // accepting. On Linux a connect to a unix socket whose listen backlog is full
 // fails with EAGAIN, which proves a listener, so it is never stale; on macOS
 // a full backlog refuses.
-func (b *Backend) dialFailure(entry string, err error) error {
+func (b *Backend) dialFailure(ctx context.Context, entry string, err error) error {
 	switch {
 	case errors.Is(err, syscall.EAGAIN):
 		return fmt.Errorf("%w: %w", err, errNotAccepting)
 	case errors.Is(err, syscall.ECONNREFUSED):
-		return b.refused(entry, err)
+		return b.refused(ctx, entry, err)
 	}
 	return err
 }
@@ -188,7 +188,7 @@ func (b *Backend) dialFailure(entry string, err error) error {
 // socket made before this boot, whose daemon cannot be running now, is stale;
 // one made since is stale only once the process table proves no process holds
 // it, a read paid for on a refusal alone.
-func (b *Backend) refused(entry string, err error) error {
+func (b *Backend) refused(ctx context.Context, entry string, err error) error {
 	if refusalProvesNoListener {
 		return fmt.Errorf("%w: %w", err, errStale)
 	}
@@ -197,7 +197,7 @@ func (b *Backend) refused(entry string, err error) error {
 	if statErr == nil && bootErr == nil && info.ModTime().Before(boot) {
 		return fmt.Errorf("%w: %w", err, errStale)
 	}
-	if held := b.unheld(entry); held != nil {
+	if held := b.unheld(ctx, entry); held != nil {
 		return fmt.Errorf("%w: %w: %w", err, ErrRefusing, held)
 	}
 	return fmt.Errorf("%w: %w", err, errStale)

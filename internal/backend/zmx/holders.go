@@ -30,14 +30,20 @@ var startingVerbs = map[string]bool{"attach": true, "a": true, "run": true, "r":
 // on it whose kernel name contains zmx. Any other process it can't read is
 // skipped (decision 70): under load a scan often catches one mid-exec, and
 // some stay unreadable for seconds, so only a renamed zmx, unreadable that
-// long while its daemon's backlog is full, is miscounted.
-func (b *Backend) unheld(entry string) error {
+// long while its daemon's backlog is full, is miscounted. A scan ctx ends
+// before it is done proves nothing either: a probe's ceiling bounds a whole
+// listing, and a table of many unreadable processes, each read again for a
+// while, would outlast it.
+func (b *Backend) unheld(ctx context.Context, entry string) error {
 	procs, err := b.processes.list()
 	if err != nil {
 		return fmt.Errorf("list the processes that may hold it: %w", err)
 	}
 	for _, p := range procs {
-		args, read, err := b.candidateArgs(p)
+		if ctx.Err() != nil {
+			return fmt.Errorf("the scan for a process that may hold it was cut short: %w", context.Cause(ctx))
+		}
+		args, read, err := b.candidateArgs(ctx, p)
 		switch {
 		case err != nil:
 			return fmt.Errorf("read process %d, which may hold it: %w", p.PID, err)
@@ -60,8 +66,8 @@ func (b *Backend) unheld(entry string) error {
 // meanwhile, or for one still unreadable whose kernel name has no zmx in it,
 // which is skipped (decision 70); and the read's failure for one whose name
 // has, as a zmx renamed or wrapped may be.
-func (b *Backend) candidateArgs(p proctable.Process) (args proctable.Args, read bool, err error) {
-	args, err = b.processes.args(p.PID)
+func (b *Backend) candidateArgs(ctx context.Context, p proctable.Process) (args proctable.Args, read bool, err error) {
+	args, err = b.processes.args(ctx, p.PID)
 	switch {
 	case err == nil:
 		return args, true, nil
@@ -188,11 +194,11 @@ func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid in
 	if _, held, err := b.held(name); err != nil || !held {
 		return err
 	}
-	d, err := b.sessionDaemon(name)
+	d, err := b.sessionDaemon(ctx, name)
 	if err != nil {
 		return err
 	}
-	switch err := b.stillDaemon(d); {
+	switch err := b.stillDaemon(ctx, d); {
 	case errors.Is(err, proctable.ErrGone):
 		return b.awaitEnded(ctx, name, d.PID)
 	case err != nil:
@@ -216,7 +222,7 @@ type daemon struct {
 // judged as candidateArgs judges it: one whose kernel name contains zmx
 // proves nothing, and any other is skipped (decision 70), so the proof
 // signals only a process it read whole.
-func (b *Backend) sessionDaemon(name string) (daemon, error) {
+func (b *Backend) sessionDaemon(ctx context.Context, name string) (daemon, error) {
 	procs, err := b.processes.list()
 	if err != nil {
 		return daemon{}, fmt.Errorf("list the processes: %w", err)
@@ -226,7 +232,7 @@ func (b *Backend) sessionDaemon(name string) (daemon, error) {
 		if !detached(p) {
 			continue
 		}
-		switch args, read, err := b.candidateArgs(p); {
+		switch args, read, err := b.candidateArgs(ctx, p); {
 		case err != nil:
 			return daemon{}, fmt.Errorf("read process %d: %w", p.PID, err)
 		case read && b.runsDaemonOf(args, name):
@@ -243,12 +249,12 @@ func (b *Backend) sessionDaemon(name string) (daemon, error) {
 // reads as it did when proved: its parent, its terminal, its argv and its
 // environment. A pid reused since reads otherwise. One gone or exiting fails
 // with proctable.ErrGone.
-func (b *Backend) stillDaemon(d daemon) error {
+func (b *Backend) stillDaemon(ctx context.Context, d daemon) error {
 	p, err := b.processes.read(d.PID)
 	if err != nil {
 		return fmt.Errorf("read pid %d again: %w", d.PID, err)
 	}
-	args, err := b.processes.args(d.PID)
+	args, err := b.processes.args(ctx, d.PID)
 	if err != nil {
 		return fmt.Errorf("read pid %d again: %w", d.PID, err)
 	}
@@ -279,7 +285,7 @@ func (b *Backend) awaitEnded(ctx context.Context, name string, pid int) error {
 	ctx, cancel := b.bound(ctx, b.limits.kill, "")
 	defer cancel()
 	for {
-		left, err := b.left(name, pid)
+		left, err := b.left(ctx, name, pid)
 		switch {
 		case err != nil:
 			return fmt.Errorf("look for pid %d's end: %w", pid, err)
@@ -299,7 +305,7 @@ func (b *Backend) awaitEnded(ctx context.Context, name string, pid int) error {
 // once the table shows no such process, or one no longer proved the daemon,
 // as a pid reused is not. Unlike the proof's scan, it fails on pid unreadable,
 // whatever the kernel names it: that one pid was the daemon.
-func (b *Backend) left(name string, pid int) (string, error) {
+func (b *Backend) left(ctx context.Context, name string, pid int) (string, error) {
 	if _, held, err := b.held(name); err != nil || held {
 		return "its socket is still there", err
 	}
@@ -311,7 +317,7 @@ func (b *Backend) left(name string, pid int) (string, error) {
 	if i < 0 || !detached(procs[i]) {
 		return "", nil
 	}
-	switch args, err := b.processes.args(pid); {
+	switch args, err := b.processes.args(ctx, pid); {
 	case errors.Is(err, proctable.ErrGone):
 		return "", nil
 	case err != nil:

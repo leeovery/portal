@@ -276,15 +276,18 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string) (
 }
 
 // AttachCommand switches, as the driver's does, when the current session is
-// one the Fake holds that answers.
+// one the Fake holds that answers, and fails when it holds one that doesn't.
 func (f *Fake) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.beginHeld(ctx, Call{Op: OpAttachCommand, Name: name}, zmx.CheckAttach); err != nil {
 		return backend.Command{}, err
 	}
-	current, ok := f.sessions[f.current]
-	return backend.Command{Argv: []string{AttachProgram, name}, Switches: ok && current.Answered}, nil
+	current, held := f.sessions[f.current]
+	if held && !current.Answered {
+		return backend.Command{}, fmt.Errorf("attach session %q: session %s, which this runs in, is not answering; nothing was opened", name, f.current)
+	}
+	return backend.Command{Argv: []string{AttachProgram, name}, Switches: held}, nil
 }
 
 // Session returns the session as List lists it.

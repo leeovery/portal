@@ -15,7 +15,7 @@ func (b *Backend) Runs(ctx context.Context) error {
 	ctx, cancel := b.bound(ctx, b.limits.create, "")
 	defer cancel()
 	cmd := exec.CommandContext(ctx, b.binary, "version")
-	cmd.Env = b.env(envSession, envPrefix, envTmux, envTmuxPane)
+	cmd.Env = b.env(envSession, envPrefix)
 	cmd.WaitDelay = pipeGrace
 	out, err := cmd.CombinedOutput()
 	switch {
