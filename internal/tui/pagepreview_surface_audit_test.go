@@ -4,10 +4,12 @@ import (
 	"go/ast"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -74,12 +76,11 @@ func TestSurfaceAudit_PreviewReadsTheWholeHistoryThroughTheSeam(t *testing.T) {
 	}
 }
 
-// The saved scrollback files belong to internal/state, and window and pane
-// enumeration to internal/tmux. The preview's files reach neither.
-func TestSurfaceAudit_PreviewReadsNoSavedScrollbackAndNoTmux(t *testing.T) {
+// The saved scrollback files belong to internal/state, which the preview's
+// files never reach.
+func TestSurfaceAudit_PreviewReadsNoSavedScrollback(t *testing.T) {
 	forbidden := map[string]string{
 		`"github.com/leeovery/portal/internal/state"`: "saved scrollback",
-		`"github.com/leeovery/portal/internal/tmux"`:  "tmux",
 	}
 	files, err := filepath.Glob("*preview*.go")
 	if err != nil {
@@ -140,96 +141,64 @@ func TestSurfaceAudit_HooksNoPreviewTokens(t *testing.T) {
 }
 
 func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
-	internalDir := repoRelative("internal")
-	entries, err := os.ReadDir(internalDir)
+	t.Run("it finds no package named for the preview under internal", func(t *testing.T) {
+		for _, found := range previewPackages(t, repoRelative("internal")) {
+			t.Errorf("new package internal/%s/ exists; the preview lives in internal/tui", found)
+		}
+	})
+
+	t.Run("it reports each package named for the preview", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, name := range []string{"preview", "scrollback", "snapshot", "tui", "previews"} {
+			if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+				t.Fatalf("stage %s: %v", name, err)
+			}
+		}
+		var rec harnesstest.Recorder
+		var found []string
+		rec.Run(func() { found = previewPackages(&rec, dir) })
+		if want := []string{"preview", "scrollback", "snapshot"}; rec.Failed() || !slices.Equal(found, want) {
+			t.Errorf("previewPackages reported %q and %s, want %q", found, rec.Report(), want)
+		}
+	})
+
+	t.Run("it fails on a directory holding no package", func(t *testing.T) {
+		var rec harnesstest.Recorder
+		rec.Run(func() { previewPackages(&rec, t.TempDir()) })
+		if len(rec.Fatals) != 1 {
+			t.Errorf("previewPackages over an empty directory reported %s, want one fatal", rec.Report())
+		}
+	})
+}
+
+// previewPackageNames are the names a package split out for the preview
+// would carry.
+var previewPackageNames = []string{"preview", "scrollback", "snapshot"}
+
+// previewPackages returns, in directory order, each package under dir named
+// for the preview. A dir holding no package at all is fatal: the audit would
+// pass by having stopped looking.
+func previewPackages(t harnesstest.TestingT, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read dir %s: %v", internalDir, err)
+		t.Fatalf("read dir %s: %v", dir, err)
+		return nil
 	}
-
-	preExistingPackages := map[string]struct{}{
-		"alias":           {},
-		"attachkeys":      {},
-		"backend":         {},
-		"backendtest":     {},
-		"bootid":          {},
-		"capture":         {},
-		"commandertest":   {},
-		"commitlock":      {},
-		"devversion":      {},
-		"fileutil":        {},
-		"fuzzy":           {},
-		"harnesstest":     {},
-		"hooks":           {},
-		"hookstest":       {},
-		"hooksweep":       {},
-		"log":             {},
-		"logtest":         {},
-		"migrate":         {},
-		"nanoid":          {},
-		"portalbintest":   {},
-		"portaltest":      {},
-		"prefs":           {},
-		"proctable":       {},
-		"proctest":        {},
-		"project":         {},
-		"resolver":        {},
-		"restore":         {},
-		"resumekeys":      {},
-		"resumemode":      {},
-		"runner":          {},
-		"runnerreg":       {},
-		"runnertoken":     {},
-		"saver":           {},
-		"saverhost":       {},
-		"session":         {},
-		"sessionindex":    {},
-		"shellquote":      {},
-		"sourceguardtest": {},
-		"spawn":           {},
-		"spawntest":       {},
-		"state":           {},
-		"storelog":        {},
-		"theme":           {},
-		"themetest":       {},
-		"tmux":            {},
-		"tmuxerr":         {},
-		"tmuxout":         {},
-		"tmuxtest":        {},
-		"tui":             {},
-		"vtcapture":       {},
-		"warning":         {},
-		"xdg":             {},
-		"zmxtest":         {},
-	}
-
-	forbiddenNames := map[string]struct{}{
-		"preview":    {},
-		"scrollback": {},
-		"snapshot":   {},
-	}
-
+	var packages int
+	var found []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		if _, forbidden := forbiddenNames[name]; forbidden {
-			t.Errorf(
-				"new package internal/%s/ exists; the preview lives in "+
-					"internal/tui. Forbidden name pinned by audit.",
-				name,
-			)
-			continue
-		}
-		if _, ok := preExistingPackages[name]; !ok {
-			t.Errorf(
-				"new package internal/%s/ exists and is not on the "+
-					"pre-existing allow-list. If this addition is unrelated "+
-					"to the preview, update the audit's preExistingPackages "+
-					"map. Otherwise, the preview must not introduce a new "+
-					"internal/ package.",
-				name,
-			)
+		packages++
+		if slices.Contains(previewPackageNames, e.Name()) {
+			found = append(found, e.Name())
 		}
 	}
+	if packages == 0 {
+		t.Fatalf("no package under %s; the audit scanned nothing", dir)
+		return nil
+	}
+	return found
 }

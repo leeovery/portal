@@ -7,8 +7,8 @@ import (
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
-// A session name's suffix is the general-purpose nanoid. The pane-token
-// generator is hooks.json's key shape, free to change width on its own.
+// A session name's suffix is drawn from nanoid's general-purpose generator,
+// and only from it.
 func TestMintDrawsSuffixesFromTheGeneralPurposeGenerator(t *testing.T) {
 	source := sourceguardtest.PackageSource(t, ".", "open_mint.go")
 	fn := findFuncDeclInFile(t, source.File, "newIndexingCreator")

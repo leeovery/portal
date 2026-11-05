@@ -1,9 +1,8 @@
 // Package nanoid holds the vocabulary of Portal's generated ids: the charset,
-// the widths, the generators that mint them and the predicates that recognise
-// an id and a pane token. It depends on the standard library alone, so
-// packages that must not import each other — the hooks store and the session
-// tree among them — can each reach the vocabulary without an edge between
-// them.
+// the width, the generator that mints them and the predicates that recognise
+// an id and a pane token. It depends on the standard library alone, so the
+// packages that share it — sessions, spawn, the runner registry, the hook
+// sweep and migrate — reach it without an edge to one another.
 package nanoid
 
 import (
@@ -29,18 +28,8 @@ type Generator func() (string, error)
 
 // NewGenerator returns a Generator minting general-purpose ids at width.
 func NewGenerator() Generator {
-	return generatorOfWidth(width)
-}
-
-// NewPaneTokenGenerator returns a Generator minting pane tokens at
-// paneTokenWidth, the width IsTokenShaped recognises.
-func NewPaneTokenGenerator() Generator {
-	return generatorOfWidth(paneTokenWidth)
-}
-
-func generatorOfWidth(n int) Generator {
 	return func() (string, error) {
-		bytes := make([]byte, n)
+		bytes := make([]byte, width)
 		if _, err := rand.Read(bytes); err != nil {
 			return "", fmt.Errorf("failed to read random bytes: %w", err)
 		}
@@ -51,16 +40,16 @@ func generatorOfWidth(n int) Generator {
 	}
 }
 
-// paneTokenWidth is the byte length of a pane token, read by both the mint and
-// IsTokenShaped so generation and recognition cannot drift apart.
+// paneTokenWidth is the byte length of a pane token, the hook key the tmux
+// version minted.
 //
 // It is part of hooks.json's on-disk contract: changing it reclassifies every
 // key already persisted there, which the staleness rule then declines to judge
 // and retains forever. Moving it is a migration event, not a tuning change.
 const paneTokenWidth = 6
 
-// IsTokenShaped reports whether s could have been produced by the pane-token
-// mint: an id exactly paneTokenWidth bytes wide.
+// IsTokenShaped reports whether s could be a pane token: an id exactly
+// paneTokenWidth bytes wide.
 func IsTokenShaped(s string) bool {
 	return len(s) == paneTokenWidth && IsIDShaped(s)
 }

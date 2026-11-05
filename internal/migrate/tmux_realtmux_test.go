@@ -143,11 +143,11 @@ func TestTmux_KillSaver(t *testing.T) {
 		if !killed || err != nil {
 			t.Fatalf("KillSaver = %v, %v; want true, nil", killed, err)
 		}
-		if _, err := ts.TryRun("has-session", "-t", "=_portal-saver:"); err == nil {
+		if ts.HasSession("_portal-saver") {
 			t.Error("_portal-saver is still there")
 		}
 		for _, kept := range []string{"_portal-saver-2", "_portal-bootstrap"} {
-			if _, err := ts.TryRun("has-session", "-t", "="+kept+":"); err != nil {
+			if !ts.HasSession(kept) {
 				t.Errorf("%s was killed too", kept)
 			}
 		}
@@ -162,7 +162,7 @@ func TestTmux_KillSaver(t *testing.T) {
 		if killed || err != nil {
 			t.Fatalf("KillSaver = %v, %v; want false, nil", killed, err)
 		}
-		if _, err := ts.TryRun("has-session", "-t", "=_portal-saver-2:"); err != nil {
+		if !ts.HasSession("_portal-saver-2") {
 			t.Error("_portal-saver-2 was killed")
 		}
 	})

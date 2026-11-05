@@ -154,7 +154,7 @@ func hangUpOnSaverKill(ts *tmuxtest.Socket, daemon *proctest.Held, done <-chan s
 				return
 			case <-time.After(20 * time.Millisecond):
 			}
-			if _, err := ts.TryRun("has-session", "-t", "=_portal-saver:"); err != nil {
+			if !ts.HasSession("_portal-saver") {
 				time.Sleep(daemonLag)
 				sent <- daemon.Signal(daemon.PID(), syscall.SIGHUP)
 				return
@@ -340,10 +340,10 @@ func TestMigrateAgainstZmx(t *testing.T) {
 		if listed := ts.Run(t, "show-hooks", "-g", "session-created"); !strings.Contains(listed, userTmuxHook) {
 			t.Errorf("session-created = %q, want the user's hook kept", listed)
 		}
-		if _, err := ts.TryRun("has-session", "-t", "=_portal-saver:"); err == nil {
+		if ts.HasSession("_portal-saver") {
 			t.Error("_portal-saver is still there")
 		}
-		if _, err := ts.TryRun("has-session", "-t", "=_portal-bootstrap:"); err != nil {
+		if !ts.HasSession("_portal-bootstrap") {
 			t.Error("the tmux server's anchor session went too")
 		}
 	})
