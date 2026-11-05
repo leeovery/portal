@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -379,6 +381,32 @@ func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	}
 }
 
+// decision 75: a mint whose create the backend refused, because a zmx 0.8.1
+// first on PATH made the session, fails with the older-zmx fatal, as a
+// bootstrap meeting that zmx does.
+func TestExecute_UnsupportedCreateIsTheOlderZmxFatal(t *testing.T) {
+	fake, _ := stageAttach(t)
+	stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+	fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w; zmx kill ended the session", "x", backend.ErrUnsupportedProtocol))
+
+	var stderr bytes.Buffer
+	originalWriter := fatalErrorStderr
+	fatalErrorStderr = &stderr
+	t.Cleanup(func() { fatalErrorStderr = originalWriter })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", t.TempDir()})
+	err := Execute()
+
+	fatal, ok := errors.AsType[*bootstrap.FatalError](err)
+	if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
+		t.Fatalf("Execute = %v, want the older-zmx fatal carrying the refusal", err)
+	}
+	if got, want := stderr.String(), bootstrap.OlderZmxMessage+"\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+}
+
 func TestExecute_NonFatalErrorWritesNothingToFatalStream(t *testing.T) {
 	resetBootstrapOnce(t)
 
@@ -477,4 +505,16 @@ func nonDefaultFlagValue(t *testing.T, f *pflag.Flag) string {
 	}
 	t.Fatalf("no non-default value known for --%s of type %s", f.Name, f.Value.Type())
 	return ""
+}
+
+// The one mapping from a create's error to its fatal, shared by the picker's
+// mint and Execute: the older-zmx fatal for a refusal, and none otherwise.
+func TestCreateFatal(t *testing.T) {
+	refusal := fmt.Errorf("create session %q: %w", "x", backend.ErrUnsupportedProtocol)
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](createFatal(refusal)); !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("createFatal(refusal) = %v, want the older-zmx fatal carrying it", createFatal(refusal))
+	}
+	if err := createFatal(errors.New("boom")); err != nil {
+		t.Errorf("createFatal(boom) = %#v, want nil", err)
+	}
 }

@@ -76,7 +76,7 @@ func TestDoctorFix_AdvisoriesInBothPasses(t *testing.T) {
 	requireBothReportsEndWith(t, outBuf.String(), ""+
 		"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 		"  ⚠ theme b-colour: bad colour — canvas = blue\n"+
-		"  10 checks passed · 2 advisories")
+		"  11 checks passed · 2 advisories")
 }
 
 func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
@@ -92,7 +92,7 @@ func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
 	}
 
 	out := outBuf.String()
-	if n := strings.Count(out, "\n  10 checks passed · 2 advisories\n"); n != 2 {
+	if n := strings.Count(out, "\n  11 checks passed · 2 advisories\n"); n != 2 {
 		t.Errorf("suffixed summary count = %d; want 2 (one per report render):\n%s", n, out)
 	}
 
@@ -115,10 +115,10 @@ func TestDoctorFix_SuffixInBothSummaries(t *testing.T) {
 			"  ⚠ theme a-missing: missing tokens — missing text.primary\n" +
 			"  ⚠ theme b-colour: bad colour — canvas = blue\n"
 		pre, post := requireTwoReports(t, outBuf.String())
-		if want := block + "  9 of 10 checks passed · 2 advisories"; !strings.HasSuffix(pre, want) {
+		if want := block + "  10 of 11 checks passed · 2 advisories"; !strings.HasSuffix(pre, want) {
 			t.Errorf("the initial diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, pre)
 		}
-		if want := block + "  10 checks passed · 2 advisories"; !strings.HasSuffix(post, want) {
+		if want := block + "  11 checks passed · 2 advisories"; !strings.HasSuffix(post, want) {
 			t.Errorf("the post-repair re-diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, post)
 		}
 	})
@@ -147,7 +147,7 @@ func TestDoctorFix_AdvisoryOnlyExitsZero(t *testing.T) {
 		"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 		"  ⚠ theme b-colour: bad colour — canvas = blue\n"+
 		"  ⚠ theme gone does not resolve: not found\n"+
-		"  10 checks passed · 3 advisories")
+		"  11 checks passed · 3 advisories")
 }
 
 // The `appearance` key makes this a file the migrating loader would genuinely
@@ -352,7 +352,7 @@ func TestDoctorFix_RemainsBootstrapExempt(t *testing.T) {
 		requireBothReportsEndWith(t, outBuf.String(), ""+
 			"  ⚠ theme a-missing: missing tokens — missing text.primary\n"+
 			"  ⚠ theme gone does not resolve: not found\n"+
-			"  10 checks passed · 2 advisories")
+			"  11 checks passed · 2 advisories")
 	})
 
 	t.Run("the orchestrator seam runs for a non-exempt command", func(t *testing.T) {
@@ -407,10 +407,10 @@ func TestDoctorFix_ExistingRepairsUnchanged(t *testing.T) {
 
 		const advisory = "  ⚠ theme a-missing: missing tokens — missing text.primary\n"
 		pre, post := requireTwoReports(t, out)
-		if want := advisory + "  9 of 10 checks passed · 1 advisory"; !strings.HasSuffix(pre, want) {
+		if want := advisory + "  10 of 11 checks passed · 1 advisory"; !strings.HasSuffix(pre, want) {
 			t.Errorf("the initial diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, pre)
 		}
-		if want := advisory + "  10 checks passed · 1 advisory"; !strings.HasSuffix(post, want) {
+		if want := advisory + "  11 checks passed · 1 advisory"; !strings.HasSuffix(post, want) {
 			t.Errorf("the post-repair re-diagnosis does not close with\n%s\ngot\nPortal doctor:\n%s", want, post)
 		}
 	})

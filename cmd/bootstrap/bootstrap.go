@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
@@ -132,6 +133,7 @@ type RestoreProgressSink interface {
 // Logger is tolerated — Run substitutes a discard sink.
 type Orchestrator struct {
 	Zmx           ZmxChecker
+	ZmxDir        ZmxDirClaimer
 	Latch         Latch
 	Restoring     RestoringFlag
 	OrphanSweeper OrphanSweeper
@@ -145,10 +147,11 @@ type Orchestrator struct {
 }
 
 // Run executes the steps in order and returns the soft warnings in step order.
-// Checking zmx, removing the latch, and raising and lowering the restoring
-// flag are fatal, as is a saver Portal can't use that it made, or found and
-// can't end; every other failure is logged, and those a user can act on are
-// warned of. The
+// Checking zmx, claiming the state directory for its zmx directory, removing
+// the latch, and raising and lowering the restoring flag are fatal, as is a
+// saver Portal can't use that it made, or found and can't end, and a session
+// restore made that the backend refused as one Portal can't talk to; every
+// other failure is logged, and those a user can act on are warned of. The
 // latch goes before the first change and is written only by a pass that ran
 // to the end, so a pass cut short leaves none, and so does one that leaves the
 // restore unfinished: its context's end, a saver it can't judge, sessions it
@@ -227,9 +230,15 @@ func (p *pass) leaveUnfinished(step string, w Warning, err error) {
 	p.unfinished = true
 }
 
+// checkZmx checks zmx runs, then claims the state directory for the zmx
+// directory Portal runs against, before the latch goes: a state directory
+// that belongs to another is refused with nothing changed.
 func (p *pass) checkZmx(ctx context.Context) *FatalError {
 	if err := p.Zmx.CheckZmx(ctx); err != nil {
 		return NewFatal(err.Error(), err)
+	}
+	if err := p.ZmxDir.Claim(); err != nil {
+		return zmxDirFatal(err)
 	}
 	return nil
 }
@@ -290,6 +299,9 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 	switch {
 	case fatal != nil || p.unfinished:
 		return fatal
+	case errors.Is(err, backend.ErrUnsupportedProtocol):
+		// The create has ended what it made, and says in err whether it went.
+		return UnsupportedCreate(err)
 	case err != nil:
 		p.warn(stepEnsureSaver, saverWarning(err), err)
 	}
@@ -366,7 +378,7 @@ func (p *pass) judge(ctx context.Context) (*FatalError, error) {
 	speaks, err := p.Saver.Protocol(ctx)
 	switch {
 	case errors.Is(err, ErrOlderZmx):
-		return NewFatal("Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1.", err), nil
+		return NewFatal(OlderZmxMessage, err), nil
 	case err != nil:
 		return nil, fmt.Errorf("judge the saver's zmx protocol: %w", err)
 	case speaks != p.Protocol:
@@ -376,10 +388,15 @@ func (p *pass) judge(ctx context.Context) (*FatalError, error) {
 	return nil, nil
 }
 
-// endMade ends the saver the pass made that Portal can't use, recording in
-// unusable's cause whether it went.
+// endMade ends the saver the pass made that Portal can't use.
 func (p *pass) endMade(ctx context.Context, unusable *FatalError) {
-	if err := p.Saver.EndMade(ctx); err != nil {
+	p.endWith(ctx, unusable, p.Saver.EndMade)
+}
+
+// endWith ends the saver the pass made by end, recording in unusable's cause
+// whether it went.
+func (p *pass) endWith(ctx context.Context, unusable *FatalError, end func(context.Context) error) {
+	if err := end(ctx); err != nil {
 		unusable.Cause = fmt.Errorf("%w; Portal couldn't end the saver it made on it, which is left: %w", unusable.Cause, err)
 		return
 	}
@@ -429,7 +446,7 @@ func (p *pass) restore(ctx context.Context) *FatalError {
 	if _, err := p.Restoring.Lower(); err != nil {
 		return lowerFatal(err)
 	}
-	return nil
+	return UnsupportedCreate(res.Unsupported)
 }
 
 func lowerFatal(err error) *FatalError {

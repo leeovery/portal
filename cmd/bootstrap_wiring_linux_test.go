@@ -44,6 +44,7 @@ func (s foundSaver) EnsureSaver(context.Context, func(context.Context) error) er
 type quietSteps struct{}
 
 func (quietSteps) CheckZmx(context.Context) error           { return nil }
+func (quietSteps) Claim() error                             { return nil }
 func (quietSteps) RemoveLatch() error                       { return nil }
 func (quietSteps) WriteLatch() error                        { return nil }
 func (quietSteps) Raise() error                             { return nil }
@@ -74,7 +75,7 @@ func TestBootstrap_AnOlderSaverFoundOnLinuxIsTheFatalNamingTheWayOut(t *testing.
 	})
 	steps := quietSteps{}
 	o := &bootstrap.Orchestrator{
-		Zmx: steps, Latch: steps, Restoring: steps, OrphanSweeper: steps, FlagSweeper: steps, Restore: steps,
+		Zmx: steps, ZmxDir: steps, Latch: steps, Restoring: steps, OrphanSweeper: steps, FlagSweeper: steps, Restore: steps,
 		Saver:    foundSaver{saverDaemon: saverDaemon{driver: func() (saverZmx, error) { return olderSaverDriver{driver}, nil }}, t: t},
 		Protocol: zmx.ProtocolVersion,
 	}

@@ -33,9 +33,13 @@ const (
 	// restoreRun is restore's listing, before its first session.
 	restoreRun = saverhost.ReadCeiling
 	// restoreSessionRun is a session restore makes: its Create, a run of the
-	// binary, with its grace; when that fails, a read, a probe ceiling's wait
-	// and a read again. Its record waits on commit.lock besides.
-	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace + 3*saverhost.ReadCeiling
+	// binary, with its grace; then either the Create's refusal of a session
+	// an older zmx made (a read in that zmx's framing and its zmx kill, a run
+	// of the binary), or, when the Create fails otherwise, a read, a probe
+	// ceiling's wait and a read again. Its record waits on commit.lock
+	// besides.
+	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace +
+		max(3*saverhost.ReadCeiling, saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace)
 	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
 	// and the flag, latch and index files.
 	lockSlack = 15 * time.Second

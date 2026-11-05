@@ -33,6 +33,7 @@ type productionBootstrap struct {
 	dir     string
 	backend backend.Backend
 	host    *saverhost.Host
+	owner   bootstrap.ZmxDirOwner
 	running state.Latch
 	// bootErr is why this boot's id couldn't be read, leaving running
 	// incomplete.
@@ -53,10 +54,16 @@ func newProductionBootstrap() (*productionBootstrap, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &productionBootstrap{dir: dir, backend: b, host: host}
+	p := &productionBootstrap{dir: dir, backend: b, host: host, owner: zmxDirOwner(dir, zmx.DirFor(os.Environ()))}
 	p.running, p.bootErr = runningLatch()
-	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, Present: host.Present, Logger: bootstrapLogger}
+	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, ZmxDir: p.owner.Claimed, Present: host.Present, Logger: bootstrapLogger}
 	return p, nil
+}
+
+// zmxDirOwner pairs the state directory stateDir with the zmx directory
+// zmxDir, compared as the zmx backend compares directories.
+func zmxDirOwner(stateDir, zmxDir string) bootstrap.ZmxDirOwner {
+	return bootstrap.ZmxDirOwner{StateDir: stateDir, ZmxDir: zmxDir, Canonical: zmx.CanonicalDir}
 }
 
 // runningLatch is the latch a bootstrap of this boot and this binary writes.
@@ -85,6 +92,7 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 	}
 	steps := &bootstrap.Orchestrator{
 		Zmx:       zmxCheck{dir: zmx.DirFor(os.Environ())},
+		ZmxDir:    p.owner,
 		Latch:     latchFile{dir: p.dir, latch: p.running, bootErr: p.bootErr},
 		Restoring: restoringFlag(p.dir),
 		OrphanSweeper: &bootstrap.OrphanSweepCore{
@@ -224,7 +232,9 @@ func (d saverDaemon) End(ctx context.Context) error {
 // EndMade ends the saver session the bootstrap made with zmx kill, run by the
 // zmx on PATH that made it, which speaks its daemon's protocol, so needs no
 // process table: off darwin, the only way. End's signal ends it when that
-// kill fails.
+// kill fails. Create's refusal has no such fallback (decision 80): this
+// proof targets only _portal-saver's daemon, so a wrong match ends a Portal
+// process, never a user's session.
 func (d saverDaemon) EndMade(ctx context.Context) error {
 	driver, err := d.driver()
 	if err != nil {

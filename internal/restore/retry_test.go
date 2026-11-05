@@ -3,6 +3,7 @@ package restore_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -460,6 +461,64 @@ func TestRestore_Retries(t *testing.T) {
 			t.Errorf("cancellation = %v, want its cause", rec.Attrs)
 		}
 	})
+}
+
+// decision 75: a Create the backend refuses as a session of a protocol Portal
+// doesn't support stops the retries as it stops the first pass, since every
+// Create after it would make another, and the refused name is never looked up
+// again.
+func TestRestore_RetriesStopOnASessionOfAnUnsupportedProtocol(t *testing.T) {
+	second := time.Second
+	for name, tc := range map[string]struct {
+		// refused is the Create, counted from 1, the backend refuses; every
+		// other fails for a reason a retry may clear.
+		refused int
+		created []string
+		slept   []time.Duration
+	}{
+		"refused on the first pass, nothing is tried again": {
+			refused: 2, created: []string{"a", "b"}, slept: []time.Duration{second},
+		},
+		"refused in a retry, nothing more is tried": {
+			refused: 3, created: []string{"a", "b", "a"}, slept: []time.Duration{second, second, second},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.save(t, entry(t, "a"), entry(t, "b"))
+			w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+				if len(w.created()) == tc.refused {
+					return backend.Session{}, fmt.Errorf("create session %q: %w", name, backend.ErrUnsupportedProtocol)
+				}
+				return backend.Session{}, errRefused
+			})
+
+			res := w.r.Restore(t.Context())
+
+			if !errors.Is(res.Unsupported, backend.ErrUnsupportedProtocol) || res.Failed != 2 || res.Restored != 0 {
+				t.Errorf("Restore = %+v, want both failed, carrying the refusal", res)
+			}
+			if got := w.created(); !slices.Equal(got, tc.created) {
+				t.Errorf("created %q, want %q: nothing made after the refusal", got, tc.created)
+			}
+			if !slices.Equal(w.slept, tc.slept) {
+				t.Errorf("waited %v, want %v: no round after the refusal", w.slept, tc.slept)
+			}
+			for _, name := range []string{"a", "b"} {
+				if w.hydrating(t, name) {
+					t.Errorf("%s's hydrating flag is up, want it down: no session runs the helper", name)
+				}
+				if _, ok := w.lookup(t, name); !ok {
+					t.Errorf("%s's entry is gone, want it kept for the next restore", name)
+				}
+			}
+			for _, rec := range w.sink.Records().WithMessage("restore session failed") {
+				if errors.Is(rec.ErrorAttr(t, "error"), backend.ErrUnsupportedProtocol) && rec.HasAttr("detail") {
+					t.Errorf("the refusal's failure = %v, want nothing said of trying it again", rec.Attrs)
+				}
+			}
+		})
+	}
 }
 
 // stickCreates makes each Create take took on the world's clock, recording

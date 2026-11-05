@@ -117,16 +117,43 @@ func (b *Backend) mayBeDir(dir string) bool {
 
 // isDir reports whether dir, absolute, resolves to the Backend's directory.
 func (b *Backend) isDir(dir string) bool {
-	return filepath.IsAbs(dir) && resolved(dir) == resolved(b.dir)
+	return filepath.IsAbs(dir) && CanonicalDir(dir) == CanonicalDir(b.dir)
 }
 
-// resolved is dir with its symbolic links resolved, or as written when they
-// can't be: a directory that doesn't resolve is not one that does.
-func resolved(dir string) string {
+// CanonicalDir is dir with its symbolic links resolved, so spellings of one
+// zmx directory that differ by links, as /tmp and /private/tmp do on macOS,
+// compare equal, and two different directories never do. Spellings that
+// differ only by case on a case-insensitive volume, or through a firmlink,
+// still compare unequal: the safe side for the holder proof and the record.
+// An absolute dir that doesn't resolve has its deepest prefix that does
+// resolved as the OS resolves it, each .. taken after the links before it,
+// and the rest appended: cleaned when it holds no .., and as written when it
+// does, since a .. past a missing directory names no directory the OS can
+// find, so it compares equal to nothing else. A path that doesn't exist so
+// never compares equal to one that does, which keeps the holder proof as
+// strict as resolving existing paths alone. A relative dir that doesn't
+// resolve is as written, cleaned.
+func CanonicalDir(dir string) string {
 	if path, err := filepath.EvalSymlinks(dir); err == nil {
 		return path
 	}
-	return filepath.Clean(dir)
+	if !filepath.IsAbs(dir) {
+		return filepath.Clean(dir)
+	}
+	const sep = string(filepath.Separator)
+	elems := strings.Split(strings.TrimRight(dir, sep), sep)
+	for i := len(elems) - 1; i > 0; i-- {
+		prefix, err := filepath.EvalSymlinks(strings.Join(elems[:i], sep) + sep)
+		if err != nil {
+			continue
+		}
+		rest := elems[i:]
+		if slices.Contains(rest, "..") {
+			return strings.TrimSuffix(prefix, sep) + sep + strings.Join(rest, sep)
+		}
+		return filepath.Join(append([]string{prefix}, rest...)...)
+	}
+	return dir
 }
 
 // errUnproved is a session's daemon the process table doesn't prove.

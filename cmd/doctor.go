@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -200,6 +201,12 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 
+		// The repairs write state, so a state directory that belongs to
+		// another zmx directory gets none; the diagnosis above names why.
+		if dir, err := doctorStateDir(deps); err == nil && zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), fixRefusedLine)
+			return ErrDoctorUnhealthy
+		}
 		// The exit is driven solely by the post-repair re-diagnosis below; the
 		// repairs never touch it directly.
 		runDoctorFix(cmd, deps)
@@ -216,6 +223,10 @@ var doctorCmd = &cobra.Command{
 		return nil
 	},
 }
+
+// fixRefusedLine is a --fix that repaired nothing, the state's zmx dir check
+// having failed.
+const fixRefusedLine = "Skipped every repair: state's zmx dir failed"
 
 // runDoctorFix applies only repairs that are reversible by reconstruction, each
 // best-effort so a failure is left for the re-diagnosis to report. Themes get no
@@ -394,6 +405,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkSaver(ctx, deps.Saver, idle),
 		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
+		checkStateZmxDir(dir, dirErr, deps.ZmxDir),
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
@@ -627,6 +639,38 @@ func checkStateDirSane(dir string, dirErr error) checkResult {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
 	}
 	return checkDirReadable(name, dir)
+}
+
+// The state's zmx dir check's failures.
+const (
+	// otherZmxDirDetail is a state directory that belongs to another zmx
+	// directory: the one it belongs to, the record, and the one this Portal
+	// uses.
+	otherZmxDirDetail = "belongs to the zmx sessions in %[1]s (recorded in %[2]s), but this Portal is using %[3]s; run it with ZMX_DIR=%[1]s, or give it a state of its own with PORTAL_STATE_DIR"
+	// unreadableZmxDirDetail is a record doctor can't read: its path, and why.
+	unreadableZmxDirDetail = "can't read %[1]s: %[2]v; delete it, and Portal records the directory in use at its next start"
+)
+
+// checkStateZmxDir reads, as the bootstrap does but recording nothing, which
+// zmx directory the state directory belongs to. A state directory that
+// records none yet passes: the next bootstrap records this one.
+func checkStateZmxDir(dir string, dirErr error, zmxDir string) checkResult {
+	const name = "state's zmx dir"
+	if dirErr != nil {
+		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
+	}
+	recorded, err := zmxDirOwner(dir, zmxDir).Recorded()
+	other, isOther := errors.AsType[*bootstrap.OtherZmxDirError](err)
+	record, isRecord := errors.AsType[*bootstrap.ZmxDirRecordError](err)
+	switch {
+	case isOther:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(otherZmxDirDetail, other.Recorded, other.Record, other.Using)}
+	case isRecord:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(unreadableZmxDirDetail, record.Path, record.Err)}
+	case recorded == "":
+		return checkResult{name: name, status: checkPass, detail: "not recorded yet"}
+	}
+	return checkResult{name: name, status: checkPass, detail: recorded}
 }
 
 // checkDirReadable passes a directory that can be read, or that is not made

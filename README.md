@@ -518,8 +518,14 @@ working directory, with its scrollback (including ANSI colour) replayed, and eac
 a resume hook comes back holding the resume panel, which runs the command when you answer
 it. While that runs, the picker shows its loading page.
 
-Only a kill is final. Killing a session — `k` in the picker, `xctl kill`, `zmx kill`, or
-exiting its program — removes its saved state, scrollback and resume hook for good.
+Only a kill is final. Killing a session in Portal — `k` in the picker or `xctl kill` —
+removes its saved state, scrollback and resume hook for good. A session ended outside
+Portal, by `zmx kill` or by exiting its program, goes the same way once the save daemon
+sees it gone, about ten seconds later, with two exceptions that err towards keeping it:
+when several sessions end at once, the daemon keeps them all, as it would after a crash,
+and they come back after a reboot or the next time the save daemon has to be started;
+and a session that ends while the save daemon isn't running comes back with the next
+command.
 Detaching, logging out and shutting down or rebooting the machine all leave your sessions
 restorable, with nothing to run first.
 

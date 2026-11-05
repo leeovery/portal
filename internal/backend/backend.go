@@ -38,6 +38,12 @@ var (
 	// client processes that met a process it could not read, which might have
 	// been one of them.
 	ErrUnreadableClient = errors.New("a process that may be a client can't be read")
+
+	// ErrUnsupportedProtocol is returned, wrapped, by a Create whose session
+	// came up speaking a protocol Portal doesn't support, as every session
+	// the backend makes would. The backend has tried to end that session
+	// first, and the error says whether it went.
+	ErrUnsupportedProtocol = errors.New("the session speaks a protocol Portal doesn't support")
 )
 
 // SessionExistsError is Create's refusal of a name the backend already holds.
@@ -229,8 +235,11 @@ type Backend interface {
 	// command does next: a command that exits at once still made a session.
 	// It returns the session as the new session answers, as List would
 	// report it; one that has already ended, or does not answer in time, is
-	// returned with only its name. A held name, including one held under
-	// another case or normalisation, is refused with a *SessionExistsError.
+	// returned with only its name, unless it speaks a protocol Portal doesn't
+	// support: that one is ended and refused with ErrUnsupportedProtocol, so
+	// no caller keeps a session it can't talk to. A held name, including one
+	// held under another case or normalisation, is refused with a
+	// *SessionExistsError.
 	// The check and the creation are not atomic: a concurrent creator of the
 	// same name can win, and this call then briefly attaches to its session
 	// and returns the same refusal.

@@ -112,6 +112,12 @@ func (p LoadingProgress) clone() LoadingProgress {
 	}
 }
 
+// ranStep reports whether any bootstrap step reached the loading page: a wait
+// for another Portal's bootstrap is none.
+func (p LoadingProgress) ranStep() bool {
+	return len(p.completedSteps) > 0 || p.restoreM > 0
+}
+
 func (p LoadingProgress) View() LoadingProgressView {
 	return p.view(0, "")
 }

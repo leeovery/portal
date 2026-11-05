@@ -438,6 +438,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		AskedKiller:      cfg.askedKiller,
 		Labeller:         cfg.labeller,
 		Creator:          cfg.sessionCreator,
+		CreateFatal:      createFatal,
 		ProjectStore:     cfg.projectStore,
 		ProjectEditor:    cfg.projectEditor,
 		AliasEditor:      cfg.aliasEditor,

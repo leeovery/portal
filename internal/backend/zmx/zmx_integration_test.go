@@ -288,6 +288,48 @@ func TestOlderZmxDaemon(t *testing.T) {
 		}
 		gone(t, b)
 	})
+
+	// decision 75: inside a session, path_helper puts Homebrew's zmx 0.8.1
+	// first on PATH, and a create through it makes a session Portal can't
+	// talk to.
+	t.Run("a session it makes is ended by its own zmx's kill, and Create refuses it", func(t *testing.T) {
+		b := zmxtest.New(t)
+		byOlder := boundFirstOnPath(t, older, b.Dir())
+
+		s, err := byOlder.Create(t.Context(), "older", t.TempDir(), []string{"sleep", "1000"})
+
+		if !errors.Is(err, backend.ErrUnsupportedProtocol) || s != (backend.Session{}) {
+			t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", s, err)
+		}
+		if !strings.Contains(err.Error(), "zmx kill ended the session") {
+			t.Errorf("Create = %v, want it to say zmx kill ended the session", err)
+		}
+		gone(t, b)
+	})
+}
+
+// boundFirstOnPath binds a Backend to dir through the zmx found first on PATH
+// with zmx's directory first, as Portal binds the zmx on PATH. PATH holds it
+// for the rest of the test only.
+func boundFirstOnPath(t *testing.T, zmxPath, dir string) *zmx.Backend {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.Symlink(zmxPath, filepath.Join(bin, "zmx")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	binary, err := exec.LookPath("zmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	b, err := zmx.New(zmx.Config{Binary: binary, Dir: dir, Environ: func() []string {
+		return []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin"}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestInfoFixture(t *testing.T) {

@@ -53,6 +53,12 @@ type Result struct {
 	// couldn't be, retries and all, whose entries stay for the next bootstrap
 	// to retry.
 	Restored, Failed int
+	// Unsupported is why restore stopped short: a session it made speaks a
+	// protocol Portal doesn't support, as every session it made next would.
+	// The backend has tried to end that session, the error saying whether it
+	// went. The sessions it was to try again count as failed, and they and
+	// the entries it didn't reach stay for the next bootstrap.
+	Unsupported error
 }
 
 // Restorer restores the saved sessions. It is not safe for concurrent use.
@@ -147,7 +153,8 @@ func (r *Restorer) MarkOwed(ctx context.Context) error {
 // other has had its first try. A session it can't make keeps its entry for
 // the next bootstrap. It asks the backend nothing when sessions.json can't be
 // read, makes nothing when the backend can't be listed, and makes no further
-// session once ctx ends.
+// session once ctx ends or the backend refuses one it made as speaking a
+// protocol Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r, raised: map[string]bool{}}
@@ -199,6 +206,9 @@ func (r *run) restore(ctx context.Context) {
 		if r.firstTry(ctx, e) {
 			again = append(again, e)
 		}
+		if r.res.Unsupported != nil {
+			break
+		}
 	}
 	r.res.Failed += len(r.retry(ctx, again))
 }
@@ -222,11 +232,12 @@ func (r *run) firstTry(ctx context.Context, e sessionindex.Entry) bool {
 // retry tries the sessions left again, in rounds retryBackoff apart, starting
 // a round only while RetryBudget, counted from the first pass's end, has room
 // for its wait, and a session's try only while it lasts. It returns those
-// still unmade but for good, which retryRound counts, and stops once ctx
-// ends, saying so when it leaves sessions unrestored.
+// still unmade but for good, which retryRound counts. It stops once ctx ends,
+// saying so when it leaves sessions unrestored, and tries nothing once the
+// backend has refused a session as unsupported, the first pass's or its own.
 func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
 	deadline := r.now().Add(RetryBudget)
-	for round := 0; len(left) > 0; round++ {
+	for round := 0; len(left) > 0 && r.res.Unsupported == nil; round++ {
 		backoff := retryBackoff[min(round, len(retryBackoff)-1)]
 		if !r.now().Add(backoff).Before(deadline) {
 			break
@@ -244,11 +255,12 @@ func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionind
 
 // retryRound tries each session left once more, and returns those that failed
 // again for a reason a retry may clear, with those it had no time or context
-// left to try. One failing for good is counted failed here.
+// left to try, or that a refusal as unsupported stopped it reaching. One
+// failing for good is counted failed here.
 func (r *run) retryRound(ctx context.Context, left []sessionindex.Entry, deadline time.Time) []sessionindex.Entry {
 	var still []sessionindex.Entry
 	for i, e := range left {
-		if ctx.Err() != nil || !r.now().Before(deadline) {
+		if ctx.Err() != nil || !r.now().Before(deadline) || r.res.Unsupported != nil {
 			return append(still, left[i:]...)
 		}
 		err := r.tryAgain(ctx, e)
@@ -374,6 +386,8 @@ func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) error {
 	dir, argv := startDir(e), r.command(e)
 	s, err := r.backend.Create(ctx, e.Name, dir, argv)
 	switch {
+	case errors.Is(err, backend.ErrUnsupportedProtocol):
+		return r.unsupported(e.Name, err)
 	case err != nil:
 		s, err = r.madeAnyway(ctx, e.Name, err)
 	case s.Created.IsZero():
@@ -447,6 +461,20 @@ func (r *run) judge(name string, live backend.Session, err, cause error) (backen
 	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", cause, err)
 }
 
+// unsupported stops the run on a Create the backend refused because the
+// session it made speaks a protocol Portal doesn't support: every Create
+// after it would make another. It is a failure for good, never looked up
+// again: a retry would remake the name, or restore a session the backend
+// couldn't end. Only a flag this run raised comes down, as for a session that
+// isn't there.
+func (r *run) unsupported(name string, err error) error {
+	if r.raised[name] {
+		r.lowerHydrating(name)
+	}
+	r.res.Unsupported = err
+	return forGood(err)
+}
+
 // holder is the session holding the name, asked for a second time a probe's
 // ceiling after a first answer of none: a Create cut short once zmx has forked
 // the session's daemon, before its socket listens, leaves a session that
@@ -461,7 +489,8 @@ func (r *run) holder(ctx context.Context, name string) (backend.Session, error) 
 }
 
 // forGoodError marks a failure no retry within the bootstrap can clear: a name
-// Create refuses, or one another session holds.
+// Create refuses, one another session holds, or a session of a protocol Portal
+// doesn't support.
 type forGoodError struct{ error }
 
 func (e forGoodError) Unwrap() error { return e.error }

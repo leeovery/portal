@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
@@ -15,7 +16,8 @@ import (
 )
 
 // productionGate stages a state directory and a backend for the production
-// gate, with this boot's latch written when latched and the saver session up
+// gate, with this boot's latch and the zmx dir in use recorded, as a finished
+// bootstrap leaves them, when latched, and the saver session up
 // when saverUp. Nothing past the gate is staged: the bootstrap's exe seam
 // panics under cmd's TestMain.
 func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, string) {
@@ -30,6 +32,9 @@ func productionGate(t *testing.T, latched, saverUp bool) (*backendtest.Fake, str
 		}
 		if err := state.WriteLatch(dir, latch); err != nil {
 			t.Fatalf("write the latch: %v", err)
+		}
+		if err := state.RecordZmxDir(dir, zmx.CanonicalDir(zmx.DirFor(os.Environ()))); err != nil {
+			t.Fatalf("record the zmx dir: %v", err)
 		}
 	}
 	fake := backendtest.New()

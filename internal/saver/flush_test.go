@@ -180,20 +180,25 @@ func TestFlush(t *testing.T) {
 		for _, name := range []string{"api", "web", "zed"} {
 			w.fake.SetHistory(name, []byte(name+"'s screen"))
 		}
+		// The context ends as web's History is asked, never on a clock, so
+		// api's History and its write are done first however loaded the
+		// machine is.
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		var cancelled time.Time
 		w.race.onHistory = func(ctx context.Context, name string) {
 			if name == "web" {
+				cancelled = time.Now()
+				cancel()
 				<-ctx.Done()
 			}
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-		defer cancel()
 
 		mark := w.mark()
-		start := time.Now()
 		got := w.flush(ctx)
 
-		if took := time.Since(start); took > 2*time.Second {
-			t.Errorf("Flush took %s, want it back once its 50ms ran out", took)
+		if took := time.Since(cancelled); took > 2*time.Second {
+			t.Errorf("Flush took %s past its context's end, want it back at once", took)
 		}
 		if asked := historyAsked(w, mark); !slices.Equal(asked, []string{"api", "web"}) {
 			t.Errorf("History asked %v, want zed, after the context ended, not asked", asked)

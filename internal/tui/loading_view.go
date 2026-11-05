@@ -89,6 +89,9 @@ func renderLoadingScreen(view LoadingProgressView, w, h int, th theme.Theme, col
 // The bar width derives from the rendered wordmark, so it spans the logo in
 // every degraded form.
 func composeLoadingBlock(view LoadingProgressView, w, h int, th theme.Theme, colourless bool) string {
+	if len(view.Labels) == 0 {
+		return composeFatalAlone(view.Message, w, h, th, colourless)
+	}
 	list := renderTickList(view.Labels, w, th, colourless)
 	listHeight := lipgloss.Height(list)
 
@@ -122,6 +125,21 @@ func composeLoadingBlock(view LoadingProgressView, w, h int, th theme.Theme, col
 	}
 	parts = append(parts, footerParts...)
 
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+}
+
+// composeFatalAlone is a fatal no loading step came before, as a warm
+// picker's mint meets: the wordmark, room allowing, over the error footer,
+// with no bar and no step list.
+func composeFatalAlone(message string, w, h int, th theme.Theme, colourless bool) string {
+	parts := renderErrorFooter(message, w, h, th, colourless)
+	footerHeight := 0
+	for _, p := range parts {
+		footerHeight += lipgloss.Height(p)
+	}
+	if singleRowWordmarkHeight+footerHeight <= h {
+		parts = append([]string{renderLoadingWordmark(w, h, footerHeight, th, colourless)}, parts...)
+	}
 	return lipgloss.JoinVertical(lipgloss.Center, parts...)
 }
 
