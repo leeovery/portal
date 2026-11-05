@@ -521,11 +521,13 @@ it. While that runs, the picker shows its loading page.
 Only a kill is final. Killing a session in Portal — `k` in the picker or `xctl kill` —
 removes its saved state, scrollback and resume hook for good. A session ended outside
 Portal, by `zmx kill` or by exiting its program, goes the same way once the save daemon
-sees it gone, about ten seconds later, with two exceptions that err towards keeping it:
+sees it gone, about ten seconds later, with three exceptions that err towards keeping it:
 when several sessions end at once, the daemon keeps them all, as it would after a crash,
 and they come back after a reboot or the next time the save daemon has to be started;
-and a session that ends while the save daemon isn't running comes back with the next
-command.
+a session that ends while the save daemon isn't running comes back with the next
+command; and a restored session whose saved scrollback Portal couldn't replay (it says
+where the file is kept) is kept even once it ends, and comes back at every restore for as
+long as that file can't be replayed.
 Detaching, logging out and shutting down or rebooting the machine all leave your sessions
 restorable, with nothing to run first.
 

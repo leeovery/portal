@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/restore"
@@ -228,10 +229,13 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
-	// The Create's refusal of an older zmx's session, a read and a zmx kill,
-	// outlasts the lookup a failed Create makes.
+	// After its Create, a session's restore runs the longer of the Create's
+	// refusal of an older zmx's session, a read and a zmx kill, and the second
+	// ask of a Create that read back no creation or failed otherwise: a read,
+	// backend.RecheckAfter's wait and a read again.
 	refusal := saverhost.ReadCeiling + saverhost.KillCeiling + saverhost.RunGrace
-	each := saverhost.CreateCeiling + saverhost.RunGrace + refusal + commitlock.Bound()
+	askAgain := 2*saverhost.ReadCeiling + backend.RecheckAfter
+	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()
 
 	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
 		if got := LockWait(20) - LockWait(0); got != 20*each {
