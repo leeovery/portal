@@ -282,6 +282,7 @@ Phases 1–2 make it usable day to day. Phase 3 is needed before trusting it thr
 
 ## Risks to watch
 
+- **macOS only.** Portal ships for darwin alone. Off darwin the process table can't be read, so no proof holds: `uninstall` can't stop the saver, and after an upgrade the old saver can't be replaced, so every command bootstraps again and warns until a reboot. Linux needs a process reader from `/proc` before it ships.
 - **zmx bugs:**
   - #294: crash on session exit on macOS.
   - #295: part of the scrollback lost on reattach.

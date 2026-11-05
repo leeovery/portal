@@ -9,7 +9,7 @@ Fast, fuzzy session management from a bare shell, with project memory,
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg)](https://go.dev)
-[![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#install)
 
 [Install](#install) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration) · [Upgrading from tmux](#upgrading-from-the-tmux-version)
 
@@ -46,23 +46,15 @@ Coming from the tmux version of Portal? Install this one, then run `portal migra
 ### Requirements
 
 - **[zmx](https://github.com/neurosnap/zmx)** `<zmx release with protocol 1>`, the release Portal supports: the first to speak zmx's socket protocol 1, which is how Portal talks to zmx. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
-- **macOS or Linux**, and **Go** 1.26+ to build from source.
+- **macOS**, and **Go** 1.26+ to build from source.
 
-**macOS**
+**Homebrew**
 
 ```bash
 brew install leeovery/tools/portal
 ```
 
 Homebrew installs zmx with it, as a dependency.
-
-**Linux**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/leeovery/portal/main/scripts/install.sh | bash
-```
-
-The script installs Portal alone. Install zmx yourself, from the Linux builds in [zmx's getting started guide](https://zmx.sh/getting-started), or with Homebrew on Linux: `brew install neurosnap/tap/zmx`.
 
 **Go**
 
