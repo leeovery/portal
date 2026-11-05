@@ -334,7 +334,9 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 				{
 					"a double-width command", "再開するセッション",
 					map[int][]string{
-						1: {"", "", "…"},
+						// No grapheme fits a row one cell wide, and a row
+						// showing nothing is no row: the line keeps one.
+						1: {""},
 						2: {"再", "開", "…"},
 						3: {"再", "開", "す…"},
 						4: {"再開", "する", "セ…"},
@@ -735,9 +737,9 @@ func TestResumeCommandLines_Invariants(t *testing.T) {
 		}
 	})
 
-	t.Run("it renders an empty row for a grapheme wider than the width", func(t *testing.T) {
-		if got := resumeCommandLines("再開するセッション", 1); !reflect.DeepEqual(got, []string{"", "", "…"}) {
-			t.Errorf("a double-width command at a width of 1 reads %q, want %q", got, []string{"", "", "…"})
+	t.Run("it renders one empty row where no grapheme fits the width", func(t *testing.T) {
+		if got := resumeCommandLines("再開するセッション", 1); !reflect.DeepEqual(got, []string{""}) {
+			t.Errorf("a double-width command at a width of 1 reads %q, want one empty row", got)
 		}
 	})
 }
@@ -786,13 +788,26 @@ func TestWrappedLines_ReadsTheSourceBack(t *testing.T) {
 
 // The wrap's rows must read the text back in order: a row boundary may swallow
 // the spaces the wrap broke at, and a grapheme too wide for a whole row is
-// dropped onto a row of its own — every other cell of the text is on screen
-// where the text has it, with nothing glued to its neighbour.
+// dropped — every other cell of the text is on screen where the text has it,
+// with nothing glued to its neighbour.
 func assertRowsReadSource(t *testing.T, rows []string, text string, width int) {
 	t.Helper()
 	rest := restPastRows(t, rows, text, width)
-	if strings.TrimFunc(rest, breaksWrap) != "" {
+	if skipUnshowable(rest, width) != "" {
 		t.Errorf("the rows %q stop short of %q at a width of %d", rows, rest, width)
+	}
+}
+
+// skipUnshowable is text past its leading whitespace and the graphemes too
+// wide for any row.
+func skipUnshowable(text string, width int) string {
+	for {
+		text = strings.TrimLeftFunc(text, breaksWrap)
+		cluster, w := ansi.FirstGraphemeCluster(text, ansi.GraphemeWidth)
+		if cluster == "" || w <= width {
+			return text
+		}
+		text = text[len(cluster):]
 	}
 }
 
@@ -800,12 +815,7 @@ func restPastRows(t *testing.T, rows []string, text string, width int) string {
 	t.Helper()
 	rest := text
 	for i, row := range rows {
-		rest = strings.TrimLeftFunc(rest, breaksWrap)
-		if row == "" {
-			if cluster, w := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth); cluster != "" && w > width {
-				rest = rest[len(cluster):]
-			}
-		}
+		rest = skipUnshowable(rest, width)
 		if !strings.HasPrefix(rest, row) {
 			t.Fatalf("row %d of %q reads %q at a width of %d, want the opening of %q", i, rows, row, width, rest)
 		}

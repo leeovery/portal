@@ -9,6 +9,7 @@ import (
 
 // The rows past the cap are re-joined onto the last kept one and truncated
 // there, so the ellipsis marks the cut rather than the rows leaving without one.
+// A line break among them joins as a space, as no row may hold one.
 func wrapCapped(text string, width, maxRows int, ellipsis string) []string {
 	return capRows(wrappedRows(text, width), width, maxRows, ellipsis)
 }
@@ -26,9 +27,12 @@ func capRows(rows []wrappedRow, width, maxRows int, ellipsis string) []string {
 	kept := rowTexts(rows[:maxRows-1])
 	var beyond strings.Builder
 	beyond.WriteString(rows[maxRows-1].text)
-	for _, row := range rows[maxRows:] {
-		beyond.WriteString(row.gap)
-		beyond.WriteString(row.text)
+	for i := maxRows; i < len(rows); i++ {
+		if rows[i].line != rows[i-1].line && !strings.HasSuffix(beyond.String(), " ") {
+			beyond.WriteByte(' ')
+		}
+		beyond.WriteString(rows[i].gap)
+		beyond.WriteString(rows[i].text)
 	}
 	return append(kept, cutRow(strings.TrimLeftFunc(beyond.String(), breaksWrap), width, ellipsis))
 }
@@ -48,9 +52,11 @@ func wrappedLines(text string, width int) []string {
 
 type wrappedRow struct {
 	text string
-	// The source's whitespace between the row before and this one: none where
-	// the break fell inside a word or straight after a hyphen.
+	// The source's whitespace between the row before and this one on its line:
+	// none where the break fell inside a word or straight after a hyphen.
 	gap string
+	// The index of the text's line the row is from.
+	line int
 }
 
 func rowTexts(rows []wrappedRow) []string {
@@ -61,45 +67,38 @@ func rowTexts(rows []wrappedRow) []string {
 	return texts
 }
 
+// Each line of the text is wrapped on its own, so no row, carry or gap crosses
+// a line break, and every line gives at least one row: a line holding nothing
+// visible gives one empty row.
+func wrappedRows(text string, width int) []wrappedRow {
+	var rows []wrappedRow
+	for i, line := range strings.Split(text, "\n") {
+		rows = append(rows, lineRows(line, width, i)...)
+	}
+	return rows
+}
+
 // ansi.Wrap rather than ansi.Wordwrap: a word longer than the limit must be
 // broken at it rather than left to overflow the frame. Every line comes back no
 // wider than the width asked for, which ansi.Wrap on its own does not promise —
 // it over-packs a run of hyphens past the limit at ordinary widths. A row a
 // cell too wide cannot be padded back down, and the frame built around it
-// cannot hold it, so the overshoot re-flows onto the line after it rather than
+// cannot hold it, so the overshoot re-flows onto the row after it rather than
 // being cut off the end.
-func wrappedRows(text string, width int) []wrappedRow {
-	wrapped := wrappedSourceLines(text, width)
-	walk := rowWalk{width: width, rows: make([]wrappedRow, 0, len(wrapped))}
-	rest := text
-	for i, line := range wrapped {
-		rest = strings.TrimPrefix(rest, line)
+func lineRows(line string, width, index int) []wrappedRow {
+	wrapped := strings.Split(ansi.Wrap(line, width, ""), "\n")
+	walk := rowWalk{width: width, line: index}
+	rest := line
+	for i, part := range wrapped {
+		rest = strings.TrimPrefix(rest, part)
 		gap := droppedGap(rest, wrapped[i+1:])
 		rest = rest[len(gap):]
-		walk.take(walk.carry + line + gap)
+		walk.take(walk.carry + part + gap)
 	}
 	for walk.carry != "" {
 		walk.take(walk.carry)
 	}
-	return walk.rows
-}
-
-// ansi.Wrap starts afresh after each newline in the text, so wrapping each
-// line of the text on its own gives the rows of the whole. A line it
-// over-packs, as it does a space and then a word as wide as the row, it ends
-// with a break that holds no source: the empty row that break leaves at the
-// end of a line is dropped, while a line of the text that is empty keeps its
-// row.
-func wrappedSourceLines(text string, width int) []string {
-	var lines []string
-	for line := range strings.SplitSeq(text, "\n") {
-		wrapped := strings.Split(ansi.Wrap(line, width, ""), "\n")
-		if last := len(wrapped) - 1; last > 0 && wrapped[last] == "" {
-			wrapped = wrapped[:last]
-		}
-		lines = append(lines, wrapped...)
-	}
-	return lines
+	return walk.done()
 }
 
 // ansi.Wrap breaks after a hyphen whatever breakpoints it is given, so each
@@ -128,17 +127,61 @@ func absentPrivateUseRune(text string) rune {
 // trailing run of one row and the leading run of the next are together the
 // source's whitespace between them.
 type rowWalk struct {
-	width        int
+	width, line  int
 	rows         []wrappedRow
 	carry, trail string
+	// Escape sequences met before the line's first row, which open it.
+	pending string
 }
 
+// A row showing nothing is no row, as the empty one ansi.Wrap leaves after a
+// line it over-packed: its whitespace joins the gap before the next row, and
+// its escape sequences, which take no width, the row before it.
 func (w *rowWalk) take(line string) {
 	body := strings.TrimLeftFunc(line, breaksWrap)
 	head, carry := rowAndCarry(body, w.width)
 	text := strings.TrimRightFunc(head, breaksWrap)
-	w.rows = append(w.rows, wrappedRow{text: text, gap: w.trail + line[:len(line)-len(body)]})
+	gap := w.trail + line[:len(line)-len(body)]
 	w.trail, w.carry = head[len(text):], carry
+	if showsNothing(text) {
+		w.trail = gap + w.trail
+		w.attach(escapesOf(text))
+		return
+	}
+	w.rows = append(w.rows, wrappedRow{text: w.pending + text, gap: gap, line: w.line})
+	w.pending = ""
+}
+
+func (w *rowWalk) attach(escapes string) {
+	if len(w.rows) == 0 {
+		w.pending += escapes
+		return
+	}
+	w.rows[len(w.rows)-1].text += escapes
+}
+
+func (w *rowWalk) done() []wrappedRow {
+	if len(w.rows) == 0 {
+		return []wrappedRow{{line: w.line}}
+	}
+	return w.rows
+}
+
+func showsNothing(text string) bool {
+	return strings.TrimFunc(ansi.Strip(text), unicode.IsSpace) == ""
+}
+
+func escapesOf(text string) string {
+	var escapes strings.Builder
+	var state byte
+	for text != "" {
+		seq, width, n, next := ansi.DecodeSequence(text, state, nil)
+		if width == 0 && strings.TrimFunc(seq, unicode.IsSpace) != "" {
+			escapes.WriteString(seq)
+		}
+		text, state = text[n:], next
+	}
+	return escapes.String()
 }
 
 // The spaces the wrap dropped breaking a line: in neither of the two, and so on
@@ -168,14 +211,26 @@ func rowAndCarry(line string, width int) (head, carry string) {
 
 // A grapheme wider than the width fits in no row at all: ansi.Truncate drops it
 // and ansi.TruncateLeft hands it back whole, so it is dropped here rather than
-// left to re-present the same line forever.
+// left to re-present the same line forever. The escape sequences before it are
+// kept, as a sequence cut in two would show as text.
 func splitAtWidth(line string, width int) (head, rest string) {
 	head, rest = ansi.Truncate(line, width, ""), ansi.TruncateLeft(line, width, "")
 	if ansi.StringWidth(rest) < ansi.StringWidth(line) {
 		return head, rest
 	}
-	cluster, _ := ansi.FirstGraphemeCluster(line, ansi.GraphemeWidth)
-	return head, strings.TrimPrefix(line, cluster)
+	return head, withoutFirstShown(line)
+}
+
+func withoutFirstShown(line string) string {
+	var state byte
+	for at := 0; at < len(line); {
+		_, width, n, next := ansi.DecodeSequence(line[at:], state, nil)
+		if width > 0 {
+			return line[:at] + line[at+n:]
+		}
+		at, state = at+n, next
+	}
+	return ""
 }
 
 func clampToWidth(line string, width int) string {
