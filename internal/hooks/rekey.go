@@ -29,15 +29,17 @@ var errNoBackup = errors.New("no backup of hooks.json")
 // and every key moved or removed held, so nothing is carried that the plan
 // didn't name. A key removed and moved onto holds the moved hooks. It never
 // reads hooks.json, so the same backup and plan always write the same file, in
-// one write under the mutation hold. No backup, as when there was never a
-// hooks.json, writes nothing. A rekey not accounting for every key
-// (ErrUnaccountedKeys), two keys moved onto one, a key both moved and removed,
-// a backup that can't be read (ErrStoreRead) or doesn't parse (ErrMalformed),
-// and a lock not granted each refuse it, writing nothing. It logs each key at
-// DEBUG and one INFO summary, or one WARN saying why it wrote nothing.
-func (s *Store) RekeyFrom(backup string, moves map[string]string, remove []string, via Via) error {
+// one write under the mutation hold. Under that hold, before the write,
+// landing is handed the file about to be written, unless it is nil. No backup,
+// as when there was never a hooks.json, writes nothing. A rekey not accounting
+// for every key (ErrUnaccountedKeys), two keys moved onto one, a key both
+// moved and removed, a backup that can't be read (ErrStoreRead) or doesn't
+// parse (ErrMalformed), a lock not granted and an error from landing each
+// refuse it, writing nothing. It logs each key at DEBUG and one INFO summary,
+// or one WARN saying why it wrote nothing.
+func (s *Store) RekeyFrom(backup string, moves map[string]string, remove []string, via Via, landing func(file []byte) error) error {
 	start := time.Now()
-	entries, err := s.rekeyFrom(backup, moves, remove, via)
+	entries, err := s.rekeyFrom(backup, moves, remove, via, landing)
 	switch {
 	case errors.Is(err, errNoBackup):
 		logger.Debug("rekey-noop", "op", "rekey-noop", "via", via.String(), "detail", err.Error())
@@ -55,7 +57,7 @@ func (s *Store) RekeyFrom(backup string, moves map[string]string, remove []strin
 }
 
 // rekeyFrom is RekeyFrom's work, returning how many keys it moved or removed.
-func (s *Store) rekeyFrom(backup string, moves map[string]string, remove []string, via Via) (int, error) {
+func (s *Store) rekeyFrom(backup string, moves map[string]string, remove []string, via Via, landing func(file []byte) error) (int, error) {
 	from := slices.Sorted(maps.Keys(moves))
 	remove = slices.Compact(slices.Sorted(slices.Values(remove)))
 	if err := oneKeyEach(moves, from, remove); err != nil {
@@ -79,7 +81,16 @@ func (s *Store) rekeyFrom(backup string, moves map[string]string, remove []strin
 	for _, key := range from {
 		file[moves[key]] = held[key]
 	}
-	if err := s.save(file); err != nil {
+	data, err := encode(file)
+	if err != nil {
+		return 0, err
+	}
+	if landing != nil {
+		if err := landing(data); err != nil {
+			return 0, err
+		}
+	}
+	if err := s.write(data); err != nil {
 		return 0, err
 	}
 	for _, key := range from {

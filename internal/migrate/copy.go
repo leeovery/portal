@@ -19,6 +19,7 @@ const (
 	daemonUnreadCopy       = ", or Portal can't tell it has exited (%v)"
 	hooksMalformedCopy     = "Portal can't migrate: %s doesn't parse, so nothing was migrated: %v.%s Fix it, then run portal migrate again%s"
 	unlistedCopy           = "Portal can't migrate: zmx's sessions can't be listed: %v. Nothing was changed."
+	hooksChangedCopy       = "Portal can't migrate: %[1]s has changed since an earlier portal migrate backed it up to %[2]s, and migrating rewrites it from that backup, which would lose every hook registered since. Nothing was changed. Keep the hooks you want in %[1]s, move %[2]s aside, then run portal migrate again: it backs up %[1]s afresh."
 )
 
 // What stoppedCopy and hooksMalformedCopy add of how far the run they word

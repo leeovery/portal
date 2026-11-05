@@ -291,27 +291,40 @@ func write(t *testing.T, path, content string, mode os.FileMode) {
 }
 
 func TestCheckPoisoned(t *testing.T) {
-	for value, ok := range map[string]bool{PoisonedDir: true, "": false, "/Users/lee/.local/state/zmx": false} {
-		t.Run(value, func(t *testing.T) {
-			err := checkPoisoned(func(string) string { return value })
-			if (err == nil) != ok {
-				t.Errorf("checkPoisoned with ZMX_DIR=%q = %v, want ok %v", value, err, ok)
-			}
-		})
+	poisoned := map[string]string{"ZMX_DIR": PoisonedDir, "TMUX_TMPDIR": PoisonedTmpdir}
+	t.Run("both poisoned", func(t *testing.T) {
+		if err := checkPoisoned(func(name string) string { return poisoned[name] }); err != nil {
+			t.Errorf("checkPoisoned = %v, want ok", err)
+		}
+	})
+	for name := range poisoned {
+		for _, value := range []string{"", "/Users/lee/.local/state/zmx", "/private/tmp"} {
+			t.Run(name+"="+value, func(t *testing.T) {
+				err := checkPoisoned(func(n string) string {
+					if n == name {
+						return value
+					}
+					return poisoned[n]
+				})
+				if err == nil || !strings.Contains(err.Error(), name) {
+					t.Errorf("checkPoisoned with %s=%q = %v, want a failure naming it", name, value, err)
+				}
+			})
+		}
 	}
 }
 
 func TestSessionEnv(t *testing.T) {
-	t.Run("it passes only PATH, TERM, USER, TMPDIR and the locale, with its own HOME and SHELL", func(t *testing.T) {
+	t.Run("it passes only PATH, TERM, USER, TMPDIR, TMUX_TMPDIR and the locale, with its own HOME and SHELL", func(t *testing.T) {
 		environ := []string{
-			"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "LANG=en_GB.UTF-8", "LC_ALL=C",
+			"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C",
 			"HOME=/Users/lee", "SHELL=/bin/zsh", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=live",
 			"ZMX_SESSION_PREFIX=pre-", "TMUX=/tmp/tmux", "SSH_AUTH_SOCK=/agent", "LCX=no",
 		}
 
 		got := sessionEnv(environ, "/tmp/home")
 
-		want := []string{"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "LANG=en_GB.UTF-8", "LC_ALL=C", "HOME=/tmp/home", "SHELL=/bin/sh"}
+		want := []string{"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C", "HOME=/tmp/home", "SHELL=/bin/sh"}
 		if !slices.Equal(got, want) {
 			t.Errorf("sessionEnv = %q, want %q", got, want)
 		}

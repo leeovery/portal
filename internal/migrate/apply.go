@@ -46,12 +46,15 @@ func Build(plan Plan, dir string) error {
 // RewriteHooks writes hooks.json through store from backup, the copy of it
 // migrate keeps: each key the plan moves under its session's name, each it
 // removes gone, every value as backup holds it, in one write. It never reads
-// hooks.json, so every run writes the same file. No backup writes nothing. A
-// plan not naming every key backup holds, or naming one it doesn't, was made
-// from other keys: RewriteHooks refuses it with hooks.ErrUnaccountedKeys,
-// writing nothing.
+// hooks.json, so every run writes the same file. Before the write it records
+// the file's digest beside backup, so a later run knows hooks.json as its
+// own (hooksUnchanged); a digest it can't record writes nothing. No backup
+// writes nothing. A plan not naming every key backup holds, or naming one it
+// doesn't, was made from other keys: RewriteHooks refuses it with
+// hooks.ErrUnaccountedKeys, writing nothing.
 func RewriteHooks(plan Plan, backup string, store *hooks.Store) error {
-	if err := store.RekeyFrom(backup, plan.moves(), plan.removedKeys(), hooks.ViaCLI); err != nil {
+	landing := func(file []byte) error { return recordRewrite(backup, file) }
+	if err := store.RekeyFrom(backup, plan.moves(), plan.removedKeys(), hooks.ViaCLI, landing); err != nil {
 		return fmt.Errorf("rewrite hooks.json: %w", err)
 	}
 	return nil

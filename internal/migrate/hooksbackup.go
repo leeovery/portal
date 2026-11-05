@@ -1,6 +1,9 @@
 package migrate
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
@@ -21,6 +25,86 @@ const hooksBackupName = "hooks.json.tmux"
 // HooksBackup is where migrate keeps its copy of hooks.json in the state dir
 // dir.
 func HooksBackup(dir string) string { return filepath.Join(dir, hooksBackupName) }
+
+// hooksRewritesName records, beside the backup, the digest of each hooks.json
+// a run writes from it, one per line, each before its write lands.
+const hooksRewritesName = "hooks.json.tmux.rewrites"
+
+func hooksRewrites(backup string) string {
+	return filepath.Join(filepath.Dir(backup), hooksRewritesName)
+}
+
+// hooksUnchanged refuses a run that finds a backup while hooks.json, at live,
+// is neither byte for byte the backup nor a file an earlier run wrote from it:
+// the rewrite would replace it from the backup, losing every hook registered
+// since, as after a run cut short and a rollback to the tmux version.
+func hooksUnchanged(live, backup string) error {
+	left, err := hooksAsLeft(live, backup)
+	if err != nil {
+		return err
+	}
+	if !left {
+		return refused(ErrHooksChanged, hooksChangedCopy, live, backup)
+	}
+	return nil
+}
+
+// hooksAsLeft reports whether hooks.json, at live, is as migrate left it:
+// there is no backup, or it is the backup or a rewrite of it. A hooks.json
+// gone since the backup is not.
+func hooksAsLeft(live, backup string) (bool, error) {
+	backed, err := os.ReadFile(backup)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("read hooks.json's backup: %w", err)
+	}
+	current, err := os.ReadFile(live)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("read hooks.json: %w", err)
+	}
+	if bytes.Equal(current, backed) {
+		return true, nil
+	}
+	written, err := rewriteDigests(backup)
+	return slices.Contains(written, digest(current)), err
+}
+
+// recordRewrite adds the digest of file, the hooks.json about to be written
+// from backup, to the digests beside it.
+func recordRewrite(backup string, file []byte) error {
+	written, err := rewriteDigests(backup)
+	if err != nil {
+		return err
+	}
+	written = append(written, digest(file))
+	if err := fileutil.AtomicWrite0600(hooksRewrites(backup), []byte(strings.Join(written, "\n")+"\n")); err != nil {
+		return fmt.Errorf("record hooks.json's rewrite: %w", err)
+	}
+	return nil
+}
+
+// rewriteDigests is the digest of every hooks.json a run wrote from backup,
+// none before the first.
+func rewriteDigests(backup string) ([]string, error) {
+	data, err := os.ReadFile(hooksRewrites(backup))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the record of hooks.json's rewrites: %w", err)
+	}
+	return strings.Fields(string(data)), nil
+}
+
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 // backUpHooks copies hooks.json, at live, to backup, unless backup exists:
 // a backup is never overwritten, since a run cut short may have rewritten

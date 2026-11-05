@@ -27,6 +27,7 @@ func TestMain(m *testing.M) {
 	}
 	for _, err := range []error{
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
+		os.Setenv("TMUX_TMPDIR", zmxtest.PoisonedTmpdir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	} {

@@ -12,8 +12,11 @@ import (
 
 // Daemon-pgrep test sandbox, integration builds only — pgrep_sandbox_prod.go
 // supplies inert stubs for every other build. The orphan sweep only SIGKILLs
-// pids PgrepPortalDaemons returns, so filtering here default-deny makes it
-// structurally impossible for a test to kill the developer's live daemon.
+// pids PgrepPortalDaemons returns, so once the sandbox is on, by
+// EnableDaemonSandbox in this process or SandboxRegistryEnv naming a registry
+// for a test's subprocess, it filters default-deny, and no sweep can reach the
+// developer's live daemon. Until then it filters nothing, so a test must turn
+// it on, as IsolateStateForTest does, before anything enumerates daemons.
 // Ownership is keyed on the state directory, not the pid: the saver respawns
 // during bootstrap, but each incarnation rewrites <stateDir>/daemon.pid.
 

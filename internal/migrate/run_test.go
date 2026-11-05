@@ -155,6 +155,43 @@ func (w *runWorld) cutShort() {
 	}
 }
 
+// cutShortAfterRewrite leaves w as a run stopped at the commit point's first
+// rename leaves it: hooks.json backed up and rewritten from the backup, the
+// state dir still the tmux version's.
+func (w *runWorld) cutShortAfterRewrite() {
+	w.t.Helper()
+	refusal := errors.New("rename refused")
+	migrate.SetRenameForTest(w.t, func(string, string) error { return refusal })
+	if _, err := w.run(); !errors.Is(err, refusal) {
+		w.t.Fatalf("Run = %v; want it stopped at the first rename", err)
+	}
+	migrate.SetRenameForTest(w.t, os.Rename)
+	if string(readBytes(w.t, w.hooksFile)) == runHooks || present(w.t, w.tmuxDir) {
+		w.t.Fatal("the run cut short didn't rewrite hooks.json, or swapped the state dir")
+	}
+	w.steps = nil
+}
+
+// cutShortBeforeRewrite leaves w as a run whose build failed leaves it:
+// hooks.json backed up, and not yet rewritten.
+func (w *runWorld) cutShortBeforeRewrite() {
+	w.t.Helper()
+	unreadable := filepath.Join(w.dir, lanternScrollback)
+	if err := os.Chmod(unreadable, 0); err != nil {
+		w.t.Fatal(err)
+	}
+	if _, err := w.run(); !errors.Is(err, os.ErrPermission) {
+		w.t.Fatalf("Run = %v; want the build stopped", err)
+	}
+	if err := os.Chmod(unreadable, 0o600); err != nil {
+		w.t.Fatal(err)
+	}
+	if string(readBytes(w.t, w.hooksFile)) != runHooks || !present(w.t, migrate.HooksBackup(w.dir)) {
+		w.t.Fatal("the run cut short rewrote hooks.json, or kept no backup")
+	}
+	w.steps = nil
+}
+
 // stepNames is the name of each step, a run of the same step named once.
 func (w *runWorld) stepNames() []string {
 	var names []string
@@ -411,9 +448,8 @@ func TestRun_MigratesInFull(t *testing.T) {
 
 	t.Run("it never overwrites a backup a run cut short kept", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()
-		writeFile(t, migrate.HooksBackup(w.dir), runHooks)
-		writeFile(t, w.hooksFile, `{"lantern": {"on-resume": "claude --resume lantern"}}`)
 		tmuxState := dirFiles(t, w.dir)
+		w.cutShortAfterRewrite()
 
 		o := w.migrated()
 
@@ -948,6 +984,76 @@ func TestRun_ReRuns(t *testing.T) {
 			t.Fatalf("Run = %v; want a refusal naming sessions.json", err)
 		}
 		assertUnchanged(t, w, before, "refused")
+	})
+}
+
+func TestRun_HooksChangedSinceBackup(t *testing.T) {
+	cuts := map[string]func(w *runWorld){
+		"before its rewrite": (*runWorld).cutShortBeforeRewrite,
+		"after its rewrite":  (*runWorld).cutShortAfterRewrite,
+	}
+
+	t.Run("a re-run of a run cut short before its rewrite migrates", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		tmuxState := dirFiles(t, w.dir)
+		w.cutShortBeforeRewrite()
+
+		o := w.migrated()
+
+		assertMigrated(t, w, o, tmuxState, runHooks)
+	})
+
+	for cut, cutShort := range cuts {
+		t.Run("a hook registered after a rollback from a run cut short "+cut+" refuses the re-run, changing nothing", func(t *testing.T) {
+			w := newRunWorld(t).withTmuxState()
+			cutShort(w)
+			sink := logtest.Install(t)
+			writeFile(t, w.hooksFile, `{"tokLan": {"on-resume": "claude --resume lantern"}, "tokNew": {"on-resume": "registered since"}}`)
+			before := w.tree()
+
+			_, err := w.run()
+
+			backup := migrate.HooksBackup(w.dir)
+			want := "Portal can't migrate: " + w.hooksFile + " has changed since an earlier portal migrate backed it up to " + backup +
+				", and migrating rewrites it from that backup, which would lose every hook registered since. Nothing was changed. Keep the hooks you want in " +
+				w.hooksFile + ", move " + backup + " aside, then run portal migrate again: it backs up " + w.hooksFile + " afresh."
+			if !errors.Is(err, migrate.ErrHooksChanged) || err.Error() != want {
+				t.Fatalf("Run = %v; want hooks.json refused, saying %q", err, want)
+			}
+			if got := w.stepNames(); len(got) != 0 {
+				t.Errorf("steps = %v, want none: the tmux side and zmx untouched", got)
+			}
+			assertUnchanged(t, w, before, "refused")
+			sink.Records().Matching("migrate", "stopped").AtExactLevel(slog.LevelError).Only(t, "the refusal")
+		})
+	}
+
+	t.Run("hooks.json gone since a run cut short refuses the re-run", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		w.cutShortBeforeRewrite()
+		if err := os.Remove(w.hooksFile); err != nil {
+			t.Fatal(err)
+		}
+		before := w.tree()
+
+		if _, err := w.run(); !errors.Is(err, migrate.ErrHooksChanged) {
+			t.Fatalf("Run = %v; want hooks.json refused", err)
+		}
+		assertUnchanged(t, w, before, "refused")
+	})
+
+	t.Run("a rewrite whose digest can't be recorded writes no hooks.json", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		if err := os.MkdirAll(migrate.HooksBackup(w.dir)+".rewrites", 0o700); err != nil {
+			t.Fatal(err)
+		}
+		hooksBefore := readBytes(t, w.hooksFile)
+		indexBefore := readBytes(t, sessionindex.Path(w.dir))
+
+		if _, err := w.run(); err == nil {
+			t.Fatal("Run succeeded without recording its rewrite")
+		}
+		assertNotSwapped(t, w, hooksBefore, indexBefore)
 	})
 }
 

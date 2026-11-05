@@ -64,7 +64,7 @@ func TestRekeyFrom(t *testing.T) {
 		store, path := stageLive(t, hookstest.Staging{})
 		before := decodeHooksFile(t, backup)
 
-		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 
@@ -90,7 +90,7 @@ func TestRekeyFrom(t *testing.T) {
 		moves := maps.Clone(rekeyMoves)
 		moves[hookstest.TmuxEraSeedA] = hookstest.TmuxEraSeedB
 
-		if err := store.RekeyFrom(backup, moves, rekeyRemove, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, moves, rekeyRemove, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		if got := compactJSON(t, decodeHooksFile(t, path)[hookstest.TmuxEraSeedB]["on-resume"]); got != `"claude --resume token"` {
@@ -101,7 +101,7 @@ func TestRekeyFrom(t *testing.T) {
 	t.Run("a run again writes the same file, whatever hooks.json became meanwhile", func(t *testing.T) {
 		backup := stageBackup(t, rekeyBackup)
 		store, path := stageLive(t, hookstest.Staging{})
-		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		first := readFileBytes(t, path)
@@ -109,7 +109,7 @@ func TestRekeyFrom(t *testing.T) {
 			t.Fatalf("Set: %v", err)
 		}
 
-		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom again: %v", err)
 		}
 		hookstest.AssertHooksFileUnchanged(t, path, first, "differs on a second run")
@@ -119,7 +119,7 @@ func TestRekeyFrom(t *testing.T) {
 		backup := stageBackup(t, "null")
 		store, path := stageLive(t, hookstest.Staging{})
 
-		if err := store.RekeyFrom(backup, nil, nil, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, nil, nil, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		if got := strings.TrimSpace(string(readFileBytes(t, path))); got != "{}" {
@@ -138,12 +138,44 @@ func TestRekeyFrom(t *testing.T) {
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		if err := store.RekeyFrom(hookstest.HooksPath(t, t.TempDir()), rekeyMoves, rekeyRemove, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(hookstest.HooksPath(t, t.TempDir()), rekeyMoves, rekeyRemove, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		hookstest.AssertHooksFileUnchanged(t, path, before, "written with no backup")
 		assertNoSidecar(t, path)
 		sink.Records().Matching("hooks", "rekey-noop").AtExactLevel(slog.LevelDebug).Only(t, "rekey-noop")
+	})
+
+	t.Run("landing is handed the file it writes, before the write", func(t *testing.T) {
+		backup := stageBackup(t, rekeyBackup)
+		store, path := stageLive(t, hookstest.Staging{})
+		before := readFileBytes(t, path)
+		var handed []byte
+
+		if err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, func(file []byte) error {
+			hookstest.AssertHooksFileUnchanged(t, path, before, "written before landing was handed it")
+			handed = slices.Clone(file)
+			return nil
+		}); err != nil {
+			t.Fatalf("RekeyFrom: %v", err)
+		}
+		if got := readFileBytes(t, path); string(got) != string(handed) {
+			t.Errorf("wrote %s, want the file landing was handed, %s", got, handed)
+		}
+	})
+
+	t.Run("an error from landing writes nothing", func(t *testing.T) {
+		backup := stageBackup(t, rekeyBackup)
+		store, path := stageLive(t, hookstest.Staging{})
+		before := readFileBytes(t, path)
+		refusal := errors.New("not recorded")
+
+		err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, func([]byte) error { return refusal })
+
+		if !errors.Is(err, refusal) {
+			t.Fatalf("RekeyFrom = %v, want landing's error", err)
+		}
+		hookstest.AssertHooksFileUnchanged(t, path, before, "written though landing refused")
 	})
 
 	t.Run("it logs each key it moved or removed at DEBUG, and one INFO summary", func(t *testing.T) {
@@ -152,7 +184,7 @@ func TestRekeyFrom(t *testing.T) {
 		store, _ := stageLive(t, hookstest.Staging{})
 		sink := logtest.Install(t)
 
-		if err := store.RekeyFrom(backup, map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA}, []string{hookstest.ReapableSeedA}, hooks.ViaCLI); err != nil {
+		if err := store.RekeyFrom(backup, map[string]string{hookstest.TmuxEraSeedA: hookstest.SubjectSeedA}, []string{hookstest.ReapableSeedA}, hooks.ViaCLI, nil); err != nil {
 			t.Fatalf("RekeyFrom: %v", err)
 		}
 		for _, want := range []struct{ op, key, value string }{
@@ -208,7 +240,7 @@ func TestRekeyFrom(t *testing.T) {
 			before := readFileBytes(t, path)
 			sink := logtest.Install(t)
 
-			err := store.RekeyFrom(backup, refused.moves, refused.remove, hooks.ViaCLI)
+			err := store.RekeyFrom(backup, refused.moves, refused.remove, hooks.ViaCLI, nil)
 			if err == nil || refused.want != nil && !errors.Is(err, refused.want) {
 				t.Fatalf("RekeyFrom = %v, want a refusal (%v)", err, refused.want)
 			}
@@ -226,7 +258,7 @@ func TestRekeyFrom(t *testing.T) {
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		err := store.RekeyFrom(unreadable, rekeyMoves, rekeyRemove, hooks.ViaCLI)
+		err := store.RekeyFrom(unreadable, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil)
 		if !errors.Is(err, hooks.ErrStoreRead) {
 			t.Fatalf("RekeyFrom = %v, want ErrStoreRead", err)
 		}
@@ -242,7 +274,7 @@ func TestRekeyFrom(t *testing.T) {
 		hookstest.HoldHooksSidecar(t, path)
 		sink := logtest.Install(t)
 
-		err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI)
+		err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil)
 		if !errors.Is(err, hooks.ErrLockHeld) {
 			t.Fatalf("RekeyFrom = %v, want ErrLockHeld", err)
 		}
@@ -256,7 +288,7 @@ func TestRekeyFrom(t *testing.T) {
 		before := readFileBytes(t, path)
 		sink := logtest.Install(t)
 
-		err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI)
+		err := store.RekeyFrom(backup, rekeyMoves, rekeyRemove, hooks.ViaCLI, nil)
 		if err == nil {
 			t.Fatal("RekeyFrom succeeded with writes denied")
 		}

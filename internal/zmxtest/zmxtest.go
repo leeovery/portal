@@ -31,6 +31,14 @@ import (
 // but every read under a file fails with ENOTDIR.
 const PoisonedDir = "/dev/null/zmx-poison"
 
+// PoisonedTmpdir is the TMUX_TMPDIR every package's TestMain sets, and
+// IsolateStateForTest hands every subprocess, so a plain tmux that names no
+// socket (no -S, no -L, no TMUX), run by a test or by a line typed into a test
+// session, fails with ENOTDIR rather than reaching the developer's default
+// server. A test session's shell has no TMUX, since Create drops it, and finds
+// the installed tmux on PATH.
+const PoisonedTmpdir = "/dev/null/tmpdir-poison"
+
 // root is short on purpose: a session's socket is <dir>/<name>, capped at
 // 103 bytes on macOS, and $TMPDIR there is ~50 bytes on its own.
 const root = "/tmp"
@@ -38,10 +46,11 @@ const root = "/tmp"
 // settle bounds each wait at teardown for processes to exit.
 const settle = 5 * time.Second
 
-// passedEnv names the developer's variables a session sees; LANG and LC_*
-// pass too. Nothing else does: HOME is a temp dir and SHELL is /bin/sh, so no
-// session reads the developer's shell config.
-var passedEnv = []string{"PATH", "TERM", "USER", "TMPDIR"}
+// passedEnv names the variables of the test's environment a session sees;
+// LANG and LC_* pass too. Nothing else does: HOME is a temp dir and SHELL is
+// /bin/sh, so no session reads the developer's shell config. TMUX_TMPDIR is
+// the TestMain's poison.
+var passedEnv = []string{"PATH", "TERM", "USER", "TMPDIR", "TMUX_TMPDIR"}
 
 // Option configures New.
 type Option func(*options)
@@ -71,9 +80,6 @@ func New(t *testing.T, opts ...Option) *zmx.Backend {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	if err := checkPoisoned(os.Getenv); err != nil {
-		t.Fatal(err)
-	}
 	binary := Binary(t)
 	if err := checkProcessReader(); err != nil {
 		t.Fatalf("zmxtest cannot prove which processes it owns: %v", err)
@@ -82,6 +88,7 @@ func New(t *testing.T, opts ...Option) *zmx.Backend {
 	if err != nil {
 		t.Fatalf("make zmx dir: %v", err)
 	}
+	made.add(dir)
 	env := append(sessionEnv(os.Environ(), t.TempDir()), o.env...)
 	b, err := zmx.New(zmx.Config{
 		Binary:  binary,
@@ -107,13 +114,16 @@ const BinaryEnv = "PORTAL_TEST_ZMX_BINARY"
 
 // Binary is the path of the zmx build the tests drive: the one BinaryEnv
 // names, or else the pinned build. It fails the test when that build is
-// missing or cannot run, outside the integration lane, and when the weekly
-// zmx check doesn't run the test. Every real zmx a test runs comes from here,
-// New's included.
+// missing or cannot run, outside the integration lane, when the weekly zmx
+// check doesn't run the test, and when ZMX_DIR or TMUX_TMPDIR is not
+// poisoned. Every real zmx a test runs comes from here, New's included.
 func Binary(t *testing.T) string {
 	t.Helper()
 	if !integrationLane {
 		t.Fatal("zmxtest: a real zmx runs only in the integration lane, the one the weekly zmx check runs: tag the test's file //go:build integration")
+	}
+	if err := checkPoisoned(os.Getenv); err != nil {
+		t.Fatal(err)
 	}
 	requireWeeklyCheck(t)
 	binary, err := resolveBinary(os.Getenv, portalbintest.ProjectRoot)
@@ -168,8 +178,10 @@ func runnable(path string) bool {
 }
 
 func checkPoisoned(getenv func(string) string) error {
-	if got := getenv("ZMX_DIR"); got != PoisonedDir {
-		return fmt.Errorf("ZMX_DIR is %q, want %q: the package's TestMain must poison it before any test runs zmx", got, PoisonedDir)
+	for _, v := range []struct{ name, poison string }{{"ZMX_DIR", PoisonedDir}, {"TMUX_TMPDIR", PoisonedTmpdir}} {
+		if got := getenv(v.name); got != v.poison {
+			return fmt.Errorf("%s is %q, want %q: the package's TestMain must poison it before any test runs zmx", v.name, got, v.poison)
+		}
 	}
 	return nil
 }
@@ -242,9 +254,13 @@ func awaitExit(t harnesstest.TestingT, dir string) ([]int, error) {
 
 // Daemon returns the pid of the zmx daemon hosting a session in b's
 // directory: the parent of the session's process, proven to belong to that
-// directory.
+// directory. It fails the test, reading nothing, for a directory New didn't
+// make in this process.
 func Daemon(t *testing.T, b *zmx.Backend, name string) int {
 	t.Helper()
+	if err := made.refuse(b.Dir()); err != nil {
+		t.Fatal(err)
+	}
 	sessions, err := b.List(t.Context())
 	if err != nil {
 		t.Fatalf("list %s: %v", b.Dir(), err)
@@ -274,9 +290,13 @@ func StopDaemon(t *testing.T, b *zmx.Backend, name string) int {
 }
 
 // Signal sends sig to pid if it is a process of b's directory, proved as the
-// signal is sent, and fails, sending nothing, for one that is not. A test
-// signals a zmx process only through here: a pid proved even a moment
-// earlier may since have been reused.
+// signal is sent, and fails, sending nothing, for one that is not, or for a
+// directory New didn't make in this process. A test signals a zmx process
+// only through here: a pid proved even a moment earlier may since have been
+// reused.
 func Signal(b *zmx.Backend, pid int, sig syscall.Signal) error {
+	if err := made.refuse(b.Dir()); err != nil {
+		return err
+	}
 	return signalOwned(pid, b.Dir(), sig)
 }

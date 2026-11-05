@@ -92,6 +92,25 @@ func TestKillCommand(t *testing.T) {
 		assertIndexed(t, dir, "my-session-abc123", true)
 	})
 
+	t.Run("it refuses Portal's own sessions as no session found, asking the backend nothing", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "_portal-saver"}, backend.Session{Name: "_portal-other"})
+		stageKill(t, fake)
+
+		for _, name := range []string{"_portal-saver", "_portal-other"} {
+			_, _, err := runRootCmd(t, "kill", name)
+
+			if want := "No session found: " + name; err == nil || err.Error() != want {
+				t.Errorf("kill %s: error = %v, want %q", name, err, want)
+			}
+			if _, held := fake.Held(name); !held {
+				t.Errorf("kill ended %s", name)
+			}
+		}
+		if calls := fake.CallsTo(backendtest.OpKill); len(calls) != 0 {
+			t.Errorf("Kill calls = %+v, want none", calls)
+		}
+	})
+
 	// A saved session that isn't running, kept for the next restore, is one
 	// the user can see and bring back; killing it discards it for good.
 	t.Run("it discards a saved session that isn't running, saying so, and succeeds", func(t *testing.T) {

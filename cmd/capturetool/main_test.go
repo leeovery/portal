@@ -17,14 +17,20 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
+	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 // The tool's frames are written and printed with narrow East Asian widths
-// wherever the tests run, as the capture tests hold them.
+// wherever the tests run, as the capture tests hold them. Every adapter panics
+// rather than open a window, as in every package whose tests reach the picker.
 func TestMain(m *testing.M) {
+	if err := os.Setenv("TMUX_TMPDIR", "/dev/null/tmpdir-poison"); err != nil {
+		panic(err)
+	}
+	spawn.PoisonAdaptersForTest()
 	os.Exit(capture.RunNarrow(m))
 }
 
