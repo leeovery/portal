@@ -33,12 +33,13 @@ func Join(argv []string) string {
 // Readable renders argv as one command line for a person to read: a word a
 // shell reads back unchanged is left bare and any other is quoted through
 // Single, so where one argument ends stays plain without every word carrying
-// quotes. An empty argv renders as the empty string.
+// quotes. A word starting with = is quoted, as zsh expands it to a command's
+// path. An empty argv renders as the empty string.
 func Readable(argv []string) string {
 	words := make([]string, len(argv))
 	for i, arg := range argv {
 		words[i] = arg
-		if arg == "" || strings.ContainsFunc(arg, needsQuoting) {
+		if arg == "" || strings.HasPrefix(arg, "=") || strings.ContainsFunc(arg, needsQuoting) {
 			words[i] = Single(arg)
 		}
 	}

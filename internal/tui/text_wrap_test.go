@@ -108,6 +108,15 @@ func TestWrap_LeadingSpaceAndARowWideWord(t *testing.T) {
 			if got, want := wrap(word+"\n", 60), []string{word, ""}; !reflect.DeepEqual(got, want) {
 				t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
 			}
+			if got, want := wrap(" "+word+"\n", 60), []string{word, ""}; !reflect.DeepEqual(got, want) {
+				t.Errorf("after the over-packed row, the rows read\n got: %q\nwant: %q", got, want)
+			}
+		})
+
+		t.Run("the "+name+" path adds no row between an over-packed row and the next line", func(t *testing.T) {
+			if got, want := wrap(" "+word+"\nb", 60), []string{word, "b"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
+			}
 		})
 	}
 
@@ -119,4 +128,29 @@ func TestWrap_LeadingSpaceAndARowWideWord(t *testing.T) {
 			t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
 		}
 	})
+}
+
+func TestWrap_KeepsEveryBlankLine(t *testing.T) {
+	cases := []struct {
+		text string
+		want []string
+	}{
+		{"a\n\nb", []string{"a", "", "b"}},
+		{"a\n\n\nb", []string{"a", "", "", "b"}},
+		{"a\n\n\n\nb", []string{"a", "", "", "", "b"}},
+		{"a\n\n", []string{"a", "", ""}},
+		{"\n\na", []string{"", "", "a"}},
+	}
+	for name, wrap := range map[string]func(string, int) []string{
+		"prose":   wrappedLines,
+		"command": spaceWrappedLines,
+	} {
+		t.Run("the "+name+" path gives each blank line its row", func(t *testing.T) {
+			for _, c := range cases {
+				if got := wrap(c.text, 60); !reflect.DeepEqual(got, c.want) {
+					t.Errorf("%q wraps to\n got: %q\nwant: %q", c.text, got, c.want)
+				}
+			}
+		})
+	}
 }

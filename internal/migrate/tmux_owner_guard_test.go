@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,19 +22,56 @@ import (
 // Only portal migrate knows tmux: its own client runs the binary, and
 // tmuxtest runs it for migrate's tests. Nothing else may, so a tmux call
 // creeping back in fails here rather than reaching the developer's server.
+//
+// The guard reads the program a runner is handed (os/exec's Command,
+// CommandContext and LookPath, syscall.Exec, os.StartProcess, and an exec.Cmd
+// literal's Path) as a name or a command line, and every other string it is
+// handed as a command line a shell may run. It reads each as a literal, a
+// constant, or a variable its declaration or := sets from one, flagged at that
+// initialiser whatever is assigned to it later. Beyond its reach: a value made
+// at runtime, such as a function's result, a concatenation holding a variable
+// or a field read; a variable set by assignment alone, or declared in another
+// package; an argv slice held in a variable; and the constants and variables
+// of a source built for another platform, whose literals alone it reads.
 const (
 	tmuxProgram = "tmux"
-	execPkgPath = "os/exec"
 	// migrateTmuxFile is the one production source that runs tmux.
 	migrateTmuxFile = "internal/migrate/tmux.go"
 	// tmuxtestDir is the harness that runs tmux for migrate's tests.
 	tmuxtestDir = "internal/tmuxtest"
 )
 
-// execRunners are os/exec's functions that name a program to run or find.
-var execRunners = []string{"Command", "CommandContext", "LookPath"}
+// tmuxCommandWord is tmux as a word a shell runs: after the start, whitespace,
+// a separator, an opening parenthesis or a path's last slash, and before the
+// end, whitespace, a separator or a closing parenthesis.
+var tmuxCommandWord = regexp.MustCompile(`(^|[\s;&|(/])` + tmuxProgram + `($|[\s;&|)])`)
 
-// tmuxRun is a call that names the tmux program to os/exec.
+// runner is a function handed a program to run or find: program is the index
+// of the argument naming it, and the arguments from there, up to words of them
+// (all when words is 0), may hold a command line. An argument that is a
+// composite literal, an argv, is read element by element.
+type runner struct {
+	pkg, name      string
+	program, words int
+}
+
+var runners = []runner{
+	{pkg: "os/exec", name: "Command"},
+	{pkg: "os/exec", name: "CommandContext", program: 1},
+	{pkg: "os/exec", name: "LookPath"},
+	{pkg: "syscall", name: "Exec", words: 2},
+	{pkg: "os", name: "StartProcess", words: 2},
+}
+
+// The exec.Cmd fields that name the program and hold its argv, in the order an
+// unkeyed literal gives them.
+const (
+	cmdPkg, cmdType      = "os/exec", "Cmd"
+	cmdPath, cmdArgs     = "Path", "Args"
+	cmdPathAt, cmdArgsAt = 0, 1
+)
+
+// tmuxRun is a place a runner is handed tmux.
 type tmuxRun struct {
 	file string
 	line int
@@ -41,13 +79,28 @@ type tmuxRun struct {
 
 func (r tmuxRun) String() string { return fmt.Sprintf("%s:%d", r.file, r.line) }
 
+// handed is an expression a runner reads: its program, read as a name or a
+// command line, or another argument, read as a command line.
+type handed struct {
+	expr    ast.Expr
+	program bool
+}
+
+// importResolver is the path of the package a qualifier names, empty when it
+// names none.
+type importResolver func(qualifier *ast.Ident) string
+
+// valueReader reads the string an expression holds and the expression it is
+// read from, which is where a run is reported.
+type valueReader func(ast.Expr) (value string, from ast.Expr, ok bool)
+
 func TestOnlyMigrateRunsTmux(t *testing.T) {
 	t.Run("it finds tmux run only by migrate's client and tmuxtest", func(t *testing.T) {
 		root, sources := sourceguardtest.RepoSources(t, sourceguardtest.AllSources)
 		runs, unresolved := tmuxByLiteral(sources)
-		for _, dir := range unresolved {
-			for _, lane := range sourceguardtest.Lanes() {
-				runs = append(runs, tmuxByConstant(typedPackage(t, root, dir, lane))...)
+		for _, lane := range sourceguardtest.Lanes() {
+			for _, pkg := range typedPackages(t, root, unresolved, lane) {
+				runs = append(runs, tmuxByType(pkg)...)
 			}
 		}
 		for _, run := range judgeTmuxRuns(t, runs) {
@@ -60,21 +113,26 @@ func TestOnlyMigrateRunsTmux(t *testing.T) {
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	run "os/exec"
+	"syscall"
 )
 
 func a() { _ = exec.Command("tmux", "ls") }
 func b(ctx context.Context) { _ = exec.CommandContext(ctx, "tmux") }
 func c() { _, _ = exec.LookPath("tmux") }
 func d() { _ = run.Command("/opt/homebrew/bin/tmux") }
-func e() { _ = exec.Command("zmx", "tmux") }
-func f(ctx context.Context) { _ = exec.CommandContext(ctx, "sh", "-c", "tmux") }
-func g(p string) { _ = exec.Command(p) }
+func e() { _ = syscall.Exec("/opt/homebrew/bin/tmux", nil, nil) }
+func f() { _, _ = os.StartProcess("/opt/homebrew/bin/tmux", nil, nil) }
+func g() { _ = &exec.Cmd{Path: "/opt/homebrew/bin/tmux"} }
+func h() { _ = exec.Cmd{"tmux", nil} }
+func i() { _ = exec.Command("tmuxinator", "my-tmux", "tmux.conf") }
+func j(p string) { _ = exec.Command(p) }
 `
 		runs, unresolved := tmuxByLiteral([]sourceguardtest.ParsedSource{parseFixture(t, "internal/x/x.go", src)})
 
-		want := []string{"internal/x/x.go:9", "internal/x/x.go:10", "internal/x/x.go:11", "internal/x/x.go:12"}
+		want := []string{"internal/x/x.go:11", "internal/x/x.go:12", "internal/x/x.go:13", "internal/x/x.go:14", "internal/x/x.go:15", "internal/x/x.go:16", "internal/x/x.go:17", "internal/x/x.go:18"}
 		if got := runStrings(runs); !slices.Equal(got, want) {
 			t.Errorf("tmuxByLiteral found %q, want %q", got, want)
 		}
@@ -83,31 +141,66 @@ func g(p string) { _ = exec.Command(p) }
 		}
 	})
 
-	t.Run("it finds no run in a call that is not os/exec's", func(t *testing.T) {
+	t.Run("it finds tmux run through a shell, or handed to another program", func(t *testing.T) {
+		const src = `package x
+
+import (
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+func a() { _ = exec.Command("sh", "-c", "tmux kill-server") }
+func b() { _ = exec.Command("sh", "-c", "cd /tmp && tmux") }
+func c() { _ = exec.Command("sh", "-c", "true;tmux ls") }
+func d() { _ = exec.Command("sh", "-c", "(tmux)") }
+func e() { _ = exec.Command("zmx", "run", "s", "tmux") }
+func f() { _ = exec.Command("sh", "-c", "/opt/homebrew/bin/tmux ls") }
+func g() { _ = syscall.Exec("/bin/sh", []string{"sh", "-c", "tmux ls"}, nil) }
+func h() { _, _ = os.StartProcess("/bin/sh", []string{"sh", "-c", "x|tmux"}, nil) }
+func i() { _ = exec.Cmd{Path: "/bin/sh", Args: []string{"sh", "-c", "tmux ls"}} }
+func j() { _ = syscall.Exec("/bin/sh", nil, []string{"X=tmux"}) }
+func k() { _ = exec.Command("sh", "-c", "tmuxinator; my-tmux; echo tmux.conf") }
+`
+		runs, _ := tmuxByLiteral([]sourceguardtest.ParsedSource{parseFixture(t, "internal/x/x.go", src)})
+
+		want := []string{"internal/x/x.go:9", "internal/x/x.go:10", "internal/x/x.go:11", "internal/x/x.go:12", "internal/x/x.go:13", "internal/x/x.go:14", "internal/x/x.go:15", "internal/x/x.go:16", "internal/x/x.go:17"}
+		if got := runStrings(runs); !slices.Equal(got, want) {
+			t.Errorf("tmuxByLiteral found %q, want %q: tmux as a command word, in an argv but not an environment", got, want)
+		}
+	})
+
+	t.Run("it finds no run in a call that is not a runner's", func(t *testing.T) {
 		const src = `package x
 
 import exec "example.com/notexec"
 
 func a() { _ = exec.Command("tmux") }
+func b() { _ = exec.Cmd{Path: "tmux"} }
 `
 		if runs, unresolved := tmuxByLiteral([]sourceguardtest.ParsedSource{parseFixture(t, "internal/x/x.go", src)}); len(runs) != 0 || len(unresolved) != 0 {
 			t.Errorf("tmuxByLiteral found %v and left %q, want nothing: the package is not os/exec", runs, unresolved)
 		}
 	})
 
-	t.Run("it leaves a test's variable to no one, the type checker reading production alone", func(t *testing.T) {
+	t.Run("it leaves a test's variable to the type checker, which reads tests too", func(t *testing.T) {
 		const src = `package x
 
 import "os/exec"
 
 func a(p string) { _ = exec.Command(p) }
 `
-		if _, unresolved := tmuxByLiteral([]sourceguardtest.ParsedSource{parseFixture(t, "internal/x/x_test.go", src)}); len(unresolved) != 0 {
-			t.Errorf("tmuxByLiteral left %q to the type checker, want nothing for a test source", unresolved)
+		if _, unresolved := tmuxByLiteral([]sourceguardtest.ParsedSource{parseFixture(t, "internal/x/x_test.go", src)}); !slices.Equal(unresolved, []string{"internal/x"}) {
+			t.Errorf("tmuxByLiteral left %q to the type checker, want the test source's directory", unresolved)
 		}
 	})
 
 	checker := sourceguardtest.NewTypeChecker(t, ".")
+	typed := func(t *testing.T, file, src string) []string {
+		t.Helper()
+		return runStrings(tmuxByType(checker.Sources(t, map[string]string{file: src})))
+	}
+
 	t.Run("it finds tmux named by a constant", func(t *testing.T) {
 		const src = `package migrate
 
@@ -117,16 +210,92 @@ import (
 )
 
 const program = "tmux"
+const shell = "tmux " + "ls"
 
 func a() { _ = exec.Command(program) }
 func b(ctx context.Context) { _ = exec.CommandContext(ctx, program) }
 func c(p string) { _ = exec.Command(p) }
-func d() { _ = exec.Command("tmux") }
+func d() { _ = exec.Command("sh", "-c", shell) }
+func e() { _ = exec.Cmd{Path: program} }
 `
 		const file = "internal/x/x.go"
-		got := runStrings(tmuxByConstant(checker.Sources(t, map[string]string{file: src})))
-		if want := []string{file + ":10", file + ":11"}; !slices.Equal(got, want) {
-			t.Errorf("tmuxByConstant found %q, want %q: the constants alone, a literal being tmuxByLiteral's", got, want)
+		if got, want := typed(t, file, src), []string{file + ":11", file + ":12", file + ":14", file + ":15"}; !slices.Equal(got, want) {
+			t.Errorf("tmuxByType found %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it finds tmux named by a constant a test file declares", func(t *testing.T) {
+		const src = `package migrate
+
+import "os/exec"
+
+const program = "/opt/homebrew/bin/tmux"
+
+func a() { _ = exec.Command(program) }
+`
+		const file = "internal/x/x_test.go"
+		if got, want := typed(t, file, src), []string{file + ":7"}; !slices.Equal(got, want) {
+			t.Errorf("tmuxByType found %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it finds tmux named by a variable at the literal or constant it starts from", func(t *testing.T) {
+		const src = `package migrate
+
+import (
+	"os"
+	"os/exec"
+)
+
+const program = "tmux"
+
+var bin = "tmux"
+var fromConstant, other = program, "zmx"
+
+func a() { _ = exec.Command(bin, "ls") }
+func b() { _ = exec.Command(fromConstant) }
+func c() {
+	local := "/opt/homebrew/bin/tmux"
+	_, _ = os.StartProcess(local, nil, nil)
+}
+func d() {
+	var shell = "tmux kill-server"
+	_ = exec.Command("sh", "-c", shell)
+}
+func e() {
+	reassigned := "tmux"
+	reassigned = "zmx"
+	_ = exec.Command(reassigned)
+}
+func f() { _ = exec.Command(other) }
+`
+		const file = "internal/x/x_test.go"
+		if got, want := typed(t, file, src), []string{file + ":10", file + ":11", file + ":16", file + ":20", file + ":24"}; !slices.Equal(got, want) {
+			t.Errorf("tmuxByType found %q, want %q: each initialiser, a later assignment untracked", got, want)
+		}
+	})
+
+	t.Run("it leaves a value made at runtime unread", func(t *testing.T) {
+		const src = `package migrate
+
+import (
+	"os/exec"
+	"strings"
+)
+
+type config struct{ bin string }
+
+func a() { _ = exec.Command(strings.TrimSpace(" tmux ")) }
+func b(dir string) { _ = exec.Command(dir + "/tmux") }
+func c(cfg config) { _ = exec.Command(cfg.bin) }
+func d() {
+	var bin string
+	bin = "tmux"
+	_ = exec.Command(bin)
+}
+`
+		if got := typed(t, "internal/x/x.go", src); len(got) != 0 {
+			t.Errorf("tmuxByType found %q, want nothing: these are beyond what a source can be read for", got)
 		}
 	})
 
@@ -201,81 +370,168 @@ var _ m.TmuxServer = m.Tmux{}
 	})
 }
 
-// tmuxByLiteral returns each call in sources that names the tmux program to
-// os/exec as a string literal, by path or bare name, and the directory of
-// each production source with a call naming its program any other way, which
-// only the type checker can resolve. It reads every source, whatever its
-// build tags or platform. A test source's program is judged as written: the
-// type checker reads production sources alone.
+// tmuxByLiteral returns each place in sources a runner is handed tmux as a
+// string literal, and the directory of each source handing one anything else,
+// which only the type checker can read. It reads every source, whatever its
+// build tags or platform.
 func tmuxByLiteral(sources []sourceguardtest.ParsedSource) (runs []tmuxRun, unresolved []string) {
 	for _, source := range sources {
-		names := importNames(source.File, execPkgPath)
-		if len(names) == 0 {
+		imports := runnerImports(source.File)
+		if len(imports) == 0 {
 			continue
 		}
 		file := filepath.ToSlash(source.Path)
-		ast.Inspect(source.File, func(n ast.Node) bool {
-			program, ok := execProgram(n, func(sel *ast.SelectorExpr) bool {
-				pkg, ok := sel.X.(*ast.Ident)
-				return ok && slices.Contains(names, pkg.Name)
-			})
-			if !ok {
-				return true
-			}
-			lit, isLit := program.(*ast.BasicLit)
-			switch {
-			case isLit && namesTmux(lit):
-				runs = append(runs, tmuxRun{file: file, line: source.Position(program.Pos()).Line})
-			case !isLit && !strings.HasSuffix(file, "_test.go"):
-				unresolved = append(unresolved, path.Dir(file))
-			}
-			return true
-		})
+		found, unread := tmuxRunsIn(source, func(qualifier *ast.Ident) string { return imports[qualifier.Name] }, literalValue)
+		runs = append(runs, found...)
+		if unread {
+			unresolved = append(unresolved, path.Dir(file))
+		}
 	}
 	slices.Sort(unresolved)
 	return runs, slices.Compact(unresolved)
 }
 
-// tmuxByConstant returns each call in pkg that names the tmux program to
-// os/exec through a constant. A literal is tmuxByLiteral's to find, and a
-// variable's value is outside what a source can be read for, accepted.
-func tmuxByConstant(pkg sourceguardtest.TypedPackage) []tmuxRun {
+// tmuxByType returns each place in pkg a runner is handed tmux as a literal, a
+// constant, or a variable set from either where it is declared.
+func tmuxByType(pkg sourceguardtest.TypedPackage) []tmuxRun {
+	importPath := func(qualifier *ast.Ident) string {
+		if name, ok := pkg.Info.Uses[qualifier].(*types.PkgName); ok {
+			return name.Imported().Path()
+		}
+		return ""
+	}
+	value := typedValue(pkg, initialisers(pkg))
 	var runs []tmuxRun
 	for _, source := range pkg.Sources {
-		file := filepath.ToSlash(source.Path)
-		ast.Inspect(source.File, func(n ast.Node) bool {
-			program, ok := execProgram(n, func(sel *ast.SelectorExpr) bool {
-				fn, ok := pkg.Object(sel.Sel).(*types.Func)
-				return ok && fn.Pkg() != nil && fn.Pkg().Path() == execPkgPath
-			})
-			if ok && constantNamesTmux(pkg, program) {
-				runs = append(runs, tmuxRun{file: file, line: source.Position(program.Pos()).Line})
-			}
-			return true
-		})
+		found, _ := tmuxRunsIn(source, importPath, value)
+		runs = append(runs, found...)
 	}
 	return runs
 }
 
-// execProgram returns the program n names, when n is a call of one of
-// execRunners selected as isExec judges.
-func execProgram(n ast.Node, isExec func(*ast.SelectorExpr) bool) (ast.Expr, bool) {
-	call, ok := n.(*ast.CallExpr)
+// tmuxRunsIn returns each place in source a runner is handed tmux, and whether
+// it hands one anything value cannot read.
+func tmuxRunsIn(source sourceguardtest.ParsedSource, importPath importResolver, value valueReader) (runs []tmuxRun, unread bool) {
+	file := filepath.ToSlash(source.Path)
+	ast.Inspect(source.File, func(n ast.Node) bool {
+		for _, h := range handedTo(n, importPath) {
+			text, from, ok := value(h.expr)
+			switch {
+			case !ok:
+				unread = true
+			case h.program && namesTmux(text), tmuxCommandWord.MatchString(text):
+				runs = append(runs, tmuxRun{file: file, line: source.Position(from.Pos()).Line})
+			}
+		}
+		return true
+	})
+	return runs, unread
+}
+
+// handedTo is what n hands a runner, when n is a runner's call or an exec.Cmd
+// literal.
+func handedTo(n ast.Node, importPath importResolver) []handed {
+	switch n := n.(type) {
+	case *ast.CallExpr:
+		return handedToCall(n, importPath)
+	case *ast.CompositeLit:
+		if pkg, name := qualified(n.Type, importPath); pkg == cmdPkg && name == cmdType {
+			return handedToCmd(n)
+		}
+	}
+	return nil
+}
+
+func handedToCall(call *ast.CallExpr, importPath importResolver) []handed {
+	pkg, name := qualified(call.Fun, importPath)
+	at := slices.IndexFunc(runners, func(r runner) bool { return r.pkg == pkg && r.name == name })
+	if at < 0 || len(call.Args) <= runners[at].program {
+		return nil
+	}
+	r := runners[at]
+	args := call.Args[r.program:]
+	if r.words > 0 && len(args) > r.words {
+		args = args[:r.words]
+	}
+	found := []handed{{expr: args[0], program: true}}
+	for _, arg := range args[1:] {
+		found = append(found, words(arg)...)
+	}
+	return found
+}
+
+func handedToCmd(lit *ast.CompositeLit) []handed {
+	var found []handed
+	for i, elt := range lit.Elts {
+		field, value := cmdField(i, elt)
+		switch field {
+		case cmdPath:
+			found = append(found, handed{expr: value, program: true})
+		case cmdArgs:
+			found = append(found, words(value)...)
+		}
+	}
+	return found
+}
+
+// cmdField names the exec.Cmd field elt sets, at position i of the literal.
+func cmdField(i int, elt ast.Expr) (string, ast.Expr) {
+	if kv, ok := elt.(*ast.KeyValueExpr); ok {
+		if key, ok := kv.Key.(*ast.Ident); ok {
+			return key.Name, kv.Value
+		}
+		return "", nil
+	}
+	switch i {
+	case cmdPathAt:
+		return cmdPath, elt
+	case cmdArgsAt:
+		return cmdArgs, elt
+	}
+	return "", nil
+}
+
+// words are the strings arg hands a runner for a command line: the elements of
+// an argv literal, or arg itself.
+func words(arg ast.Expr) []handed {
+	lit, ok := arg.(*ast.CompositeLit)
 	if !ok {
-		return nil, false
+		return []handed{{expr: arg}}
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || !slices.Contains(execRunners, sel.Sel.Name) || !isExec(sel) {
-		return nil, false
+	found := make([]handed, 0, len(lit.Elts))
+	for _, elt := range lit.Elts {
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			elt = kv.Value
+		}
+		found = append(found, handed{expr: elt})
 	}
-	at := 0
-	if sel.Sel.Name == "CommandContext" {
-		at = 1
+	return found
+}
+
+// qualified is the package path and name expr names as pkg.Name, empty when it
+// names nothing in another package.
+func qualified(expr ast.Expr, importPath importResolver) (pkg, name string) {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return "", ""
 	}
-	if len(call.Args) <= at {
-		return nil, false
+	qualifier, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return "", ""
 	}
-	return call.Args[at], true
+	return importPath(qualifier), sel.Sel.Name
+}
+
+// runnerImports maps each name file imports a runner's package under to its
+// path.
+func runnerImports(file *ast.File) map[string]string {
+	imports := map[string]string{}
+	for _, r := range runners {
+		for _, name := range importNames(file, r.pkg) {
+			imports[name] = r.pkg
+		}
+	}
+	return imports
 }
 
 // importNames are the names file imports the package at pkgPath under.
@@ -294,23 +550,78 @@ func importNames(file *ast.File, pkgPath string) []string {
 	return names
 }
 
-func namesTmux(lit *ast.BasicLit) bool {
+func literalValue(expr ast.Expr) (string, ast.Expr, bool) {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", nil, false
+	}
 	value, err := strconv.Unquote(lit.Value)
-	return lit.Kind == token.STRING && err == nil && path.Base(value) == tmuxProgram
+	return value, lit, err == nil
 }
 
-func constantNamesTmux(pkg sourceguardtest.TypedPackage, program ast.Expr) bool {
-	var ident *ast.Ident
-	switch p := program.(type) {
-	case *ast.Ident:
-		ident = p
-	case *ast.SelectorExpr:
-		ident = p.Sel
-	default:
-		return false
+// typedValue reads a constant, or a variable from the constant initialisers
+// gives it.
+func typedValue(pkg sourceguardtest.TypedPackage, initialisers map[types.Object]ast.Expr) valueReader {
+	return func(expr ast.Expr) (string, ast.Expr, bool) {
+		if value, ok := constantString(pkg, expr); ok {
+			return value, expr, true
+		}
+		if ident, ok := expr.(*ast.Ident); ok {
+			if init := initialisers[pkg.Object(ident)]; init != nil {
+				value, ok := constantString(pkg, init)
+				return value, init, ok
+			}
+		}
+		return "", nil, false
 	}
-	c, ok := pkg.Object(ident).(*types.Const)
-	return ok && c.Val().Kind() == constant.String && path.Base(constant.StringVal(c.Val())) == tmuxProgram
+}
+
+func constantString(pkg sourceguardtest.TypedPackage, expr ast.Expr) (string, bool) {
+	value := pkg.Info.Types[expr].Value
+	if value == nil || value.Kind() != constant.String {
+		return "", false
+	}
+	return constant.StringVal(value), true
+}
+
+// initialisers maps each variable pkg declares with a value, by var or :=, to
+// the expression that value is.
+func initialisers(pkg sourceguardtest.TypedPackage) map[types.Object]ast.Expr {
+	found := map[types.Object]ast.Expr{}
+	declare := func(names []ast.Expr, values []ast.Expr) {
+		if len(names) != len(values) {
+			return
+		}
+		for i, name := range names {
+			if ident, ok := name.(*ast.Ident); ok {
+				if v, ok := pkg.Info.Defs[ident].(*types.Var); ok {
+					found[v] = values[i]
+				}
+			}
+		}
+	}
+	for _, source := range pkg.Sources {
+		ast.Inspect(source.File, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.ValueSpec:
+				names := make([]ast.Expr, len(n.Names))
+				for i, name := range n.Names {
+					names[i] = name
+				}
+				declare(names, n.Values)
+			case *ast.AssignStmt:
+				if n.Tok == token.DEFINE {
+					declare(n.Lhs, n.Rhs)
+				}
+			}
+			return true
+		})
+	}
+	return found
+}
+
+func namesTmux(program string) bool {
+	return program == tmuxProgram || strings.HasSuffix(program, "/"+tmuxProgram)
 }
 
 // judgeTmuxRuns returns each run outside migrate's client and tmuxtest, once.
@@ -338,19 +649,29 @@ func judgeTmuxRuns(t harnesstest.TestingT, runs []tmuxRun) []string {
 	return slices.Compact(found)
 }
 
-// typedPackage type-checks the production sources of the package at the
-// module path dir under lane, naming them by module path.
-func typedPackage(t *testing.T, root, dir string, lane sourceguardtest.DepsOption) sourceguardtest.TypedPackage {
+// typedPackages type-checks the packages at the module paths dirs under lane
+// as their tests compile them, with their external tests, naming the sources
+// by module path.
+func typedPackages(t *testing.T, root string, dirs []string, lane sourceguardtest.DepsOption) []sourceguardtest.TypedPackage {
 	t.Helper()
-	pkg := sourceguardtest.NewTypeChecker(t, filepath.Join(root, filepath.FromSlash(dir)), lane).Package(t)
-	for i, source := range pkg.Sources {
-		rel, err := filepath.Rel(root, source.Path)
-		if err != nil {
-			t.Fatalf("relativise %s: %v", source.Path, err)
-		}
-		pkg.Sources[i].Path = rel
+	if len(dirs) == 0 {
+		return nil
 	}
-	return pkg
+	patterns := make([]string, len(dirs))
+	for i, dir := range dirs {
+		patterns[i] = "./" + dir
+	}
+	pkgs := sourceguardtest.NewTestTypeChecker(t, root, patterns, lane).Packages(t)
+	for _, pkg := range pkgs {
+		for i, source := range pkg.Sources {
+			rel, err := filepath.Rel(root, source.Path)
+			if err != nil {
+				t.Fatalf("relativise %s: %v", source.Path, err)
+			}
+			pkg.Sources[i].Path = rel
+		}
+	}
+	return pkgs
 }
 
 // tmuxClientBuilder is the one production source outside migrate that may

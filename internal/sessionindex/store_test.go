@@ -410,8 +410,8 @@ func TestUpdateThen(t *testing.T) {
 	}
 }
 
-// sessionindex is the store internal/state will read labels from, so it may
-// never import state or anything that reaches tmux.
+// sessionindex is the store internal/state reads labels from, so it imports
+// only the leaves listed here.
 func TestSessionindexPackage_ImportsOnlyLeaves(t *testing.T) {
 	const prefix = "github.com/leeovery/portal/"
 	allowed := []string{prefix + "internal/commitlock", prefix + "internal/fileutil", prefix + "internal/log", prefix + "internal/shellquote"}

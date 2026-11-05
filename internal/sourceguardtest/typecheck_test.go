@@ -3,6 +3,7 @@ package sourceguardtest_test
 import (
 	"go/ast"
 	"go/types"
+	"maps"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -20,6 +21,32 @@ func TestTypeChecker_ChecksThePackagesOwnSources(t *testing.T) {
 		if source.File.Name.Name != "sourceguardtest" {
 			t.Errorf("%s is package %s, want only the package's own non-test sources", source.Path, source.File.Name.Name)
 		}
+	}
+}
+
+func TestTestTypeChecker_ChecksThePackageAsItsTestsCompileIt(t *testing.T) {
+	tc := sourceguardtest.NewTestTypeChecker(t, ".", []string{"."})
+	files := map[string][]string{}
+	for _, pkg := range tc.Packages(t) {
+		for _, source := range pkg.Sources {
+			files[source.File.Name.Name] = append(files[source.File.Name.Name], filepath.Base(source.Path))
+		}
+	}
+
+	if !slices.Contains(files["sourceguardtest"], "typecheck.go") || !slices.Contains(files["sourceguardtest"], "assertdepswithin_test.go") {
+		t.Errorf("package sourceguardtest checked %v, want its own sources with its in-package tests", files["sourceguardtest"])
+	}
+	if !slices.Contains(files["sourceguardtest_test"], "typecheck_test.go") {
+		t.Errorf("package sourceguardtest_test checked %v, want the external tests", files["sourceguardtest_test"])
+	}
+	if len(files) != 2 {
+		t.Errorf("checked packages %v, want the package and its external tests alone, the test main no source of either", slices.Sorted(maps.Keys(files)))
+	}
+
+	stub := &recordingT{}
+	tc.Package(stub)
+	if !stub.fataled {
+		t.Error("Package checked one of the two packages the checker holds, want a fatal")
 	}
 }
 

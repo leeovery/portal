@@ -100,6 +100,12 @@ func TestReadable(t *testing.T) {
 		}
 	})
 
+	t.Run("it quotes a word starting with = and leaves one holding it bare", func(t *testing.T) {
+		if got, want := shellquote.Readable([]string{"=ls", "--key=value"}), `'=ls' --key=value`; got != want {
+			t.Errorf("Readable = %q, want %q (zsh expands a word starting with =, and only there)", got, want)
+		}
+	})
+
 	t.Run("it keeps an empty element as an empty quoted word", func(t *testing.T) {
 		if got, want := shellquote.Readable([]string{"portal", ""}), `portal ''`; got != want {
 			t.Errorf("Readable = %q, want %q (an empty argument must survive as one word)", got, want)

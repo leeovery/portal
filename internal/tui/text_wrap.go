@@ -69,7 +69,7 @@ func rowTexts(rows []wrappedRow) []string {
 // cannot hold it, so the overshoot re-flows onto the line after it rather than
 // being cut off the end.
 func wrappedRows(text string, width int) []wrappedRow {
-	wrapped := strings.Split(ansi.Wrap(text, width, ""), "\n")
+	wrapped := wrappedSourceLines(text, width)
 	walk := rowWalk{width: width, rows: make([]wrappedRow, 0, len(wrapped))}
 	rest := text
 	for i, line := range wrapped {
@@ -82,6 +82,24 @@ func wrappedRows(text string, width int) []wrappedRow {
 		walk.take(walk.carry)
 	}
 	return walk.rows
+}
+
+// ansi.Wrap starts afresh after each newline in the text, so wrapping each
+// line of the text on its own gives the rows of the whole. A line it
+// over-packs, as it does a space and then a word as wide as the row, it ends
+// with a break that holds no source: the empty row that break leaves at the
+// end of a line is dropped, while a line of the text that is empty keeps its
+// row.
+func wrappedSourceLines(text string, width int) []string {
+	var lines []string
+	for line := range strings.SplitSeq(text, "\n") {
+		wrapped := strings.Split(ansi.Wrap(line, width, ""), "\n")
+		if last := len(wrapped) - 1; last > 0 && wrapped[last] == "" {
+			wrapped = wrapped[:last]
+		}
+		lines = append(lines, wrapped...)
+	}
+	return lines
 }
 
 // ansi.Wrap breaks after a hyphen whatever breakpoints it is given, so each
@@ -115,13 +133,7 @@ type rowWalk struct {
 	carry, trail string
 }
 
-// ansi.Wrap can end on an empty line after one it over-packed, as it does a
-// space and then a word as wide as the row: a break with no source after it,
-// which gives back neither text nor whitespace, so it is no row.
 func (w *rowWalk) take(line string) {
-	if line == "" && w.trail == "" && len(w.rows) > 0 {
-		return
-	}
 	body := strings.TrimLeftFunc(line, breaksWrap)
 	head, carry := rowAndCarry(body, w.width)
 	text := strings.TrimRightFunc(head, breaksWrap)
