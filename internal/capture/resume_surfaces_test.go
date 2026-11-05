@@ -17,7 +17,7 @@ import (
 // The seeds are restated here rather than read off the surface: an expectation
 // built from the value the code renders asserts nothing about what it holds.
 const (
-	surfaceCommand       = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+	surfaceCommand       = "cd ~/code/portal/internal && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
 	surfaceReport        = "can't unpause this session: permission denied"
 	discardSurfaceReport = "can't write hooks.json: permission denied"
 )

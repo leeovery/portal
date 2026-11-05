@@ -10,7 +10,16 @@ import (
 // The rows past the cap are re-joined onto the last kept one and truncated
 // there, so the ellipsis marks the cut rather than the rows leaving without one.
 func wrapCapped(text string, width, maxRows int, ellipsis string) []string {
-	rows := wrappedRows(text, width)
+	return capRows(wrappedRows(text, width), width, maxRows, ellipsis)
+}
+
+// For text whose hyphens belong to its words, such as a command's flags, where
+// a row ending "--" cut from the word after it misreads the text.
+func wrapCappedAtSpaces(text string, width, maxRows int, ellipsis string) []string {
+	return capRows(spaceWrappedRows(text, width), width, maxRows, ellipsis)
+}
+
+func capRows(rows []wrappedRow, width, maxRows int, ellipsis string) []string {
 	if len(rows) <= maxRows {
 		return rowTexts(rows)
 	}
@@ -73,6 +82,28 @@ func wrappedRows(text string, width int) []wrappedRow {
 		walk.take(walk.carry)
 	}
 	return walk.rows
+}
+
+// ansi.Wrap breaks after a hyphen whatever breakpoints it is given, so each
+// hyphen is wrapped as a one-cell stand-in the text does not hold and handed
+// back on every row; a word wider than the row still breaks at the width. The
+// text must carry no escape sequence, as a hyphen inside one would be swapped
+// too.
+func spaceWrappedRows(text string, width int) []wrappedRow {
+	standIn := string(absentPrivateUseRune(text))
+	rows := wrappedRows(strings.ReplaceAll(text, "-", standIn), width)
+	for i := range rows {
+		rows[i].text = strings.ReplaceAll(rows[i].text, standIn, "-")
+	}
+	return rows
+}
+
+func absentPrivateUseRune(text string) rune {
+	r := rune(0xe000)
+	for strings.ContainsRune(text, r) {
+		r++
+	}
+	return r
 }
 
 // The whitespace trimmed off a row's edges is kept rather than discarded: the

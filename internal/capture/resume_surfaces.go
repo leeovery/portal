@@ -22,7 +22,7 @@ const (
 
 // A directory and an identifier, which is what a real registration carries and
 // what makes the card's wrap visible rather than theoretical.
-const resumeSurfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+const resumeSurfaceCommand = "cd ~/code/portal/internal && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
 
 // The reports each screen's answer leaves on its card when it is refused: a
 // resume-pending flag that will not lower on the panel, and a hooks.json that

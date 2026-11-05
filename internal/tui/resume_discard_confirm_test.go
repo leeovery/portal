@@ -98,8 +98,8 @@ func TestRenderResumeDiscardConfirm_Card(t *testing.T) {
 			rows := discardCardRows(t, r, resumePartsLongCommand, "")
 			assertRowsEqual(t, rows, discardGoldenCard([]string{
 				"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7",
-				"--cwd /Users/leeovery/Code/portal/internal/tui --",
-				"output-format stream-json",
+				"--cwd /Users/leeovery/Code/portal/internal/tui",
+				"--output-format stream-json",
 			}, "", discardConsequenceAtCard))
 			out := RenderResumeDiscardConfirm(discardScreenOf(r, resumeGoldenCommand, "", resumeRoomyWidth, resumeRoomyHeight))
 			assertEmphasisedToken(t, labelSegment(t, out, resumeGoldenCommand), r.th.StateDestructive, true, r.colourless)

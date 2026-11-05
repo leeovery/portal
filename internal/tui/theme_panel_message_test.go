@@ -521,7 +521,7 @@ func TestPanelMessage_RowsFitTheInnerWidth(t *testing.T) {
 	t.Run("it reads the capped row back as the message from where it starts", func(t *testing.T) {
 		const message = flashWarningGlyph + " couldn't save theme gruvbox_material-dark-hard-contrast-extended"
 		for inner := messageTestMinInner; inner <= messageTestMaxInner; inner++ {
-			assertCappedRowReadsSource(t, messageTestRows(message, inner, true), message, inner, themePanelMessageWrapRows)
+			assertCappedRowReadsSource(t, messageTestRows(message, inner, true), wrappedLines, message, inner, themePanelMessageWrapRows)
 		}
 	})
 
