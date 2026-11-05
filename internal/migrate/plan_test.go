@@ -11,18 +11,21 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/migrate"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
 
-const orchard = "/home/user/code/orchard-pipeline"
+const orchard = codeDir + "orchard-pipeline"
 
 func TestNewPlan_Names(t *testing.T) {
-	t.Run("a session takes its tmux name up to the first ' · '", func(t *testing.T) {
+	t.Run("a session takes its tmux name up to the first ' · ', trimmed", func(t *testing.T) {
 		for tmuxName, want := range map[string]string{
 			"orchard-pipeline-Hq7wNe · api review": "orchard-pipeline-Hq7wNe",
 			"lantern":                              "lantern",
 			"tidepool · flaky test · round two":    "tidepool",
 			"no·spaces·around":                     "no·spaces·around",
+			"trail  · two spaces before":           "trail",
+			"  padded · leading spaces":            "padded",
 		} {
 			plan := planSessions(t, session(tmuxName, pane(0, orchard)))
 			if got := plan.Sessions[0]; got.Name != want || got.Generated != nil {
@@ -86,14 +89,16 @@ func TestNewPlan_Names(t *testing.T) {
 		}
 	})
 
-	t.Run("a generated name's project is the pane's directory's last element, as a mint's", func(t *testing.T) {
-		long := "/home/user/code/" + strings.Repeat("p", 120)
+	t.Run("a generated name's project is the last part of the pane's dir, as a mint's", func(t *testing.T) {
+		long := codeDir + strings.Repeat("p", 120)
 		for cwd, want := range map[string]string{
-			"/home/user/code/My Project": "My Project-Gen001",
-			"/home/user/code/_hidden":    "hidden-Gen001",
-			"":                           "session-Gen001",
-			"/":                          "session-Gen001",
-			long:                         strings.Repeat("p", zmxBackend(t).MaxNameLen()-len("-Gen001")) + "-Gen001",
+			orchard + "/web/src":       "orchard-pipeline-Gen001",
+			"/tmp/scratch":             "scratch-Gen001",
+			codeDir + "My Project/doc": "My Project-Gen001",
+			codeDir + "_hidden":        "hidden-Gen001",
+			"":                         "session-Gen001",
+			"/":                        "session-Gen001",
+			long:                       strings.Repeat("p", zmxBackend(t).MaxNameLen()-len("-Gen001")) + "-Gen001",
 		} {
 			if got := planSessions(t, session("star*", pane(0, cwd))).Sessions[0].Name; got != want {
 				t.Errorf("cwd %q gave %q, want %q", cwd, got, want)
@@ -135,12 +140,21 @@ func TestNewPlan_Labels(t *testing.T) {
 		"orchard-pipeline-Hq7wNe · api review": "orchard-pipeline-Hq7wNe · api review",
 		"lantern":                              "",
 		"star* · topic":                        "star* · topic",
-		"abc\u202edef · topic":                 "",
+		"trail  · x":                           "trail  · x",
 	} {
-		if got := planSessions(t, session(tmuxName, pane(0, orchard))).Sessions[0].Label; got != want {
-			t.Errorf("%q labelled %q, want %q", tmuxName, got, want)
+		got := planSessions(t, session(tmuxName, pane(0, orchard))).Sessions[0]
+		if got.Label != want || got.LabelRefused != nil {
+			t.Errorf("%q labelled %q (refused: %v), want %q", tmuxName, got.Label, got.LabelRefused, want)
 		}
 	}
+
+	t.Run("a label the index refuses is omitted, saying why", func(t *testing.T) {
+		got := planSessions(t, session("abc\u202edef · topic", pane(0, orchard))).Sessions[0]
+
+		if got.Label != "" || !errors.Is(got.LabelRefused, sessionindex.ErrLabelUnprintable) {
+			t.Errorf("label %q (refused: %v), want none, refused as unprintable", got.Label, got.LabelRefused)
+		}
+	})
 }
 
 func TestNewPlan_Panes(t *testing.T) {
@@ -181,28 +195,48 @@ func TestNewPlan_Panes(t *testing.T) {
 		}
 	})
 
-	t.Run("a pane whose numbered name is taken gets a generated one", func(t *testing.T) {
-		dir := legacyDir(t, []v1Session{session("lantern", pane(0, orchard), pane(1, orchard), pane(2, orchard))}, nil)
-		plan := planOf(t, dir, nil, naming(t, "lantern-2"))
+	t.Run("a pane whose number is taken takes the next free one, labelled with it", func(t *testing.T) {
+		dir := legacyDir(t, []v1Session{session("api · user search", pane(0, orchard), pane(1, orchard), pane(2, orchard))}, nil)
+		plan := planOf(t, dir, nil, naming(t, "api-2"))
 
-		if got := namesOf(plan); !slices.Equal(got, []string{"lantern", "orchard-pipeline-Gen001", "lantern-3"}) {
+		if got := namesOf(plan); !slices.Equal(got, []string{"api", "api-3", "api-4"}) {
 			t.Errorf("names = %v", got)
 		}
-		assertTakenBy(t, plan.Sessions[1].Generated, "lantern-2")
-		if plan.Sessions[2].Generated != nil {
-			t.Errorf("lantern-3 generated: %v", plan.Sessions[2].Generated)
+		if got := labelsOf(plan); !slices.Equal(got, []string{"api · user search", "api · user search-3", "api · user search-4"}) {
+			t.Errorf("labels = %v", got)
+		}
+		for _, s := range plan.Sessions {
+			if s.Generated != nil {
+				t.Errorf("%s generated: %v", s.Name, s.Generated)
+			}
 		}
 	})
 
-	t.Run("a pane whose numbered name is too long gets a generated one", func(t *testing.T) {
-		longest := strings.Repeat("x", zmxBackend(t).MaxNameLen())
-		plan := planSessions(t, session(longest, pane(0, orchard), pane(1, orchard)))
+	t.Run("every session's own name is reserved before any pane's number", func(t *testing.T) {
+		plan := planSessions(t, session("work", pane(0, orchard), pane(1, orchard)), session("work-2", pane(0, orchard)))
 
-		if got := namesOf(plan); !slices.Equal(got, []string{longest, "orchard-pipeline-Gen001"}) {
+		if got := namesOf(plan); !slices.Equal(got, []string{"work", "work-3", "work-2"}) {
+			t.Errorf("names = %v, want the real work-2 keeping its name", got)
+		}
+		if got := labelsOf(plan); !slices.Equal(got, []string{"", "", ""}) {
+			t.Errorf("labels = %v, want each its name", got)
+		}
+	})
+
+	t.Run("a pane whose numbered name is too long gets a generated one, labelled with its number", func(t *testing.T) {
+		longest := strings.Repeat("x", zmxBackend(t).MaxNameLen())
+		plan := planSessions(t, session(longest+" · topic", pane(0, orchard), pane(1, orchard+"/web"), pane(2, orchard)))
+
+		if got := namesOf(plan); !slices.Equal(got, []string{longest, "orchard-pipeline-Gen001", "orchard-pipeline-Gen002"}) {
 			t.Errorf("names = %v", got)
 		}
-		if !errors.Is(plan.Sessions[1].Generated, backend.ErrInvalidName) {
-			t.Errorf("Generated = %v, want the backend's refusal", plan.Sessions[1].Generated)
+		for _, s := range plan.Sessions[1:] {
+			if !errors.Is(s.Generated, backend.ErrInvalidName) {
+				t.Errorf("%s Generated = %v, want the backend's refusal", s.Name, s.Generated)
+			}
+		}
+		if got := labelsOf(plan)[1:]; !slices.Equal(got, []string{longest + " · topic-2", longest + " · topic-3"}) {
+			t.Errorf("labels = %q, want the tmux name with each pane's number", got)
 		}
 	})
 
@@ -218,23 +252,47 @@ func TestNewPlan_Panes(t *testing.T) {
 			}
 		}
 	})
+}
 
-	t.Run("a numbered name an earlier session took is taken from a later one", func(t *testing.T) {
-		plan := planSessions(t, session("work", pane(0, orchard), pane(1, orchard)), session("work-2", pane(0, orchard)))
+func TestNewPlan_DirAndCwd(t *testing.T) {
+	t.Run("the dir is the pane's grouping dir, else its cwd; the cwd is the pane's", func(t *testing.T) {
+		plan := planSessions(t, session("lantern", pane(0, orchard), pane(1, orchard+"/web/src"), pane(2, "/tmp/scratch"), pane(3, "")))
 
-		if got := namesOf(plan); !slices.Equal(got, []string{"work", "work-2", "orchard-pipeline-Gen001"}) {
-			t.Errorf("names = %v", got)
+		for i, want := range []struct{ dir, cwd string }{
+			{orchard, orchard},
+			{orchard, orchard + "/web/src"},
+			{"/tmp/scratch", "/tmp/scratch"},
+			{"", ""},
+		} {
+			if got := plan.Sessions[i]; got.Dir != want.dir || got.Cwd != want.cwd {
+				t.Errorf("%s dir %q, cwd %q; want %q, %q", got.Name, got.Dir, got.Cwd, want.dir, want.cwd)
+			}
+		}
+	})
+
+	t.Run("with no grouping dir to find, the dir is the cwd", func(t *testing.T) {
+		n := naming(t)
+		n.GroupingDir = nil
+		got := planOf(t, legacyDir(t, []v1Session{session("lantern", pane(0, orchard+"/web"))}, nil), nil, n).Sessions[0]
+
+		if got.Dir != orchard+"/web" {
+			t.Errorf("dir = %q, want the cwd", got.Dir)
 		}
 	})
 }
 
-func TestNewPlan_DirAndCwd(t *testing.T) {
-	plan := planSessions(t, session("lantern", pane(0, orchard), pane(1, orchard+"/web"), pane(2, "")))
+func TestNewPlan_Skipped(t *testing.T) {
+	plan := planSessions(t,
+		v1Session{Name: "windowless"},
+		sessionOf("paneless", window(0), window(1)),
+		session("lantern", pane(0, orchard)))
 
-	for i, want := range []string{orchard, orchard + "/web", ""} {
-		if got := plan.Sessions[i]; got.Dir != want || got.Cwd != want {
-			t.Errorf("%s dir %q, cwd %q; want both the pane's %q", got.Name, got.Dir, got.Cwd, want)
-		}
+	want := []migrate.SkippedSession{{Name: "windowless", Why: migrate.ErrNoWindows}, {Name: "paneless", Why: migrate.ErrNoPanes}}
+	if !slices.Equal(plan.Skipped, want) {
+		t.Errorf("skipped = %v, want %v", plan.Skipped, want)
+	}
+	if got := namesOf(plan); !slices.Equal(got, []string{"lantern"}) {
+		t.Errorf("names = %v, want lantern alone", got)
 	}
 }
 
@@ -244,25 +302,23 @@ func TestNewPlan_Hooks(t *testing.T) {
 		sessionOf("tidepool · flaky test", window(0, pane(0, orchard)), window(1, pane(0, orchard), pane(2, orchard).token("tokTd2"))),
 		session("orchard", pane(0, orchard).token("tokDup")),
 		session("quarry", pane(0, orchard).token("tokDup")),
+		session("Ab3dE6", pane(0, orchard)),
 	}
 	dir := legacyDir(t, sessions, nil)
 	keys := []string{
-		"tokLan",                    // a token key
-		"tidepool · flaky test:1.0", // a pre-token key at a window and pane past the first
-		"tokTd2",                    // a token key beside its pane's pre-token key, which loses
-		"tidepool · flaky test:1.2",
-		"lantern:0.1", // a pre-token key whose pane's token is no key
-		"tokDup",      // a token two panes carry
-		"tokGone",     // a token of no saved pane
-		"gone:0.0",    // the address of no saved pane
-		"seed-other",  // a key of neither shape
-		"",
+		"tokLan", "tokTd2", "tokDup", // token keys, tokDup carried by two panes
+		"tokGon",                                        // a token of no saved pane
+		"lantern:0.1",                                   // pane addresses: of a pane carrying a token,
+		"tidepool · flaky test:1.0",                     // of one carrying none,
+		"gone:0.0",                                      // and of no saved pane
+		"Ab3dE6:0.0",                                    // a saved session's address, its name token-shaped
+		"Zq8xW4:1.2",                                    // a session token's address
+		"%12",                                           // a tmux pane id
+		"seed-other", "", "a:b.c", "a:1.", ":0.0", "%x", // anything else
 	}
 	plan := planOf(t, dir, keys, naming(t))
 
 	wantMoves := []migrate.HookMove{
-		{From: "lantern:0.1", To: "lantern-2"},
-		{From: "tidepool · flaky test:1.0", To: "tidepool-2"},
 		{From: "tokDup", To: "orchard"},
 		{From: "tokLan", To: "lantern"},
 		{From: "tokTd2", To: "tidepool-3"},
@@ -271,11 +327,19 @@ func TestNewPlan_Hooks(t *testing.T) {
 		t.Errorf("moves = %v\nwant %v", plan.Moves, wantMoves)
 	}
 	wantRemovals := []migrate.HookRemoval{
-		{Key: ""},
-		{Key: "gone:0.0"},
-		{Key: "seed-other"},
-		{Key: "tidepool · flaky test:1.2", Superseded: "tidepool-3"},
-		{Key: "tokGone"},
+		{Key: "", Kind: migrate.OtherKey},
+		{Key: "%12", Kind: migrate.PaneIDKey},
+		{Key: "%x", Kind: migrate.OtherKey},
+		{Key: ":0.0", Kind: migrate.OtherKey},
+		{Key: "Ab3dE6:0.0", Kind: migrate.PaneAddressKey},
+		{Key: "Zq8xW4:1.2", Kind: migrate.PortalIDKey},
+		{Key: "a:1.", Kind: migrate.OtherKey},
+		{Key: "a:b.c", Kind: migrate.OtherKey},
+		{Key: "gone:0.0", Kind: migrate.PaneAddressKey},
+		{Key: "lantern:0.1", Kind: migrate.PaneAddressKey},
+		{Key: "seed-other", Kind: migrate.OtherKey},
+		{Key: "tidepool · flaky test:1.0", Kind: migrate.PaneAddressKey},
+		{Key: "tokGon", Kind: migrate.UnsavedTokenKey},
 	}
 	if !slices.Equal(plan.Removals, wantRemovals) {
 		t.Errorf("removals = %v\nwant %v", plan.Removals, wantRemovals)
@@ -283,6 +347,8 @@ func TestNewPlan_Hooks(t *testing.T) {
 }
 
 func TestNewPlan_Transcripts(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "escaped.bin"), "not the state dir's")
 	sessions := []v1Session{session("lantern",
 		pane(0, orchard).scrollback("scrollback/lantern__0.0.bin"),
 		pane(1, orchard),
@@ -291,9 +357,15 @@ func TestNewPlan_Transcripts(t *testing.T) {
 		pane(4, orchard).scrollback("/etc/absolute.bin"),
 		pane(5, orchard).scrollback("scrollback/a-dir"),
 		pane(6, orchard).scrollback("scrollback/link.bin"),
+		pane(7, orchard).scrollback("linked/escaped.bin"),
+		pane(8, orchard).scrollback("scrollback/lantern__0.0.bin/below-a-file.bin"),
+		pane(9, orchard).scrollback("scrollback/nul\x00.bin"),
 	)}
 	dir := legacyDir(t, sessions, map[string]string{"scrollback/lantern__0.0.bin": "saved\n", "scrollback/a-dir/inside": "x"})
 	if err := os.Symlink(filepath.Join(dir, "scrollback", "lantern__0.0.bin"), filepath.Join(dir, "scrollback", "link.bin")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linked")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
 	plan := planOf(t, dir, nil, naming(t))
@@ -329,6 +401,19 @@ func TestNewPlan_Transcripts(t *testing.T) {
 			got := plan.Sessions[i].Transcript
 			if got.File != "" || !errors.Is(got.Missing, tc.want) {
 				t.Errorf("transcript = %+v, want none copied, missing for %v", got, tc.want)
+			}
+		})
+	}
+
+	for i, what := range map[int]string{
+		7: "a file below a directory link leading out of the state dir",
+		8: "a path through a file",
+		9: "a name holding NUL",
+	} {
+		t.Run(what+" copies none, carrying the lookup's error", func(t *testing.T) {
+			got := plan.Sessions[i].Transcript
+			if got.File != "" || got.Missing == nil {
+				t.Errorf("transcript = %+v, want none copied, missing with the lookup's error", got)
 			}
 		})
 	}

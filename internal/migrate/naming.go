@@ -22,10 +22,28 @@ const labelSeparator = " · "
 // composes are taken, as a mint's does.
 const maxAttempts = 10
 
-// name is a pane's planned name, and why it was generated, nil when it wasn't.
+// ownName is a tmux session's own name: its name up to " · ", trimmed of
+// surrounding whitespace.
+func ownName(tmuxName string) string {
+	given, _, _ := strings.Cut(tmuxName, labelSeparator)
+	return strings.TrimSpace(given)
+}
+
+// withNumber is s for the first pane, and s with the pane's number for another.
+func withNumber(s string, number int) string {
+	if number == 1 {
+		return s
+	}
+	return fmt.Sprintf("%s-%d", s, number)
+}
+
+// name is a pane's planned name; why it was generated, nil when it wasn't; and
+// its number: 1 for a session's first pane, and for another the number its
+// name carries, or would have carried had it fit.
 type name struct {
 	name      string
 	generated error
+	number    int
 }
 
 // namer hands out names, each one the backend takes and none folding to one
@@ -36,52 +54,60 @@ type namer struct {
 	taken    []string
 }
 
-// names names each of a tmux session's panes, in order: the first by the
-// session's name up to " · ", each other by the first's with its number.
-func (n *namer) names(tmuxName string, panes []savedPane) ([]name, error) {
-	given, _, _ := strings.Cut(tmuxName, labelSeparator)
-	var names []name
-	for i, p := range panes {
-		candidate, inherited := given, error(nil)
-		if i > 0 {
-			candidate, inherited = numbered(names[0].name, i+1), names[0].generated
-		}
-		named, err := n.claim(candidate, inherited, p.pane.CWD)
-		if err != nil {
-			return nil, err
-		}
-		names = append(names, named)
-	}
-	return names, nil
-}
-
-// claim takes candidate when it can, generated for the reason inherited;
-// otherwise it takes a generated name for a session in dir, generated for the
-// reason candidate couldn't be taken.
-func (n *namer) claim(candidate string, inherited error, dir string) (name, error) {
-	refused := n.refusal(candidate)
-	if refused == nil {
-		n.taken = append(n.taken, candidate)
-		return name{name: candidate, generated: inherited}, nil
-	}
-	generated, err := n.generate(dir)
-	if err != nil {
-		return name{}, err
-	}
-	n.taken = append(n.taken, generated)
-	return name{name: generated, generated: refused}, nil
-}
-
-// refusal says why candidate can't be taken: the backend refuses it, or it
-// folds to a name taken already. It is nil when it can.
-func (n *namer) refusal(candidate string) error {
+// reserve takes candidate when it can, and says why it can't otherwise.
+func (n *namer) reserve(candidate string) error {
 	if err := n.validate(candidate); err != nil {
 		return err
 	}
 	if holder, ok := n.holder(candidate); ok {
 		return fmt.Errorf("%w by %q", ErrNameTaken, holder)
 	}
+	n.taken = append(n.taken, candidate)
 	return nil
+}
+
+// names names each pane of s: the first by s's own name, reserved already
+// unless that was refused, then by a generated one; each other by the first's
+// with the lowest free number above the last pane's, or a generated one once
+// no number fits.
+func (n *namer) names(s migratingSession) ([]name, error) {
+	first := name{name: s.own, number: 1}
+	if s.refused != nil {
+		generated, err := n.generate(s.panes[0].dir)
+		if err != nil {
+			return nil, err
+		}
+		first = name{name: generated, generated: s.refused, number: 1}
+	}
+	names := []name{first}
+	for _, p := range s.panes[1:] {
+		extra, err := n.extra(first, names[len(names)-1].number+1, p.dir)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, extra)
+	}
+	return names, nil
+}
+
+// extra is first's name with the lowest free number from number on, or, once
+// the backend refuses it, a longer number fitting no better, a generated name
+// for a session in dir.
+func (n *namer) extra(first name, number int, dir string) (name, error) {
+	for ; ; number++ {
+		candidate := withNumber(first.name, number)
+		if refused := n.validate(candidate); refused != nil {
+			generated, err := n.generate(dir)
+			if err != nil {
+				return name{}, err
+			}
+			return name{name: generated, generated: refused, number: number}, nil
+		}
+		if _, held := n.holder(candidate); !held {
+			n.taken = append(n.taken, candidate)
+			return name{name: candidate, generated: first.generated, number: number}, nil
+		}
+	}
 }
 
 // holder is the taken name candidate folds to, as a filesystem that folds
@@ -95,8 +121,8 @@ func (n *namer) holder(candidate string) (string, bool) {
 	return "", false
 }
 
-// generate is a free {project}-{nanoid} name by the minting rule, the project
-// dir's last element.
+// generate takes a free {project}-{nanoid} name by the minting rule, the
+// project dir's last element.
 func (n *namer) generate(dir string) (string, error) {
 	project := ""
 	if dir != "" {
@@ -112,6 +138,7 @@ func (n *namer) generate(dir string) (string, error) {
 			return "", fmt.Errorf("generate a session name for %q: %w", project, err)
 		}
 		if _, held := n.holder(generated); !held {
+			n.taken = append(n.taken, generated)
 			return generated, nil
 		}
 	}

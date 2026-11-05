@@ -2,8 +2,9 @@
 // version's, for portal migrate. ReadLegacy reads the tmux version's
 // sessions.json, version 1, and looks for the scrollback files it names;
 // NewPlan works out, writing nothing, the zmx session each tmux pane becomes
-// and the key each hooks.json key moves to; Apply writes that plan into a new
-// state dir and hooks.json. It is the one reader of version 1.
+// and what becomes of each hooks.json key; Build writes the plan's sessions
+// into a fresh state dir, and RewriteHooks writes hooks.json from its backup
+// through the plan. It is the one reader of version 1.
 package migrate
 
 import (
@@ -11,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +31,10 @@ var (
 	// ErrNotRegular is why a scrollback file that isn't a regular file isn't
 	// copied.
 	ErrNotRegular = errors.New("is not a regular file")
+	// ErrNoWindows and ErrNoPanes are why a tmux session version 1 saved
+	// becomes no zmx session.
+	ErrNoWindows = errors.New("version 1 saved no windows for it")
+	ErrNoPanes   = errors.New("version 1 saved no panes for it")
 )
 
 // legacyIndex is as much of a version 1 sessions.json as migrate reads: each
@@ -100,8 +104,17 @@ func (s legacySession) panes() []savedPane {
 	return saved
 }
 
+// empty says why a session with no saved panes has none.
+func (s legacySession) empty() error {
+	if len(s.Windows) == 0 {
+		return ErrNoWindows
+	}
+	return ErrNoPanes
+}
+
 // Legacy is the tmux version's saved state, as ReadLegacy found it.
 type Legacy struct {
+	dir   string
 	index legacyIndex
 	// transcripts is what ReadLegacy found of each scrollback file a pane
 	// names, by the name the pane gives it.
@@ -109,13 +122,19 @@ type Legacy struct {
 }
 
 // ReadLegacy reads the version 1 sessions.json in dir, the tmux version's
-// state dir, and looks there for each scrollback file it names. A
+// state dir, and looks there for each scrollback file it names, every read
+// through a root on dir, so none leaves it, whatever links lie below. A dir or
 // sessions.json that is absent (an error matching fs.ErrNotExist), unreadable,
-// corrupt or of another version is an error, and so is a scrollback file it
-// can't look for. One that is absent, outside dir or not a regular file is
-// not: its pane is migrated with no scrollback, and the plan says why.
+// corrupt or of another version is an error. A scrollback file that can't be
+// found, or is outside dir or no regular file, is not: its pane is migrated
+// with no scrollback, and the plan says why.
 func ReadLegacy(dir string) (Legacy, error) {
-	data, err := os.ReadFile(filepath.Join(dir, legacyIndexFile))
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return Legacy{}, fmt.Errorf("open the tmux version's state dir: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(legacyIndexFile)
 	if err != nil {
 		return Legacy{}, fmt.Errorf("read the tmux version's sessions.json: %w", err)
 	}
@@ -126,38 +145,31 @@ func ReadLegacy(dir string) (Legacy, error) {
 	transcripts := map[string]Transcript{}
 	for _, s := range idx.Sessions {
 		for _, p := range s.panes() {
-			named := p.pane.ScrollbackFile
-			if _, found := transcripts[named]; found || named == "" {
-				continue
-			}
-			if transcripts[named], err = lookFor(dir, named); err != nil {
-				return Legacy{}, err
+			if named := p.pane.ScrollbackFile; named != "" {
+				transcripts[named] = lookFor(root, named)
 			}
 		}
 	}
-	return Legacy{index: idx, transcripts: transcripts}, nil
+	return Legacy{dir: dir, index: idx, transcripts: transcripts}, nil
 }
 
-// lookFor finds the scrollback file named, relative to dir, saying why it
+// lookFor finds the scrollback file named, relative to root, saying why it
 // can't be copied when it can't.
-func lookFor(dir, named string) (Transcript, error) {
+func lookFor(root *os.Root, named string) Transcript {
 	found := Transcript{Named: named}
 	rel := filepath.FromSlash(named)
 	if !filepath.IsLocal(rel) {
 		found.Missing = fmt.Errorf("scrollback file %q %w", named, ErrOutsideState)
-		return found, nil
+		return found
 	}
-	path := filepath.Join(dir, rel)
-	info, err := os.Lstat(path)
+	info, err := root.Lstat(rel)
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		found.Missing = err
 	case err != nil:
-		return Transcript{}, fmt.Errorf("look for scrollback file %s: %w", path, err)
+		found.Missing = fmt.Errorf("look for scrollback file %q: %w", named, err)
 	case !info.Mode().IsRegular():
-		found.Missing = fmt.Errorf("scrollback file %s %w", path, ErrNotRegular)
+		found.Missing = fmt.Errorf("scrollback file %q %w", named, ErrNotRegular)
 	default:
-		found.source = path
+		found.source = rel
 	}
-	return found, nil
+	return found
 }

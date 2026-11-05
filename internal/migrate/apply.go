@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
@@ -14,23 +15,18 @@ import (
 // via is the surface migrate's writes come from: the portal migrate command.
 const via = "cli"
 
-// Apply writes plan into dir, the zmx version's state dir, made 0700 if
-// absent, and rewrites hooks.json through store, each file replaced
-// atomically:
-//   - each session's entry in sessions.json, owed a restore and recording no
-//     creation, and its scrollback copied to the file the entry names, all in
-//     one hold of the commit lock, so no saver's clean takes a copy before an
-//     entry names it;
-//   - then hooks.json's keys moved to the new names and the rest removed, in
-//     one write.
-//
-// Applying a plan again changes nothing: its scrollback is copied again as it
-// was, its entries are found made and its keys found moved or removed. An
-// entry under one of its names that isn't the one it makes refuses it with
-// sessionindex.ErrNameHeld, writing nothing.
-func Apply(plan Plan, dir string, store *hooks.Store) error {
+// Build writes plan's sessions into dir, the fresh state dir migrate builds
+// beside the tmux version's, made 0700 with its scrollback dir if absent:
+// first each scrollback file, copied from the tmux version's state dir through
+// a root on it, so no read leaves it; then sessions.json's entries, owed a
+// restore and recording no creation. A copy that fails writes no entry, so no
+// entry names a file not copied. Each file is written atomically.
+func Build(plan Plan, dir string) error {
 	if err := os.MkdirAll(state.ScrollbackDir(dir), 0o700); err != nil {
 		return fmt.Errorf("make the state dir: %w", err)
+	}
+	if err := copyTranscripts(plan, dir); err != nil {
+		return err
 	}
 	if _, err := sessionindex.Update(dir, via, func(idx *sessionindex.Index) error {
 		for _, s := range plan.Sessions {
@@ -38,11 +34,19 @@ func Apply(plan Plan, dir string, store *hooks.Store) error {
 				return err
 			}
 		}
-		return copyTranscripts(dir, plan.Sessions)
+		return nil
 	}); err != nil {
 		return fmt.Errorf("write the migrated sessions: %w", err)
 	}
-	if err := store.Rekey(plan.moves(), plan.removedKeys(), hooks.ViaCLI); err != nil {
+	return nil
+}
+
+// RewriteHooks writes hooks.json through store from backup, the copy of it
+// migrate keeps: each key the plan moves under its session's name, each it
+// removes gone, every value as backup holds it, in one write. It never reads
+// hooks.json, so every run writes the same file. No backup writes nothing.
+func RewriteHooks(plan Plan, backup string, store *hooks.Store) error {
+	if err := store.RekeyFrom(backup, plan.moves(), plan.removedKeys(), hooks.ViaCLI); err != nil {
 		return fmt.Errorf("rewrite hooks.json: %w", err)
 	}
 	return nil
@@ -55,12 +59,18 @@ func (s Session) entry() sessionindex.Entry {
 
 // copyTranscripts copies each session's scrollback file into dir under the
 // name its entry gives it.
-func copyTranscripts(dir string, sessions []Session) error {
-	for _, s := range sessions {
-		if s.Transcript.File == "" {
-			continue
-		}
-		data, err := os.ReadFile(s.Transcript.source)
+func copyTranscripts(plan Plan, dir string) error {
+	copied := slices.DeleteFunc(slices.Clone(plan.Sessions), func(s Session) bool { return s.Transcript.File == "" })
+	if len(copied) == 0 {
+		return nil
+	}
+	root, err := os.OpenRoot(plan.legacyDir)
+	if err != nil {
+		return fmt.Errorf("open the tmux version's state dir: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	for _, s := range copied {
+		data, err := root.ReadFile(s.Transcript.source)
 		if err != nil {
 			return fmt.Errorf("read the scrollback of %s: %w", s.From, err)
 		}

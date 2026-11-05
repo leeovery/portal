@@ -34,7 +34,9 @@ type fixturePane struct {
 }
 
 // fixtureSession is a tmux session of the realistic fixture: its name, its
-// project's directory under an invented home, and its panes, all in window 0.
+// project, and its panes, all in window 0. A project is a repository under
+// codeDir, or an absolute directory outside any. A session's first pane works
+// in its project's directory, and any other in the project's web directory.
 type fixtureSession struct {
 	tmux, project string
 	panes         []fixturePane
@@ -42,7 +44,7 @@ type fixtureSession struct {
 
 // realisticSessions is thirty tmux sessions as the tmux version saved them.
 // Every name is invented. One session has two panes; one name is too long for
-// zmx; one is a live zmx session's already.
+// zmx; one is a live zmx session's already; one works outside any repository.
 var realisticSessions = []fixtureSession{
 	{"orchard-pipeline-Hq7wNe · api review", "orchard-pipeline", []fixturePane{{"k3f9qz", byToken, tokenKey}, {"p8Lm2x", byToken, tokenKey}}},
 	{"lantern-9fKq2L", "lantern", []fixturePane{{"Tq4n8B", byToken, tokenKey}}},
@@ -51,7 +53,7 @@ var realisticSessions = []fixtureSession{
 	{"juniper-api-Wd5gH2 · auth refactor", "juniper-api", []fixturePane{{"Hy6v3K", byToken, tokenKey}}},
 	{"saltmarsh-Lk2rQ8", "saltmarsh", []fixturePane{{"Nb5x7J", missing, tokenKey}}},
 	{"copperleaf-Ze4tY6 · release notes", "copperleaf", []fixturePane{{"Cv8w1M", byToken, tokenKey}}},
-	{"driftwood-Fs9pA3", "driftwood", []fixturePane{{"", positional, ""}}},
+	{"driftwood-Fs9pA3", "/tmp/driftwood", []fixturePane{{"", positional, ""}}},
 	{"ember-ui-Gu1kB7 · dark mode", "ember-ui", []fixturePane{{"Qe3r6T", byToken, tokenKey}}},
 	{"fernwood-Jh5mC9", "fernwood", []fixturePane{{"Ws2y4U", byToken, tokenKey}}},
 	{"glacier-ops-Kc7nD1 · terraform plan", "glacier-ops", []fixturePane{{"Ex9i5O", byToken, tokenKey}}},
@@ -80,11 +82,32 @@ var realisticSessions = []fixtureSession{
 // fixture session's name, and an unrelated entry.
 var realisticTaken = []string{"quarry-Pm4sT1", "dotfiles-Aa1Bb2"}
 
-// realisticUnmapped are hooks.json keys mapping to no saved pane: a token of a
-// pane gone before the last save, and a gone session's pane address.
-var realisticUnmapped = []string{"Yy9Ww8", "retired-Qa1sW2:0.0"}
+// realisticUnmapped are hooks.json keys carried by no saved pane, by what each
+// was: a token of a pane gone before the last save, a gone session's pane
+// address, a session token's pane address, and a tmux pane id.
+var realisticUnmapped = map[string]migrate.HookKeyKind{
+	"Yy9Ww8":             migrate.UnsavedTokenKey,
+	"retired-Qa1sW2:0.0": migrate.PaneAddressKey,
+	"Qa1sW2:0.0":         migrate.PortalIDKey,
+	"%12":                migrate.PaneIDKey,
+}
 
-func fixtureDir(project string) string { return "/home/user/code/" + project }
+// fixtureDir is the directory of project.
+func fixtureDir(project string) string {
+	if filepath.IsAbs(project) {
+		return project
+	}
+	return codeDir + project
+}
+
+// fixtureCwd is the working directory of a pane at index of a session of
+// project.
+func fixtureCwd(project string, index int) string {
+	if index == 0 {
+		return fixtureDir(project)
+	}
+	return fixtureDir(project) + "/web"
+}
 
 func (p fixturePane) scrollbackFile(session string, index int) string {
 	switch p.scrollback {
@@ -126,7 +149,7 @@ func realisticFixture(t *testing.T) (dir, hooksBody string) {
 		var panes []v1Pane
 		for i, p := range s.panes {
 			file := p.scrollbackFile(s.tmux, i)
-			panes = append(panes, pane(i, fixtureDir(s.project)).token(p.token).scrollback(file))
+			panes = append(panes, pane(i, fixtureCwd(s.project, i)).token(p.token).scrollback(file))
 			if p.scrollback == byToken || p.scrollback == positional {
 				files[file] = transcriptOf(s.tmux, i)
 			}
@@ -142,7 +165,7 @@ func realisticFixture(t *testing.T) (dir, hooksBody string) {
 		}
 		sessions = append(sessions, session(s.tmux, panes...))
 	}
-	for _, key := range realisticUnmapped {
+	for _, key := range slices.Sorted(maps.Keys(realisticUnmapped)) {
 		entries = append(entries, fmt.Sprintf(`%q: {"on-resume": %s}`, key, commandOf(n, key)))
 		n++
 	}
@@ -151,9 +174,10 @@ func realisticFixture(t *testing.T) (dir, hooksBody string) {
 
 func TestRealisticFixture(t *testing.T) {
 	legacy, hooksBody := realisticFixture(t)
+	backupStore, backup := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody, SidecarAbsent: true})
 	store, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody})
-	original := rawHooks(t, hooksPath)
-	plan := planOf(t, legacy, hookKeys(t, store), naming(t, realisticTaken...))
+	original := rawHooks(t, backup)
+	plan := planOf(t, legacy, hookKeys(t, backupStore), naming(t, realisticTaken...))
 	byAddress := map[string]migrate.Session{}
 	for _, s := range plan.Sessions {
 		byAddress[s.From.String()] = s
@@ -190,8 +214,8 @@ func TestRealisticFixture(t *testing.T) {
 			if topic {
 				wantLabel = fixture.tmux
 			}
-			if got.Label != wantLabel {
-				t.Errorf("%q labelled %q, want %q", fixture.tmux, got.Label, wantLabel)
+			if got.Label != wantLabel || got.LabelRefused != nil {
+				t.Errorf("%q labelled %q (refused: %v), want %q", fixture.tmux, got.Label, got.LabelRefused, wantLabel)
 			}
 		}
 	})
@@ -222,26 +246,33 @@ func TestRealisticFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("each hook key moves to its pane's session, the token winning, and the rest are removed", func(t *testing.T) {
+	t.Run("each session's dir is its pane's repository, else its working directory", func(t *testing.T) {
+		for _, fixture := range realisticSessions {
+			for i := range fixture.panes {
+				got := byAddress[fmt.Sprintf("%s:0.%d", fixture.tmux, i)]
+				if want := fixtureDir(fixture.project); got.Dir != want || got.Cwd != fixtureCwd(fixture.project, i) {
+					t.Errorf("%s: dir %q, cwd %q; want %q, %q", got.Name, got.Dir, got.Cwd, want, fixtureCwd(fixture.project, i))
+				}
+			}
+		}
+	})
+
+	t.Run("each token key moves to its pane's session, and every other key is removed, saying what it was", func(t *testing.T) {
 		wantMoves := map[string]string{}
 		var wantRemovals []migrate.HookRemoval
 		for _, fixture := range realisticSessions {
 			for i, p := range fixture.panes {
 				address := fmt.Sprintf("%s:0.%d", fixture.tmux, i)
-				name := byAddress[address].Name
-				switch p.hook {
-				case tokenKey:
-					wantMoves[p.token] = name
-				case addressKey:
-					wantMoves[address] = name
-				case bothKeys:
-					wantMoves[p.token] = name
-					wantRemovals = append(wantRemovals, migrate.HookRemoval{Key: address, Superseded: name})
+				if p.hook == tokenKey || p.hook == bothKeys {
+					wantMoves[p.token] = byAddress[address].Name
+				}
+				if p.hook == addressKey || p.hook == bothKeys {
+					wantRemovals = append(wantRemovals, migrate.HookRemoval{Key: address, Kind: migrate.PaneAddressKey})
 				}
 			}
 		}
-		for _, key := range realisticUnmapped {
-			wantRemovals = append(wantRemovals, migrate.HookRemoval{Key: key})
+		for key, kind := range realisticUnmapped {
+			wantRemovals = append(wantRemovals, migrate.HookRemoval{Key: key, Kind: kind})
 		}
 		slices.SortFunc(wantRemovals, func(a, b migrate.HookRemoval) int { return strings.Compare(a.Key, b.Key) })
 
@@ -257,16 +288,16 @@ func TestRealisticFixture(t *testing.T) {
 		}
 	})
 
-	newDir := t.TempDir()
-	if err := migrate.Apply(plan, newDir, store); err != nil {
-		t.Fatalf("Apply: %v", err)
+	newDir := filepath.Join(t.TempDir(), "state")
+	if err := migrate.Build(plan, newDir); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := migrate.RewriteHooks(plan, backup, store); err != nil {
+		t.Fatalf("RewriteHooks: %v", err)
 	}
 
 	t.Run("sessions.json holds every session owed a restore, recording no creation", func(t *testing.T) {
-		idx, err := sessionindex.Read(newDir)
-		if err != nil {
-			t.Fatalf("read sessions.json: %v", err)
-		}
+		idx := readIndex(t, newDir)
 		if idx.Len() != len(plan.Sessions) {
 			t.Fatalf("%d entries, want %d", idx.Len(), len(plan.Sessions))
 		}
@@ -301,13 +332,12 @@ func TestRealisticFixture(t *testing.T) {
 	})
 
 	t.Run("hooks.json holds each moved key's value byte for byte under its new name, and nothing else", func(t *testing.T) {
-		after := rawHooks(t, hooksPath)
 		want := map[string]string{}
 		for _, m := range plan.Moves {
 			want[m.To] = compact(t, original[m.From])
 		}
 		got := map[string]string{}
-		for key, value := range after {
+		for key, value := range rawHooks(t, hooksPath) {
 			got[key] = compact(t, value)
 		}
 		if !maps.Equal(got, want) {
@@ -315,14 +345,17 @@ func TestRealisticFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("applying it again changes nothing", func(t *testing.T) {
+	t.Run("migrating it again changes nothing", func(t *testing.T) {
 		once, hooksFile := dirFiles(t, newDir), readBytes(t, hooksPath)
-		if err := migrate.Apply(plan, newDir, store); err != nil {
-			t.Fatalf("Apply again: %v", err)
+		if err := migrate.Build(plan, newDir); err != nil {
+			t.Fatalf("Build again: %v", err)
+		}
+		if err := migrate.RewriteHooks(plan, backup, store); err != nil {
+			t.Fatalf("RewriteHooks again: %v", err)
 		}
 		if again := dirFiles(t, newDir); !maps.EqualFunc(again, once, bytes.Equal) {
-			t.Error("the state dir changed on a second apply")
+			t.Error("the state dir changed on a second build")
 		}
-		hookstest.AssertHooksFileUnchanged(t, hooksPath, hooksFile, "changed by a second apply")
+		hookstest.AssertHooksFileUnchanged(t, hooksPath, hooksFile, "changed by a second rewrite")
 	})
 }

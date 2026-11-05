@@ -16,8 +16,7 @@ type TmuxPane struct {
 	Pane    int
 }
 
-// String is the pane's address, <session>:<window>.<pane>, which keyed its
-// hook in hooks.json before panes carried tokens.
+// String is the pane's address, <session>:<window>.<pane>.
 func (p TmuxPane) String() string { return fmt.Sprintf("%s:%d.%d", p.Session, p.Window, p.Pane) }
 
 // Session is the zmx session migrate makes of one tmux pane.
@@ -28,10 +27,13 @@ type Session struct {
 	// session's name; nil when it wasn't. A pane numbered after a generated
 	// first name carries the first's reason.
 	Generated error
-	// Label is the label the entry records: empty when it is the name.
-	Label string
-	// Dir and Cwd are both the pane's working directory: version 1 recorded
-	// no other.
+	// Label is the label the entry records: empty when it is the name, or
+	// when the index refuses it, LabelRefused then saying why.
+	Label        string
+	LabelRefused error
+	// Dir is the git root of the pane's working directory, the dir the zmx
+	// version groups a session with no recorded one under, or that working
+	// directory when it has none. Cwd is the working directory.
 	Dir, Cwd   string
 	Transcript Transcript
 }
@@ -47,39 +49,83 @@ type Transcript struct {
 	// Missing says why a file version 1 named isn't copied; nil when it is,
 	// and when it named none.
 	Missing error
-	// source is Named under the tmux version's state dir, for one copied.
+	// source is Named as a path below the tmux version's state dir, for one
+	// copied.
 	source string
 }
 
-// HookMove is a hooks.json key moved to the name of the session its pane
-// became.
+// SkippedSession is a tmux session version 1 saved that becomes no zmx
+// session, and why.
+type SkippedSession struct {
+	Name string
+	Why  error
+}
+
+// HookMove is a token key of hooks.json moved to the name of the session its
+// pane became.
 type HookMove struct {
 	From, To string
 }
 
-// HookRemoval is a hooks.json key Apply removes: it maps to no migrated
-// session, and left behind, a key of the tmux version's shape would hold
-// zmx's hook sweep down for good. The tmux version's state dir keeps a copy of
-// hooks.json.
+// HookKeyKind is what a hooks.json key RewriteHooks removes was.
+type HookKeyKind int
+
+const (
+	// PaneAddressKey is <session>:<window>.<pane>, the key before pane
+	// tokens.
+	PaneAddressKey HookKeyKind = iota + 1
+	// PortalIDKey is <@portal-id>:<window>.<pane>, its session's token in
+	// place of its name, the key for a while before pane tokens.
+	PortalIDKey
+	// PaneIDKey is %N, tmux's own pane id, the earliest key.
+	PaneIDKey
+	// UnsavedTokenKey is a pane token no saved pane carries.
+	UnsavedTokenKey
+	// OtherKey is a key of no shape Portal wrote.
+	OtherKey
+)
+
+func (k HookKeyKind) String() string {
+	switch k {
+	case PaneAddressKey:
+		return "pane address"
+	case PortalIDKey:
+		return "session token and pane address"
+	case PaneIDKey:
+		return "tmux pane id"
+	case UnsavedTokenKey:
+		return "token of no saved pane"
+	case OtherKey:
+		return "other"
+	}
+	return fmt.Sprintf("HookKeyKind(%d)", int(k))
+}
+
+// HookRemoval is a hooks.json key RewriteHooks removes, and what it was. Only
+// a token key is carried: on the tmux version, restore fired a pane's hook by
+// its saved token alone, so a key of any older shape has fired nothing since
+// pane tokens, and its coordinates, from when it was set, name whatever pane
+// sits there now. hooks.json's backup keeps every key.
 type HookRemoval struct {
-	Key string
-	// Superseded is the name of the session the key's pane became when that
-	// pane's token key, which wins, moves there; empty when the key maps to
-	// no pane.
-	Superseded string
+	Key  string
+	Kind HookKeyKind
 }
 
 // Plan is everything migrate writes, worked out before it writes anything:
 // one session for each tmux pane, in the order version 1 saved the sessions
-// and each session's panes in window order then pane order; and each
-// hooks.json key moved or removed, by key.
+// and each session's panes in window order then pane order; the tmux sessions
+// with no pane to migrate; and each hooks.json key moved or removed, by key.
 type Plan struct {
 	Sessions []Session
+	Skipped  []SkippedSession
 	Moves    []HookMove
 	Removals []HookRemoval
+	// legacyDir is the tmux version's state dir, Build's copies' source.
+	legacyDir string
 }
 
-// Naming is what the plan's names keep clear of and obey.
+// Naming is what the plan's names keep clear of and obey, and where its
+// sessions' dirs come from.
 type Naming struct {
 	// Taken are the names already in use: the backend's sessions and the new
 	// state dir's entries.
@@ -89,65 +135,110 @@ type Naming struct {
 	Validate func(name string) error
 	// Mint draws the nanoid a generated name ends in.
 	Mint nanoid.Generator
+	// GroupingDir is session.GroupingDir bound to a git runner: the dir a
+	// session working in cwd groups under, false when there is none. A nil
+	// one finds none.
+	GroupingDir func(cwd string) (string, bool)
+}
+
+// dirOf is the dir the entry of a pane working in cwd records.
+func (n Naming) dirOf(cwd string) string {
+	if n.GroupingDir != nil {
+		if dir, ok := n.GroupingDir(cwd); ok {
+			return dir
+		}
+	}
+	return cwd
+}
+
+// migratingSession is a tmux session with panes to migrate: its own name, why
+// that couldn't be reserved, nil when it was, and its panes.
+type migratingSession struct {
+	tmuxName string
+	own      string
+	refused  error
+	panes    []migratingPane
+}
+
+// migratingPane is a saved pane and the dir its entry records.
+type migratingPane struct {
+	savedPane
+	dir string
 }
 
 // NewPlan works out what migrating legacy writes, given hooks.json's keys.
-//   - A tmux session's first pane takes the session's name up to " · ",
-//     unless Validate refuses it or it is taken, folding case as a filesystem
-//     may: by Naming.Taken or an earlier pane's name. Then it takes a
-//     generated {project}-{nanoid}, by the minting rule, the project its
-//     working directory's last element. Each other pane takes the first's
-//     name with its number, -2, -3 and so on, or a generated one when that is
-//     refused or taken.
-//   - Each label is the tmux session's name, each other pane's with its
-//     number too, omitted when it is the name or one the index would refuse.
+//   - Every tmux session's own name, its name up to " · " trimmed, is
+//     reserved first, unless Validate refuses it or it is taken, folding case
+//     as a filesystem may: by Naming.Taken or an earlier session's. A session
+//     whose own name is refused takes a generated {project}-{nanoid}, by the
+//     minting rule, the project its first pane's dir's last element. Each of
+//     a session's other panes then takes the first's name with the lowest
+//     free number above the last pane's, -2, -3 and so on, or a generated
+//     name once no number fits.
+//   - Each label is the tmux session's name, another pane's with its number,
+//     omitted when it is the name or one the index refuses.
+//   - Each entry's dir is the pane's grouping dir, else its cwd.
 //   - A pane's scrollback file, when ReadLegacy found it, is copied to the
 //     file the zmx version names for the session's creation, taken to be
 //     version 1's saved_at, since the entry records none.
-//   - A token key moves to the session of the pane carrying the token, the
-//     first such pane when several do; any other key to the pane at its
-//     address, unless that pane's token key moves too, which wins. Every key
-//     that moves nowhere is removed.
+//   - A token key moves to the session of the first pane carrying the token.
+//     Every other key is removed.
 //
-// It errors when Mint fails, or no free name can be generated.
+// A tmux session with no panes is skipped. It errors when Mint fails, or no
+// free name can be generated.
 func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
 	n := &namer{validate: naming.Validate, mint: naming.Mint, taken: slices.Clone(naming.Taken)}
-	var panes []savedPane
-	var sessions []Session
+	plan := Plan{legacyDir: legacy.dir}
+	var migrating []migratingSession
 	for _, s := range legacy.index.Sessions {
 		saved := s.panes()
-		names, err := n.names(s.Name, saved)
+		if len(saved) == 0 {
+			plan.Skipped = append(plan.Skipped, SkippedSession{Name: s.Name, Why: s.empty()})
+			continue
+		}
+		m := migratingSession{tmuxName: s.Name, own: ownName(s.Name)}
+		for _, p := range saved {
+			m.panes = append(m.panes, migratingPane{savedPane: p, dir: naming.dirOf(p.pane.CWD)})
+		}
+		m.refused = n.reserve(m.own)
+		migrating = append(migrating, m)
+	}
+	var panes []savedPane
+	for _, m := range migrating {
+		names, err := n.names(m)
 		if err != nil {
 			return Plan{}, err
 		}
-		for i, p := range saved {
-			made, err := legacy.session(s.Name, i+1, p, names[i])
+		for i, p := range m.panes {
+			made, err := legacy.session(m.tmuxName, p, names[i])
 			if err != nil {
 				return Plan{}, err
 			}
-			sessions = append(sessions, made)
+			plan.Sessions = append(plan.Sessions, made)
+			panes = append(panes, p.savedPane)
 		}
-		panes = append(panes, saved...)
 	}
-	moves, removals := newPaneIndex(panes).hooks(hookKeys, sessions)
-	return Plan{Sessions: sessions, Moves: moves, Removals: removals}, nil
+	plan.Moves, plan.Removals = newHookIndex(legacy, panes).hooks(hookKeys, plan.Sessions)
+	return plan, nil
 }
 
-// session is the session made of p, the pane numbered number in its tmux
-// session tmuxName, named n.
-func (l Legacy) session(tmuxName string, number int, p savedPane, n name) (Session, error) {
+// session is the session made of p, a pane of the tmux session tmuxName,
+// named n.
+func (l Legacy) session(tmuxName string, p migratingPane, n name) (Session, error) {
 	transcript, err := l.transcript(p.pane, n.name)
 	if err != nil {
 		return Session{}, err
 	}
+	label, refused := sessionindex.LabelFor(n.name, withNumber(tmuxName, n.number))
 	return Session{
-		From:       p.at,
-		Name:       n.name,
-		Generated:  n.generated,
-		Label:      label(tmuxName, number, n.name),
-		Dir:        p.pane.CWD,
-		Cwd:        p.pane.CWD,
-		Transcript: transcript,
+		From:         p.at,
+		Name:         n.name,
+		Generated:    n.generated,
+		Label:        label,
+		LabelRefused: refused,
+		Dir:          p.dir,
+		Cwd:          p.pane.CWD,
+		Transcript:   transcript,
 	}, nil
 }
 
@@ -167,72 +258,6 @@ func (l Legacy) transcript(p legacyPane, name string) (Transcript, error) {
 	}
 	found.File = file
 	return found, nil
-}
-
-// label is the label the pane numbered number of the tmux session tmuxName
-// records as the session named name: none when the index would refuse it.
-func label(tmuxName string, number int, name string) string {
-	recorded, err := sessionindex.LabelFor(name, numbered(tmuxName, number))
-	if err != nil {
-		return ""
-	}
-	return recorded
-}
-
-// numbered is s for the first pane, and s with the pane's number for another.
-func numbered(s string, number int) string {
-	if number == 1 {
-		return s
-	}
-	return fmt.Sprintf("%s-%d", s, number)
-}
-
-// paneIndex finds a pane's position by its token and by its address, each the
-// first pane carrying it.
-type paneIndex struct {
-	byToken   map[string]int
-	byAddress map[string]int
-}
-
-func newPaneIndex(panes []savedPane) paneIndex {
-	x := paneIndex{byToken: map[string]int{}, byAddress: map[string]int{}}
-	// Backward, so the first pane carrying a token or an address is the one
-	// left holding it.
-	for i, p := range slices.Backward(panes) {
-		if p.pane.PortalPaneID != "" {
-			x.byToken[p.pane.PortalPaneID] = i
-		}
-		x.byAddress[p.at.String()] = i
-	}
-	return x
-}
-
-// hooks moves each of keys to the session the pane it belongs to became,
-// sessions holding the session of each pane, and removes the rest.
-func (x paneIndex) hooks(keys []string, sessions []Session) ([]HookMove, []HookRemoval) {
-	tokenKeyed := map[int]bool{}
-	for _, key := range keys {
-		if i, ok := x.byToken[key]; ok {
-			tokenKeyed[i] = true
-		}
-	}
-	var moves []HookMove
-	var removals []HookRemoval
-	for _, key := range slices.Compact(slices.Sorted(slices.Values(keys))) {
-		i, byToken := x.byToken[key]
-		j, byAddress := x.byAddress[key]
-		switch {
-		case byToken:
-			moves = append(moves, HookMove{From: key, To: sessions[i].Name})
-		case byAddress && tokenKeyed[j]:
-			removals = append(removals, HookRemoval{Key: key, Superseded: sessions[j].Name})
-		case byAddress:
-			moves = append(moves, HookMove{From: key, To: sessions[j].Name})
-		default:
-			removals = append(removals, HookRemoval{Key: key})
-		}
-	}
-	return moves, removals
 }
 
 // moves is the plan's hook moves, by the key each moves.

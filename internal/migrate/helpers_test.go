@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,11 +136,25 @@ func mints() nanoid.Generator {
 	}
 }
 
+// codeDir holds the fixtures' git repositories, one per directory below it.
+const codeDir = "/home/user/code/"
+
+// repoRoot stands in for session.GroupingDir: a working directory below
+// codeDir groups under the repository holding it, and any other under none.
+func repoRoot(cwd string) (string, bool) {
+	rest, ok := strings.CutPrefix(cwd, codeDir)
+	if !ok || rest == "" {
+		return "", false
+	}
+	repo, _, _ := strings.Cut(rest, "/")
+	return codeDir + repo, true
+}
+
 // naming judges names as the zmx backend does over zmxDir, with taken held
-// already, minting from mints.
+// already, minting from mints, grouping by repoRoot.
 func naming(t *testing.T, taken ...string) migrate.Naming {
 	t.Helper()
-	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Mint: mints()}
+	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Mint: mints(), GroupingDir: repoRoot}
 }
 
 // planOf plans migrating the tmux version's state dir dir with hookKeys under
