@@ -14,7 +14,11 @@ const (
 )
 
 func renderDeleteModalContent(name, path string, th theme.Theme, colourless bool) string {
-	spec := destructiveConfirmSpec{
+	return renderDestructiveConfirm(deleteModalSpec(name, path, th, colourless), th, colourless)
+}
+
+func deleteModalSpec(name, path string, th theme.Theme, colourless bool) destructiveConfirmSpec {
+	return destructiveConfirmSpec{
 		title:         deleteTitle,
 		targetName:    name,
 		extraBodyRows: []string{deleteModalPathRow(path, th, colourless)},
@@ -22,7 +26,6 @@ func renderDeleteModalContent(name, path string, th theme.Theme, colourless bool
 		confirmKey:    deleteKeyConfirm,
 		confirmLabel:  deleteLabelConfirm,
 	}
-	return renderDestructiveConfirm(spec, th, colourless)
 }
 
 func deleteModalPathRow(path string, th theme.Theme, colourless bool) string {

@@ -9,11 +9,11 @@ import (
 )
 
 // th never reaches the list's rows — they are drawn by the delegate the model
-// assigned; the caller keeps the two in step. p is a value, so the SetSize
+// assigned; the caller keeps the two in step. p is a value, so the sizing
 // lands on this frame's copy and never mutates the model.
 func renderThemePanel(p themePanel, height int, th theme.Theme, colourless bool) string {
 	inner, bodyRows := themePanelListSize(p, height)
-	p.list.SetSize(inner, bodyRows)
+	sizeList(&p.list, inner, bodyRows)
 
 	header := themePanelHeaderShapeFor(height, p.bandRows, p.union.DirUnusable)
 	rows := themePanelHeaderBlock(header, p.width, th, colourless)

@@ -17,11 +17,11 @@ import (
 // legend-less renders are compared against byte for byte.
 func preLegendHelpPanel(entries []keymapEntry, th theme.Theme, colourless bool) string {
 	bodyRows := helpModalBodyRows(entries, th, colourless)
-	contentWidth := lipgloss.Width(helpModalHeader(0, th, colourless))
+	contentWidth := lipgloss.Width(helpModalHeader(0, false, th, colourless))
 	for _, r := range bodyRows {
 		contentWidth = max(contentWidth, lipgloss.Width(r))
 	}
-	title := helpModalHeader(contentWidth, th, colourless)
+	title := helpModalHeader(contentWidth, false, th, colourless)
 	return renderJoinedPanel([][]string{{title}, bodyRows}, th.Border, th, colourless)
 }
 

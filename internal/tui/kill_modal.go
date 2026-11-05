@@ -15,9 +15,13 @@ const (
 	killLabelAttach = "attach"
 )
 
+func renderKillModalContent(name string, offersAttach bool, th theme.Theme, colourless bool) string {
+	return renderDestructiveConfirm(killModalSpec(name, offersAttach), th, colourless)
+}
+
 // offersAttach adds Enter's choice, for the prompt the kill key asked for
 // from inside the session: keep it and attach it again.
-func renderKillModalContent(name string, offersAttach bool, th theme.Theme, colourless bool) string {
+func killModalSpec(name string, offersAttach bool) destructiveConfirmSpec {
 	spec := destructiveConfirmSpec{
 		title:        killTitle,
 		targetName:   name,
@@ -28,5 +32,5 @@ func renderKillModalContent(name string, offersAttach bool, th theme.Theme, colo
 	if offersAttach {
 		spec.keep = footerHintGroup{key: killKeyAttach, label: killLabelAttach}
 	}
-	return renderDestructiveConfirm(spec, th, colourless)
+	return spec
 }

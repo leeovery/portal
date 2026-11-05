@@ -300,7 +300,7 @@ func (p themePanel) rowItems() []list.Item {
 func (m *Model) applyThemePanelListStyles() {
 	m.themePanel.bandRows = m.pageBandHeight()
 	width, rows := themePanelListSize(m.themePanel, m.contentHeight())
-	m.themePanel.list.SetSize(width, rows)
+	sizeList(&m.themePanel.list, width, rows)
 	m.applyThemePanelCanvasMode()
 }
 

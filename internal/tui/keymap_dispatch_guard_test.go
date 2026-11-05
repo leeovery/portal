@@ -190,6 +190,22 @@ func TestProjectsDescriptorDispatchParity(t *testing.T) {
 	assertDescriptorDispatchParity(t, "projects", projectsKeymap(), probes)
 }
 
+func TestHelpModalDescriptorDispatchParity(t *testing.T) {
+	probes := map[string]dispatchProbe{
+		helpScrollKey: {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
+			top := helpOpenAt(t, shortModalWidth, shortModalHeight)
+			scrolled := pressed(t, top, tea.KeyPressMsg{Code: tea.KeyDown})
+			return drawn(scrolled) != drawn(top) && drawn(pressed(t, scrolled, tea.KeyPressMsg{Code: tea.KeyUp})) == drawn(top)
+		}},
+		"esc": {press: tea.KeyPressMsg{Code: tea.KeyEscape}, honour: func(t *testing.T) bool {
+			m := pressed(t, helpOpenAt(t, shortModalWidth, shortModalHeight), tea.KeyPressMsg{Code: tea.KeyEscape})
+			return m.modal == modalNone
+		}},
+	}
+
+	assertDescriptorDispatchParity(t, "help modal", helpModalKeymap(), probes)
+}
+
 func TestPreviewDescriptorDispatchParity(t *testing.T) {
 	probes := map[string]dispatchProbe{
 		"j/k": {press: tea.KeyPressMsg{Code: 'j', Text: "j"}, honour: func(t *testing.T) bool {

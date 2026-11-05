@@ -300,7 +300,7 @@ func TestHelpModalColourRoles(t *testing.T) {
 			}
 		}
 
-		header := helpModalHeader(60, th, false)
+		header := helpModalHeader(60, false, th, false)
 		if seq := tokenFgSeq(t, th.TextPrimary); !strings.Contains(header, seq) {
 			t.Errorf("help header must render '? Keybindings' in text.primary SGR core %q; missing in:\n%s", seq, header)
 		}
