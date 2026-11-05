@@ -159,6 +159,27 @@ func TestSaverDaemon_End(t *testing.T) {
 		}
 	})
 
+	t.Run("an end refusing a daemon of another state directory is that state directory's saver, refused", func(t *testing.T) {
+		refusal := &zmx.OtherDirError{PID: 4242, Key: "PORTAL_STATE_DIR", Dir: "/srv/portal/state"}
+
+		err := daemonOver(&zmxFake{endErr: refusal}).End(t.Context())
+
+		other, ok := errors.AsType[*saverhost.OtherStateDirError](err)
+		if want := (saverhost.OtherStateDirError{StateDir: daemonState, Other: "/srv/portal/state", PID: 4242}); !ok || *other != want {
+			t.Errorf("End = %v, want %+v", err, want)
+		}
+	})
+
+	t.Run("an end refusing a daemon of another directory under any other variable is the end's failure", func(t *testing.T) {
+		refusal := &zmx.OtherDirError{PID: 4242, Key: "ZMX_DIR", Dir: "/srv/zmx"}
+
+		err := daemonOver(&zmxFake{endErr: refusal}).End(t.Context())
+
+		if _, theirs := errors.AsType[*saverhost.OtherStateDirError](err); theirs || !errors.Is(err, refusal) {
+			t.Errorf("End = %v, want the end's own failure", err)
+		}
+	})
+
 	t.Run("it never runs zmx kill: the zmx on PATH may speak another protocol than the saver found", func(t *testing.T) {
 		fake := &zmxFake{}
 

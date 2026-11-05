@@ -203,6 +203,26 @@ func TestUninstall(t *testing.T) {
 		}
 	})
 
+	// The stop can't read a daemon on a protocol Portal can't use, so only
+	// the end finds it another state directory's: SaverLeftMessage would have
+	// the user end that state's saver.
+	t.Run("one the end finds another state directory's is refused in the bootstrap's terms, printing nothing", func(t *testing.T) {
+		theirs := &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other: "/srv/portal/state", PID: 4242}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: &daemonFake{isUnusable: true, endErr: theirs}})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.OtherStateDir(theirs).UserMessage; err == nil || err.Error() != want {
+			t.Errorf("uninstall = %v, want %q", err, want)
+		}
+		if _, fatal := errors.AsType[*bootstrap.FatalError](err); !fatal {
+			t.Errorf("uninstall = %v, want the bootstrap's fatal, which Execute prints alone", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
 	// Decision 68: the judgement and the end hold saver.lock as the stop
 	// does, so neither can reach a saver a bootstrap makes meanwhile.
 	t.Run("unstaged, it judges and ends a saver it can't stop under saver.lock", func(t *testing.T) {

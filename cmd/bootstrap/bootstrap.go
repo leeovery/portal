@@ -111,7 +111,8 @@ type Saver interface {
 	// session gone.
 	Protocol(ctx context.Context) (int, error)
 	// End ends the saver session's daemon, whatever protocol it speaks, by a
-	// signal to the one process proved that daemon.
+	// signal to the one process proved that daemon. One proved another state
+	// directory's is sent nothing, its error a *saverhost.OtherStateDirError.
 	End(ctx context.Context) error
 	// EndMade ends the saver session EnsureSaver made with the zmx that made
 	// it, which speaks its daemon's protocol, and as End does when that zmx
@@ -365,7 +366,10 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 // it can't judge is kept, the restore left unfinished; one Portal can't use is
 // ended, so the pass goes on as if none ran. One it can't end is the fatal
 // that names the way out, SaverLeftMessage: the judgement's own would send
-// the user to a zmx that leaves it there.
+// the user to a zmx that leaves it there. One the end finds another state
+// directory's, which step 1 can't read on a protocol Portal can't use, is
+// that state directory's refusal: SaverLeftMessage would have the user end
+// it.
 func (p *pass) keepFound(ctx context.Context) (bool, *FatalError) {
 	if !p.saverPresent(ctx) {
 		return false, nil
@@ -380,6 +384,9 @@ func (p *pass) keepFound(ctx context.Context) (bool, *FatalError) {
 		return true, nil
 	}
 	if err := p.Saver.End(ctx); err != nil {
+		if fatal := OtherStateDir(err); fatal != nil {
+			return true, fatal
+		}
 		return true, NewFatal(SaverLeftMessage, fmt.Errorf("%w; Portal couldn't end the saver running on it, which is left: %w", unusable.Cause, err))
 	}
 	p.logger.Info("saver ended", "detail", unusable.Cause.Error()+"; Portal ended the saver running on it")

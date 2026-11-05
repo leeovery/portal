@@ -100,14 +100,12 @@ func (h *Host) ensure(ctx context.Context, d Daemon, made func(context.Context) 
 		return err
 	}
 	defer release()
-	r, err := h.settled(ctx, d.Version)
+	whose := &owner{host: h}
+	r, err := h.settled(ctx, d.Version, whose)
 	if err != nil {
 		return err
 	}
 	if r.present {
-		if err := h.checkStateDir(r.session); err != nil {
-			return err
-		}
 		reason := r.replacing(d.Version)
 		if reason == "" {
 			logger.Info("daemon kept", "target_pid", r.session)
@@ -126,7 +124,7 @@ func (h *Host) ensure(ctx context.Context, d Daemon, made func(context.Context) 
 			return err
 		}
 	}
-	return h.awaitReady(ctx, d.Version)
+	return h.awaitReady(ctx, d.Version, whose)
 }
 
 // notStopped is a recycle's stop of the daemon pid that failed with err:
@@ -143,15 +141,20 @@ func (h *Host) notStopped(pid int, err error) error {
 // session's process, or daemon.version not yet written. Judged sooner, a
 // saver whose ensure gave up on it under load would be stopped on its way up.
 // One proved another state directory's never records itself here, so it is
-// never waited for. A saver whose session can't be read is ErrUnread, and
-// ErrVersionUnproved too unless daemon.version names version.
-func (h *Host) settled(ctx context.Context, version string) (readiness, error) {
+// never waited for: it is whose's *OtherStateDirError. A saver whose session
+// can't be read is ErrUnread, and ErrVersionUnproved too unless daemon.version
+// names version.
+func (h *Host) settled(ctx context.Context, version string, whose *owner) (readiness, error) {
+	var other *OtherStateDirError
 	r, _, err := h.watch(ctx, func(r readiness) bool {
-		return r.sessionErr != nil || !r.present || r.recorded() || h.checkStateDir(r.session) != nil
+		other = whose.of(r)
+		return r.sessionErr != nil || !r.present || other != nil || r.recorded()
 	})
 	switch {
 	case err != nil:
 		return r, fmt.Errorf("wait for the saver's daemon: %w", err)
+	case other != nil:
+		return r, other
 	case r.sessionErr != nil && r.records(version):
 		return r, fmt.Errorf("%w: %w", ErrUnread, r.sessionErr)
 	case r.sessionErr != nil:
@@ -180,13 +183,21 @@ func (h *Host) create(ctx context.Context, exe string) error {
 // awaitReady waits up to ReadyWait for the saver session's process to hold
 // the daemon's lock, daemon.pid naming it, and to record version: the daemon
 // records its version just after its pid. A session that ends first, its
-// daemon refusing to run, fails at once.
-func (h *Host) awaitReady(ctx context.Context, version string) error {
+// daemon refusing to run, fails at once, and so does one whose judges
+// another state directory's, which a create another process won leaves once
+// its daemon has exec'd: its *OtherStateDirError.
+func (h *Host) awaitReady(ctx context.Context, version string, whose *owner) error {
 	start := time.Now()
-	r, done, err := h.watch(ctx, func(r readiness) bool { return r.ready(version) || r.ended() })
+	var other *OtherStateDirError
+	r, done, err := h.watch(ctx, func(r readiness) bool {
+		other = whose.of(r)
+		return other != nil || r.ready(version) || r.ended()
+	})
 	switch {
 	case err != nil:
 		return fmt.Errorf("wait for the saver's daemon: %w", err)
+	case other != nil:
+		return other
 	case !done:
 		return fmt.Errorf("%w within %s: %s", ErrNotReady, h.readyWait, r)
 	case r.ended():
@@ -217,6 +228,44 @@ func (h *Host) watch(ctx context.Context, until func(readiness) bool) (readiness
 		case <-tick.C:
 		}
 	}
+}
+
+// rejudgeEvery is how many readings an owner lets pass before it proves again
+// a process proved neither this state directory's saver's daemon nor
+// another's: a second at the default poll. A session's process keeps its pid
+// as it execs its daemon, so one read before that exec, or one the process
+// table couldn't read, is proved again, and the pid alone never says when.
+const rejudgeEvery = 20
+
+// owner judges whose saver an ensure's readings find, proving each process
+// as seldom as the judgement allows: a process the first reading it is in,
+// one proved a saver's daemon, this state directory's or another's, never
+// again, and any other again every rejudgeEvery readings, so a saver that
+// stays unrecorded costs one proof, not a ps a poll.
+type owner struct {
+	host *Host
+	pid  int
+	// theirs is pid proved another state directory's saver, and settled pid
+	// proved a saver's daemon either way.
+	theirs  *OtherStateDirError
+	settled bool
+	since   int
+}
+
+// of is the *OtherStateDirError of the process r's saver session runs, nil
+// with no session, or while its process isn't proved another state
+// directory's saver.
+func (o *owner) of(r readiness) *OtherStateDirError {
+	if !r.present {
+		return nil
+	}
+	o.since++
+	if r.session != o.pid || !o.settled && o.since >= rejudgeEvery {
+		err := o.host.proof.prove(r.session)
+		o.theirs, _ = errors.AsType[*OtherStateDirError](err)
+		o.pid, o.settled, o.since = r.session, err == nil || o.theirs != nil, 0
+	}
+	return o.theirs
 }
 
 // readiness is one reading of a starting saver: the process its session runs,

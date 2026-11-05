@@ -209,6 +209,31 @@ func TestEnsureSaver_StateDir(t *testing.T) {
 		})
 	}
 
+	// Another state directory's Portal wins the create, and the create's own
+	// check reads its session's process before the daemon has exec'd: the
+	// wait for this state's daemon judges whose the saver is again, and
+	// refuses it once its daemon has exec'd, never waiting out ReadyWait to
+	// restore beside it.
+	t.Run("a saver another state directory's Portal makes first is refused once its daemon has exec'd", func(t *testing.T) {
+		b := &beatenByAnother{Fake: backendtest.New()}
+		p := newProcs(map[int]*proc{firstMade: execing(theirs(otherState, nil), 2)})
+		cfg := config(b, p, t.TempDir())
+		cfg.ReadyWait = lockWait
+		start := time.Now()
+
+		err := ensurerOf(t, hostOf(t, cfg), release).EnsureSaver(t.Context(), nil)
+
+		if other, ok := errors.AsType[*saverhost.OtherStateDirError](err); !ok || other.Other != otherState {
+			t.Fatalf("EnsureSaver = %v, want the saver of %s refused", err, otherState)
+		}
+		if took := time.Since(start); took >= cfg.ReadyWait {
+			t.Errorf("EnsureSaver took %s, want the refusal before ReadyWait, %s", took, cfg.ReadyWait)
+		}
+		if signals := p.signals(); len(signals) != 0 {
+			t.Errorf("signals = %q, want none", signals)
+		}
+	})
+
 	t.Run("a saver another process makes first, of another state directory, is refused, never judged as made", func(t *testing.T) {
 		b := &beatenToIt{Fake: backendtest.New(), dir: t.TempDir(), version: release}
 		p := newProcs(map[int]*proc{firstMade: theirs(otherState, nil)})
@@ -220,6 +245,65 @@ func TestEnsureSaver_StateDir(t *testing.T) {
 
 		if _, ok := errors.AsType[*saverhost.OtherStateDirError](err); !ok {
 			t.Errorf("EnsureSaver = %v, want the saver of %s refused", err, otherState)
+		}
+	})
+}
+
+// beatenByAnother is the Fake whose saver session another state directory's
+// Portal creates first, so the create finds the name held.
+type beatenByAnother struct{ *backendtest.Fake }
+
+func (b *beatenByAnother) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	if _, err := b.Fake.Create(ctx, name, dir, []string{"/usr/local/bin/portal", "state", "daemon"}, saverhost.StateDirMark(otherState)); err != nil {
+		return backend.Session{}, err
+	}
+	return b.Fake.Create(ctx, name, dir, command, env...)
+}
+
+// Every wait on the saver proves the process its session runs once, and again
+// only when that process is another or not yet proved a saver's daemon either
+// way: a saver that stays unrecorded is no ps a poll.
+func TestEnsureSaver_ProvesASteadySaverOnce(t *testing.T) {
+	t.Run("while it waits for a saver found still starting", func(t *testing.T) {
+		p := newProcs(map[int]*proc{daemonPID: daemon(nil)})
+		cfg := config(withSaver(daemonPID), p, t.TempDir())
+		cfg.ReadyWait = lockWait
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		if err := ensurerOf(t, hostOf(t, cfg), release).EnsureSaver(ctx, nil); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("EnsureSaver = %v, want the wait cut short by ctx", err)
+		}
+		if n := p.identified(daemonPID); n != 1 {
+			t.Errorf("pid %d identified %d times over %d polls, want once", daemonPID, n, 100*time.Millisecond/poll)
+		}
+	})
+
+	t.Run("a process proved neither way is proved again every RejudgeEvery readings, no oftener", func(t *testing.T) {
+		b := withSaver(daemonPID)
+		p := newProcs(map[int]*proc{daemonPID: {identifyErr: errors.New("ps failed")}})
+		cfg := config(b, p, t.TempDir())
+		cfg.ReadyWait = lockWait
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		defer cancel()
+
+		if err := ensurerOf(t, hostOf(t, cfg), release).EnsureSaver(ctx, nil); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("EnsureSaver = %v, want the wait cut short by ctx", err)
+		}
+		readings := len(b.CallsTo(backendtest.OpSession))
+		if n, want := p.identified(daemonPID), 1+(readings-1)/saverhost.RejudgeEvery; n != want {
+			t.Errorf("pid %d identified %d times over %d readings, want %d", daemonPID, n, readings, want)
+		}
+	})
+
+	t.Run("while it waits for the saver it made", func(t *testing.T) {
+		p := newProcs(map[int]*proc{firstMade: daemon(nil)})
+
+		if err := newEnsurer(t, backendtest.New(), p, t.TempDir(), release).EnsureSaver(t.Context(), nil); !errors.Is(err, saverhost.ErrNotReady) {
+			t.Fatalf("EnsureSaver = %v, want ErrNotReady from a daemon that never records itself", err)
+		}
+		if n := p.identified(firstMade); n != 1 {
+			t.Errorf("pid %d identified %d times over %d polls, want once", firstMade, n, readyWait/poll)
 		}
 	})
 }

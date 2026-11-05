@@ -196,22 +196,39 @@ func TestEndDaemon_ProvesTheDirectoriesItIsGiven(t *testing.T) {
 		})
 	}
 
-	for name, env := range map[string][]string{
-		"no such directory":          nil,
-		"another directory":          {"PORTAL_STATE_DIR=" + t.TempDir()},
-		"a relative directory":       {"PORTAL_STATE_DIR=state"},
-		"it, then another directory": {mark, "PORTAL_STATE_DIR=" + t.TempDir()},
-		"another directory, then it": {"PORTAL_STATE_DIR=" + t.TempDir(), mark},
-		"it under another variable":  {"PORTAL_STATE=" + state},
+	other, third := t.TempDir(), t.TempDir()
+	for name, tc := range map[string]struct {
+		env []string
+		// theirs is the directory an *OtherDirError names, empty for a
+		// plain failure of the proof.
+		theirs string
+	}{
+		"no such directory":            {env: nil},
+		"another directory":            {env: []string{"PORTAL_STATE_DIR=" + other}, theirs: other},
+		"another directory, set twice": {env: []string{"PORTAL_STATE_DIR=" + other, "PORTAL_STATE_DIR=" + other}, theirs: other},
+		"two other directories":        {env: []string{"PORTAL_STATE_DIR=" + other, "PORTAL_STATE_DIR=" + third}},
+		"a relative directory":         {env: []string{"PORTAL_STATE_DIR=state"}},
+		"it, then another directory":   {env: []string{mark, "PORTAL_STATE_DIR=" + other}},
+		"another directory, then it":   {env: []string{"PORTAL_STATE_DIR=" + other, mark}},
+		"it under another variable":    {env: []string{"PORTAL_STATE=" + state}},
 	} {
 		t.Run("it signals nothing to a daemon naming "+name, func(t *testing.T) {
 			w := newEndingWorld(t)
 			d := daemonOf(100, w.dir, "work")
-			d.Args.Env = append(d.Args.Env, env...)
+			d.Args.Env = append(d.Args.Env, tc.env...)
 			w.table(d)
 
-			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}), mark); err == nil {
-				t.Error("EndDaemon(work) = nil, want the proof's failure")
+			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}), mark)
+
+			if err == nil {
+				t.Fatal("EndDaemon(work) = nil, want the proof's failure")
+			}
+			theirs, isTheirs := errors.AsType[*zmx.OtherDirError](err)
+			switch {
+			case tc.theirs == "" && isTheirs:
+				t.Errorf("EndDaemon(work) = %v, want a plain failure of the proof, no other directory named", err)
+			case tc.theirs != "" && (!isTheirs || *theirs != zmx.OtherDirError{PID: 100, Key: "PORTAL_STATE_DIR", Dir: tc.theirs}):
+				t.Errorf("EndDaemon(work) = %v, want the daemon of %s refused", err, tc.theirs)
 			}
 			if got := w.signals(); len(got) != 0 {
 				t.Errorf("signals sent = %v, want none", got)

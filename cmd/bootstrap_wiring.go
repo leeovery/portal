@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 var restoreLogger = log.For("restore")
@@ -292,10 +293,15 @@ func (d saverDaemon) EndMade(ctx context.Context) error {
 
 // endBySignal ends the saver session's daemon through driver, proved by the
 // state directory's mark beside the session's own, so another state
-// directory's saver is never signalled.
+// directory's saver is never signalled: one whose daemon names another state
+// directory is the *saverhost.OtherStateDirError the proof's refusal is.
 func (d saverDaemon) endBySignal(ctx context.Context, driver saverZmx) error {
-	return driver.EndDaemon(ctx, saver.SessionName, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
+	err := driver.EndDaemon(ctx, saver.SessionName, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
 		saverhost.StateDirMark(d.stateDir))
+	if other, ok := errors.AsType[*zmx.OtherDirError](err); ok && other.Key == xdg.StateDir.EnvVar {
+		return &saverhost.OtherStateDirError{StateDir: d.stateDir, Other: other.Dir, PID: other.PID}
+	}
+	return err
 }
 
 // unusable reports whether the saver session's daemon speaks a protocol

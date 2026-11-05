@@ -557,6 +557,27 @@ func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
 			}
 		})
 	}
+
+	// Step 1 reads the saver through Portal's protocol, which an older zmx's
+	// daemon doesn't answer, so only the end finds it another state
+	// directory's: SaverLeftMessage would have the user end that state's
+	// saver.
+	t.Run("one the end finds another state directory's is that state directory's refusal, nothing made", func(t *testing.T) {
+		r := newRecorder()
+		r.Answers = []answer{older}
+		r.EndErr = fmt.Errorf("end the daemon of session %q: %w", "_portal-saver", theirs)
+
+		fatal := fatalOf(t, r)
+
+		if fatal.UserMessage != theirsMessage || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, theirsMessage, indexEnsureSaver)
+		}
+		for _, call := range []string{"MarkOwed", "EnsureSaver", "Create", "Raise", "Restore", "WriteLatch"} {
+			if r.called(call) {
+				t.Errorf("calls = %v, want no %s past another state directory's saver", r.calls, call)
+			}
+		}
+	})
 }
 
 // decision 63: the saver made is judged before restore creates anything.

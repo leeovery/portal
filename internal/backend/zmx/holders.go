@@ -165,6 +165,22 @@ func CanonicalDir(dir string) string {
 // errUnproved is a session's daemon the process table doesn't prove.
 var errUnproved = errors.New("no one process is proved the session's zmx daemon")
 
+// OtherDirError is EndDaemon's refusal of a session's daemon proved but for
+// one of the directories it was given: its environment sets that variable,
+// every time, to one other absolute directory, so the daemon is another's.
+type OtherDirError struct {
+	PID int
+	// Key is the variable, and Dir the directory it names in place of the
+	// one EndDaemon was given.
+	Key, Dir string
+}
+
+func (e *OtherDirError) Error() string {
+	return fmt.Sprintf("%v: pid %d's environment sets %s=%s", errUnproved, e.PID, e.Key, e.Dir)
+}
+
+func (e *OtherDirError) Unwrap() error { return errUnproved }
+
 // endPoll spaces the looks for a signalled daemon's end.
 const endPoll = 20 * time.Millisecond
 
@@ -182,7 +198,8 @@ const endPoll = 20 * time.Millisecond
 // such process or more than one, a table it can't read, as off darwin, or a
 // daemon whose environment doesn't set each of dirs' variables, KEY=dir, to
 // that directory every time, compared canonically, a relative value only
-// ever itself.
+// ever itself: an *OtherDirError when it sets one, every time, to another
+// absolute directory.
 func (b *Backend) EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error {
 	if err := b.endDaemon(ctx, name, signal, dirs); err != nil {
 		return fmt.Errorf("end the daemon of session %q: %w", name, err)
@@ -201,8 +218,8 @@ func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid in
 	if err != nil {
 		return err
 	}
-	if !setsDirs(d.args.Env, dirs) {
-		return fmt.Errorf("%w: pid %d's environment doesn't name %q", errUnproved, d.PID, dirs)
+	if err := checkDirs(d.PID, d.args.Env, dirs); err != nil {
+		return err
 	}
 	switch err := b.stillDaemon(ctx, d); {
 	case errors.Is(err, proctable.ErrGone):
@@ -285,28 +302,40 @@ func (b *Backend) runsDaemonOf(args proctable.Args, name string) bool {
 	return ok && len(args.Env) > 0 && lookup(args.Env, envPrefix)+started == name && b.isDir(DirFor(args.Env))
 }
 
-// setsDirs reports whether env sets each of dirs' variables, KEY=dir, and to
-// that directory every time it sets it: the same string, or, both absolute,
-// one directory once canonical.
-func setsDirs(env, dirs []string) bool {
+// checkDirs fails unless env, pid's, sets each of dirs' variables, KEY=dir,
+// and to that directory every time it sets it: the same string, or, both
+// absolute, one directory once canonical. One it sets, every time, to one
+// other absolute directory is an *OtherDirError.
+func checkDirs(pid int, env, dirs []string) error {
 	for _, entry := range dirs {
 		key, dir, _ := strings.Cut(entry, "=")
-		set := false
-		for _, kv := range env {
-			k, got, _ := strings.Cut(kv, "=")
-			if k != key {
-				continue
-			}
-			if got != dir && (!filepath.IsAbs(got) || !filepath.IsAbs(dir) || CanonicalDir(got) != CanonicalDir(dir)) {
-				return false
-			}
-			set = true
+		values := envValues(env, key)
+		switch {
+		case len(values) > 0 && !slices.ContainsFunc(values, func(got string) bool { return !sameDir(got, dir) }):
+			continue
+		case len(values) > 0 && filepath.IsAbs(values[0]) && !slices.ContainsFunc(values, func(got string) bool { return got != values[0] }):
+			return &OtherDirError{PID: pid, Key: key, Dir: values[0]}
 		}
-		if !set {
-			return false
+		return fmt.Errorf("%w: pid %d's environment doesn't name %q", errUnproved, pid, entry)
+	}
+	return nil
+}
+
+// envValues is every value env sets key to, in order.
+func envValues(env []string, key string) []string {
+	var values []string
+	for _, kv := range env {
+		if k, value, _ := strings.Cut(kv, "="); k == key {
+			values = append(values, value)
 		}
 	}
-	return true
+	return values
+}
+
+// sameDir reports whether got names dir: the same string, or, both absolute,
+// one directory once canonical. A relative got is only ever itself.
+func sameDir(got, dir string) bool {
+	return got == dir || filepath.IsAbs(got) && filepath.IsAbs(dir) && CanonicalDir(got) == CanonicalDir(dir)
 }
 
 // awaitEnded waits, within the kill ceiling, for the session name's socket to

@@ -54,6 +54,16 @@ type proc struct {
 	zombie bool
 	// onSignal is what a signal does to it; nil leaves it running.
 	onSignal func(p *proc, sig syscall.Signal)
+	// execs is what it becomes, keeping its pid, once it has been
+	// identified after times: a session's process exec'ing its daemon.
+	execs *proc
+	after int
+}
+
+// execing is a session's process not yet exec'd, as zmx forks it: no daemon
+// until it has been identified after times, then d.
+func execing(d *proc, after int) *proc {
+	return &proc{verdict: state.IdentifyNotPortalDaemon, argv: []string{"zmx"}, execs: d, after: after}
 }
 
 // daemon is the saver's daemon: a portal state daemon carrying the marks, the
@@ -111,6 +121,12 @@ func (p *procs) live(pid int) (*proc, bool) {
 
 func (p *procs) identify(pid int) (state.IdentifyResult, error) {
 	p.events = append(p.events, fmt.Sprintf("identify %d", pid))
+	if pr, ok := p.table[pid]; ok && pr.execs != nil {
+		if pr.after == 0 {
+			p.table[pid] = pr.execs
+		}
+		pr.after--
+	}
 	if pr, ok := p.table[pid]; ok && pr.zombie {
 		return state.IdentifyNotPortalDaemon, nil
 	}
@@ -156,6 +172,17 @@ func (p *procs) signal(pid int, sig syscall.Signal) error {
 		pr.onSignal(pr, sig)
 	}
 	return nil
+}
+
+// identified is how many times pid was identified.
+func (p *procs) identified(pid int) int {
+	n := 0
+	for _, e := range p.events {
+		if e == fmt.Sprintf("identify %d", pid) {
+			n++
+		}
+	}
+	return n
 }
 
 // signals is every signal sent, in order.
