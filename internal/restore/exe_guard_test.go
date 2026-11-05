@@ -297,7 +297,8 @@ func writeTree(t *testing.T, files map[string]string) string {
 //
 // The functions allowed name the exceptions.
 const (
-	restorePath    = "github.com/leeovery/portal/internal/restore"
+	modulePath     = "github.com/leeovery/portal"
+	restorePath    = modulePath + "/internal/restore"
 	restoreDir     = "internal/restore"
 	newRestorer    = "New"
 	productionHome = "cmd"
@@ -306,12 +307,6 @@ const (
 // runningBinary is each name of package os a test reaches the running
 // binary's path through.
 var runningBinary = []string{"Executable", "Args"}
-
-// testOnlyPackages are the test-only packages CLAUDE.md lists, under internal.
-var testOnlyPackages = []string{
-	"capture", "portaltest", "tmuxtest", "portalbintest", "hookstest", "logtest", "harnesstest", "sourceguardtest",
-	"commandertest", "spawntest", "themetest", "backendtest", "zmxtest", "proctest",
-}
 
 // allowed is the one function of each directory that may reach the running
 // binary, for a reason no restorer meets it by.
@@ -338,7 +333,7 @@ func scanExeGuard(t harnesstest.TestingT, opts ...sourceguardtest.ScanOption) []
 		t.Fatalf("no test constructs a restorer through %s.%s, so the guard would pass by having stopped looking", restorePath, newRestorer)
 		return nil
 	case s.helpers == 0:
-		t.Fatalf("no source of a test-only package %v was scanned, so the guard would pass by having stopped looking", testOnlyPackages)
+		t.Fatalf("no source of a test-only package %v was scanned, so the guard would pass by having stopped looking", sourceguardtest.TestOnlyPackages)
 		return nil
 	}
 	findings := s.findings
@@ -399,8 +394,7 @@ func runningBinaryReaches(source sourceguardtest.ParsedSource, where string) []s
 }
 
 func isTestOnly(source sourceguardtest.ParsedSource) bool {
-	name, ok := strings.CutPrefix(dirOf(source), "internal/")
-	return ok && slices.Contains(testOnlyPackages, name)
+	return slices.Contains(sourceguardtest.TestOnlyPackages, modulePath+"/"+dirOf(source))
 }
 
 // declaresFunc reports whether file declares the package-level function name.
