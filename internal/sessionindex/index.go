@@ -1,7 +1,9 @@
 package sessionindex
 
 import (
+	"cmp"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -41,19 +43,29 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 	return idx.sessions[i], true
 }
 
-// SetLabel sets the session's label, trimmed of surrounding whitespace. An
-// empty label, or one equal to the name, clears it back to the default. A
-// session with no entry gets a bare one only when it is given a label;
-// clearing one with no entry changes nothing. A label still holding an
-// unprintable character once trimmed is refused with ErrLabelUnprintable and
-// changes nothing.
-func (idx *Index) SetLabel(name, label string) error {
+// LabelFor is the label an entry of the session named name records for label:
+// label trimmed of surrounding whitespace, and empty, the default, when that
+// leaves it empty or the name itself. A label still holding an unprintable
+// character once trimmed is refused with ErrLabelUnprintable.
+func LabelFor(name, label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if !printable(label) {
-		return ErrLabelUnprintable
+		return "", ErrLabelUnprintable
 	}
 	if label == name {
-		label = ""
+		return "", nil
+	}
+	return label, nil
+}
+
+// SetLabel sets the session's label as LabelFor gives it, an empty one
+// clearing it back to the default. A session with no entry gets a bare one
+// only when it is given a label; clearing one with no entry changes nothing. A
+// label LabelFor refuses changes nothing.
+func (idx *Index) SetLabel(name, label string) error {
+	label, err := LabelFor(name, label)
+	if err != nil {
+		return err
 	}
 	i := idx.indexOf(name)
 	if i < 0 {
@@ -116,6 +128,43 @@ func (idx *Index) setField(name, op, value string, level slog.Level, field func(
 func (idx *Index) Owe(name string) bool {
 	i := idx.indexOf(name)
 	return i >= 0 && idx.owe(i, "")
+}
+
+// ErrNameHeld refuses an entry Migrated would make under a name another entry
+// holds: portal migrate chose the name as no entry's.
+var ErrNameHeld = errors.New("another entry holds the name")
+
+// Migrated records a session portal migrate brings over from the tmux
+// version: e's name, label, dirs and scrollback file, as an entry made afresh,
+// owed a restore and recording no creation, so the next restore makes it and
+// the claim of its helper takes it over. Its label is the one LabelFor gives,
+// and a label LabelFor refuses changes nothing. An entry under the name that
+// is the one Migrated makes already, as migrating again finds it, is left as
+// it is; any other refuses it with ErrNameHeld, changing nothing. It consults
+// no rule, so migrate is its only caller, which a guard holds to.
+func (idx *Index) Migrated(e Entry) error {
+	label, err := LabelFor(e.Name, e.Label)
+	if err != nil {
+		return err
+	}
+	made := Entry{Name: e.Name, Label: label, Dir: e.Dir, Cwd: e.Cwd, ScrollbackFile: e.ScrollbackFile, Owed: true}
+	if held, ok := idx.Lookup(e.Name); ok {
+		if held == made {
+			return nil
+		}
+		return fmt.Errorf("session %s: %w", e.Name, ErrNameHeld)
+	}
+	if _, added := idx.add(made); !added {
+		return ErrRemoved
+	}
+	idx.changes = append(idx.changes, change{op: "migrated", session: e.Name, value: e.Dir, detail: migratedDetail(made)})
+	return nil
+}
+
+// migratedDetail says what a migrated entry carries over.
+func migratedDetail(e Entry) string {
+	label, scrollback := cmp.Or(e.Label, "none"), cmp.Or(e.ScrollbackFile, "none")
+	return fmt.Sprintf("owed a restore, recording no creation; its label %q and its scrollback %q", label, scrollback)
 }
 
 // owe marks the entry at i owed a restore, recording why when given, and
