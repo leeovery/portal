@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+                                 ╭───────────────────────────────────────────────────╮
+                                 │  ? Keybindings                         esc close  │
+                                 ├───────────────────────────────────────────────────┤
+                                 │  ↑/↓          Move selection                      │
+                                 │  ^↑/↓         Next / prev page                    │
+                                 │  ⏎            Open / attach session               │
+                                 │  /            Filter sessions                     │
+                                 │  ␣            Preview scrollback                  │
+                                 │  s            Switch view — flat / project / tag  │
+                                 │  n            New session in cwd                  │
+                                 │  r            Rename session                      │
+                                 │  k            Kill session                        │
+                                 │  q            Quit                                │
+                                 │  x            Switch to Projects                  │
+                                 │  t            Theme picker                        │
+                                 │  m            Multi-select mode                   │
+                                 ├───────────────────────────────────────────────────┤
+                                 │  ●            Session attached                    │
+                                 │  ●            Resume pending                      │
+                                 ╰───────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+

@@ -165,6 +165,8 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsPagedFixture,
 		sessionsInlineFlashFixture,
 		sessionsRenameRefusedLabelFixture,
+		sessionsHelpFixture,
+		sessionsFilteringFixture,
 		sessionsKillConfirmFixture,
 		sessionsKillAskFixture,
 		sessionsMultiSelectActiveFixture,
@@ -180,6 +182,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsNotAnsweringFixture,
 		projectsFixture,
 		projectsCommandPendingFixture,
+		projectsEditFixture,
 		themePanelAdaptivePairFixture,
 		themePanelConstantPreviewingFixture,
 		themePanelInvalidRowFixture,
@@ -409,6 +412,37 @@ func sessionsRenameRefusedLabelFixture() *Fixture {
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune('\u200b'), keyEnter()}
 	fx.landsLastKeyRead = true
 	return fx
+}
+
+func sessionsHelpFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-help"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('?')}
+	return fx
+}
+
+// The term is typed, not committed: the frame is the filter input still taking
+// keys, with the rows it has narrowed to beneath. The list narrows on the
+// command a keystroke returns, so without the last key's read landing every row
+// still shows.
+func sessionsFilteringFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "sessions-filtering"
+	fx.captureKeys = slices.Concat([]tea.KeyPressMsg{keyRune('/')}, typed(sessionsFilteringTerm))
+	fx.landsLastKeyRead = true
+	return fx
+}
+
+// Matches the three relay sessions, one of them mid-name, and nothing else in
+// the flat world.
+const sessionsFilteringTerm = "relay"
+
+func typed(s string) []tea.KeyPressMsg {
+	keys := make([]tea.KeyPressMsg, 0, len(s))
+	for _, r := range s {
+		keys = append(keys, keyRune(r))
+	}
+	return keys
 }
 
 // The modal opens over a labelled row, so the frame shows which of the
@@ -892,6 +926,15 @@ func projectsCommandPendingFixture() *Fixture {
 	fx := projectsFixture()
 	fx.name = "projects-command-pending"
 	fx.command = []string{"npm", "run", "dev"}
+	return fx
+}
+
+// Projects opens with the cursor on relay-v1-api, whose seeded tags and
+// aliases are the modal's chips.
+func projectsEditFixture() *Fixture {
+	fx := projectsFixture()
+	fx.name = "projects-edit"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('x'), keyRune('e')}
 	return fx
 }
 
