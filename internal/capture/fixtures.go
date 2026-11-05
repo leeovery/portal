@@ -99,6 +99,9 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		// DirRunner stays nil, so the git-root fallback resolves nothing and a
 		// fixture session carrying no recorded directory groups into the
 		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
+		// A fixture's paths are made up, so they match by their text: resolving
+		// one on disk stats /home, an automount on macOS, at every build.
+		DirKey:      filepath.Clean,
 		InitialMode: f.initialMode,
 		Search:      f.search,
 		KillAsk:     f.killAsk,
@@ -268,8 +271,6 @@ func sessionsEmptyFixture() *Fixture {
 	}
 }
 
-// The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
-// sides, so the grouping is deterministic without a real filesystem.
 func sessionsByProjectFixture() *Fixture {
 	sessions := []tui.Session{
 		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
@@ -326,8 +327,6 @@ func sessionsByProjectLabelledFixture() *Fixture {
 	}
 }
 
-// The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
-// sides, so the match is deterministic without a real filesystem.
 func sessionsByTagFixture() *Fixture {
 	sessions := []tui.Session{
 		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},

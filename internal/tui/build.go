@@ -29,7 +29,11 @@ type Deps struct {
 	History       HistoryReader
 	// DirRunner resolves the git root of a session's cwd, which grouping falls
 	// back to for a session with no recorded directory.
-	DirRunner     resolver.CommandRunner
+	DirRunner resolver.CommandRunner
+	// DirKey reduces a directory to the key sessions are matched to projects
+	// by. Nil takes project.CanonicalDirKey, which resolves symlinks on disk; a
+	// capture pins one that reads nothing.
+	DirKey        func(string) string
 	PendingReader PendingResumeReader
 	// Hydrating keeps the cold route re-reading the pending set until no
 	// restored session is still hydrating, for at most PendingSettleBound.
@@ -145,6 +149,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.DirRunner != nil {
 		opts = append(opts, WithDirRunner(deps.DirRunner))
+	}
+	if deps.DirKey != nil {
+		opts = append(opts, WithDirKey(deps.DirKey))
 	}
 	if deps.PendingReader != nil {
 		opts = append(opts, WithPendingResumeReader(deps.PendingReader))

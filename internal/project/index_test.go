@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -135,6 +136,56 @@ func TestNewIndexEmpty(t *testing.T) {
 		idx := NewIndex([]Project{})
 		if _, _, ok := idx.Match("/anything"); ok {
 			t.Errorf("Index.Match against empty-built index ok = true, want false")
+		}
+	})
+}
+
+func TestNewIndexBy(t *testing.T) {
+	t.Run("stored paths and looked-up dirs are both reduced by the key", func(t *testing.T) {
+		var reduced []string
+		byBase := func(p string) string {
+			reduced = append(reduced, p)
+			return filepath.Base(p)
+		}
+		idx := NewIndexBy([]Project{{Path: "/stored/kiln", Name: "kiln"}}, byBase)
+
+		got, key, ok := idx.Match("/elsewhere/kiln")
+		if !ok || got.Name != "kiln" {
+			t.Fatalf("Index.Match = (%+v, %v), want kiln matched through the key", got, ok)
+		}
+		if key != "kiln" {
+			t.Errorf("Index.Match key = %q, want the key's %q", key, "kiln")
+		}
+		if want := []string{"/stored/kiln", "/elsewhere/kiln"}; !slices.Equal(reduced, want) {
+			t.Errorf("key reduced %q, want %q", reduced, want)
+		}
+	})
+
+	t.Run("a key in place of CanonicalDirKey resolves no symlink", func(t *testing.T) {
+		base := t.TempDir()
+		target := filepath.Join(base, "target")
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatalf("Mkdir(%q) error = %v", target, err)
+		}
+		link := filepath.Join(base, "link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatalf("Symlink error = %v", err)
+		}
+		projects := []Project{{Path: target, Name: "target"}}
+
+		if _, _, ok := NewIndex(projects).Match(link); !ok {
+			t.Fatalf("NewIndex Match(link) ok = false; the oracle needs CanonicalDirKey to resolve the link")
+		}
+		if _, _, ok := NewIndexBy(projects, filepath.Clean).Match(link); ok {
+			t.Errorf("NewIndexBy(filepath.Clean) Match(link) ok = true, want the link left unresolved")
+		}
+	})
+
+	t.Run("a nil key is CanonicalDirKey", func(t *testing.T) {
+		dir := t.TempDir()
+		idx := NewIndexBy([]Project{{Path: dir, Name: "p"}}, nil)
+		if _, key, ok := idx.Match(dir + string(os.PathSeparator)); !ok || key != CanonicalDirKey(dir) {
+			t.Errorf("nil-key Match = (key %q, %v), want (%q, true)", key, ok, CanonicalDirKey(dir))
 		}
 	})
 }
