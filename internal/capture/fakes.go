@@ -13,6 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
@@ -54,6 +57,61 @@ func (f *fakeLister) ListSessions() ([]tui.Session, error) {
 	out := make([]tui.Session, len(f.sessions))
 	copy(out, f.sessions)
 	return out, nil
+}
+
+// timedLister lists a scenario's sessions as a cold start's listings read them
+// either side of its restore: none before restoredAt into the scenario, every
+// one from then on.
+type timedLister struct {
+	elapsed    func() time.Duration
+	restoredAt time.Duration
+	sessions   []tui.Session
+}
+
+func (l timedLister) ListSessions() ([]tui.Session, error) {
+	if l.elapsed() < l.restoredAt {
+		return nil, nil
+	}
+	return slices.Clone(l.sessions), nil
+}
+
+// timedPendingReader is the pending-resume set as a scenario's restore leaves
+// it: empty before restoredAt, the sessions waiting to resume from then on.
+type timedPendingReader struct {
+	elapsed    func() time.Duration
+	restoredAt time.Duration
+	sessions   []string
+}
+
+func (r timedPendingReader) ListPendingResumeSessions() (map[string]struct{}, error) {
+	if r.elapsed() < r.restoredAt {
+		return map[string]struct{}{}, nil
+	}
+	return fakePendingReader{sessions: r.sessions}.ListPendingResumeSessions()
+}
+
+// bootReceiver is a scenario's bootstrap as the loading page receives it, one
+// event a call, as the model re-issues the receive after each: a call waits
+// until its event's moment, then hands it over. The cues end at the complete,
+// after which the model asks no more; a call past them answers nil at once, so
+// no receive outlives the scenario, as the fixtures' parked one would.
+type bootReceiver struct {
+	elapsed func() time.Duration
+	mu      sync.Mutex
+	cues    []bootCue
+}
+
+func (r *bootReceiver) receive() tea.Msg {
+	r.mu.Lock()
+	if len(r.cues) == 0 {
+		r.mu.Unlock()
+		return nil
+	}
+	next := r.cues[0]
+	r.cues = r.cues[1:]
+	r.mu.Unlock()
+	time.Sleep(next.at - r.elapsed())
+	return next.msg
 }
 
 type fakePendingReader struct {
@@ -121,16 +179,21 @@ func (fakeAliasEditor) SetAndSave(string, string, string) error { return nil }
 
 func (fakeAliasEditor) DeleteAndSave(string, string) (bool, error) { return true, nil }
 
-// fakeHistory answers every session's History with the same content, or with
+// fakeHistory answers a session's History with its own content where histories
+// holds some, and otherwise every session's with the same content, or with
 // file's bytes when it names one. Seeded content stays generic terminal output
 // — Portal's preview is tool-agnostic, so no fixture references any specific
 // tool.
 type fakeHistory struct {
-	content string
-	file    string
+	content   string
+	file      string
+	histories map[string]string
 }
 
-func (h fakeHistory) History(context.Context, string, int) ([]byte, error) {
+func (h fakeHistory) History(_ context.Context, name string, _ int) ([]byte, error) {
+	if own, ok := h.histories[name]; ok {
+		return []byte(own), nil
+	}
 	if h.file != "" {
 		return os.ReadFile(h.file)
 	}
