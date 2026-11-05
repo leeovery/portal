@@ -215,7 +215,7 @@ func TestSessionsByProjectFixture(t *testing.T) {
 		t.Errorf("sessions-by-project fixture has %d projects, want >=2 (multiple group headings)", len(projects))
 	}
 
-	idx := project.NewIndex(projects)
+	idx := project.NewIndexBy(projects, fx.Deps(darkBuiltinTheme(t)).DirKey)
 	sessions, err := fx.Lister.ListSessions()
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)

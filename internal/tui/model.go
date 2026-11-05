@@ -172,6 +172,7 @@ type Model struct {
 	// projectIndex is a derived cache: it must be rebuilt whenever projects
 	// changes, so always mutate both via setProjects.
 	projectIndex    project.Index
+	dirKey          func(string) string
 	sessionListMode prefs.SessionListMode
 	modePersister   ModePersister
 	// colourless is the NO_COLOR carve-out; canvas-dependent surfaces read it
@@ -745,6 +746,14 @@ func WithDirRunner(runner resolver.CommandRunner) Option {
 	}
 }
 
+// WithDirKey reduces directories to the key sessions are matched to projects by,
+// in place of project.CanonicalDirKey.
+func WithDirKey(key func(string) string) Option {
+	return func(m *Model) {
+		m.dirKey = key
+	}
+}
+
 // Sets the state fields directly — no flashGen bump, no layout resync, since
 // dimensions are still zero at construction.
 func WithInitialFlash(text string) Option {
@@ -961,11 +970,15 @@ func New(lister SessionLister, opts ...Option) Model {
 		themeState: themeState{active: defaultDarkTheme()},
 		// Resolved once, here, and overwritten by WithHome: nothing downstream
 		// reads the environment's home.
-		home: resolver.ProcessHome(),
+		home:   resolver.ProcessHome(),
+		dirKey: project.CanonicalDirKey,
 	}
 	for _, opt := range opts {
 		opt(&m)
 	}
+	// Sessions grouped before projects load match through the index too, so it
+	// is built once the options have given it its key.
+	m.setProjects(nil)
 	// Recompute now that mode / current session are known (newSessionList set the Flat
 	// default), so the first frame paints the correct mode heading.
 	m.setSessionListTitle()
@@ -1315,7 +1328,7 @@ func anyTagsExist(projects []project.Project) bool {
 // Always mutate projects through this, or the derived index goes stale.
 func (m *Model) setProjects(projects []project.Project) {
 	m.projects = projects
-	m.projectIndex = project.NewIndex(projects)
+	m.projectIndex = project.NewIndexBy(projects, m.dirKey)
 }
 
 // Best-effort: an unresolvable session is not negative-cached — nothing is

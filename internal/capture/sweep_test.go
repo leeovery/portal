@@ -154,9 +154,7 @@ func drawerOf(d *swept, th theme.Theme) (func(w, h int) string, error) {
 // terminal resized to the size given, its declared size passed over, so a
 // geometry fixture is swept like any other. Each size is resized to from the
 // captured model, never from the last size drawn, so no size's draw hangs on
-// the order they're drawn in. It's built once, not at each size: a build
-// resolves each project's path on disk, and a fixture's paths, under /home,
-// cost an automount lookup each on macOS.
+// the order they're drawn in.
 func drawnAt(f *Fixture, th theme.Theme) func(w, h int) string {
 	var captured tea.Model = f.modelAt(f.Deps(th), cmp.Or(f.frame.Width, harnessSize.Width), cmp.Or(f.frame.Height, harnessSize.Height))
 	return func(w, h int) string {

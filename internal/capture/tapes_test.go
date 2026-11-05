@@ -467,6 +467,92 @@ func TestRecordShListsOnlyTapesThatExist(t *testing.T) {
 	}
 }
 
+// artDir is where the README's art lives, art/ at the repository's root.
+const artDir = "../../art"
+
+// Every file in art/ is made by a tape, and every tape's art is there: a WebP
+// of each tape, and an MP4 of each clip, a tape record.sh makes no still of.
+func TestEveryArtFileIsMadeByATape(t *testing.T) {
+	entries, err := os.ReadDir(artDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := make([]string, len(entries))
+	for i, e := range entries {
+		files[i] = e.Name()
+	}
+	for _, misfit := range artMisfits(demoTapeNames(t), stillsListed(t), files) {
+		t.Error(misfit)
+	}
+}
+
+// artMisfits are where the files in art/ differ from the art the tapes make:
+// a file no tape makes, an MP4 of a still, and a tape's file missing.
+func artMisfits(tapes, stills, files []string) []string {
+	made := make(map[string]bool)
+	for _, name := range tapes {
+		made[name+".webp"] = true
+		if !slices.Contains(stills, name) {
+			made[name+".mp4"] = true
+		}
+	}
+	var misfits []string
+	for _, file := range files {
+		name, isClip := strings.CutSuffix(file, ".mp4")
+		switch {
+		case made[file]:
+			delete(made, file)
+		case isClip && slices.Contains(tapes, name):
+			misfits = append(misfits, fmt.Sprintf("art/%s is a clip of demo/%s.tape, which record.sh makes a still of", file, name))
+		default:
+			misfits = append(misfits, fmt.Sprintf("art/%s is made by no tape in demo/", file))
+		}
+	}
+	for _, file := range slices.Sorted(maps.Keys(made)) {
+		misfits = append(misfits, fmt.Sprintf("art/%s is missing: a tape in demo/ makes it", file))
+	}
+	return misfits
+}
+
+func TestArtMisfits(t *testing.T) {
+	tapes, stills := []string{"tour", "help"}, []string{"help"}
+	art := []string{"help.webp", "tour.mp4", "tour.webp"}
+	tests := []struct {
+		name  string
+		files []string
+		want  []string
+	}{
+		{name: "each tape's art and nothing else", files: art},
+		{
+			name:  "a file no tape makes",
+			files: append(slices.Clone(art), "old-demo.webp"),
+			want:  []string{"art/old-demo.webp is made by no tape in demo/"},
+		},
+		{
+			name:  "a still's WebP missing",
+			files: []string{"tour.mp4", "tour.webp"},
+			want:  []string{"art/help.webp is missing: a tape in demo/ makes it"},
+		},
+		{
+			name:  "a clip's MP4 missing",
+			files: []string{"help.webp", "tour.webp"},
+			want:  []string{"art/tour.mp4 is missing: a tape in demo/ makes it"},
+		},
+		{
+			name:  "an MP4 of a still",
+			files: append(slices.Clone(art), "help.mp4"),
+			want:  []string{"art/help.mp4 is a clip of demo/help.tape, which record.sh makes a still of"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := artMisfits(tapes, stills, tt.files); !slices.Equal(got, tt.want) {
+				t.Errorf("artMisfits = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A still of a fixture shows the fixture's golden frame as its last Show ends,
 // whatever keys reach it, so its art is what the frames hold the code to.
 func TestEachFixtureStillShowsItsFixturesFrame(t *testing.T) {
