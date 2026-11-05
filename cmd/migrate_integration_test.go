@@ -391,7 +391,7 @@ func TestMigrateAgainstZmx(t *testing.T) {
 		want := "Migrated 2 tmux sessions to 2 sessions.\n" +
 			"Moved 1 resume hook. Removed 1, kept in the backup.\n" +
 			"Restored 2 sessions. Every saved session is restored.\n" +
-			"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+			"Each migrated session with a resume hook waits on its resume panel the first time you open it.\n" +
 			"\n" +
 			"Sessions (name ← tmux name):\n" +
 			"  lantern ← lantern\n" +
@@ -475,7 +475,7 @@ func TestMigrateCutShortBetweenItsRenamesAgainstZmx(t *testing.T) {
 
 	want := "Finished a migration cut short: the migrated state is in place at " + w.dir.StateDir + ".\n" +
 		"Restored 2 sessions. Every saved session is restored.\n" +
-		"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+		"Each migrated session with a resume hook waits on its resume panel the first time you open it.\n" +
 		"\n" + w.keptReport()
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)

@@ -172,10 +172,12 @@ func migrateBootstrap(ctx context.Context, stderr io.Writer) (migrate.Restore, [
 
 // restoreOf is how the restore of a bootstrap that ended with err ended, res
 // its result, nil when it ran none. A fatal, before the restore or during it,
-// stops it, after the sessions it made; with none, a bootstrap that ran no
-// restore found none owed under its lock. A restore that couldn't read
-// sessions.json or list zmx's sessions made nothing, for the reason the
-// bootstrap's warning gives.
+// stops it, after the sessions it made. With none, a bootstrap that ran no
+// restore either found none owed under its lock or left the restore
+// unfinished before reaching it, for sessions it couldn't mark owed or a
+// saver it couldn't judge, which its warning tells of. A restore that
+// couldn't read sessions.json or list zmx's sessions made nothing, for the
+// reason the bootstrap's warning gives.
 func restoreOf(res *restore.Result, err error) migrate.Restore {
 	switch {
 	case err != nil && res != nil:

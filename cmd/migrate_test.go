@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +27,7 @@ import (
 // migrateWorld is a state dir and hooks.json of the test's own, the zmx
 // backend, the tmux version's server and the bootstrap migrate ends with
 // staged, each noting it was reached. The bootstrap's restore makes the
-// sessions makes names, as zmx's.
+// sessions makes names, as zmx's, and claims them, as their helpers do.
 type migrateWorld struct {
 	dir, hooksFile string
 	backend        *backendtest.Fake
@@ -74,9 +76,36 @@ func (w *migrateWorld) stage(t *testing.T) {
 			for _, name := range w.makes {
 				w.backend.Add(backend.Session{Name: name})
 			}
+			if len(w.makes) > 0 {
+				claim(t, w.dir, w.makes)
+			}
 			return w.restored, w.warnings, w.bootErr
 		},
 	})
+}
+
+// claim clears the marks of each session named in the state dir dir's index,
+// as a restored session's helper claiming it does.
+func claim(t *testing.T, dir string, names []string) {
+	t.Helper()
+	var idx struct {
+		Version  int                  `json:"version"`
+		SavedAt  time.Time            `json:"saved_at"`
+		Sessions []sessionindex.Entry `json:"sessions"`
+	}
+	if err := json.Unmarshal(readFileBytes(t, sessionindex.Path(dir)), &idx); err != nil {
+		t.Fatal(err)
+	}
+	for i, e := range idx.Sessions {
+		if slices.Contains(names, e.Name) {
+			idx.Sessions[i].Owed, idx.Sessions[i].ResumeLazy = false, false
+		}
+	}
+	data, err := json.Marshal(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, sessionindex.Path(dir), string(data))
 }
 
 // withTmuxState gives w the tmux version's state, one session of one pane,
@@ -140,10 +169,10 @@ func keptLines(dir string) string {
 }
 
 // lanternLeft is the report's block naming lantern left to restore.
-const lanternLeft = "1 session left to restore, at Portal's next start or now with x <name>:\n" +
+const lanternLeft = "1 session left to restore. x <name> brings one back now; otherwise they come back at the next restore after a reboot:\n" +
 	"  lantern\n"
 
-const panelLine = "Each one with a resume hook waits on its resume panel the first time you open it.\n"
+const panelLine = "Each migrated session with a resume hook waits on its resume panel the first time you open it.\n"
 
 func TestMigrateCommand(t *testing.T) {
 	t.Run("it migrates a version 1 state past the state check and the root's bootstrap, then bootstraps and reports", func(t *testing.T) {
@@ -165,8 +194,8 @@ func TestMigrateCommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the state dir isn't this version's: %v", err)
 		}
-		if e, ok := idx.Lookup("lantern"); !ok || !e.ResumeLazy {
-			t.Errorf("lantern's entry %+v (held: %v); want it, resuming lazily", e, ok)
+		if _, ok := idx.Lookup("lantern"); !ok {
+			t.Error("lantern has no entry, want the one migrated, its marks claimed by the restore")
 		}
 		if held := string(readFileBytes(t, w.hooksFile)); !strings.Contains(held, `"lantern"`) || strings.Contains(held, "tokLan") {
 			t.Errorf("hooks.json = %s, want the hook moved to lantern", held)
@@ -324,7 +353,9 @@ func TestMigrateCommand(t *testing.T) {
 		if !errors.Is(err, w.bootErr) {
 			t.Errorf("migrate = %v, want the bootstrap's fatal", err)
 		}
-		want := "Couldn't restore the sessions: the error below says why.\n" + panelLine + "\n" + lanternLeft
+		want := "Couldn't restore the sessions: the error below says why.\n" + panelLine + "\n" +
+			"1 session left to restore. Once the error below is fixed, x <name> brings one back; otherwise they come back at the next restore after a reboot:\n" +
+			"  lantern\n"
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout:\n%s\nwant the report holding:\n%s", stdout, want)
 		}
@@ -351,7 +382,7 @@ func TestMigrateCommand(t *testing.T) {
 
 		stdout, _, err := runRootCmd(t, "migrate")
 
-		if err == nil || !strings.HasPrefix(err.Error(), "portal migrate stopped: ") || !strings.HasSuffix(err.Error(), ". Once that's fixed, run portal migrate again: it picks up where this run stopped.") {
+		if err == nil || !strings.HasPrefix(err.Error(), "portal migrate stopped: ") || !strings.HasSuffix(err.Error(), ". Once that's fixed, run portal migrate again.") {
 			t.Fatalf("migrate = %v; want the failure worded as a run stopped", err)
 		}
 		if stdout.Len() != 0 {

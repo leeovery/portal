@@ -81,7 +81,7 @@ type Outcome struct {
 // one run at a time: another holding the state dir's parent is ErrLocked.
 // What it does follows from what it finds there:
 //   - A version 1 sessions.json with no state-tmux/ beside it migrates in
-//     full: first every read that may refuse it (the hooks the plan reads,
+//     full: first every check it can make up front (the hooks the plan reads,
 //     the version 1 index and zmx's sessions); then the tmux side (Portal's
 //     tmux hooks unset and the saver killed, when a tmux server answers,
 //     then the wait for the tmux version's daemon to exit); hooks.json
@@ -122,7 +122,7 @@ func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	case o.Course == Migrated:
 		o.Plan, err = migrateState(ctx, cfg)
 	case o.Course == Finished:
-		err = install(found.staging, cfg.StateDir)
+		err = stage{rerun: finishesCopy}.stopped(install(found.staging, cfg.StateDir))
 	}
 	if err != nil {
 		return o, refuse(err)
@@ -163,18 +163,26 @@ func logOutcome(o Outcome, start time.Time) {
 }
 
 // migrateState migrates the tmux version's state in full, and returns the
-// plan it wrote.
+// plan it wrote. A failure that stops it is worded by how far it got.
 func migrateState(ctx context.Context, cfg Config) (Plan, error) {
+	s := &stage{rerun: againCopy}
+	plan, err := migrateFrom(ctx, cfg, s)
+	return plan, s.stopped(err)
+}
+
+// migrateFrom is migrateState's work, s noting how far it gets.
+func migrateFrom(ctx context.Context, cfg Config, s *stage) (Plan, error) {
 	backup := HooksBackup(cfg.StateDir)
 	live, err := precheck(ctx, cfg, backup)
 	if err != nil {
 		return Plan{}, err
 	}
-	stopped, err := stopTmux(ctx, cfg.Tmux)
+	stop, err := stopTmux(ctx, cfg.Tmux)
 	if err != nil {
 		return Plan{}, err
 	}
-	if err := awaitDaemon(ctx, cfg, stopped); err != nil {
+	s.tmuxStopped, s.rerun = stop.answered, startsOverCopy
+	if err := awaitDaemon(ctx, cfg, stop.killed); err != nil {
 		return Plan{}, err
 	}
 	if err := backUp(cfg.HooksFile, backup); err != nil {
@@ -191,16 +199,45 @@ func migrateState(ctx context.Context, cfg Config) (Plan, error) {
 	if err := RewriteHooks(plan, backup, hooks.NewStore(cfg.HooksFile)); err != nil {
 		return Plan{}, err
 	}
-	return plan, swap(cfg.StateDir, staging)
+	return plan, swap(cfg.StateDir, staging, s)
 }
 
-// precheck takes, before the tmux side is stopped, every read that may
-// refuse the run, so a refusal leaves the tmux version saving as it did:
-// the hooks the plan reads, as strictly as it reads them; the version 1
-// index, as the plan reads it; and zmx's sessions, which it returns for the
-// plan's names. Neither file can pass now and fail later: the tmux version's
-// writers refuse a hooks.json that doesn't parse, and its daemon's flush
-// writes the index it reads itself, which the plan reads afresh.
+// stage is how far a run has got, which words a failure that stops it:
+// whether it stopped Portal's tmux side, which then saves nothing, and what
+// a re-run does: from the stop on it starts over, and past the commit
+// point's first rename it finishes the migration.
+type stage struct {
+	tmuxStopped bool
+	rerun       string
+}
+
+// stopped words err, nil or a failure that stops a run at s. A refusal keeps
+// its own words, but for a hooks file that doesn't parse, which s words too.
+func (s stage) stopped(err error) error {
+	if err == nil {
+		return nil
+	}
+	tmux := ""
+	if s.tmuxStopped {
+		tmux = tmuxOffCopy
+	}
+	if m, ok := errors.AsType[malformedHooks](err); ok {
+		return refused(hooks.ErrMalformed, hooksMalformedCopy, m.path, m.err, tmux, s.rerun)
+	}
+	if _, ok := errors.AsType[refusal](err); ok {
+		return err
+	}
+	return refused(nil, stoppedCopy, err, tmux, s.rerun)
+}
+
+// precheck makes, before the tmux side is stopped, every check that can be
+// made up front, so a refusal among them leaves the tmux version saving as
+// it did: the hooks the plan reads, as strictly as it reads them; the
+// version 1 index, as the plan reads it; and zmx's sessions, which it
+// returns for the plan's names. Neither file can pass now and fail later:
+// the tmux version's writers refuse a hooks.json that doesn't parse, and its
+// daemon's flush writes the index it reads itself, which the plan reads
+// afresh.
 func precheck(ctx context.Context, cfg Config, backup string) ([]string, error) {
 	source, err := hooksSource(cfg.HooksFile, backup)
 	if err != nil {
@@ -219,28 +256,35 @@ func precheck(ctx context.Context, cfg Config, backup string) ([]string, error) 
 	return live, nil
 }
 
-// stopTmux unsets Portal's tmux hooks and kills the tmux version's saver,
-// reporting whether it killed one. With no tmux server answering there are
-// none: they ended with it. Either failing stops the run, since a tmux hook
-// left would run the tmux version against the state dir migrate rewrites.
-func stopTmux(ctx context.Context, tmux TmuxServer) (bool, error) {
+// tmuxStop is what stopping the tmux side did: whether a tmux server
+// answered, so Portal's hooks on it were unset, and whether a saver was
+// killed.
+type tmuxStop struct {
+	answered, killed bool
+}
+
+// stopTmux unsets Portal's tmux hooks and kills the tmux version's saver.
+// With no tmux server answering there are none: they ended with it. Either
+// failing stops the run, since a tmux hook left would run the tmux version
+// against the state dir migrate rewrites.
+func stopTmux(ctx context.Context, tmux TmuxServer) (tmuxStop, error) {
 	if !tmux.Answering(ctx) {
 		logger.Info("no tmux server", "detail", "Portal's tmux hooks and saver ended with it")
-		return false, nil
+		return tmuxStop{}, nil
 	}
 	unset, err := tmux.RemoveHooks(ctx)
 	if err != nil {
-		return false, refused(nil, tmuxHooksLeftCopy, err)
+		return tmuxStop{}, refused(nil, tmuxHooksLeftCopy, err)
 	}
 	logger.Info("tmux hooks removed", "unset", unset)
 	killed, err := tmux.KillSaver(ctx)
 	if err != nil {
-		return false, refused(nil, tmuxSaverLeftCopy, err)
+		return tmuxStop{}, refused(nil, tmuxSaverLeftCopy, err)
 	}
 	if killed {
 		logger.Info("tmux saver killed")
 	}
-	return killed, nil
+	return tmuxStop{answered: true, killed: killed}, nil
 }
 
 // awaitDaemon waits for the tmux version's daemon to exit, its saver killed
@@ -303,14 +347,20 @@ func build(plan Plan, staging string) error {
 	return nil
 }
 
+// renameDir makes the commit point's two renames: os.Rename, but in tests,
+// which watch each one land, or fail it.
+var renameDir = os.Rename
+
 // swap is the commit point: the tmux version's state dir renamed to
-// state-tmux/, then staging put in its place. Nothing logs between the two:
-// a log line makes the state dir again, for its own file.
-func swap(dir, staging string) error {
+// state-tmux/, then staging put in its place, past which a re-run finishes
+// the migration rather than starting over, as s comes to say. Nothing logs
+// between the two: a log line makes the state dir again, for its own file.
+func swap(dir, staging string, s *stage) error {
 	tmuxDir := state.TmuxStateDir(dir)
-	if err := os.Rename(dir, tmuxDir); err != nil {
+	if err := renameDir(dir, tmuxDir); err != nil {
 		return fmt.Errorf("move the tmux version's state to %s: %w", tmuxDir, err)
 	}
+	s.rerun = finishesCopy
 	unsynced := syncParent(dir)
 	if err := stopAt(BetweenRenames); err != nil {
 		return err
@@ -328,7 +378,7 @@ func swap(dir, staging string) error {
 // and the re-run that finishes it, find one there holding their logs, and
 // what a move cut short brought. Any other entry is in the way, and refused.
 func install(staging, dir string) error {
-	err := os.Rename(staging, dir)
+	err := renameDir(staging, dir)
 	if errors.Is(err, unix.ENOTEMPTY) || errors.Is(err, fs.ErrExist) {
 		if err := inTheWay(staging, dir); err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 	"golang.org/x/sys/unix"
@@ -60,13 +61,20 @@ func refused(kind error, format string, args ...any) error {
 }
 
 // worded is err as the user reads it: a refusal as it is, and any other
-// failure as a run stopped by it.
+// failure as a run stopped by it, at no stage that says more.
 func worded(err error) error {
-	if _, ok := errors.AsType[refusal](err); ok {
-		return err
-	}
-	return refused(nil, stoppedCopy, err)
+	return stage{rerun: againCopy}.stopped(err)
 }
+
+// malformedHooks is the hooks file at path not parsing, for err. It is worded
+// by the stage of the run it stops.
+type malformedHooks struct {
+	path string
+	err  error
+}
+
+func (m malformedHooks) Error() string   { return fmt.Sprintf("%s doesn't parse: %v", m.path, m.err) }
+func (m malformedHooks) Unwrap() []error { return []error{hooks.ErrMalformed, m.err} }
 
 // indexKind is what the state dir's sessions.json is.
 type indexKind int
@@ -87,16 +95,16 @@ type found struct {
 }
 
 // inspect reads what is in and beside the state dir dir, removing first an
-// empty staging dir. A sessions.json there that can't be read, or is of
-// another version than 1 or 2, is an error, as is anything it can't look
-// for.
+// empty staging dir beside state-tmux/. A sessions.json there that can't be
+// read, or is of another version than 1 or 2, is an error, as is anything it
+// can't look for.
 func inspect(dir string) (found, error) {
 	f := found{dir: dir, tmuxDir: state.TmuxStateDir(dir), staging: state.MigrationStagingDir(dir)}
 	var err error
 	if f.index, err = readIndexKind(dir); err != nil {
 		return f, err
 	}
-	if f.hasTmuxDir, err = exists(f.tmuxDir); err != nil {
+	if f.hasTmuxDir, err = exists(f.tmuxDir); err != nil || !f.hasTmuxDir {
 		return f, err
 	}
 	if err := removeEmptyStaging(f.staging); err != nil {
@@ -108,7 +116,9 @@ func inspect(dir string) (found, error) {
 
 // removeEmptyStaging removes the staging dir when it is there holding
 // nothing: what a move into the state dir cut short as it ended leaves,
-// everything moved but the dir itself.
+// everything moved but the dir itself. Only beside state-tmux/ is a staging
+// dir a move's: with none, it is a build's before its renames, which a full
+// migration wipes.
 func removeEmptyStaging(staging string) error {
 	names, err := entryNames(staging)
 	switch {

@@ -53,6 +53,47 @@ func TestMigrationCutShort(t *testing.T) {
 		})
 	}
 
+	// No state-tmux/ means no migration reached its renames, so nothing at
+	// the staging path is looked at: it would stop every command otherwise.
+	for name, block := range map[string]func(t *testing.T, staging string){
+		"a file at the staging path": func(t *testing.T, staging string) { mustWrite(t, staging, "not a dir") },
+		"a staging dir it can't read": func(t *testing.T, staging string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a 0000 dir")
+			}
+			mustMkdir(t, filepath.Join(staging, "sessions"))
+			if err := os.Chmod(staging, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(staging, 0o700) })
+		},
+	} {
+		t.Run("it reads "+name+" with no state-tmux/ as no migration", func(t *testing.T) {
+			dir := arrange(t, dirs{})
+			block(t, state.MigrationStagingDir(dir))
+
+			if got, err := state.MigrationCutShort(dir); got || err != nil {
+				t.Errorf("MigrationCutShort = %v, %v; want false, nil", got, err)
+			}
+		})
+	}
+
+	t.Run("it fails on a staging dir it can't read beside state-tmux/", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads a 0000 dir")
+		}
+		dir := arrange(t, dirs{tmuxDir: true, staged: true})
+		staging := state.MigrationStagingDir(dir)
+		if err := os.Chmod(staging, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(staging, 0o700) })
+
+		if got, err := state.MigrationCutShort(dir); err == nil {
+			t.Errorf("MigrationCutShort = %v, nil; want an error", got)
+		}
+	})
+
 	t.Run("it reads a state dir beneath a file as no migration", func(t *testing.T) {
 		blocker := filepath.Join(t.TempDir(), "not-a-dir")
 		mustWrite(t, blocker, "x")

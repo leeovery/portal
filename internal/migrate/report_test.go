@@ -53,7 +53,7 @@ func migratedOutcome(plan migrate.Plan) migrate.Outcome {
 const wantMigratedReport = `Migrated 4 tmux sessions to 5 sessions. Skipped 1 tmux session.
 Moved 1 resume hook. Removed 4, kept in the backup.
 Restored 5 sessions. Every saved session is restored.
-Each one with a resume hook waits on its resume panel the first time you open it.
+Each migrated session with a resume hook waits on its resume panel the first time you open it.
 
 Sessions (name ← tmux name):
   lantern ← lantern
@@ -116,7 +116,7 @@ func TestReport(t *testing.T) {
 			restore: migrate.Restore{End: migrate.RestoreRan, Restored: 3, Waits: true},
 			want: "Finished a migration cut short: the migrated state is in place at ~/.config/portal/state.\n" +
 				"Restored 3 sessions. Every saved session is restored.\n" +
-				"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+				"Each migrated session with a resume hook waits on its resume panel the first time you open it.\n" +
 				kept +
 				"hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.\n",
 		},
@@ -128,9 +128,9 @@ func TestReport(t *testing.T) {
 			outcome: landed,
 			restore: migrate.Restore{Left: []string{"lantern", "quarry-Gen001"}, Waits: true},
 			want: "Already migrated.\n" +
-				"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+				"Each migrated session with a resume hook waits on its resume panel the first time you open it.\n" +
 				"\n" +
-				"2 sessions left to restore, at Portal's next start or now with x <name>:\n" +
+				"2 sessions left to restore. x <name> brings one back now; otherwise they come back at the next restore after a reboot:\n" +
 				"  lantern\n" +
 				"  quarry-Gen001\n" +
 				kept,
@@ -141,7 +141,7 @@ func TestReport(t *testing.T) {
 			want: "Already migrated.\n" +
 				"Restored 2 sessions.\n" +
 				"\n" +
-				"1 session left to restore, at Portal's next start or now with x <name>:\n" +
+				"1 session left to restore. x <name> brings one back now; otherwise they come back at the next restore after a reboot:\n" +
 				"  bell\n" +
 				kept,
 		},
@@ -151,7 +151,7 @@ func TestReport(t *testing.T) {
 			want: "Already migrated.\n" +
 				"Restored 1 session, then stopped on the error below.\n" +
 				"\n" +
-				"2 sessions left to restore, at Portal's next start or now with x <name>:\n" +
+				"2 sessions left to restore. Once the error below is fixed, x <name> brings one back; otherwise they come back at the next restore after a reboot:\n" +
 				"  bell\n" +
 				"  tidepool\n" +
 				kept,
@@ -162,7 +162,7 @@ func TestReport(t *testing.T) {
 			want: "Already migrated.\n" +
 				"Couldn't restore the sessions: the error below says why.\n" +
 				"\n" +
-				"1 session left to restore, at Portal's next start or now with x <name>:\n" +
+				"1 session left to restore. Once the error below is fixed, x <name> brings one back; otherwise they come back at the next restore after a reboot:\n" +
 				"  bell\n" +
 				kept,
 		},
