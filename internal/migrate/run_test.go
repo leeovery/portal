@@ -325,8 +325,8 @@ func TestRun_MigratesInFull(t *testing.T) {
 		o := w.migrated()
 
 		lantern := o.Plan.Sessions[0]
-		if lantern.From.Session != "lantern" || lantern.Name == "lantern" || lantern.Generated == nil {
-			t.Errorf("lantern's pane became %s (generated: %v); want a generated name clear of zmx's", lantern.Name, lantern.Generated)
+		if lantern.From.Session != "lantern" || !strings.HasPrefix(lantern.Name, "lantern-") || !slices.Equal(lantern.Changed, []string{takenWhy("lantern")}) {
+			t.Errorf("lantern's pane became %s (changed: %q); want lantern with a fresh id, clear of zmx's", lantern.Name, lantern.Changed)
 		}
 	})
 

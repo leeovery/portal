@@ -203,7 +203,7 @@ func TestRealisticFixture(t *testing.T) {
 	t.Run("each takes its tmux name up to ' · ', labelled with the whole of it", func(t *testing.T) {
 		for _, fixture := range realisticSessions {
 			got := byAddress[fixture.tmux+":0.0"]
-			if got.Generated != nil {
+			if got.Changed != nil {
 				continue
 			}
 			given, _, topic := strings.Cut(fixture.tmux, " · ")
@@ -220,19 +220,19 @@ func TestRealisticFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("the name too long and the name a live session holds are generated, labelled with the tmux name", func(t *testing.T) {
-		var generated []string
+	t.Run("the name a live session holds takes a fresh id and the name too long is cut, each labelled with the tmux name", func(t *testing.T) {
+		var changed []string
 		for _, s := range plan.Sessions {
-			if s.Generated != nil {
-				generated = append(generated, s.Name+" for "+s.Label)
+			if s.Changed != nil {
+				changed = append(changed, s.Label+" → "+s.Name+": "+strings.Join(s.Changed, "; "))
 			}
 		}
 		want := []string{
-			"quarry-Gen001 for quarry-Pm4sT1",
-			"cinder-Gen002 for " + realisticSessions[29].tmux,
+			"quarry-Pm4sT1 → quarry-Gen001: quarry-Pm4sT1 was taken, so it has a new id",
+			realisticSessions[29].tmux + " → cinder-a-session-name-typed-out-by-hand-long-enough-to-overflow-zmx-sockets: too long, so it was cut to 75 characters",
 		}
-		if !slices.Equal(generated, want) {
-			t.Errorf("generated %v, want %v", generated, want)
+		if !slices.Equal(changed, want) {
+			t.Errorf("changed %q\nwant %q", changed, want)
 		}
 	})
 

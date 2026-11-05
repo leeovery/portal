@@ -30,6 +30,19 @@ const (
 	finishesCopy   = ": it finishes the migration."
 )
 
+// How a session's name differs from its tmux session's own name, and why,
+// each told in the report beside the session.
+const (
+	replacedOneCopy   = "%s isn't allowed in a session name, so it became '-'"
+	replacedManyCopy  = "%s and %s aren't allowed in a session name, so each became '-'"
+	leadDroppedCopy   = "a session name can't start with '-', so it was dropped"
+	cutCopy           = "too long, so it was cut to %d characters"
+	takenCopy         = "%s was taken, so it has a new id"
+	numberTooLongCopy = "%s is too long, so it has a new id"
+	noPartCopy        = "no part of it is allowed in a session name, so it has a generated name"
+	stillRefusedCopy  = "%v, so it has a generated name"
+)
+
 // The waiting line: told once, as a run starts to wait for the tmux
 // version's daemon to exit.
 const waitingCopy = "Waiting for the tmux version's save daemon (pid %d) to save and exit…"
@@ -57,10 +70,12 @@ const (
 	leftLine            = "  %s"
 	tmuxDirCopy         = "The tmux version's state is kept at %s."
 	backupCopy          = "hooks.json's backup is at %s."
-	sessionsHeading     = "Sessions (name ← tmux name):"
-	sessionLine         = "  %s ← %s"
+	sessionsHeading     = "Sessions (tmux name → name):"
+	sessionLine         = "  %s → %s"
 	paneSuffix          = " (window %d, pane %d)"
-	generatedHeading    = "Generated names:"
+	changedHeading      = "Names made compatible (tmux name → name):"
+	changedLine         = "  %s → %s: %s"
+	changesSeparator    = "; "
 	labelsHeading       = "Labels dropped:"
 	skippedHeading      = "Skipped:"
 	transcriptsHeading  = "Restored without scrollback:"

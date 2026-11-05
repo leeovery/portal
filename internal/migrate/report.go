@@ -59,11 +59,11 @@ func WaitingLine(pid int) string { return fmt.Sprintf(waitingCopy, pid) }
 
 // Report is what portal migrate prints of the run o and the restore r after
 // it: a summary, the restore's result and the sessions it left; for a run
-// that migrated, each session it made, as name ← tmux name, and what it
-// generated, dropped, skipped, couldn't carry over, moved and removed, each
-// with why; then where the tmux version's state and hooks.json's backup are
-// kept. A run that found nothing to migrate says so alone. shown is how a
-// path is printed.
+// that migrated, each session it made, as tmux name → name, old to new, and
+// the names it changed, the labels it dropped, and what it skipped, couldn't
+// carry over, moved and removed, each with why; then where the tmux
+// version's state and hooks.json's backup are kept. A run that found nothing
+// to migrate says so alone. shown is how a path is printed.
 func Report(o Outcome, r Restore, shown func(path string) string) string {
 	var rep report
 	switch o.Course {
@@ -180,14 +180,18 @@ func (r *report) restore(res Restore) {
 // over, a block each, a block left out when it has nothing to say.
 func (r *report) detail(plan Plan) {
 	panes := panesBySession(plan)
-	section(r, sessionsHeading, plan.Sessions, func(s Session) (string, bool) {
-		made := fmt.Sprintf(sessionLine, s.Name, s.From.Session)
+	from := func(s Session) string {
 		if panes[s.From.Session] > 1 {
-			made += fmt.Sprintf(paneSuffix, s.From.Window, s.From.Pane)
+			return s.From.Session + fmt.Sprintf(paneSuffix, s.From.Window, s.From.Pane)
 		}
-		return made, true
+		return s.From.Session
+	}
+	section(r, sessionsHeading, plan.Sessions, func(s Session) (string, bool) {
+		return fmt.Sprintf(sessionLine, from(s), s.Name), true
 	})
-	section(r, generatedHeading, plan.Sessions, func(s Session) (string, bool) { return why(s.Name, s.Generated) })
+	section(r, changedHeading, plan.Sessions, func(s Session) (string, bool) {
+		return fmt.Sprintf(changedLine, from(s), s.Name, strings.Join(s.Changed, changesSeparator)), len(s.Changed) > 0
+	})
 	section(r, labelsHeading, plan.Sessions, func(s Session) (string, bool) { return why(s.Name, s.LabelRefused) })
 	section(r, skippedHeading, plan.Skipped, func(s SkippedSession) (string, bool) { return why(s.Name, s.Why) })
 	section(r, transcriptsHeading, plan.Sessions, func(s Session) (string, bool) { return why(s.Name, missing(s.Transcript)) })

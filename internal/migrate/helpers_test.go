@@ -175,7 +175,7 @@ func canonical(path string) string {
 // already, minting from mints, grouping by groupingDir.
 func naming(t *testing.T, taken ...string) migrate.Naming {
 	t.Helper()
-	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Mint: mints(), GroupingDir: groupingDir}
+	return migrate.Naming{Taken: taken, Validate: zmxBackend(t).ValidateName, Refuses: zmx.RefusesRune, Mint: mints(), GroupingDir: groupingDir}
 }
 
 // planOf plans migrating the tmux version's state dir dir with hookKeys under

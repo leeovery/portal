@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"unicode"
@@ -27,14 +28,51 @@ type nameRule struct {
 	reason  string
 }
 
+// runeRule refuses every name holding a character it refuses.
+type runeRule struct {
+	refuses func(rune) bool
+	reason  string
+}
+
+// pathRunes are the characters no entry in the directory can carry.
+var pathRunes = []runeRule{
+	{func(r rune) bool { return r == '/' }, "contains '/'"},
+	{func(r rune) bool { return r == 0 }, "contains NUL"},
+}
+
+// createRunes are the characters Create refuses as well, though zmx attach
+// makes names holding them.
+var createRunes = []runeRule{
+	{unicode.IsControl, "contains a control character, which zmx's own listing prints raw"},
+}
+
+// holding is the name rule of each of rules: a name holding a character it
+// refuses.
+func holding(rules []runeRule) []nameRule {
+	named := make([]nameRule, 0, len(rules))
+	for _, rule := range rules {
+		named = append(named, nameRule{func(n string) bool { return strings.ContainsFunc(n, rule.refuses) }, rule.reason})
+	}
+	return named
+}
+
+// RefusesRune reports whether Create refuses every name holding r, by the
+// rules on single characters that CheckName applies.
+func RefusesRune(r rune) bool {
+	for _, rule := range slices.Concat(pathRunes, createRunes) {
+		if rule.refuses(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // pathRules refuse the names no entry in the directory can carry, as zmx
 // refuses them.
-var pathRules = []nameRule{
+var pathRules = slices.Concat([]nameRule{
 	{func(n string) bool { return n == "" }, "is empty"},
 	{func(n string) bool { return n == "." || n == ".." }, "names a directory entry"},
-	{func(n string) bool { return strings.ContainsRune(n, '/') }, "contains '/'"},
-	{func(n string) bool { return strings.ContainsRune(n, 0) }, "contains NUL"},
-}
+}, holding(pathRunes))
 
 // attachRules refuse the names zmx attach reads as its own flags, which it
 // takes only before the session name.
@@ -46,13 +84,13 @@ var attachRules = []nameRule{
 // createRules refuse as well the names Portal does not make, though zmx
 // attach makes some: ones zmx's other commands misread, or its own listing
 // cannot carry.
-var createRules = []nameRule{
+var createRules = slices.Concat([]nameRule{
 	{func(n string) bool { return strings.EqualFold(n, logDir) }, "is zmx's log directory"},
 	{func(n string) bool { return strings.HasPrefix(n, "-") }, "starts with '-', which zmx reads as a flag"},
 	{func(n string) bool { return strings.HasSuffix(n, "*") }, "ends with '*', which zmx kill reads as a prefix match"},
-	{func(n string) bool { return strings.ContainsFunc(n, unicode.IsControl) }, "contains a control character, which zmx's own listing prints raw"},
+}, holding(createRunes), []nameRule{
 	{func(n string) bool { return !utf8.ValidString(n) }, "is not valid UTF-8"},
-}
+})
 
 func check(name string, rules ...[]nameRule) error {
 	for _, set := range rules {
@@ -98,7 +136,7 @@ func (b *Backend) checkLookup(name string) error {
 func (b *Backend) checkLength(name string) error {
 	if limit := b.MaxNameLen(); len(name) > limit {
 		return fmt.Errorf("%w: %q is %d bytes, more than the %d zmx can hold in %s",
-			backend.ErrInvalidName, name, len(name), max(limit, 0), b.dir)
+			backend.ErrNameTooLong, name, len(name), max(limit, 0), b.dir)
 	}
 	return nil
 }

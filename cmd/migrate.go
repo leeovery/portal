@@ -7,6 +7,7 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/migrate"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/resolver"
@@ -129,6 +130,7 @@ func migrateConfig(deps MigrateDeps, stderr io.Writer) (migrate.Config, error) {
 		Live:      func(ctx context.Context) ([]string, error) { return sessionNames(ctx, b) },
 		Naming: migrate.Naming{
 			Validate:    b.ValidateName,
+			Refuses:     zmx.RefusesRune,
 			Mint:        nanoid.NewGenerator(),
 			GroupingDir: func(cwd string) (string, bool) { return session.GroupingDir(cwd, runner) },
 		},

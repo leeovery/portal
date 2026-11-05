@@ -393,9 +393,9 @@ func TestMigrateAgainstZmx(t *testing.T) {
 			"Restored 2 sessions. Every saved session is restored.\n" +
 			"Each migrated session with a resume hook waits on its resume panel the first time you open it.\n" +
 			"\n" +
-			"Sessions (name ← tmux name):\n" +
-			"  lantern ← lantern\n" +
-			"  tidepool ← tidepool\n" +
+			"Sessions (tmux name → name):\n" +
+			"  lantern → lantern\n" +
+			"  tidepool → tidepool\n" +
 			"\n" +
 			"Resume hooks moved:\n" +
 			"  tokLan → lantern\n" +
