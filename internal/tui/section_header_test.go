@@ -78,7 +78,7 @@ func TestSectionHeader_PreservesCurrentSessionDecoration(t *testing.T) {
 	header := renderSectionHeader(prefs.ModeFlat, current, 2, sectionHeaderWidth, testDarkTheme(t), false)
 	want := "(current: " + current + ")"
 	if !strings.Contains(header, want) {
-		t.Errorf("section header dropped the inside-tmux decoration %q:\n%s", want, header)
+		t.Errorf("section header dropped the current-session decoration %q:\n%s", want, header)
 	}
 }
 
@@ -179,7 +179,7 @@ func TestViewSessionList_SectionHeaderCountMatchesVisible(t *testing.T) {
 		t.Errorf("composed view section-header count should be 2 (alpha excluded as the current session):\n%s", view)
 	}
 	if !strings.Contains(view, "current: alpha") {
-		t.Errorf("composed view dropped the inside-tmux decoration:\n%s", view)
+		t.Errorf("composed view dropped the current-session decoration:\n%s", view)
 	}
 }
 

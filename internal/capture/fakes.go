@@ -1,7 +1,8 @@
 // Package capture provides the in-memory fakes and deterministic fixtures the
-// offline visual-capture harness (cmd/capturetool) renders. Every tmux seam the
-// TUI model depends on is canned, and nothing here discovers config, so a capture
-// never opens a tmux server, spawns a daemon or reads the real ~/.config/portal.
+// offline visual-capture harness (cmd/capturetool) renders. Every backend seam
+// the TUI model depends on is canned, and nothing here discovers config, so a
+// capture never reaches a zmx session, spawns a daemon or reads the real
+// ~/.config/portal.
 //
 // The shipped portal binary must not import this package.
 package capture

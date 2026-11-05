@@ -9,6 +9,6 @@ package resumekeys
 const (
 	// Discard opens the discard confirmation from the waiting panel.
 	Discard byte = 'd'
-	// Confirm discards the pane's resume command from the confirmation.
+	// Confirm discards the session's resume command from the confirmation.
 	Confirm byte = 'y'
 )

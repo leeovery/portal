@@ -10,7 +10,7 @@ package hooks
 // the on-disk key are the same string.
 type Event string
 
-// EventOnResume runs the command when a restored pane hydrates.
+// EventOnResume runs the command when a restored session hydrates.
 const EventOnResume Event = "on-resume"
 
 // String returns the persisted key.

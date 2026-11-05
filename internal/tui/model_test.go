@@ -180,7 +180,7 @@ func TestView(t *testing.T) {
 			},
 		},
 		{
-			name: "sessions displayed in order returned by tmux",
+			name: "sessions displayed in the order the lister returns them",
 			sessions: []tui.Session{
 				{Name: "zebra", Attached: false},
 				{Name: "alpha", Attached: false},
@@ -282,7 +282,7 @@ func TestUpdate(t *testing.T) {
 
 	t.Run("sessionsMsg with error returns quit command", func(t *testing.T) {
 		m := tui.New(nil)
-		errMsg := tui.SessionsMsg{Err: fmt.Errorf("tmux not running")}
+		errMsg := tui.SessionsMsg{Err: fmt.Errorf("zmx not running")}
 
 		_, cmd := m.Update(errMsg)
 		if cmd == nil {
@@ -640,7 +640,7 @@ func TestNKeyCreatesSessionInCWD(t *testing.T) {
 			{Name: "dev", Attached: false},
 		}
 		creator := &mockSessionCreator{
-			err: fmt.Errorf("tmux failed"),
+			err: fmt.Errorf("zmx failed"),
 		}
 
 		m := tui.New(
@@ -1009,7 +1009,7 @@ func TestCurrentSessionExclusion(t *testing.T) {
 		}
 	})
 
-	t.Run("title is Sessions outside tmux", func(t *testing.T) {
+	t.Run("title is Sessions outside a session", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "dev", Attached: false},
 			{Name: "work", Attached: false},
@@ -2096,7 +2096,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 
 	t.Run("SessionsMsg with error triggers quit", func(t *testing.T) {
 		m := tui.New(nil)
-		errMsg := tui.SessionsMsg{Err: fmt.Errorf("tmux not running")}
+		errMsg := tui.SessionsMsg{Err: fmt.Errorf("zmx not running")}
 
 		_, cmd := m.Update(errMsg)
 		if cmd == nil {
@@ -2202,7 +2202,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 		}
 	})
 
-	t.Run("outside tmux sets title to Sessions", func(t *testing.T) {
+	t.Run("outside a session sets title to Sessions", func(t *testing.T) {
 		sessions := []tui.Session{
 			{Name: "dev", Attached: false},
 		}
@@ -3030,7 +3030,7 @@ func TestProjectsPage(t *testing.T) {
 				{Path: "/code/portal", Name: "portal"},
 			},
 		}
-		creator := &mockSessionCreator{err: fmt.Errorf("tmux failed")}
+		creator := &mockSessionCreator{err: fmt.Errorf("zmx failed")}
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{}},
 			tui.WithProjectStore(store),
@@ -4747,7 +4747,7 @@ func TestDefaultPageSelection(t *testing.T) {
 		}
 	})
 
-	t.Run("defaults to Projects page when all sessions filtered by inside-tmux exclusion", func(t *testing.T) {
+	t.Run("defaults to Projects page when all sessions filtered by current-session exclusion", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -4772,7 +4772,7 @@ func TestDefaultPageSelection(t *testing.T) {
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects when all sessions filtered by inside-tmux, got %d", updated.ActivePage())
+			t.Errorf("expected PageProjects when all sessions filtered by current-session exclusion, got %d", updated.ActivePage())
 		}
 	})
 
@@ -5344,7 +5344,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 				{Path: "/code/myapp", Name: "myapp"},
 			},
 		}
-		creator := &mockSessionCreator{err: fmt.Errorf("tmux failed")}
+		creator := &mockSessionCreator{err: fmt.Errorf("zmx failed")}
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tui.Session{}},

@@ -3169,8 +3169,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
 	// Pointer input (pointer.go). Without it a terminal keeps a swipe for its own
-	// scrollback, which the alt screen has none of, and tmux drops the wheel for
-	// a pane that never asked for the mouse.
+	// scrollback, which the alt screen has none of.
 	v.MouseMode = tea.MouseModeCellMotion
 	// Under NO_COLOR the terminal keeps its native bg: leaving BackgroundColor
 	// nil completes the canvas suppression.

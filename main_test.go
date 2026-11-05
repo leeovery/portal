@@ -78,7 +78,7 @@ func TestRun(t *testing.T) {
 
 	t.Run("it returns code 1 on a FatalError without duplicating stderr", func(t *testing.T) {
 		buf := withSeams(t, func() error {
-			return bootstrap.NewFatal("Portal failed to start tmux", errors.New("cause"))
+			return bootstrap.NewFatal("Portal failed to raise the restoring flag", errors.New("cause"))
 		})
 
 		code, panicked := run()

@@ -133,10 +133,14 @@ skipped (see [Troubleshooting](#tolerant-decoding--troubleshooting)).
 The command Portal hands your recipe already carries everything the spawned window
 needs to reconnect on its own:
 
-- It runs `portal open` on a pinned target with an explicit `PATH` injected, so the
-  new window finds `portal` and `tmux` even in a bare host environment.
-- `TMUX` and `TMUX_PANE` are stripped, so the spawned window runs **outside** tmux
-  (a clean attach, not a nested switch).
+- It runs the same `portal` binary as the window that asked, by its absolute path,
+  as `portal open` on a pinned target.
+- It carries Portal's own environment: `PATH`, so the new window finds `zmx` even in
+  a bare host environment; `ZMX_DIR`, so it reaches the same sessions; the state
+  directory; and each of Portal's config path and logging variables, set as the
+  opener has them or unset where the opener has none.
+- `ZMX_SESSION`, `TMUX` and `TMUX_PANE` are stripped, so the spawned window attaches
+  in a terminal of its own rather than switching the session its opener runs in.
 
 You never need to set environment variables, source a profile, or plumb `PATH` in a
 recipe — just open a window that runs the command Portal gives you.

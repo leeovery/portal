@@ -485,12 +485,12 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 	})
 }
 
-// A waiting pane's process declining a hangup would outlive the destruction of
-// its own pane, leaving a Portal process per culled session. SIGWINCH is
+// A waiting session's process declining a hangup would outlive the end of its
+// own session, leaving a Portal process per culled session. SIGWINCH is
 // watched for a resize and SIGTERM caught to outlast a shutdown; nothing else
 // may be taken off its default disposition.
 func TestResumeWaitingPane_LeavesHangupAndInterruptAtTheirDefault(t *testing.T) {
-	const onlyWatchable = "only syscall.SIGWINCH and syscall.SIGTERM may be notified — the default disposition must end a waiting pane's process when tmux tears the pane down"
+	const onlyWatchable = "only syscall.SIGWINCH and syscall.SIGTERM may be notified — the default disposition must end a waiting session's process when its session ends"
 	watchable := map[string]bool{"syscall.SIGWINCH": true, "syscall.SIGTERM": true}
 
 	for _, name := range []string{"state_resume_wait.go", "state_resume_draw.go", "state_resume_chain.go"} {

@@ -135,9 +135,8 @@ type SessionDelegate struct {
 	Selected map[string]struct{}
 	// GoneFlagged is the transient pre-flight abort set, keyed on Session.Name.
 	GoneFlagged map[string]struct{}
-	// Pending holds the sessions with any pane awaiting a resume decision, keyed
-	// on Session.Name so a session carries one dot however many panes wait.
-	// Nil marks nothing.
+	// Pending holds the sessions awaiting a resume decision, keyed on
+	// Session.Name. Nil marks nothing.
 	Pending map[string]struct{}
 	// Home is the home directory a shown directory is abbreviated against; empty
 	// abbreviates nothing.
