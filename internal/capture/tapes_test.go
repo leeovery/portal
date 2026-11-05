@@ -472,14 +472,18 @@ const artDir = "../../art"
 
 // Every file in art/ is made by a tape, and every tape's art is there: a WebP
 // of each tape, and an MP4 of each clip, a tape record.sh makes no still of.
+// A dotfile is left out: Finder writes .DS_Store into a folder it opens, and
+// git ignores it.
 func TestEveryArtFileIsMadeByATape(t *testing.T) {
 	entries, err := os.ReadDir(artDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := make([]string, len(entries))
-	for i, e := range entries {
-		files[i] = e.Name()
+	var files []string
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".") {
+			files = append(files, e.Name())
+		}
 	}
 	for _, misfit := range artMisfits(demoTapeNames(t), stillsListed(t), files) {
 		t.Error(misfit)
