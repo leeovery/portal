@@ -1,41 +1,69 @@
 #!/usr/bin/env bash
-# Grade a VHS master recording and emit the delivery formats.
+# Make the README's art from the frames a tape in demo/ recorded: for a clip,
+# an animated WebP, which GitHub shows inline, and an MP4; for a still, a WebP
+# of its last frame.
 #
-# VHS reproduces portal's EXACT sRGB palette (verified pixel-for-pixel), which
-# reads muted next to a wide-gamut terminal — Ghostty on a P3 Mac renders the
-# same hex values more vividly because it isn't colour-managed. This bakes a
-# saturation/contrast boost so the recording matches that on-screen vividness.
+# vhs writes each frame it shows, a layer of text and one of the cursor,
+# exactly as the terminal drew them. The art is made from those, not from a
+# video vhs encodes: a video's compression shifts every pixel a little from
+# frame to frame, which an animated WebP then has to store whole, where from
+# the frames themselves it stores only what changed, losslessly, at a tenth
+# the size. The colours are the themes' own, ungraded: beside the signed-off
+# frames, which carry a Display P3 profile, they don't read flat.
 #
-# Primary deliverable is an animated WebP: true 24-bit colour AND it renders
-# inline on GitHub (incl. the iOS app), which a committed <video> does not.
-#
-# Usage:  finalize.sh <basename>      # e.g. finalize.sh portal-cold
-# Input:  demo/out/<basename>.mp4     (the VHS master — run `vhs <tape>` first)
-# Output: demo/out/<basename>-vivid.{webp,mp4}
+# Usage:  demo/finalize.sh <name>...           a clip each, such as routing
+#         demo/finalize.sh --still <name>...   a still each, such as help
+# Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
+# Output: art/<name>.webp, and for a clip, art/<name>.mp4
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-name="${1:?usage: finalize.sh <basename>  (e.g. portal-cold)}"
-src="$here/out/$name.mp4"
-grade="eq=saturation=1.55:contrast=1.08"   # the chosen "Ghostty pop" grade
+art="$(cd "$here/.." && pwd)/art"
+fps=30 # the tapes' Framerate
+pad=24 # the margin round the screen, in px
 
-[ -f "$src" ] || { echo "missing master: $src — run 'vhs demo/$name.tape' first"; exit 1; }
+still=false
+if [ "${1:-}" = "--still" ]; then
+  still=true
+  shift
+fi
+[ $# -gt 0 ] || {
+  echo "usage: demo/finalize.sh [--still] <name>..." >&2
+  exit 2
+}
 
-echo "==> grading $name  ($grade)"
-
-# Primary: animated WebP (true-colour, loops, inline-renderable on GitHub).
-# This ffmpeg has no libwebp encoder, so go via graded PNG frames + img2webp.
 frames="$(mktemp -d)"
 trap 'rm -rf "$frames"' EXIT
-ffmpeg -y -loglevel error -i "$src" -vf "$grade,fps=15,scale=1000:-1:flags=lanczos" "$frames/f%04d.png"
-img2webp -loop 0 -d 66 -q 80 -m 6 "$frames"/f*.png -o "$here/out/$name-vivid.webp" >/dev/null
+mkdir -p "$art"
 
-# Secondary: vivid MP4 (true-colour download; usable for a GitHub attachment embed).
-ffmpeg -y -loglevel error -i "$src" -vf "$grade" \
-  -c:v libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart \
-  "$here/out/$name-vivid.mp4"
+for name in "$@"; do
+  src="$here/out/$name"
+  [ -f "$src/frame-text-00001.png" ] || {
+    echo "no frames in demo/out/$name: run 'vhs demo/$name.tape' first" >&2
+    exit 1
+  }
+  rm -f "$frames"/*.png
+  size="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$src/frame-text-00001.png")"
+  w="${size%,*}" h="${size#*,}"
 
-echo "==> done:"
-for f in "$name-vivid.webp" "$name-vivid.mp4"; do
-  printf "   %-28s %s\n" "$f" "$(du -h "$here/out/$f" | cut -f1)"
+  # The cursor's layer over the text's, on a margin of the screen's own
+  # canvas, which the theme picker changes as it goes: its top-right pixel's,
+  # above the clock, as the title's badge paints the top-left.
+  ffmpeg -v error -y -framerate "$fps" -i "$src/frame-text-%05d.png" -framerate "$fps" -i "$src/frame-cursor-%05d.png" \
+    -filter_complex "[0][1]overlay=format=rgb,split[screen][corner];[corner]crop=1:1:$((w - 1)):0,scale=$((w + 2 * pad)):$((h + 2 * pad)):flags=neighbor[margin];[margin][screen]overlay=$pad:$pad:format=rgb" \
+    -pix_fmt rgb24 "$frames/f%05d.png"
+
+  echo "==> $name"
+  if $still; then
+    shot=("$frames"/f*.png)
+    cwebp -quiet -lossless -m 6 "${shot[${#shot[@]} - 1]}" -o "$art/$name.webp"
+    printf "   %-24s %s\n" "art/$name.webp" "$(du -h "$art/$name.webp" | cut -f1)"
+    continue
+  fi
+  img2webp -loop 0 -lossless -q 80 -m 6 -d $((1000 / fps)) "$frames"/f*.png -o "$art/$name.webp" >/dev/null
+  ffmpeg -v error -y -framerate "$fps" -i "$frames/f%05d.png" \
+    -c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart "$art/$name.mp4"
+  for f in "$name.webp" "$name.mp4"; do
+    printf "   %-24s %s\n" "art/$f" "$(du -h "$art/$f" | cut -f1)"
+  done
 done
