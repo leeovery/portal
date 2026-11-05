@@ -8,14 +8,14 @@ Fast, fuzzy session management from a bare shell, with project memory,
 <br>path aliases, reboot-safe restoration, and a keyboard-driven TUI.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg)](https://go.dev)
 [![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
 
-[Install](#install) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration)
+[Install](#install) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Commands](#commands) · [Shell Integration](#shell-integration) · [Configuration](#configuration) · [Upgrading from tmux](#upgrading-from-the-tmux-version)
 
 <br>
 
-<img src="art/portal-cold.webp" alt="Portal cold-boot: the loading screen, session restore, and attach" width="840">
+<img src="art/portal-cold.webp" alt="Portal's first launch after a reboot: the loading page restores twelve sessions, the picker lands on them, and a restored session's scrollback is previewed" width="840">
 
 </div>
 
@@ -41,10 +41,12 @@ Portal folds that into two shell functions and a picker:
 
 ## Install
 
+Coming from the tmux version of Portal? Install this one, then run `portal migrate` before anything else: see [Upgrading from the tmux version](#upgrading-from-the-tmux-version).
+
 ### Requirements
 
-- **[zmx](https://github.com/neurosnap/zmx)** newer than 0.8.1: one speaking zmx's socket protocol 1, which no zmx release carries yet, so build zmx from its main branch. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
-- **Go** (to build from source), **macOS or Linux**.
+- **[zmx](https://github.com/neurosnap/zmx)** `<zmx release with protocol 1>`, the release Portal supports: the first to speak zmx's socket protocol 1, which is how Portal talks to zmx. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
+- **macOS or Linux**, and **Go** 1.26+ to build from source.
 
 **macOS**
 
@@ -52,17 +54,23 @@ Portal folds that into two shell functions and a picker:
 brew install leeovery/tools/portal
 ```
 
+Homebrew installs zmx with it, as a dependency.
+
 **Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leeovery/portal/main/scripts/install.sh | bash
 ```
 
+The script installs Portal alone. Install zmx yourself, from the Linux builds in [zmx's getting started guide](https://zmx.sh/getting-started), or with Homebrew on Linux: `brew install neurosnap/tap/zmx`.
+
 **Go**
 
 ```bash
 go install github.com/leeovery/portal@latest
 ```
+
+`go install` builds Portal alone: install zmx separately, with `brew install neurosnap/tap/zmx` or from [zmx's getting started guide](https://zmx.sh/getting-started).
 
 ## Quick Start
 
@@ -84,10 +92,10 @@ Your sessions are saved as you work. After a reboot the first `x` rebuilds them 
 ## Screenshots
 
 <div align="center">
-<img src="art/portal-tour.webp" alt="Portal feature tour: grouping, fuzzy filter, scrollback preview, attach" width="840">
+<img src="art/portal-tour.webp" alt="Portal feature tour: grouping, fuzzy filter, scrollback preview, projects" width="840">
 </div>
 
-The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
+The full tour: grouping, fuzzy filter, scrollback preview, projects. Stills below.
 
 |  |  |
 |:---:|:---:|
@@ -95,6 +103,7 @@ The full tour: grouping, fuzzy filter, scrollback preview, attach. Stills below.
 | <img src="art/loading.webp" alt="Honest loading screen" width="430"><br>**Concurrent cold-boot loading** | <img src="art/help-modal.webp" alt="Keybindings help modal" width="430"><br>**Per-page `?` keymap** |
 | <img src="art/projects.webp" alt="Projects page" width="430"><br>**Projects** | <img src="art/edit-project.webp" alt="Edit project modal" width="430"><br>**Edit project: name, aliases, tags** |
 | <img src="art/filtering.webp" alt="Live filter" width="430"><br>**Live fuzzy filter** | <img src="art/kill-confirm.webp" alt="Kill confirmation modal" width="430"><br>**Destructive confirm** |
+| <img src="art/resume-panel.webp" alt="Resume panel on a restored session" width="430"><br>**Resume panel after a reboot** | <img src="art/theme-panel.webp" alt="Theme picker over the sessions" width="430"><br>**Theme picker** |
 
 The same screens render in light mode and under `NO_COLOR` (see [Configuration](#configuration)).
 
@@ -151,7 +160,7 @@ eval "$(portal init zsh --cmd p)"   # creates p() and pctl()
 
 ### `x` (open)
 
-The single session verb — the picker, opening a target, and multi-window bursts all live here. `x` maps to `portal open`. (`x` absorbs the former `attach` and `spawn` commands; both are retired.)
+The single session verb — the picker, opening a target, and multi-window bursts all live here. `x` maps to `portal open`.
 
 ```bash
 x                                    # interactive TUI picker
@@ -247,13 +256,13 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-session commands to bring back after a reboot. Under the shipped default a restored session comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the session is restored, with no panel. `hook set` must be run from inside a session; `hook rm` defaults to the current session's name but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including sessions that no longer exist, and the keys the tmux version wrote — pane tokens and old-format `<session>:<window>.<pane>` keys). `hook rm` exits non-zero when it removes nothing — a missing entry or a session with no hook of its own — so a scripted caller can tell a real removal from a no-op.
+Register per-session commands to bring back after a reboot. Under the shipped default a restored session comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the session is restored, with no panel. `hook set` must be run from inside a session; `hook rm` defaults to the current session's name but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including sessions that no longer exist). `hook rm` exits non-zero when it removes nothing — a missing entry or a session with no hook of its own — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
 Hooks are keyed by the session's name, which never changes. Renaming a session sets its label, from the picker's `r` modal or `xctl rename` inside the session, and leaves the name alone, so a relabelled session still brings its command back after the next reboot — as the panel under the shipped default, and as a fired command under `eager`.
 
-A hook goes with its session: killing the session, or the session ending for good, removes it. A hook left behind is stale once its key names neither a session zmx lists, answering or not, nor one Portal has saved in `sessions.json` — a key the tmux version wrote included. The save daemon removes stale hooks once an hour, and `xctl doctor --fix` removes them at once. Both leave every hook alone while a restore runs, while no session is listed and none is saved (so a state directory pointed somewhere fresh never costs the hooks in `hooks.json`), and while the session list, `sessions.json` or the restoring flag can't be read. Each removed command is written to `portal.log` (`grep 'op=clean-stale' portal.log`), so it can be copied back out.
+A hook goes with its session: killing the session, or the session ending for good, removes it. A hook left behind is stale once its key names neither a session zmx lists, answering or not, nor one Portal has saved in `sessions.json`. The save daemon removes stale hooks once an hour, and `xctl doctor --fix` removes them at once. Both leave every hook alone while a restore runs, while no session is listed and none is saved (so a state directory pointed somewhere fresh never costs the hooks in `hooks.json`), and while the session list, `sessions.json` or the restoring flag can't be read. Each removed command is written to `portal.log` (`grep 'op=clean-stale' portal.log`), so it can be copied back out.
 
 A label takes any printable text. Only a label holding a control or formatting character, such as a newline, tab or escape, is refused, by the picker's `r` modal and `xctl rename` alike: `label refused: it holds a control or formatting character, such as a newline, tab or escape`. The picker says exactly that and the session keeps its label; a hook registered against it is untouched. Empty text, or the session's own name, resets the label to the name.
 
@@ -261,7 +270,7 @@ A label takes any printable text. Only a label holding a control or formatting c
 xctl hook set --on-resume "npm start"            # register a resume hook
 xctl hook set --on-resume "npm start" --resume-mode lazy   # register it pinned to a resume mode
 xctl hook rm --on-resume                         # remove the current session's hook
-xctl hook rm --on-resume --pane-key 'k3Xp7Q'     # remove the entry under any hook key, verbatim (works outside a session)
+xctl hook rm --on-resume --pane-key 'api-Rf4TmZ' # remove the entry under any hook key, verbatim (works outside a session)
 xctl hook list                                   # list hooks: key, event, command, the session's label (4th column, empty if no live session carries the key), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
 ```
 
@@ -279,11 +288,11 @@ as a dev server.
 A read-only health report across Portal's resurrection machinery — zmx present and every session answering, `_portal-saver` up, its save daemon alive, state dir sane, `sessions.json` valid, no stale entries, sessions waiting to resume, the [key config](#keys-in-a-session), and the detected host terminal. It starts nothing and signals nothing (a saver that isn't running is reported, not started), and exits `0` only when every check passes, non-zero otherwise — a scriptable health gate. The host-terminal line is informational and never affects the exit code, nor does the key-config line, which names any binding that falls back to its default.
 
 ```bash
-xctl doctor              # health report (subsumes the retired `state status`)
+xctl doctor              # health report
 xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 ```
 
-`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects (replacing the retired `clean`), and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. Until migration has moved the tmux version's state to `state-tmux/`, beside the state directory, the line counts nothing and says so while any stale key has the shape of the tmux version's (a pane token, or `<session>:<window>.<pane>`), and neither the daemon nor `--fix` prunes a hook while any of those would be pruned with it. Once `state-tmux/` is there, every hook is judged alike. The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check (folding in the retired `spawn --detect`) prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resumes line reports how many live sessions are waiting on their [resume panel](#resume-panel), the kept-sessions line, shown only when there are any, names the saved sessions that aren't running, which `x <name>` brings back (with no save daemon running, every saved session that isn't running, since the next start brings them all back), and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
+`--fix` performs the reversible-by-reconstruction repairs: prune stale hooks, prune stale projects, and sweep old logs. It re-runs the diagnosis afterwards and the exit code reflects the post-repair state. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [`xctl hook`](#xctl-hook)); the stale-hooks line counts them, and fails when `hooks.json` can't be read or doesn't parse. Hooks the tmux version wrote are held back until its state is migrated: see [Upgrading from the tmux version](#upgrading-from-the-tmux-version). The daemon already runs these prunes automatically on a slow cadence, so `doctor` usually reads healthy without you doing anything — `--fix` is the manual trigger. The host-terminal check prints the detected terminal and its bundle id so you can copy it into [`terminals.json`](#configuration). The report also carries informational lines that state rather than judge — the pending-resumes line reports how many live sessions are waiting on their [resume panel](#resume-panel), the kept-sessions line, shown only when there are any, names the saved sessions that aren't running, which `x <name>` brings back (with no save daemon running, every saved session that isn't running, since the next start brings them all back), and the resume-mode line reports the install's resume mode (`eager` or `lazy`, the shipped default `lazy` whenever `prefs.json` sets none) — and, like the host-terminal line, they never affect the exit code.
 
 A missing `_portal-saver` fails the saver and daemon lines while there is anything to save: a live session, or an entry in `sessions.json`. On an install with nothing to save yet, such as a fresh one, both lines state it instead (`nothing to save yet`) and the report stays healthy; if doctor can't list the sessions or read `sessions.json`, it can't show there is nothing to save, so a missing saver still fails rather than reading not evaluable.
 
@@ -294,7 +303,7 @@ While the stale hooks can't be counted, the stale-hooks line reads not evaluable
 ```
 Pruned 2 stale hooks:
   notes-x7Kd9a
-  old-session:0.0
+  blog-drafts
 ```
 
 ### `xctl theme export`
@@ -319,28 +328,7 @@ portal uninstall
 
 ### `portal migrate`
 
-Move the tmux version of Portal's saved sessions and resume hooks to this version. Until you run it, every command but `version`, `doctor` and `current` stops on the tmux version's `sessions.json` with one line pointing here (`doctor` reports it instead, and `current` only shows the session's name).
-
-```bash
-portal migrate
-```
-
-It runs in this order, and changes nothing it doesn't name:
-
-1. Before it touches tmux, it makes every check that can be made up front: it reads `hooks.json`, the tmux version's `sessions.json` and zmx's sessions. If one of those checks stops it, nothing has changed, in tmux or on disk. A later step can still stop it once tmux is touched.
-2. **The tmux side.** If a tmux server is running, it removes Portal's tmux hooks (and only Portal's) and ends `_portal-saver`. tmux and your tmux sessions keep running; end them when you're ready.
-3. It waits, up to 30 seconds, for the tmux version's save daemon to save one last time and exit. It signals nothing itself. A daemon still running then stops the migration with nothing migrated, but Portal's tmux hooks and `_portal-saver` are already gone by then; running `portal migrate` again waits again.
-4. It copies `hooks.json` to `hooks.json.tmux` in the state directory, unless that copy is already there; it never overwrites it.
-5. It builds this version's state beside the old one, in `state-migrating/`: one session for each tmux pane, named for its tmux session (the part before ` · `), the full tmux name kept as its label, a second pane's session numbered `-2`, and so on. A name zmx can't hold is made to fit rather than replaced: a character it refuses, such as `/`, becomes `-`, a leading `-` is dropped, and a name too long is cut. Only a name with nothing left, or a reserved one such as `logs`, gets a generated `{project}-{id}`. A name already taken keeps its stem and takes a fresh id, so `kit` becomes `kit-<id>`, and `folio-bGDWc0` becomes `folio-<new id>`. Each session keeps its directory and its saved scrollback.
-6. It rewrites `hooks.json` from the copy: each resume hook keyed by a pane token moves to the name of that pane's session. Hooks keyed the older ways, by pane position or tmux pane id, haven't fired since pane tokens arrived, so they're removed; the copy keeps them.
-7. It moves the tmux version's `state/` to `state-tmux/`, beside it, and the new state into `state/`.
-8. It restores the sessions, then prints a report.
-
-Each migrated session with a resume hook opens on its [resume panel](#resume-panel) the first time, whatever its hook's mode: your tmux sessions are still running their programs, and resuming the same command twice at once would collide. After that first restore, the hook's own mode applies. If Portal can't put a session on its panel, it opens at your shell, its hook not run.
-
-The report leads with a summary and the restore: how many sessions it restored, and any it couldn't, by name: `x <name>` brings one back now, and otherwise they come back at the next restore after a reboot. When the restore stopped on an error, that holds once the error is fixed. It then lists every session, old name on the left and new on the right (`ws-folio-dev (window 1, pane 2) → ws-folio-dev-2`), each name it changed with why in plain words (`flow-v1/27 → flow-v1-27: '/' isn't allowed in a session name, so it became '-'`), dropped labels, skipped sessions and missing scrollback with the reason for each, and the hooks moved and removed, and ends with where `state-tmux/` and the `hooks.json` copy are.
-
-Running it again is safe. Stopped part way, before the move, it starts over. Stopped between the two moves, it finishes them; until then every other command but `version`, `doctor` and `current` stops with one line pointing here, and `doctor --fix` repairs nothing. Already migrated, it changes nothing, restores only what any Portal command would, and reports which sessions are still left to restore and where the tmux version's state is kept. With nothing of the tmux version's to migrate, it says so and exits `0`. It refuses, changing nothing, when both a tmux version's `state/` and an earlier migration's `state-tmux/` are there: move `state/` aside and keep the earlier migration's `state-tmux/`. It refuses too when `state-tmux/` is there but the state directory holds nothing it migrated.
+Move the tmux version of Portal's saved sessions and resume hooks to this version. See [Upgrading from the tmux version](#upgrading-from-the-tmux-version).
 
 ### `xctl version`
 
@@ -361,7 +349,7 @@ portal init bash --cmd p
 
 ## TUI Keybindings
 
-Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on any page for an in-app help modal listing that page's complete keymap.
+The lists move with the **arrows only** (no vim or page-jump aliases); the [preview](#scrollback-preview) scrolls its history with `j` / `k`. Press **`?`** on any page for an in-app help modal listing that page's complete keymap.
 
 | Key | Action |
 |---|---|
@@ -376,6 +364,8 @@ Navigation is **arrows only** (no vim or page-jump aliases). Press **`?`** on an
 | `t` | Open the theme picker |
 | `r` | Rename session |
 | `k` | Kill session |
+| `e` | Edit the highlighted project: name, aliases, tags (Projects only) |
+| `d` | Delete the highlighted project, after a confirmation (Projects only) |
 | `n` | New session in the current directory |
 | `?` | Show the full keymap for the current page |
 | `q` / `Esc` | Quit (`Esc` clears an active filter first) |
@@ -637,6 +627,10 @@ Projects are auto-populated when you create new sessions, pruned automatically b
 
 **Theme.** Every colour Portal draws comes from the active theme, painted onto its own canvas so the palette always sits on the surface it was tuned for. Six themes ship — `tokyo-night`, `tokyo-night-day`, `nord`, `nord-wave`, `gitlab-dark-grey`, and `horizon` — and by default Portal picks a light or dark one by asking your terminal what colour its background is, falling back to dark if the terminal doesn't answer. Press `t` in the picker to choose a theme, or set `"theme": "<slug>"` in `prefs.json` to pin one whatever the terminal looks like; your own themes are `.theme` files dropped into the themes directory. Setting `NO_COLOR` to any non-empty value disables the canvas and renders on your terminal's native colours — with no colour to theme, `t` is unavailable there. See [docs/theming.md](docs/theming.md) for the colour roles, the file format, the naming rules, and how the light/dark pair is set.
 
+<div align="center">
+<img src="art/themes.webp" alt="The theme picker previewing each built-in theme over the sessions" width="840">
+</div>
+
 **Custom terminals (`terminals.json`).** Portal opens host windows natively on Ghostty. For any other terminal, add a recipe — see [docs/custom-terminals.md](docs/custom-terminals.md) for the full setup guide.
 
 ## Logging
@@ -672,14 +666,42 @@ mode `0600`, directories `0700`.
 - There is no per-session opt-out: a session's scrollback is saved whenever it
   changes, at most once a minute.
 
+## Upgrading from the tmux version
+
+Portal used to run on tmux. This version runs on zmx, saves its sessions in a new shape, and keys a resume hook by its session's name rather than by a tmux pane. `portal migrate` moves the tmux version's saved sessions and resume hooks across. Run it once, after installing this version and before anything else: until you do, every command but `version`, `doctor` and `current` stops on the tmux version's `sessions.json` with one line pointing at `portal migrate` (`doctor` reports it instead, and `current` only shows the session's name).
+
+```bash
+portal migrate
+```
+
+It runs in this order, and changes nothing it doesn't name:
+
+1. Before it touches tmux, it makes every check that can be made up front: it reads `hooks.json`, the tmux version's `sessions.json` and zmx's sessions. If one of those checks stops it, nothing has changed, in tmux or on disk. A later step can still stop it once tmux is touched.
+2. **The tmux side.** If a tmux server is running, it removes Portal's tmux hooks (and only Portal's) and ends `_portal-saver`. tmux and your tmux sessions keep running; end them when you're ready.
+3. It waits, up to 30 seconds, for the tmux version's save daemon to save one last time and exit. It signals nothing itself. A daemon still running then stops the migration with nothing migrated, but Portal's tmux hooks and `_portal-saver` are already gone by then; running `portal migrate` again waits again.
+4. It copies `hooks.json` to `hooks.json.tmux` in the state directory, unless that copy is already there; it never overwrites it.
+5. It builds this version's state beside the old one, in `state-migrating/`: one session for each tmux pane, named for its tmux session (the part before ` · `), the full tmux name kept as its label, a second pane's session numbered `-2`, and so on. A name zmx can't hold is made to fit rather than replaced: a character it refuses, such as `/`, becomes `-`, a leading `-` is dropped, and a name too long is cut. Only a name with nothing left, or a reserved one such as `logs`, gets a generated `{project}-{id}`. A name already taken keeps its stem and takes a fresh id, so `kiln` becomes `kiln-<id>`, and `atelier-m4TzpD` becomes `atelier-<new id>`. Each session keeps its directory and its saved scrollback.
+6. It rewrites `hooks.json` from the copy: each resume hook keyed by a pane token moves to the name of that pane's session. Hooks keyed the older ways, by pane position or tmux pane id, haven't fired since pane tokens arrived, so they're removed; the copy keeps them.
+7. It moves the tmux version's `state/` to `state-tmux/`, beside it, and the new state into `state/`.
+8. It restores the sessions, then prints a report.
+
+Each migrated session with a resume hook opens on its [resume panel](#resume-panel) the first time, whatever its hook's mode: your tmux sessions are still running their programs, and resuming the same command twice at once would collide. After that first restore, the hook's own mode applies. If Portal can't put a session on its panel, it opens at your shell, its hook not run.
+
+The report leads with a summary and the restore: how many sessions it restored, and any it couldn't, by name: `x <name>` brings one back now, and otherwise they come back at the next restore after a reboot. When the restore stopped on an error, that holds once the error is fixed. It then lists every session, old name on the left and new on the right (`lumen-dev (window 1, pane 2) → lumen-dev-2`), each name it changed with why in plain words (`relay-v1/42 → relay-v1-42: '/' isn't allowed in a session name, so it became '-'`), dropped labels, skipped sessions and missing scrollback with the reason for each, and the hooks moved and removed, and ends with where `state-tmux/` and the `hooks.json` copy are.
+
+Running it again is safe. Stopped part way, before the move, it starts over. Stopped between the two moves, it finishes them; until then every other command but `version`, `doctor` and `current` stops with one line pointing at `portal migrate`, and `doctor --fix` repairs nothing. Already migrated, it changes nothing, restores only what any Portal command would, and reports which sessions are still left to restore and where the tmux version's state is kept. With nothing of the tmux version's to migrate, it says so and exits `0`. It refuses, changing nothing, when both a tmux version's `state/` and an earlier migration's `state-tmux/` are there: move `state/` aside and keep the earlier migration's `state-tmux/`. It refuses too when `state-tmux/` is there but the state directory holds nothing it migrated.
+
+**The tmux version's hook keys.** The tmux version keyed a hook by its pane: a pane token, or in older installs `<session>:<window>.<pane>`. `xctl hook rm --pane-key` takes those keys verbatim too. A hook under one is stale, as any other, once its key names neither a session zmx lists nor one saved in `sessions.json`. But until migration has moved the tmux version's state to `state-tmux/`, beside the state directory, [`xctl doctor`](#xctl-doctor)'s stale-hooks line counts nothing while any stale key has the shape of the tmux version's, and reads not evaluable: `hooks.json holds keys in the tmux version's shape`. Neither the daemon nor `--fix` prunes a hook while any of those would be pruned with it. Once `state-tmux/` is there, every hook is judged alike.
+
 ## Uninstall
 
 Two paths depending on whether you want to keep your saved state:
 
 - **Just remove the binary:** `brew uninstall portal` or `rm $(which portal)`.
-  Your sessions keep running in zmx, and a save daemon already running keeps
-  running until its `_portal-saver` session ends. Your saved state is preserved,
-  and reinstalling picks up where it left off.
+  `brew uninstall portal` leaves zmx installed, as Homebrew leaves a
+  dependency. Either way your sessions keep running in zmx, and a save daemon
+  already running keeps running until its `_portal-saver` session ends. Your
+  saved state is preserved, and reinstalling picks up where it left off.
 - **Explicit teardown:** run `portal uninstall`, which stops the save daemon
   once it has saved. It touches **none of your files** — saved sessions and
   all config are left in place, and running `x` again brings the daemon back. To remove

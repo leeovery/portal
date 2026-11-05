@@ -10,8 +10,8 @@
 # given a TMPDIR in demo/out. It can also fail to write the frames without a
 # word, so a run that leaves none newer than its start fails here.
 #
-# Usage:  demo/record.sh                every tape
-#         demo/record.sh tour help      the tapes named
+# Usage:  demo/record.sh                        every tape
+#         demo/record.sh portal-cold loading    the tapes named
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

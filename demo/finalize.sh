@@ -11,8 +11,8 @@
 # the size. The colours are the themes' own, ungraded: beside the signed-off
 # frames, which carry a Display P3 profile, they don't read flat.
 #
-# Usage:  demo/finalize.sh <name>...           a clip each, such as routing
-#         demo/finalize.sh --still <name>...   a still each, such as help
+# Usage:  demo/finalize.sh <name>...           a clip each, such as portal-cold
+#         demo/finalize.sh --still <name>...   a still each, such as loading
 # Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
 # Output: art/<name>.webp, and for a clip, art/<name>.mp4
 set -euo pipefail
@@ -47,8 +47,7 @@ for name in "$@"; do
   w="${size%,*}" h="${size#*,}"
 
   # The cursor's layer over the text's, on a margin of the screen's own
-  # canvas, which the theme picker changes as it goes: its top-right pixel's,
-  # above the clock, as the title's badge paints the top-left.
+  # canvas, which the theme panel changes as it previews: its top-right pixel's.
   ffmpeg -v error -y -framerate "$fps" -i "$src/frame-text-%05d.png" -framerate "$fps" -i "$src/frame-cursor-%05d.png" \
     -filter_complex "[0][1]overlay=format=rgb,split[screen][corner];[corner]crop=1:1:$((w - 1)):0,scale=$((w + 2 * pad)):$((h + 2 * pad)):flags=neighbor[margin];[margin][screen]overlay=$pad:$pad:format=rgb" \
     -pix_fmt rgb24 "$frames/f%05d.png"

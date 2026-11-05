@@ -29,13 +29,17 @@ scripts/zmx-build [ref]                     # build the zmx commit pinned in scr
 go run ./cmd/capturetool --fixture <name> [--theme <slug|path>]          # live view; capture.FixtureNames() lists fixtures
 go run ./cmd/capturetool --fixture <name> --print [--ansi] [--size WxH]  # its frame once, as text or in colour
 go run ./cmd/capturetool --frames testdata/vhs/frames [names…]           # regenerate golden frames (all without names)
+go run ./cmd/capturetool --scenario <name> [--theme <slug|path>]         # play a demo scenario full screen, in real time; capture.ScenarioNames()
 vhs testdata/vhs/<tape>                                                 # re-capture a still
+demo/record.sh [names…]                                                 # record the README's art/ from demo/*.tape (all without names)
 ```
 
 - **Golden frames.** `testdata/vhs/frames/` keeps a `.txt`/`.ansi` pair per fixture, standalone surfaces included, drawn in `tokyo-night` at the size in the stem (`sessions-flat-120x40`). `internal/capture`'s frame tests hold every fixture to its frame cell for cell: glyph, colours, bold and hyperlink. They also check each fixture draws the same twice.
 - **The terminal background.** An unpainted cell shows whatever background the screen sets. The picker fixtures and the swatch set their canvas with OSC 11, so there it counts as the canvas. The resume surfaces and colourless fixtures set none, so there it matches only an unpainted cell.
 - **Regenerating.** A change that alters a screen regenerates its frames with `--frames` in the same change. Never edit a frame by hand; an unintended frame change is a regression to fix, not a frame to rewrite. A new fixture keeps a frame from the start.
 - **Nothing personal, nothing from the environment.** Fixture data is invented: no real project or person names. Fixtures pin their home directory through `tui.Deps.Home`, so no frame reads `$HOME`, and the capture tests refuse to run with wide East Asian widths (`capture.RunNarrow`).
+- **Size sweeps.** `internal/capture`'s sweeps hold every fixture to fit, chrome, cursor and cut-name rules across a size grid. `knownBreaks` lists the excused breaks with why; a listed break that no longer breaks fails until its entry is deleted.
+- **Demos.** `demo/*.tape` run capturetool's scenarios and fixtures in-process with every seam faked, never the real `portal` binary, so recording is safe beside a live Portal. The tape test parses the tapes and plays them on a virtual clock. vhs needs the sandbox off. See `demo/README.md`.
 - `testdata/vhs/*.tape` and `*.png` are scaffolding: written while work is in progress, deleted after sign-off. `testdata/vhs/reference/*.png` are committed design exports and are kept — nothing in Go points at them, so a sweep must not treat them as orphans. Retention table: `testdata/vhs/README.md`.
 - Fixture definitions in `internal/capture` are permanent: the swap-and-diff completeness guard enumerates them, so deleting one silently shrinks coverage. Standalone surfaces that aren't picker fixtures (contrast swatch, resume panel screens) are enumerated through `capture.StandaloneNames()`; a new one joins every guard at that one edit.
 
