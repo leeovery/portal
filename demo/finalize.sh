@@ -13,7 +13,7 @@
 #
 # Usage:  demo/finalize.sh <name>...           a clip each, such as portal-cold
 #         demo/finalize.sh --still <name>...   a still each, such as loading
-# Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
+# Input:  demo/out/<name>/   the frames demo/record.sh <name> recorded
 # Output: art/<name>.webp, and for a clip, art/<name>.mp4
 set -euo pipefail
 
@@ -39,7 +39,7 @@ mkdir -p "$art"
 for name in "$@"; do
   src="$here/out/$name"
   [ -f "$src/frame-text-00001.png" ] || {
-    echo "no frames in demo/out/$name: run 'vhs demo/$name.tape' first" >&2
+    echo "no frames in demo/out/$name: record them with 'demo/record.sh $name'" >&2
     exit 1
   }
   rm -f "$frames"/*.png

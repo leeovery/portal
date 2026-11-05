@@ -23,6 +23,9 @@ const (
 	// ruleCutWithRoom (R4) is a known name cut, as "kiln-rel…", on a row with
 	// more blank cells at its end than the cut took.
 	ruleCutWithRoom sweepRuleName = "a cut name with room"
+	// rulePaging (R6) is a list's pagination dots drawn, or not, otherwise
+	// than as its items outgrow the rows it has.
+	rulePaging sweepRuleName = "paging exactly when its items outgrow its rows"
 )
 
 // breakClass is what decision 3 owes a break: a fix, where it falls at one
@@ -92,6 +95,10 @@ func designedBreaks() []knownBreak {
 		{
 			fixture: "theme-panel-adaptive-pair", rule: ruleChrome, class: byDesign, sizes: sizesOf(sweptWidths[1:], 12),
 			why: "below the page-aligned floor the panel takes its compact shape, its rule closing up onto the page's header row",
+		},
+		{
+			fixture: "theme-panel-adaptive-pair", rule: rulePaging, class: byDesign, sizes: sizesOf([]int{40}, 12, 15, 18),
+			why: "40 cells wide, the panel, an opaque layer over the page, covers the middle of the page's list, where its pagination dots are drawn",
 		},
 		{fixture: "sessions-flat", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"loom-p8…"}, sizes: sizesOf([]int{20}, sweptHeights[3:]...)},
 		{fixture: "sessions-flat", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"quill-U…"}, sizes: sizesOf([]int{20}, sweptHeights[5:]...)},

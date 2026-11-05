@@ -677,3 +677,31 @@ func TestPanelArrow_SameRowIsANoOp(t *testing.T) {
 		}
 	})
 }
+
+// Resized from where its list pages, or from where it fits, to every height
+// between, the panel's list pages as one opened at that size does: the same
+// rows a page and pages, and Ctrl+↓ landing on the same row of the same page.
+func TestPanelArrow_PagesAfterAResizeAsOpenedAtThatSize(t *testing.T) {
+	rows := arrowValidRows(t, 6)
+	opened := make(map[int]Model)
+	for h := arrowPagingTermH; h <= arrowTermH; h++ {
+		opened[h] = newArrowPanelModelAt(t, rows, arrowSlug(0), h)
+	}
+	if opened[arrowPagingTermH].themePanel.list.Paginator.TotalPages < 2 || opened[arrowTermH].themePanel.list.Paginator.TotalPages != 1 {
+		t.Fatalf("fixture: the panel's list must page at %d rows and fit at %d", arrowPagingTermH, arrowTermH)
+	}
+	for _, from := range []int{arrowPagingTermH, arrowTermH} {
+		for to := arrowPagingTermH; to <= arrowTermH; to++ {
+			resized := resizedTo(t, opened[from], arrowTermW, to)
+			got, want := resized.themePanel.list.Paginator, opened[to].themePanel.list.Paginator
+			if got.PerPage != want.PerPage || got.TotalPages != want.TotalPages {
+				t.Errorf("resized from %d to %d rows, the list has %d pages of %d, want %d of %d", from, to, got.TotalPages, got.PerPage, want.TotalPages, want.PerPage)
+			}
+			paged, wantPaged := pressPanelKey(t, resized, arrowPageDown), pressPanelKey(t, opened[to], arrowPageDown)
+			if arrowPanelIndex(paged) != arrowPanelIndex(wantPaged) || paged.themePanel.list.Paginator.Page != wantPaged.themePanel.list.Paginator.Page {
+				t.Errorf("resized from %d to %d rows, Ctrl+↓ lands on index %d of page %d, want %d of page %d", from, to,
+					arrowPanelIndex(paged), paged.themePanel.list.Paginator.Page, arrowPanelIndex(wantPaged), wantPaged.themePanel.list.Paginator.Page)
+			}
+		}
+	}
+}
