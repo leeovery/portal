@@ -36,7 +36,13 @@ type destructiveConfirmSpec struct {
 }
 
 func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
-	return renderJoinedPanel(destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless), th.Border, th, colourless)
+	return renderJoinedPanel(destructiveConfirmLayout(spec, th, colourless).compartments, th.Border, th, colourless)
+}
+
+// destructiveConfirmLayout is the framed confirmation as a modal fits it: its
+// title and key hints hold still, and its body scrolls.
+func destructiveConfirmLayout(spec destructiveConfirmSpec, th theme.Theme, colourless bool) panelLayout {
+	return panelLayout{compartments: destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless), head: 1, foot: 1}
 }
 
 // The confirmation's parts, so a caller that cannot afford the frame stacks the

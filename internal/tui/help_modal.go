@@ -9,10 +9,9 @@ import (
 )
 
 const (
-	helpTitleGlyph  = "?"
-	helpTitle       = "Keybindings"
-	helpDismissHint = "esc close"
-	helpColumnGap   = "   "
+	helpTitleGlyph = "?"
+	helpTitle      = "Keybindings"
+	helpColumnGap  = "   "
 	// Sized for the widest glyph ("Home/End") so labels share a left edge.
 	helpKeyColumnWidth = 10
 )
@@ -40,22 +39,41 @@ func sessionsIndicatorLegend(th theme.Theme, colourless bool) []helpLegendEntry 
 }
 
 func renderHelpModalContent(entries []keymapEntry, th theme.Theme, colourless bool, legend []helpLegendEntry) string {
+	return renderJoinedPanel(helpModalLayout(entries, legend, false, th, colourless).compartments, th.Border, th, colourless)
+}
+
+// helpModalLayout is the help panel: its title holds still, and the keys and
+// the legend under them scroll. scrolls has the title name the scroll keys.
+func helpModalLayout(entries []keymapEntry, legend []helpLegendEntry, scrolls bool, th theme.Theme, colourless bool) panelLayout {
 	bodyRows := helpModalBodyRows(entries, th, colourless)
 	legendRows := helpModalLegendRows(legend, th, colourless)
 
 	// The title must be laid out here rather than inside renderJoinedPanel: its
 	// width depends on contentWidth, since `esc close` right-aligns to it.
-	contentWidth := lipgloss.Width(helpModalHeader(0, th, colourless))
+	contentWidth := lipgloss.Width(helpModalHeader(0, scrolls, th, colourless))
 	for _, r := range slices.Concat(bodyRows, legendRows) {
 		contentWidth = max(contentWidth, lipgloss.Width(r))
 	}
-	title := helpModalHeader(contentWidth, th, colourless)
+	title := helpModalHeader(contentWidth, scrolls, th, colourless)
 
 	compartments := [][]string{{title}, bodyRows}
 	if len(legendRows) > 0 {
 		compartments = append(compartments, legendRows)
 	}
-	return renderJoinedPanel(compartments, th.Border, th, colourless)
+	return panelLayout{compartments: compartments, head: 1}
+}
+
+// helpModalHint is what the title says of the help modal's own keys, each as
+// its descriptor names it; the scroll keys only where the body scrolls.
+func helpModalHint(scrolls bool) string {
+	var hints []string
+	for _, e := range helpModalKeymap() {
+		if e.Key == helpScrollKey && !scrolls {
+			continue
+		}
+		hints = append(hints, e.Key+" "+e.Action)
+	}
+	return strings.Join(hints, footerEntrySeparator)
 }
 
 // The indicator arrives already rendered, so the glyph column takes it
@@ -75,14 +93,14 @@ func helpModalLegendRows(legend []helpLegendEntry, th theme.Theme, colourless bo
 
 // At or below the natural width (including the width-0 probe) it renders at
 // natural width rather than dropping the hint or wrapping.
-func helpModalHeader(width int, th theme.Theme, colourless bool) string {
+func helpModalHeader(width int, scrolls bool, th theme.Theme, colourless bool) string {
 	glyph := headerStyle(th.AccentPrimary, th, colourless).Bold(true).Render(helpTitleGlyph)
 	gap := headerCanvasBg(th, colourless).Render(" ")
 	title := headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(helpTitle)
 	left := lipgloss.JoinHorizontal(lipgloss.Top, glyph, gap, title)
 	leftWidth := lipgloss.Width(left)
 
-	dismiss := headerStyle(th.TextMuted, th, colourless).Render(helpDismissHint)
+	dismiss := headerStyle(th.TextMuted, th, colourless).Render(helpModalHint(scrolls))
 	dismissWidth := lipgloss.Width(dismiss)
 
 	naturalWidth := leftWidth + 1 + dismissWidth

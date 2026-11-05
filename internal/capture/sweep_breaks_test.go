@@ -63,48 +63,11 @@ type knownBreak struct {
 // list holds only what's drawn.
 var knownBreaks = slices.Concat(owedBreaks(), designedBreaks(), extremeBreaks())
 
-// Why a resize into a paginated list breaks the chrome: the list's height
-// budget, set before the resize brings the pagination dots in, counts a row
-// too many, so the list's bottom rule lands on the footer's row and the
-// footer goes off the foot. A list drawn at that size from the start fits.
-const resizedIntoPagination = "resized from a size the list fits at to one it pages at, the list keeps a row too many: its bottom rule takes the footer's row and pushes the footer off"
-
-// Why the Projects page breaks the chrome: a resize while it shows leaves
-// the project list at the height it was given before, so the footer floats
-// mid-page on a taller terminal and goes off the foot of a shorter one. The
-// tall draw floats it too, so no height from 40 up is told from it.
-const projectsIgnoreResize = "a resize on the Projects page leaves the project list at its old height: the footer floats under it on a taller terminal and goes off the foot of a shorter one"
-
 // owedBreaks are the breaks decision 3 owes a fix, each falling at one of
 // the owner's sizes, listed until the fix lands.
 func owedBreaks() []knownBreak {
-	var breaks []knownBreak
-	for _, name := range []string{"sessions-flat", "sessions-by-project", "sessions-by-tag"} {
-		breaks = append(breaks, knownBreak{fixture: name, rule: ruleChrome, class: owedAFix, why: resizedIntoPagination, sizes: sizesOf(sweptWidths, 12, 15, 18)})
-	}
-	for _, name := range []string{
-		"sessions-burst-opening", "sessions-by-project-labelled", "sessions-inline-flash", "sessions-multi-select-active",
-		"sessions-multi-select-preflight-abort", "sessions-no-tags-signpost", "sessions-rename-refused-label",
-		"sessions-unsupported-null", "sessions-unsupported-terminal", "theme-panel-commit-failed", "theme-panel-confirm",
-		"theme-panel-constant-previewing", "theme-panel-invalid-row", "theme-panel-min-height-message", "theme-panel-narrow",
-		"theme-panel-paginated",
-	} {
-		breaks = append(breaks, knownBreak{fixture: name, rule: ruleChrome, class: owedAFix, why: resizedIntoPagination, sizes: []string{"138x15"}})
-	}
-	return append(breaks,
-		knownBreak{fixture: "sessions-search-results", rule: ruleChrome, class: owedAFix, why: resizedIntoPagination, sizes: sizesOf(sweptWidths, 12)},
-		knownBreak{fixture: "theme-panel-adaptive-pair", rule: ruleChrome, class: owedAFix, why: resizedIntoPagination + ", under the panel", sizes: sizesOf(sweptWidths[1:], 15, 18)},
-		knownBreak{fixture: "projects", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize, sizes: sizesOf(sweptWidths, 12, 18, 24, 30, 36)},
-		knownBreak{fixture: "projects-command-pending", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize, sizes: []string{"73x36", "138x30", "108x24"}},
-		knownBreak{fixture: "theme-panel-projects", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize + ", under the panel", sizes: []string{"73x36", "138x30", "108x24"}},
-		knownBreak{fixture: "sessions-help", rule: ruleChrome, class: owedAFix, why: modalTallerThanPage, sizes: []string{"138x15"}},
-		knownBreak{fixture: "projects-edit", rule: ruleChrome, class: owedAFix, why: modalTallerThanPage, sizes: []string{"138x15"}},
-	)
+	return nil
 }
-
-// Why a modal reaches the header: one taller than the page is drawn from the
-// top and cut at the foot, its last rows and bottom border lost.
-const modalTallerThanPage = "a modal taller than the page is drawn over the header and cut at the foot, its last rows and bottom border lost"
 
 // Why a name is cut with room on a session's row: the row keeps its
 // indicator slot and right margin whether or not the session shows an
@@ -132,7 +95,7 @@ func designedBreaks() []knownBreak {
 		{fixture: "sessions-by-project", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"lumen webhooks and watche…"}, sizes: sizesOf([]int{40}, sweptHeights[4:]...)},
 		{fixture: "sessions-by-tag", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"lumen webhooks and watche…"}, sizes: sizesOf([]int{40}, sweptHeights[5:]...)},
 		{fixture: "theme-panel-adaptive-pair", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"loom-p8…"}, sizes: sizesOf([]int{20}, sweptHeights[5:]...)},
-		{fixture: "theme-panel-adaptive-pair", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"quill-U…"}, sizes: sizesOf([]int{20}, sweptHeights[5:]...)},
+		{fixture: "theme-panel-adaptive-pair", rule: ruleCutWithRoom, class: byDesign, why: indicatorSlotKept, cuts: []string{"quill-U…"}, sizes: sizesOf([]int{20}, sweptHeights[6:]...)},
 	}
 }
 
@@ -148,7 +111,7 @@ func extremeBreaks() []knownBreak {
 			why: "20 cells wide, a group's heading row draws wider than the terminal",
 		},
 		{
-			fixture: "theme-panel-adaptive-pair", rule: ruleChrome, class: extreme, sizes: []string{"20x12", "20x15", "20x24"},
+			fixture: "theme-panel-adaptive-pair", rule: ruleChrome, class: extreme, sizes: []string{"20x12", "20x15"},
 			why: "20 cells wide, the notice band that closes the panel wraps to four rows the list's budget doesn't give up, so the footer goes off the foot",
 		},
 		{

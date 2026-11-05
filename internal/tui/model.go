@@ -219,7 +219,9 @@ type Model struct {
 	// currentSession is the session the picker runs inside, empty outside one.
 	currentSession string
 	modal          modalState
-	pendingKill    Session
+	// helpScroll is how far the help modal's keys are scrolled, from the top.
+	helpScroll  int
+	pendingKill Session
 	// killOffersAttach is set while the kill prompt is the one the kill key
 	// asked for from inside the session, which Enter attaches again.
 	killOffersAttach bool
@@ -1169,12 +1171,24 @@ func NewModelWithSessions(sessions []Session) Model {
 // an explicit Width, so it must track every resize. Callers use a per-page
 // wrapper, which owns the reserved-height computation.
 func (m *Model) applyListSize(l *list.Model, width, height, reserved int) {
-	l.SetSize(width, height-reserved)
+	sizeList(l, width, height-reserved)
 	if m.colourless {
 		centrePaginationRow(l, lipgloss.NewStyle())
 		return
 	}
 	centrePaginationRow(l, lipgloss.NewStyle().Background(m.themeState.active.Canvas.Color()))
+}
+
+// sizeList sizes l so its page count, and with it whether the pagination row
+// shows, follows from its items and size alone, as a fresh draw's does.
+// bubbles/list budgets that row by the page count it had before the size: one
+// page budgets none, so a resize into paging would keep a row too many and
+// push whatever is under the list off the foot. Sized as one page, then again
+// by the page count that gives, the budget holds the row exactly when it shows.
+func sizeList(l *list.Model, width, height int) {
+	l.Paginator.TotalPages = 1
+	l.SetSize(width, height)
+	l.SetSize(width, height)
 }
 
 // Owns the Sessions height budget: header, footer and any active notice band are
@@ -2166,7 +2180,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Opening our modal also consumes the key, so bubbles/list never toggles
 		// its own help.
 		if isRuneKey(msg, "?") {
-			m.modal = modalHelp
+			m.modal, m.helpScroll = modalHelp, 0
 			return m, nil
 		}
 		switch {
@@ -2809,7 +2823,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Opening our modal also consumes the key, so bubbles/list never toggles
 		// its own help.
 		if isRuneKey(msg, "?") {
-			m.modal = modalHelp
+			m.modal, m.helpScroll = modalHelp, 0
 			return m, nil
 		}
 		// Bound before the rune handlers so it never collides with them.
@@ -3024,11 +3038,38 @@ func (m Model) updateHelpModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if isRuneKey(keyMsg, "?") || keyIsCode(keyMsg, tea.KeyEscape) {
+	switch {
+	case isRuneKey(keyMsg, "?") || keyIsCode(keyMsg, tea.KeyEscape):
 		m.modal = modalNone
-		return m, nil
+	case keyIsCode(keyMsg, tea.KeyUp):
+		m.helpScroll = m.helpScrolledBy(-1)
+	case keyIsCode(keyMsg, tea.KeyDown):
+		m.helpScroll = m.helpScrolledBy(+1)
 	}
 	return m, nil
+}
+
+// helpScrolledBy is the help modal's scroll moved delta rows, held within
+// what the room the modal has lets it scroll, from where it's drawn.
+func (m Model) helpScrolledBy(delta int) int {
+	entries, legend := m.helpModalEntries()
+	furthest := helpModalLayout(entries, legend, false, m.themeState.active, m.colourless).maxOffset(modalRoom(m.contentHeight()))
+	return min(max(min(m.helpScroll, furthest)+delta, 0), furthest)
+}
+
+// helpModalEntries are the keys and legend the help modal lists over the
+// active page: filtered through the same slice the footer renders from, so a
+// blocked key leaves both surfaces in lockstep.
+func (m Model) helpModalEntries() ([]keymapEntry, []helpLegendEntry) {
+	if m.activePage == PageProjects {
+		return m.projectsHelpKeymap(), nil
+	}
+	return m.sessionsHelpKeymap(), sessionsIndicatorLegend(m.themeState.active, m.colourless)
+}
+
+func (m Model) viewHelpModal() string {
+	entries, legend := m.helpModalEntries()
+	return renderHelpModalOnClearedCanvas(entries, legend, m.helpScroll, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 }
 
 func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -3584,9 +3625,7 @@ func (m Model) viewProjectList() string {
 	case modalEditProject:
 		return renderEditModalOnClearedCanvas(m, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
-		// Filtered through the same slice the footer renders from, so a
-		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.projectsHelpKeymap(), nil, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return m.viewHelpModal()
 	}
 	listView := m.projectList.View()
 	listView = m.applyProjectsSectionHeader(listView)
@@ -3671,9 +3710,7 @@ func (m Model) viewSessionList() string {
 	case modalRename:
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
-		// Filtered through the same slice the footer renders from, so a
-		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.sessionsHelpKeymap(), sessionsIndicatorLegend(m.themeState.active, m.colourless), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return m.viewHelpModal()
 	}
 	listView := m.sessionList.View()
 	listView = m.applySectionHeader(listView)

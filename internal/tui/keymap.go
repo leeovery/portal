@@ -72,6 +72,19 @@ func themePanelKeymap() []keymapEntry {
 	})
 }
 
+// helpScrollKey is the help modal's scroll binding, which its title names
+// only while the body is taller than the room.
+const helpScrollKey = "↑↓"
+
+// The help modal's own keys, which its title names. `?` closes it too, as the
+// key that opened it.
+func helpModalKeymap() []keymapEntry {
+	return []keymapEntry{
+		{Key: helpScrollKey, Action: "scroll", HelpAction: "Scroll the keys"},
+		{Key: "esc", Action: "close", HelpAction: "Close this help"},
+	}
+}
+
 // Key-exclusive within the panel while the confirm is live, so its footer
 // replaces the standing keys. Uppercase Y/N dispatches but is not restated.
 func themePanelConfirmKeymap() []keymapEntry {
