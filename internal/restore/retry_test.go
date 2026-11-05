@@ -116,6 +116,26 @@ func TestRestore_UnconfirmedCreate(t *testing.T) {
 		}
 	})
 
+	// Create may already have made the session, so what settles it outlasts
+	// the bootstrap's context.
+	t.Run("a context ending before the second ask still gets that ask's answer", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		ctx, cancel := context.WithCancelCause(t.Context())
+		unconfirmed(w, func(ctx context.Context, name, dir string, command []string) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				t.Fatal(err)
+			}
+			cancel(errors.New("bootstrap abandoned"))
+		})
+
+		if res, want := w.r.Restore(ctx), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		w.assertRestoredWithoutWarning(t, saved)
+	})
+
 	t.Run("a session that can't be looked up on the second ask fails, its flag kept, asked for again but never made again", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
@@ -249,33 +269,47 @@ func TestRestore_Retries(t *testing.T) {
 		}
 	})
 
-	t.Run("a name another program holds by the retry fails for good, nothing raised and nothing made", func(t *testing.T) {
-		w := newWorld(t)
-		w.save(t, entry(t, "work"))
-		w.fake.Fail(backendtest.OpCreate, errRefused)
-		w.asleep = func() {
-			if len(w.slept) == 2 { // the first round's wait, past the first try's second ask
-				w.fake.Add(backend.Session{Name: "work", Command: "vim notes.md"})
+	for name, holder := range map[string]backend.Session{
+		"another program holds":                        {Name: "work", Command: "vim notes.md"},
+		"another program holds under another spelling": {Name: "WORK", Command: "vim notes.md"},
+	} {
+		t.Run("a name "+name+" by the retry fails for good, nothing raised and nothing made", func(t *testing.T) {
+			w := newWorld(t)
+			w.save(t, entry(t, "work"))
+			w.fake.Fail(backendtest.OpCreate, errRefused)
+			w.asleep = func() {
+				if len(w.slept) == 2 { // the first round's wait, past the first try's second ask
+					w.fake.Add(holder)
+				}
 			}
-		}
 
-		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
-			t.Errorf("Restore = %+v, want %+v", res, want)
-		}
-		if tries := len(w.created()); tries != 1 {
-			t.Errorf("Create was tried %d times, want once", tries)
-		}
-		if w.hydrating(t, "work") {
-			t.Error("the hydrating flag is up on another program's session")
-		}
-	})
+			if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+				t.Errorf("Restore = %+v, want %+v", res, want)
+			}
+			if tries := len(w.created()); tries != 1 {
+				t.Errorf("Create was tried %d times, want once", tries)
+			}
+			if w.hydrating(t, "work") {
+				t.Error("the hydrating flag is up on another program's session")
+			}
+		})
+	}
 
-	for name, since := range map[string]func(t *testing.T, w *world, saved sessionindex.Entry){
-		"claimed by a helper": func(t *testing.T, w *world, saved sessionindex.Entry) {
+	for name, tc := range map[string]struct {
+		since func(t *testing.T, w *world, saved sessionindex.Entry)
+		why   string
+	}{
+		// A helper whose replay failed claims the entry and leaves it owed,
+		// so only the creation it records tells it from the entry restore read.
+		"claimed by its helper, its replay failed": {func(t *testing.T, w *world, saved sessionindex.Entry) {
+			saved.CreatedAt, saved.PID, saved.Owed = booted.Add(2*time.Hour), 4242, true
+			w.save(t, saved)
+		}, "its entry records another creation"},
+		"claimed by its helper, its replay done": {func(t *testing.T, w *world, saved sessionindex.Entry) {
 			saved.CreatedAt, saved.PID = booted.Add(2*time.Hour), 4242
 			w.save(t, saved)
-		},
-		"dropped by the user's end": func(t *testing.T, w *world, _ sessionindex.Entry) { w.save(t) },
+		}, "its entry records another creation"},
+		"dropped by the user's end": {func(t *testing.T, w *world, _ sessionindex.Entry) { w.save(t) }, "its entry is gone"},
 	} {
 		t.Run("an entry "+name+" between rounds is restore's no more, never made again", func(t *testing.T) {
 			w := newWorld(t)
@@ -284,7 +318,7 @@ func TestRestore_Retries(t *testing.T) {
 			w.fake.Fail(backendtest.OpCreate, errRefused)
 			w.asleep = func() {
 				if len(w.slept) == 2 {
-					since(t, w, saved)
+					tc.since(t, w, saved)
 				}
 			}
 			before := w.indexFile(t)
@@ -299,8 +333,8 @@ func TestRestore_Retries(t *testing.T) {
 				t.Fatal("the entry never changed under the retry; the test is vacuous")
 			}
 			skip := w.sink.Records().WithMessage("session skipped").AtExactLevel(slog.LevelDebug).Only(t, "skip")
-			if skip.AttrString(t, "session") != "work" {
-				t.Errorf("skip = %v, want work", skip.Attrs)
+			if skip.AttrString(t, "session") != "work" || skip.AttrString(t, "reason") != tc.why {
+				t.Errorf("skip = %v, want work skipped as %q", skip.Attrs, tc.why)
 			}
 		})
 	}

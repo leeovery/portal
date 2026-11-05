@@ -358,27 +358,48 @@ func bareMinter(b backend.Backend, waited *[]time.Duration) indexingCreator {
 }
 
 // A Create whose read of the session it made outlasts its ceiling under load
-// reads back no creation; asked again, the session reports one.
+// reads back no creation; asked again, the session reports one. The session
+// exists whatever the mint's context does, so that ask outlasts it.
 func TestMint_AsksAgainForACreationItsCreateReadBackNone(t *testing.T) {
-	fake := backendtest.New()
-	stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
-	dir := filepath.Join(t.TempDir(), "myproj")
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	var waited []time.Duration
+	for name, endsFirst := range map[string]bool{
+		"its answer is recorded":                                   false,
+		"a context ending before it still gets it, and records it": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := backendtest.New()
+			stateDir := stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+			dir := filepath.Join(t.TempDir(), "myproj")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var waited []time.Duration
+			minter := bareMinter(bareReadback{fake}, &waited)
+			if endsFirst {
+				ctx, cancel := context.WithCancel(t.Context())
+				minter.ctx, minter.wait = ctx, endingFirst(cancel, minter.wait)
+			}
 
-	minted, err := bareMinter(bareReadback{fake}, &waited).CreateFromDir(dir, nil)
-	if err != nil {
-		t.Fatalf("CreateFromDir: %v", err)
-	}
+			minted, err := minter.CreateFromDir(dir, nil)
+			if err != nil {
+				t.Fatalf("CreateFromDir: %v", err)
+			}
 
-	held, _ := fake.Held(minted)
-	if e := entryOf(t, stateDir, minted); !e.CreatedAt.Equal(held.Created) || e.PID != held.PID || e.Dir != dir {
-		t.Errorf("entry = %+v, want the creation the second ask read, %v pid %d, and the minted dir %s", e, held.Created, held.PID, dir)
+			held, _ := fake.Held(minted)
+			if e := entryOf(t, stateDir, minted); !e.CreatedAt.Equal(held.Created) || e.PID != held.PID || e.Dir != dir {
+				t.Errorf("entry = %+v, want the creation the second ask read, %v pid %d, and the minted dir %s", e, held.Created, held.PID, dir)
+			}
+			if !slices.Equal(waited, []time.Duration{backend.RecheckAfter}) {
+				t.Errorf("waited %v, want one probe ceiling before the second ask", waited)
+			}
+		})
 	}
-	if !slices.Equal(waited, []time.Duration{backend.RecheckAfter}) {
-		t.Errorf("waited %v, want one probe ceiling before the second ask", waited)
+}
+
+// endingFirst is wait with cancel called as it starts.
+func endingFirst(cancel context.CancelFunc, wait func(context.Context, time.Duration) error) func(context.Context, time.Duration) error {
+	return func(ctx context.Context, d time.Duration) error {
+		cancel()
+		return wait(ctx, d)
 	}
 }
 

@@ -223,7 +223,7 @@ func (r *run) firstTry(ctx context.Context, e sessionindex.Entry) bool {
 // a round only while RetryBudget, counted from the first pass's end, has room
 // for its wait, and a session's try only while it lasts. It returns those
 // still unmade but for good, which retryRound counts, and stops once ctx
-// ends, saying so when it leaves sessions untried.
+// ends, saying so when it leaves sessions unrestored.
 func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
 	deadline := r.now().Add(RetryBudget)
 	for round := 0; len(left) > 0; round++ {
