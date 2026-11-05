@@ -41,8 +41,8 @@ Thumbs.db
 dist/
 build/
 /portal
-# the offline capture-harness binary, pre-built before vhs runs so the tape's
-# `go run` is warm; always rm'd after, but ignored so a stray copy is never staged.
+# a capture-harness binary built at the root by hand (`go build ./cmd/capturetool`);
+# demo/record.sh builds its own into demo/out/. Ignored so a stray copy is never staged.
 /capturetool
 
 # vhs capture-harness transient GIF byproduct (vhs requires an Output; we only
