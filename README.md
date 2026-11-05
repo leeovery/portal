@@ -623,14 +623,6 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 
-#### The zmx directory
-
-zmx keeps its sessions in the directory `ZMX_DIR` names (unset, `$XDG_RUNTIME_DIR/zmx`, else `zmx-<uid>` under `$TMPDIR`), and Portal uses the same one. A state directory belongs to one zmx directory: the first time Portal starts against it, it records the zmx directory in use in `state/zmx-dir`. A Portal run with another `ZMX_DIR` against that state stops before it changes anything, naming both directories: run it with the recorded `ZMX_DIR`, or give it a state of its own with `PORTAL_STATE_DIR`. A state directory whose zmx directory is already served by another state directory's `_portal-saver` is refused too, and Portal stops with:
-
-```
-<R1's message for a saver of another state directory>
-```
-
 Any of the files may be a symlink, such as one into a dotfiles repository. Portal writes through the link to the file it names, so the link survives Portal's own writes.
 
 Projects are auto-populated when you create new sessions, pruned automatically by the daemon, and cleanable on demand with `xctl doctor --fix`.
@@ -642,6 +634,14 @@ Projects are auto-populated when you create new sessions, pruned automatically b
 </div>
 
 **Custom terminals (`terminals.json`).** Portal opens host windows natively on Ghostty. For any other terminal, add a recipe — see [docs/custom-terminals.md](docs/custom-terminals.md) for the full setup guide.
+
+### The zmx directory
+
+zmx keeps its sessions in the directory `ZMX_DIR` names (unset, `$XDG_RUNTIME_DIR/zmx`, else `zmx-<uid>` under `$TMPDIR`), and Portal uses the same one. A state directory belongs to one zmx directory: the first time Portal starts against it, it records the zmx directory in use in `state/zmx-dir`. A Portal run with another `ZMX_DIR` against that state stops before it changes anything, naming both directories: run it with the recorded `ZMX_DIR`, or give it a state of its own with `PORTAL_STATE_DIR`. A state directory whose zmx directory is already served by another state directory's `_portal-saver` is refused too, and Portal stops with:
+
+```
+The _portal-saver running in this zmx directory saves Portal's state in <other>, not this Portal's state in <this>. Run it with PORTAL_STATE_DIR=<other>, or give it a zmx directory of its own with ZMX_DIR. If the state in <other> is gone, end its saver with zmx kill _portal-saver.
+```
 
 ## Logging
 
