@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"image/color"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/leeovery/portal/internal/capture"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 func TestPrintsAFixturesFrameAsTextAtItsSize(t *testing.T) {
@@ -102,6 +105,13 @@ func TestRefusesWhatTheCommandLineCantMean(t *testing.T) {
 		{name: "frames into no directory", args: []string{"--frames=", "sessions-flat"}, want: "--frames takes the directory to write the frames into"},
 		{name: "a flag there isn't", args: []string{"--fixture", "sessions-flat", "--nope"}, want: "flag provided but not defined: -nope (--help lists the flags)"},
 		{name: "a flag's value missing", args: []string{"--fixture"}, want: "flag needs an argument: -fixture (--help lists the flags)"},
+		{name: "a scenario and a fixture", args: []string{"--scenario", "portal-cold", "--fixture", "sessions-flat"}, want: "--scenario and --fixture: name one"},
+		{name: "a scenario printed", args: []string{"--scenario", "portal-cold", "--print"}, want: "--print takes a fixture: a scenario plays in time, full screen"},
+		{name: "a scenario at a size", args: []string{"--scenario", "portal-cold", "--size", "80x24"}, want: "--size takes a fixture's --print: a scenario plays at the terminal's size"},
+		{name: "a scenario's colours", args: []string{"--scenario", "portal-cold", "--ansi"}, want: "--ansi takes a fixture's --print: a scenario plays in colour, full screen"},
+		{name: "a scenario's frames", args: []string{"--frames", t.TempDir(), "--scenario", "portal-cold"}, want: "--frames takes the fixtures' names alone, not --scenario"},
+		{name: "an unknown scenario", args: []string{"--scenario", "tour"}, want: `--scenario: unknown scenario "tour" (available: ` + strings.Join(capture.ScenarioNames(), ", ") + ")"},
+		{name: "a scenario without a terminal", args: []string{"--scenario", "portal-cold"}, want: "a scenario plays full screen: it needs a terminal"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -254,6 +264,79 @@ func TestHelpListsEveryFixture(t *testing.T) {
 			t.Errorf("--help does not list %s", name)
 		}
 	}
+}
+
+func TestHelpListsEveryScenario(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"--help"}, &stdout, &stderr, noEnv); err != nil {
+		t.Fatalf("run(--help): %v", err)
+	}
+	for _, name := range capture.ScenarioNames() {
+		if !strings.Contains(stderr.String(), name) {
+			t.Errorf("--help does not list the scenario %s", name)
+		}
+	}
+}
+
+// A scenario plays in the theme given, painting its canvas, or without colour,
+// painting none, as a fixture does.
+func TestPlaysAScenarioInTheThemeGivenOrWithoutColour(t *testing.T) {
+	nord := themetest.Builtin(t, "nord")
+	tests := []struct {
+		name       string
+		colourless bool
+		want       color.Color
+	}{
+		{name: "in the theme given", want: nord.Canvas.Color()},
+		{name: "without colour", colourless: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, refusal, err := liveProgram(options{scenario: "portal-tour", theme: "nord"}, io.Discard, tt.colourless)
+			if err != nil {
+				t.Fatalf("liveProgram: %v", err)
+			}
+			if refusal != "a scenario plays full screen: it needs a terminal" {
+				t.Errorf("without a terminal it would say %q, want a scenario's refusal", refusal)
+			}
+			if _, ok := m.(capture.ScenarioModel); !ok {
+				t.Fatalf("it would play %T, want the scenario", m)
+			}
+			if canvas := m.View().BackgroundColor; !sameColour(canvas, tt.want) {
+				t.Errorf("it paints the canvas %v, want %v", canvas, tt.want)
+			}
+		})
+	}
+}
+
+// The program's end owes the terminal what a scenario's picker owes it, the
+// background it painted set back, as a fixture's does.
+func TestAScenariosEndRestoresWhatItsPickerOwes(t *testing.T) {
+	m, _, err := liveProgram(options{scenario: "portal-tour", theme: "nord"}, io.Discard, false)
+	if err != nil {
+		t.Fatalf("liveProgram: %v", err)
+	}
+	if _, ok := unwrapped(m).(tui.Model); !ok {
+		t.Errorf("a scenario's end is %T, want its picker, whose background the end restores", unwrapped(m))
+	}
+	fixture, _, err := liveProgram(options{fixture: "sessions-flat", theme: "nord"}, io.Discard, false)
+	if err != nil {
+		t.Fatalf("liveProgram: %v", err)
+	}
+	if _, ok := unwrapped(fixture).(tui.Model); !ok {
+		t.Errorf("a fixture's end is %T, want the fixture's model itself", unwrapped(fixture))
+	}
+}
+
+// sameColour reports whether two colours are both none, or the same red, green
+// and blue.
+func sameColour(a, b color.Color) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ar, ag, ab, _ := a.RGBA()
+	br, bg, bb, _ := b.RGBA()
+	return ar == br && ag == bg && ab == bb
 }
 
 func TestDefaultsToTheShippedDarkTheme(t *testing.T) {

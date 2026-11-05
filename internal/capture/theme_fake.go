@@ -74,3 +74,61 @@ func repaintSlots(slots []theme.SlotResolution, palette theme.Theme) []theme.Slo
 	}
 	return out
 }
+
+// previewingThemeSource is the theme panel of a scenario that previews the
+// built-ins: unlike fakeThemeSource, every row keeps its own palette, so arrowing
+// through the panel paints each theme for real, while the theme in force, what
+// Esc goes back to, stays the scenario's, a constant. No method performs I/O.
+type previewingThemeSource struct {
+	palette     theme.Theme
+	slug        string
+	enumeration theme.Enumeration
+	union       theme.Union
+}
+
+var _ tui.ThemeSource = previewingThemeSource{}
+
+// previewingThemes is the panel's source for a scenario drawn in palette, and
+// the keys it opens on: the built-in palette is, as a constant, so the panel
+// marks it and opens on its row. A palette that is no built-in marks none.
+func previewingThemes(palette theme.Theme) (tui.ThemeSource, theme.RawKeys) {
+	keys := theme.RawKeys{Theme: builtinSlugOf(palette)}
+	enumeration := themePanelDirEnumeration()
+	return previewingThemeSource{
+		palette:     palette,
+		slug:        keys.Theme,
+		enumeration: enumeration,
+		union:       themePanelUnionFrom(enumeration, keys),
+	}, keys
+}
+
+func (p previewingThemeSource) Open(theme.RawKeys) (theme.Enumeration, theme.Union) {
+	return p.enumeration, p.union
+}
+
+func (p previewingThemeSource) Reassemble(theme.Enumeration, theme.RawKeys) theme.Union {
+	return p.union
+}
+
+func (p previewingThemeSource) Resolve(theme.Enumeration, theme.RawKeys) (theme.Resolution, error) {
+	return theme.Resolution{
+		Nomination: theme.ConstantNomination(p.palette),
+		Slots:      []theme.SlotResolution{{Slot: theme.SlotConstant, Requested: p.slug, Resolved: p.slug, Theme: p.palette}},
+	}, nil
+}
+
+// A scenario has nowhere to record a load.
+func (p previewingThemeSource) LoadSlot(theme.Enumeration, theme.Slot, theme.RawKeys) error {
+	return nil
+}
+
+// builtinSlugOf is the slug of the built-in whose palette palette is, or empty
+// for one that is no built-in.
+func builtinSlugOf(palette theme.Theme) string {
+	for slug, th := range builtins() {
+		if th == palette {
+			return slug
+		}
+	}
+	return ""
+}

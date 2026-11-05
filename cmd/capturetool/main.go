@@ -2,7 +2,9 @@
 // TUI offline, through the production tui.Build constructor with every backend
 // seam faked. It runs no bootstrap — no zmx session, no daemon, no config read. It
 // runs the fixture live, full screen; or prints its frame once, as text or in
-// colour; or writes the golden frames the capture tests hold the code to.
+// colour; or plays a scenario full screen, in real time, for the README's demos:
+// a fixture's world with timed cues, the keys pressed drawn as keycaps; or writes
+// the golden frames the capture tests hold the code to.
 //
 // Usage:
 //
@@ -11,6 +13,7 @@
 //	capturetool --fixture contrast-validation --theme ~/themes/mytheme.theme
 //	capturetool --fixture sessions-flat --print                    its frame as text, at its own size
 //	capturetool --fixture sessions-flat --print --ansi --size 100x30
+//	capturetool --scenario portal-cold                             played full screen, in real time
 //	capturetool --frames testdata/vhs/frames                       every frame, written afresh
 //	capturetool --frames testdata/vhs/frames sessions-flat projects
 //
@@ -51,6 +54,7 @@ func main() {
 // options are what the command line asks for.
 type options struct {
 	fixture     string
+	scenario    string
 	theme       string
 	print, ansi bool
 	size        string
@@ -61,8 +65,9 @@ type options struct {
 }
 
 // run does what args ask: runs the fixture live, prints its frame once to
-// stdout, or writes the frames. NO_COLOR, read through getenv, wins over
-// --theme for the first two; the frames are written in colour whatever it says.
+// stdout, plays the scenario, or writes the frames. NO_COLOR, read through
+// getenv, wins over --theme for all but the frames, which are written in colour
+// whatever it says.
 func run(args []string, stdout, stderr io.Writer, getenv func(string) string) error {
 	o, err := parse(args, stderr)
 	if errors.Is(err, flag.ErrHelp) {
@@ -87,7 +92,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) er
 	// the surface a human runs in their own terminal at a visual gate. Here
 	// rather than in live: internal/tui's restore guard follows the writer one
 	// call out, to main's os.Stdout.
-	switch fm := final.(type) {
+	switch fm := unwrapped(final).(type) {
 	case tui.Model:
 		tui.RestoreTerminalBackground(stdout, fm)
 	case interface {
@@ -99,12 +104,22 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) er
 	return nil
 }
 
+// unwrapped is the model a program ended on as its end owes the terminal: a
+// scenario's picker, or the model itself.
+func unwrapped(final tea.Model) tea.Model {
+	if played, ok := final.(capture.ScenarioModel); ok {
+		return played.Picker()
+	}
+	return final
+}
+
 // parse reads the command line, refusing what only --print takes without it,
 // and anything beside --frames but the names of the frames it writes.
 func parse(args []string, stderr io.Writer) (options, error) {
 	var o options
 	flags := flag.NewFlagSet("capturetool", flag.ContinueOnError)
 	flags.StringVar(&o.fixture, "fixture", "", "named fixture to render: "+strings.Join(capture.FixtureNames(), ", "))
+	flags.StringVar(&o.scenario, "scenario", "", "the scenario to play, full screen, in real time: "+strings.Join(capture.ScenarioNames(), ", "))
 	flags.StringVar(&o.theme, "theme", defaultThemeSlug, "theme to render: a built-in slug (e.g. "+defaultThemeSlug+") or a path to a .theme file")
 	flags.BoolVar(&o.print, "print", false, "print its frame once, as text, rather than run it live")
 	flags.StringVar(&o.size, "size", "", "with --print, the terminal's size as WxH, such as 120x40: the fixture's frame size unless given")
@@ -127,10 +142,28 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	switch {
 	case flags.NArg() > 0:
 		return options{}, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	case o.scenario != "":
+		return scenarioOnly(o)
 	case !o.print && o.size != "":
 		return options{}, errors.New("--size takes --print: live, the terminal gives the size")
 	case !o.print && o.ansi:
 		return options{}, errors.New("--ansi takes --print: live, the frame is drawn in colour")
+	}
+	return o, nil
+}
+
+// scenarioOnly is o, refusing what a scenario can't take: it plays in time,
+// full screen, at the terminal's size and in colour, so it has no frame to print.
+func scenarioOnly(o options) (options, error) {
+	switch {
+	case o.fixture != "":
+		return options{}, errors.New("--scenario and --fixture: name one")
+	case o.print:
+		return options{}, errors.New("--print takes a fixture: a scenario plays in time, full screen")
+	case o.size != "":
+		return options{}, errors.New("--size takes a fixture's --print: a scenario plays at the terminal's size")
+	case o.ansi:
+		return options{}, errors.New("--ansi takes a fixture's --print: a scenario plays in colour, full screen")
 	}
 	return o, nil
 }
@@ -243,23 +276,52 @@ func parseSize(s string) (capture.Size, error) {
 	return capture.Size{Width: width, Height: height}, nil
 }
 
-// live runs the fixture full screen in the terminal out is, until it quits, and
-// returns the model it ended on. Warnings are written before the program
-// starts, so they land on the primary screen and stay readable once the alt
-// screen is left.
+// live runs the fixture, or plays the scenario, full screen in the terminal out
+// is, until it quits, and returns the model it ended on. Warnings are written
+// before the program starts, so they land on the primary screen and stay
+// readable once the alt screen is left.
 func live(o options, out, warnings io.Writer, colourless bool) (tea.Model, error) {
-	m, err := resolveProgram(o.fixture, o.theme, warnings, colourless)
+	m, refusal, err := liveProgram(o, warnings, colourless)
 	if err != nil {
 		return nil, err
 	}
 	if file, ok := out.(term.File); !ok || !term.IsTerminal(file.Fd()) {
-		return nil, errors.New("the live view needs a terminal: --print draws without one")
+		return nil, errors.New(refusal)
 	}
 
 	// The alt screen is declared through tea.View.AltScreen in tui.Model.View,
 	// not a program option — Bubble Tea v2 removed tea.WithAltScreen.
 	p := tea.NewProgram(m, tea.WithOutput(out), tea.WithFilter(renderSizeFilter(o.fixture)))
 	return p.Run()
+}
+
+// liveProgram is the model live runs, and what live says where there's no
+// terminal to run it in.
+func liveProgram(o options, warnings io.Writer, colourless bool) (m tea.Model, refusal string, err error) {
+	if o.scenario != "" {
+		m, err = resolveScenario(o.scenario, o.theme, warnings, colourless)
+		return m, "a scenario plays full screen: it needs a terminal", err
+	}
+	m, err = resolveProgram(o.fixture, o.theme, warnings, colourless)
+	return m, "the live view needs a terminal: --print draws without one", err
+}
+
+// resolveScenario is the named scenario as it plays, in the theme named, or
+// without colour.
+func resolveScenario(name, themeArg string, warnings io.Writer, colourless bool) (tea.Model, error) {
+	s, err := capture.ScenarioNamed(name)
+	if err != nil {
+		return nil, fmt.Errorf("--scenario: %w", err)
+	}
+	pinned, err := resolveTheme(theme.NewSilentLoader(), themeArg, warnings)
+	if err != nil {
+		return nil, err
+	}
+	s = s.InTheme(pinned)
+	if colourless {
+		s = s.WithoutColour()
+	}
+	return s.Model(), nil
 }
 
 // A live window is the terminal's size rather than the screen's choice, so a
