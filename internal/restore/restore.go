@@ -153,16 +153,17 @@ func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
 }
 
 // Restore makes again, in index order, the session of every saved entry no
-// session the backend lists holds, under its name or another spelling of it,
-// Portal's own aside, that is owed a restore or may predate this boot. It
-// skips any other entry from this boot, whose session ended while a saver
-// watched and is the saver's to drop; with no boot time to judge by, every
-// entry may predate the boot. A session it couldn't make for a reason that may
-// pass it tries again, within RetryBudget, once every other has had its first
-// try. A session it can't make keeps its entry for the next bootstrap. It asks
-// the backend nothing when sessions.json can't be read, makes nothing when the
-// backend can't be listed, and makes no further session once ctx ends or the
-// backend refuses one it made as speaking a protocol Portal doesn't support.
+// session the backend lists holds under its name, nor a live one under another
+// spelling of it, Portal's own aside, that is owed a restore or may predate
+// this boot. It skips any other entry from this boot, whose session ended
+// while a saver watched and is the saver's to drop; with no boot time to judge
+// by, every entry may predate the boot. A session it couldn't make for a
+// reason that may pass it tries again, within RetryBudget, once every other
+// has had its first try. A session it can't make keeps its entry for the next
+// bootstrap. It asks the backend nothing when sessions.json can't be read,
+// makes nothing when the backend can't be listed, and makes no further session
+// once ctx ends or the backend refuses one it made as speaking a protocol
+// Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r, raised: map[string]bool{}}
@@ -218,10 +219,10 @@ func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
 		r.logger.Warn("list sessions failed", "error", err)
 		return 0, fmt.Errorf("list sessions: %w", err)
 	}
-	j := r.judging(live)
-	if why := j.notKept(ctx, e); why != "" {
+	r.listing = r.judging(live)
+	if why := r.listing.notKept(ctx, e); why != "" {
 		r.logger.Debug("session skipped", "session", name, "reason", why)
-		if j.listed[name] {
+		if r.listing.listed[name] {
 			return AlreadyLive, nil
 		}
 		return NoLongerKept, nil
@@ -234,13 +235,15 @@ func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
 	return BroughtBack, nil
 }
 
-// run is one Restore: what it did, how many warnings its sessions drew, and
-// the sessions whose hydrating flag it raised.
+// run is one Restore: what it did, how many warnings its sessions drew, the
+// sessions whose hydrating flag it raised, and its rule over the sessions it
+// listed, which reads each lookup it makes.
 type run struct {
 	*Restorer
 	res       Result
 	anomalous int
 	raised    map[string]bool
+	listing   judging
 }
 
 // retried is the detail of a failure a retry may clear. It says only that
@@ -264,7 +267,8 @@ func (r *run) restore(ctx context.Context) {
 		r.res.ListErr = err
 		return
 	}
-	due := r.due(ctx, idx.Entries(), live)
+	r.listing = r.judging(live)
+	due := r.due(ctx, idx.Entries())
 	var again []sessionindex.Entry
 	for i, e := range due {
 		if ctx.Err() != nil {
@@ -364,7 +368,7 @@ var errUnsettled = errors.New("an earlier try left it unsettled")
 // good. One that can't be looked up is left for the next round, nothing
 // raised and nothing made.
 func (r *run) tryAgain(ctx context.Context, e sessionindex.Entry) error {
-	live, err := r.backend.Session(ctx, e.Name)
+	live, err := r.listing.session(ctx, e.Name)
 	if !errors.Is(err, backend.ErrNoSuchSession) || heldAs(err) {
 		if live, err = r.judge(e.Name, live, err, errUnsettled); err == nil {
 			r.restored(e, live, startDir(e))
@@ -405,11 +409,10 @@ func (r *run) cancelled(ctx context.Context, detail string) {
 }
 
 // due is the entries to restore.
-func (r *run) due(ctx context.Context, entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
-	j := r.judging(live)
+func (r *run) due(ctx context.Context, entries []sessionindex.Entry) []sessionindex.Entry {
 	var due []sessionindex.Entry
 	for _, e := range entries {
-		if why := j.skips(ctx, e); why != "" {
+		if why := r.listing.skips(ctx, e); why != "" {
 			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
 			continue
 		}
@@ -495,18 +498,38 @@ func (j judging) skips(ctx context.Context, e sessionindex.Entry) string {
 	return ""
 }
 
-// heldElsewhere reports whether a session the listing holds has name under
-// another spelling, as the backend finds it. A spelling no listing holds is a
-// stale socket, which Create replaces, so only a name the listing holds under
-// another case is asked about, and only a listed holder counts. A pair the
-// filesystem folds that case-folding doesn't is tried, and fails as held.
+// heldElsewhere reports whether a live session holds name under another
+// spelling, as the backend finds it. Only a name the listing holds under
+// another case is asked about. A pair the filesystem folds that case-folding
+// doesn't is tried, and fails as held.
 func (j judging) heldElsewhere(ctx context.Context, name string) bool {
 	if !j.listsAnotherCase(name) {
 		return false
 	}
-	_, err := j.names.Session(ctx, name)
+	_, err := j.session(ctx, name)
+	return heldAs(err)
+}
+
+// session is the live session holding name, as the backend's Session finds
+// it, its answer settled.
+func (j judging) session(ctx context.Context, name string) (backend.Session, error) {
+	live, err := j.names.Session(ctx, name)
+	return live, j.settled(ctx, err)
+}
+
+// settled is err, a lookup's answer, read by restore's one rule of a name held
+// under another spelling: that spelling holds the name only while it is live,
+// as the listing holds it or answering now. Any other such answer, a stale
+// socket's, which Create replaces, is no session, a failure that may pass.
+func (j judging) settled(ctx context.Context, err error) error {
 	held, ok := errors.AsType[*backend.HeldAsError](err)
-	return ok && j.listed[held.Held]
+	if !ok || j.listed[held.Held] {
+		return err
+	}
+	if _, answer := j.names.Session(ctx, held.Held); answer == nil {
+		return err
+	}
+	return fmt.Errorf("held as %q, which isn't live: %w", held.Held, backend.ErrNoSuchSession)
 }
 
 // listsAnotherCase reports whether the listing holds name under another case.
@@ -546,10 +569,11 @@ type Keeping struct {
 }
 
 // Kept is the entries, in their order, a restore would make again now: a
-// saved session no session in live holds, under its name or another spelling
-// of it, not one of Portal's own, owed a restore or one the rule judges may
-// predate this boot, under a name the backend's Create accepts. x <name>
-// brings back such a session on demand, and doctor names them.
+// saved session no session in live holds under its name, nor a live one under
+// another spelling of it, not one of Portal's own, owed a restore or one the
+// rule judges may predate this boot, under a name the backend's Create
+// accepts. x <name> brings back such a session on demand, and doctor names
+// them.
 func Kept(ctx context.Context, entries []sessionindex.Entry, live []backend.Session, k Keeping) []sessionindex.Entry {
 	j := judging{listed: names(live), rule: k.Rule, names: k.Names}
 	var kept []sessionindex.Entry
@@ -624,18 +648,18 @@ var errUnconfirmed = errors.New("zmx reported the session made, but it never ans
 // has the session's pty, so one that couldn't have it was never made.
 func (r *run) unconfirmed(ctx context.Context, name string) (backend.Session, error) {
 	live, err := backend.AskAgain(ctx, r.backend, name, r.wait)
-	return r.judge(name, live, err, errUnconfirmed)
+	return r.judge(name, live, r.listing.settled(context.WithoutCancel(ctx), err), errUnconfirmed)
 }
 
 // judge settles a session a Create may have made, by the session the lookup
-// found holding its name, live, or the error it gave, cause saying why the
-// Create alone couldn't. A session running restore's helper for the name is
-// restored, its flag the helper's to lower. Any other session holding the name
-// is not restore's, so that is a failure for good, and its flag comes down
-// whoever raised it: left up, it would keep the saver off that session for
-// good. With no session under the name the failure may pass, and only a flag
-// this run raised comes down. A session that can't be looked up may be the
-// helper's, so its flag stays.
+// found holding its name, live, or the error it gave, settled, cause saying
+// why the Create alone couldn't. A session running restore's helper for the
+// name is restored, its flag the helper's to lower. Any other session holding
+// the name, under it or under another spelling, is not restore's, so that is
+// a failure for good, and its flag comes down whoever raised it: left up, it
+// would keep the saver off that session for good. With no session under the
+// name the failure may pass, and only a flag this run raised comes down. A
+// session that can't be looked up may be the helper's, so its flag stays.
 func (r *run) judge(name string, live backend.Session, err, cause error) (backend.Session, error) {
 	switch {
 	case err == nil && r.RunsHelper(live):
@@ -674,10 +698,10 @@ func (r *run) unsupported(name string, err error) error {
 // the session's daemon, before its socket listens, leaves a session that
 // answers to no one yet.
 func (r *run) holder(ctx context.Context, name string) (backend.Session, error) {
-	live, err := r.backend.Session(ctx, name)
+	live, err := r.listing.session(ctx, name)
 	if errors.Is(err, backend.ErrNoSuchSession) && !heldAs(err) {
 		_ = r.wait(ctx, backend.RecheckAfter)
-		live, err = r.backend.Session(ctx, name)
+		live, err = r.listing.session(ctx, name)
 	}
 	return live, err
 }
@@ -696,8 +720,8 @@ func isForGood(err error) bool {
 	return ok
 }
 
-// heldAs reports whether err is the backend's answer that it holds the name
-// only under another spelling.
+// heldAs reports whether err, a lookup's answer as settled reads it, is that a
+// live session holds the name only under another spelling.
 func heldAs(err error) bool {
 	_, ok := errors.AsType[*backend.HeldAsError](err)
 	return ok

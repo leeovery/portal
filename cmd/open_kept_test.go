@@ -419,9 +419,11 @@ func TestKeptSessions(t *testing.T) {
 		}
 	})
 
-	t.Run("a name Create refuses costs nothing: the backend unasked, and an index it can't read unlogged", func(t *testing.T) {
+	// zmx.New refuses a relative directory, so every bind fails: a name that
+	// reached the bind would log its failure.
+	t.Run("a name Create refuses costs nothing: no backend bound, and an index it can't read unlogged", func(t *testing.T) {
 		blockStateDir(t)
-		withBackendDeps(t, BackendDeps{Backend: untouchedBackend{t: t}})
+		t.Setenv("ZMX_DIR", "relative/zmx")
 		sink := logtest.Install(t)
 
 		for _, name := range []string{"~/code", "logs"} {
@@ -429,8 +431,11 @@ func TestKeptSessions(t *testing.T) {
 				t.Errorf("IsKept(%s) = %v, %v; want false", name, kept, err)
 			}
 		}
-		if recs := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(recs) != 0 {
-			t.Errorf("warnings = %v, want none", recs)
+		if recs := sink.Records(); len(recs) != 0 {
+			t.Errorf("records = %v, want none", recs)
+		}
+		if _, err := sessionBackend(); err == nil {
+			t.Error("a backend was bound: the test proves nothing unless the bind fails")
 		}
 	})
 
@@ -537,22 +542,6 @@ func (w *keptWorld) assertKeptAsSaved(t *testing.T) {
 	if kept, err := (keptSessions{ctx: t.Context()}).IsKept("work"); !kept || err != nil {
 		t.Errorf("IsKept(work) = %v, %v; want it still kept", kept, err)
 	}
-}
-
-// untouchedBackend fails the test on any ask a kept lookup makes of it.
-type untouchedBackend struct {
-	backend.Backend
-	t *testing.T
-}
-
-func (b untouchedBackend) ValidateName(name string) error {
-	b.t.Errorf("ValidateName(%s) asked of the backend", name)
-	return nil
-}
-
-func (b untouchedBackend) List(context.Context) ([]backend.Session, error) {
-	b.t.Error("List asked of the backend")
-	return nil, nil
 }
 
 // lockCheckedBackend is a backend whose Create fails the test unless

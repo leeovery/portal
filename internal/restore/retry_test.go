@@ -463,6 +463,42 @@ func TestRestore_Retries(t *testing.T) {
 	})
 }
 
+// zmx finds a session by statting its socket, so on a filesystem that folds
+// case the socket a session WORK left answers a lookup of work as held under
+// WORK. Create replaces such a socket, so it holds nothing, and a Create that
+// failed beside it may pass.
+func TestRestore_StaleSocketUnderAnotherSpelling(t *testing.T) {
+	for name, firstTry := range map[string]func(name string) (backend.Session, error){
+		"that failed": func(string) (backend.Session, error) { return backend.Session{}, errTimedOut },
+		"reporting a session made that never answered": func(name string) (backend.Session, error) {
+			return backend.Session{Name: name}, nil
+		},
+	} {
+		t.Run("a Create "+name+" is tried again, not failed for good", func(t *testing.T) {
+			w := newWorld(t)
+			w.save(t, entry(t, "work"))
+			w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+				if len(w.created()) == 1 {
+					return firstTry(name)
+				}
+				return w.fake.Create(ctx, name, dir, command)
+			})
+			w.answerSession("work", errHeldUnderWORK)
+
+			if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+				t.Errorf("Restore = %+v, want %+v", res, want)
+			}
+			if tries := len(w.created()); tries != 2 {
+				t.Errorf("Create was tried %d times, want twice", tries)
+			}
+			rec := w.failureLogged(t, "work")
+			if detail := rec.AttrString(t, "detail"); detail != "may be tried again within this bootstrap" || strings.Contains(rec.AttrString(t, "error"), "held as") {
+				t.Errorf("failure = %v, want one that may be tried again, naming no holder", rec.Attrs)
+			}
+		})
+	}
+}
+
 // decision 75: a Create the backend refuses as a session of a protocol Portal
 // doesn't support stops the retries as it stops the first pass, since every
 // Create after it would make another, and the refused name is never looked up

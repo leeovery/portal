@@ -229,25 +229,28 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
+	// A lookup of a name reads it, then, when another spelling the listing
+	// doesn't hold has it, reads whether that spelling answers.
+	lookup := 2 * saverhost.ReadCeiling
 	// After its Create, a session's restore runs the longer of the Create's
 	// refusal of an older zmx's session, a read and a zmx kill, and the second
-	// ask of a Create that read back no creation or failed otherwise: a read,
-	// backend.RecheckAfter's wait and a read again.
+	// ask of a Create that read back no creation or failed otherwise: a
+	// lookup, backend.RecheckAfter's wait and a lookup again.
 	refusal := saverhost.ReadCeiling + saverhost.KillCeiling + saverhost.RunGrace
-	askAgain := 2*saverhost.ReadCeiling + backend.RecheckAfter
+	askAgain := 2*lookup + backend.RecheckAfter
 	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()
 
-	// Before its first session, restore may read, for each entry, whether a
-	// listed session holds its name under another spelling.
+	// Before its first session, restore may look up, for each entry, whether
+	// a live session holds its name under another spelling.
 	t.Run("it grows by a lookup and a session's longest restore for each saved entry", func(t *testing.T) {
-		if got, per := LockWait(20)-LockWait(0), saverhost.ReadCeiling+each; got != 20*per {
+		if got, per := LockWait(20)-LockWait(0), lookup+each; got != 20*per {
 			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, per)
 		}
 	})
 
 	t.Run("it holds restore's retries, and the lookup and try that start as their budget ends, as one term", func(t *testing.T) {
 		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
-		if got, want := LockWait(0)-rest, restore.RetryBudget+saverhost.ReadCeiling+each; got != want {
+		if got, want := LockWait(0)-rest, restore.RetryBudget+lookup+each; got != want {
 			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}
 	})

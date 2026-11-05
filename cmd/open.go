@@ -167,9 +167,14 @@ in host-terminal windows.`,
 		// precede the single-pin blocks so a two-pin set bursts rather than hitting
 		// the single -s arm. A window a burst spawned names its one surface
 		// exactly, so it never bursts again: a name with glob characters would
-		// expand, opening more windows than were asked for.
+		// expand, opening more windows than were asked for. No burst spawns a
+		// window naming more than one, which would ack one and drop the rest.
 		ordered := orderedOpenTargets(openOwnArgs())
-		if !cmd.Flags().Changed("ack") && isMultiTarget(ordered) {
+		acked := cmd.Flags().Changed("ack")
+		if acked && len(ordered) > 1 {
+			return NewUsageError("open: cannot use --ack with more than one target")
+		}
+		if !acked && isMultiTarget(ordered) {
 			return dispatchOpenBurst(cmd, ordered, command)
 		}
 
@@ -283,8 +288,10 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 	}
 }
 
-// emitResolveDecision logs one line per resolved query: globs are deterministic
-// rather than guesses, so they emit none.
+// emitResolveDecision logs one line per resolution of a query, so a kept
+// target that is kept no longer by its bring-back logs a second, for its
+// fall-through. Globs are deterministic rather than guesses, so they emit
+// none.
 func emitResolveDecision(query string, result resolver.QueryResult) {
 	if resolver.HasGlobMeta(query) {
 		return

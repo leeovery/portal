@@ -175,6 +175,24 @@ func TestRestore_Skips(t *testing.T) {
 		})
 	}
 
+	t.Run("a listed session another spelling of its name holds skips it, answering or not", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.fake.StopAnswering("Work")
+		w.save(t, owing(entry(t, "work")))
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
+	// The session listed as Work has ended since, and WORK holds the name now.
+	t.Run("a lookup finding a spelling made since the listing, answering, skips it", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.save(t, entry(t, "work"))
+		w.answerSession("work", errHeldUnderWORK)
+		w.answerSession("WORK", nil)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
 	t.Run("an entry no listed session spells another way costs no lookup", func(t *testing.T) {
 		w := newWorld(t, backend.Session{Name: "api"})
 		w.save(t, entry(t, "work"))
@@ -197,23 +215,30 @@ var otherSpellingAnswers = map[string]error{
 	"finds a spelling no listing holds": fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "Work"}),
 }
 
-// sessionAnswer is the Fake with Session answering name with err.
+// errHeldUnderWORK is a lookup of work answered as held under WORK: a session
+// of that spelling while one is live, else a socket a session gone left,
+// which Create replaces.
+var errHeldUnderWORK = fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "WORK"})
+
+// sessionAnswer is a backend with Session answering name with err, a nil err
+// a session that answers.
 type sessionAnswer struct {
-	*backendtest.Fake
+	backend.Backend
 	name string
 	err  error
 }
 
 func (s sessionAnswer) Session(ctx context.Context, name string) (backend.Session, error) {
 	if name == s.name {
-		return backend.Session{}, s.err
+		return backend.Session{Name: name, Answered: s.err == nil}, s.err
 	}
-	return s.Fake.Session(ctx, name)
+	return s.Backend.Session(ctx, name)
 }
 
-// answerSession has the world's backend answer a lookup of name with err.
+// answerSession has the world's backend, as it stands, answer a lookup of
+// name with err.
 func (w *world) answerSession(name string, err error) {
-	w.witness.Backend = sessionAnswer{Fake: w.fake, name: name, err: err}
+	w.witness.Backend = sessionAnswer{Backend: w.witness.Backend, name: name, err: err}
 }
 
 // assertTried checks restore tried to make name, skipping nothing.
@@ -787,10 +812,21 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 
 		w.r.Restore(t.Context())
 
-		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) > 0 {
-			t.Errorf("asked %d times, waiting %v; want once, with no wait", asks, w.slept)
+		if asks := w.asksFor("work"); asks != 1 || len(w.slept) > 0 {
+			t.Errorf("work asked for %d times, waiting %v; want once, with no wait", asks, w.slept)
 		}
 	})
+}
+
+// asksFor is how many times restore looked name up.
+func (w *world) asksFor(name string) int {
+	var asks int
+	for _, call := range w.fake.CallsTo(backendtest.OpSession) {
+		if call.Name == name {
+			asks++
+		}
+	}
+	return asks
 }
 
 func TestRestore_RefusedCreateNamesItsCause(t *testing.T) {
