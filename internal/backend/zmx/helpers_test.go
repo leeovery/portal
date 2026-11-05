@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,6 +188,21 @@ func answeringAfter(delay time.Duration, reply ...[]byte) func(*daemon, net.Conn
 			_, _ = c.Write(r)
 		}
 		_, _ = io.Copy(io.Discard, c)
+	}
+}
+
+// answeringOnce answers its first connection as answering does, and is
+// silent on every later one, as a daemon busy since, serialising a history,
+// is.
+func answeringOnce(reply ...[]byte) func(*daemon, net.Conn) {
+	var conns atomic.Int32
+	answer := answering(reply...)
+	return func(d *daemon, c net.Conn) {
+		if conns.Add(1) == 1 {
+			answer(d, c)
+			return
+		}
+		silent(d, c)
 	}
 }
 

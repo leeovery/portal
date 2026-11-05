@@ -207,9 +207,10 @@ func (g *Registration) serve() {
 
 // answer answers the one request a connection carries, which must be read
 // within the bound a caller gives one. Close cuts it short.
-func (g *Registration) answer(conn net.Conn) {
+func (g *Registration) answer(nc net.Conn) {
+	conn := &cuttable{Conn: nc}
 	defer func() { _ = conn.Close() }()
-	stop := context.AfterFunc(g.ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
+	stop := context.AfterFunc(g.ctx, conn.cut)
 	defer stop()
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	q, err := readRequest(conn)
@@ -223,6 +224,43 @@ func (g *Registration) answer(conn net.Conn) {
 	}
 	_ = conn.SetWriteDeadline(time.Now().Add(timeout))
 	_ = writeMessage(conn, a)
+}
+
+// cuttable is a connection that cut ends at once: its deadlines pass, and no
+// deadline set before or after the cut moves them back. Close's cut may run
+// before the deadlines answer sets, as it does on a context already ended.
+type cuttable struct {
+	net.Conn
+	mu    sync.Mutex
+	isCut bool
+}
+
+func (c *cuttable) cut() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.isCut = true
+	_ = c.Conn.SetDeadline(time.Unix(1, 0))
+}
+
+func (c *cuttable) SetDeadline(t time.Time) error {
+	return c.set(c.Conn.SetDeadline, t)
+}
+
+func (c *cuttable) SetReadDeadline(t time.Time) error {
+	return c.set(c.Conn.SetReadDeadline, t)
+}
+
+func (c *cuttable) SetWriteDeadline(t time.Time) error {
+	return c.set(c.Conn.SetWriteDeadline, t)
+}
+
+func (c *cuttable) set(deadline func(time.Time) error, t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.isCut {
+		return nil
+	}
+	return deadline(t)
 }
 
 // carryOut has the handler carry out q by its deadline, so a request the

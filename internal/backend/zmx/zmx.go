@@ -27,6 +27,11 @@ const (
 	envPrefix   = "ZMX_SESSION_PREFIX"
 	envTmux     = "TMUX"
 	envTmuxPane = "TMUX_PANE"
+	// envTerm, envTermProgram and envTermProgramVersion name the terminal a
+	// process runs in; inside tmux they name tmux.
+	envTerm               = "TERM"
+	envTermProgram        = "TERM_PROGRAM"
+	envTermProgramVersion = "TERM_PROGRAM_VERSION"
 	// envNoDetachKey turns off zmx's ctrl+\ detach.
 	envNoDetachKey = "ZMX_NO_DETACH_KEY"
 )
@@ -152,15 +157,20 @@ func (b *Backend) Exists(ctx context.Context, name string) (bool, error) {
 // daemon behind it, and on a daemon that does not answer would hang the
 // terminal. Inside a session that answers in the Backend's directory, the
 // command keeps the caller's ZMX_SESSION, so zmx switches that session's
-// clients to name and exits at once instead of nesting. Anywhere else it
-// drops ZMX_SESSION, with which zmx attach would switch a session it cannot
-// reach, or another directory's session of the same name. It drops TMUX and
-// TMUX_PANE, as Create does: a session that ends between the probe and the
-// attach is made afresh by zmx attach, and must not take itself to be inside
-// the caller's tmux. It drops ZMX_NO_DETACH_KEY: Portal's attach runner ends
-// an attach with zmx's ctrl+\, which that turns into input for the session.
-// Each session is asked within a probe ceiling of its own, so a slow one
-// cannot starve the other.
+// clients to name and exits at once instead of nesting. Inside one definitely
+// not there, held by no socket or under no name one can have, it drops
+// ZMX_SESSION, with which zmx attach would switch a session it cannot reach,
+// and outside the Backend's directory too, where it would switch another
+// directory's session of the same name. Inside one that doesn't answer in
+// time it fails, since either guess may be wrong: a zmx attach nested in the
+// session it attaches feeds the session's output back into itself until the
+// session is killed. The caller's session is asked at most once: when it is
+// name, name's answer stands for it. It drops tmux's variables, as Create
+// does (see env): a session that ends between the probe and the attach is
+// made afresh by zmx attach. It drops ZMX_NO_DETACH_KEY: Portal's attach
+// runner ends an attach with zmx's ctrl+\, which that turns into input for
+// the session. Each session is asked within a probe ceiling of its own, so a
+// slow one cannot starve the other.
 func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Command, error) {
 	if err := CheckAttach(name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
@@ -168,29 +178,44 @@ func (b *Backend) AttachCommand(ctx context.Context, name string) (backend.Comma
 	if _, err := b.askWithin(ctx, name); err != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
 	}
-	switches := b.switches(ctx)
+	switches, err := b.switches(ctx, name)
 	if ctx.Err() != nil {
 		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, context.Cause(ctx))
 	}
+	if err != nil {
+		return backend.Command{}, fmt.Errorf("attach session %q: %w", name, err)
+	}
 	cmd := backend.Command{Argv: []string{b.binary, "attach", name}, Switches: switches}
 	if switches {
-		cmd.Env = b.env(envPrefix, envTmux, envTmuxPane, envNoDetachKey)
+		cmd.Env = b.env(envPrefix, envNoDetachKey)
 	} else {
-		cmd.Env = b.env(envPrefix, envSession, envTmux, envTmuxPane, envNoDetachKey)
+		cmd.Env = b.env(envPrefix, envSession, envNoDetachKey)
 	}
 	return cmd, nil
 }
 
-// switches reports whether zmx attach, run in this process's environment,
-// would switch the caller's session: one that answers in the zmx directory
-// that environment names, when that is the Backend's own.
-func (b *Backend) switches(ctx context.Context) bool {
+// switches reports whether zmx attach on target, which has just answered, run
+// in this process's environment, would switch the caller's session: one that
+// answers in the zmx directory that environment names, when that is the
+// Backend's own. A caller's session that neither answers nor is definitely
+// gone is an error naming it, wrapping none of the backend's errors, which a
+// caller would read as target's own fault.
+func (b *Backend) switches(ctx context.Context, target string) (bool, error) {
 	current := b.Current()
-	if current == "" {
-		return false
+	switch current {
+	case "":
+		return false, nil
+	case target:
+		return true, nil
 	}
 	_, err := b.askWithin(ctx, current)
-	return err == nil
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, backend.ErrNoSuchSession) || errors.Is(err, backend.ErrInvalidName):
+		return false, nil
+	}
+	return false, fmt.Errorf("session %s, which this runs in, is not answering, so whether zmx would switch it or nest in it can't be told; nothing was opened: %v", current, err)
 }
 
 // askWithin asks the session held under exactly name for its Info record,
@@ -250,7 +275,10 @@ func (b *Backend) Detach(ctx context.Context, name string) error {
 }
 
 // History asks for the whole history with a History request, and a bounded
-// one with a Capture request: zmx's Capture of 0 rows is the screen alone.
+// one with a Capture request: zmx's Capture of 0 rows is the screen alone. An
+// answer over the payload zmx's frames hold is ErrHistoryTooLarge, never the
+// timeout of a corrupt frame: zmx caps the scrollback in lines, not bytes, so
+// a wide, heavily styled one, or a cap the user's config raised, answers so.
 func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, error) {
 	if rows < 0 {
 		return nil, fmt.Errorf("read history of session %q: negative row count %d", name, rows)
@@ -272,6 +300,9 @@ func (b *Backend) History(ctx context.Context, name string, rows int) ([]byte, e
 	vt, err := c.await(request)
 	if errors.Is(err, errUnsupported) {
 		return nil, fmt.Errorf("read history of session %q: %w: %w", name, err, backend.ErrHistoryUnavailable)
+	}
+	if f, ok := errors.AsType[*oversizedFrame](err); ok && f.tag == request {
+		return nil, fmt.Errorf("read history of session %q: a %d-byte history, over the %d bytes a zmx frame holds: %w", name, f.len, maxPayload, backend.ErrHistoryTooLarge)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read history of session %q: %w", name, b.noAnswer(ctx, s, err))
@@ -383,14 +414,35 @@ func (b *Backend) bound(ctx context.Context, limit time.Duration, note string) (
 	return context.WithTimeoutCause(ctx, limit, fmt.Errorf("no answer in %s%s: %w", limit, note, backend.ErrTimeout))
 }
 
-// env is the environment without the drop keys, with ZMX_DIR set to the
-// Backend's directory.
+// env is the environment every zmx the Backend runs gets: without the drop
+// keys or tmux's variables, with ZMX_DIR set to the Backend's directory. A
+// session zmx makes inherits the run's environment, and must not take itself
+// to be inside the caller's tmux: so TMUX and TMUX_PANE go, and, when TMUX is
+// set, the terminal identity tmux gives its panes, TERM_PROGRAM,
+// TERM_PROGRAM_VERSION and a TERM naming tmux or screen. zmx keeps the
+// creator's TERM unless it is unset or dumb, when it sets its own.
 func (b *Backend) env(drop ...string) []string {
-	env := slices.DeleteFunc(slices.Clone(b.environ()), func(kv string) bool {
-		key, _, _ := strings.Cut(kv, "=")
-		return key == envDir || slices.Contains(drop, key)
+	environ := b.environ()
+	_, inTmux := lookupSet(environ, envTmux)
+	env := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
+		key, value, _ := strings.Cut(kv, "=")
+		return key == envDir || key == envTmux || key == envTmuxPane || slices.Contains(drop, key) || inTmux && tmuxIdentity(key, value)
 	})
 	return append(env, envDir+"="+b.dir)
+}
+
+// tmuxIdentity reports whether the variable key=value is part of the terminal
+// identity tmux gives the processes in its panes.
+func tmuxIdentity(key, value string) bool {
+	switch key {
+	case envTermProgram, envTermProgramVersion:
+		return true
+	case envTerm:
+		return slices.ContainsFunc([]string{"tmux", "screen"}, func(term string) bool {
+			return value == term || strings.HasPrefix(value, term+"-")
+		})
+	}
+	return false
 }
 
 // lookup is key's value in env, the first entry winning, as zmx's getenv

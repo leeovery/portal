@@ -1,6 +1,7 @@
 package zmx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -33,7 +34,7 @@ func TestProcessTableArgs(t *testing.T) {
 	t.Run("a read that answers is read once", func(t *testing.T) {
 		table, reads := readsOf(argv)
 
-		if got, err := table.args(40); err != nil || !slices.Equal(got.Argv, argv) || *reads != 1 {
+		if got, err := table.args(t.Context(), 40); err != nil || !slices.Equal(got.Argv, argv) || *reads != 1 {
 			t.Errorf("args = %q, %v after %d reads; want %q after one", got.Argv, err, *reads, argv)
 		}
 	})
@@ -41,7 +42,7 @@ func TestProcessTableArgs(t *testing.T) {
 	t.Run("a process whose reads fail a while is read until it answers", func(t *testing.T) {
 		table, reads := readsOf(argv, midExec, fmt.Errorf("read arguments of process 40: %w", syscall.EIO), midExec)
 
-		if got, err := table.args(40); err != nil || !slices.Equal(got.Argv, argv) || *reads != 4 {
+		if got, err := table.args(t.Context(), 40); err != nil || !slices.Equal(got.Argv, argv) || *reads != 4 {
 			t.Errorf("args = %q, %v after %d reads; want %q after four", got.Argv, err, *reads, argv)
 		}
 	})
@@ -49,7 +50,7 @@ func TestProcessTableArgs(t *testing.T) {
 	t.Run("a process gone between reads that fail is gone", func(t *testing.T) {
 		table, reads := readsOf(argv, midExec, fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone), midExec)
 
-		if _, err := table.args(40); !errors.Is(err, proctable.ErrGone) || *reads != 2 {
+		if _, err := table.args(t.Context(), 40); !errors.Is(err, proctable.ErrGone) || *reads != 2 {
 			t.Errorf("args = %v after %d reads; want ErrGone after two", err, *reads)
 		}
 	})
@@ -62,7 +63,7 @@ func TestProcessTableArgs(t *testing.T) {
 		}}
 		start := time.Now()
 
-		_, err := table.args(40)
+		_, err := table.args(t.Context(), 40)
 
 		took := time.Since(start)
 		if !errors.Is(err, syscall.EINVAL) {
@@ -73,6 +74,24 @@ func TestProcessTableArgs(t *testing.T) {
 		}
 		if most := int(settleWithin/settleEvery) + 1; reads < 2 || reads > most {
 			t.Errorf("args read %d times, want more than once and at most %d, %s apart", reads, most, settleEvery)
+		}
+	})
+
+	t.Run("a process that never answers is read no more once ctx ends", func(t *testing.T) {
+		reads := 0
+		ctx, cancel := context.WithCancel(t.Context())
+		table := processTable{readArgs: func(int) (proctable.Args, error) {
+			reads++
+			if reads == 2 {
+				cancel()
+			}
+			return proctable.Args{}, midExec
+		}}
+
+		_, err := table.args(ctx, 40)
+
+		if !errors.Is(err, syscall.EINVAL) || reads != 2 {
+			t.Errorf("args = %v after %d reads; want the read's failure after the two before ctx ended", err, reads)
 		}
 	})
 }
@@ -90,7 +109,7 @@ func TestSessionDaemon_ProvesNoneWhoseEnvironmentTheKernelDoesntShow(t *testing.
 		},
 	}
 
-	if d, err := b.sessionDaemon("work"); !errors.Is(err, errUnproved) {
+	if d, err := b.sessionDaemon(t.Context(), "work"); !errors.Is(err, errUnproved) {
 		t.Errorf("sessionDaemon(work) = %+v, %v; want errUnproved", d, err)
 	}
 }

@@ -40,10 +40,10 @@ func TestDialFailure(t *testing.T) {
 			return &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", errno)}
 		}
 
-		if err := b.dialFailure("old", dialErr(syscall.EAGAIN)); !errors.Is(err, errNotAccepting) || !errors.Is(err, backend.ErrTimeout) || gone(err) {
+		if err := b.dialFailure(t.Context(), "old", dialErr(syscall.EAGAIN)); !errors.Is(err, errNotAccepting) || !errors.Is(err, backend.ErrTimeout) || gone(err) {
 			t.Errorf("dialFailure(EAGAIN) = %v, want a daemon not accepting, ErrTimeout, not gone", err)
 		}
-		if err := b.dialFailure("old", dialErr(syscall.ECONNREFUSED)); !gone(err) {
+		if err := b.dialFailure(t.Context(), "old", dialErr(syscall.ECONNREFUSED)); !gone(err) {
 			t.Errorf("dialFailure(ECONNREFUSED) = %v, want the socket from before boot stale", err)
 		}
 	})

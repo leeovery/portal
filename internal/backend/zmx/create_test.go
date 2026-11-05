@@ -458,3 +458,65 @@ func realDir(t *testing.T, dir string) string {
 	}
 	return real
 }
+
+// A zmx the Backend runs that may make a session, Create's and the attach
+// command, leaves behind the terminal identity tmux gives its panes when it is
+// begun inside tmux, so zmx sets a TERM of its own; begun outside tmux it
+// keeps the terminal's.
+func TestZmxRuns_LeaveTmuxsTerminalIdentityBehind(t *testing.T) {
+	envs := map[string]func(t *testing.T, environ []string) []string{
+		"Create": func(t *testing.T, environ []string) []string {
+			binary, log := fakeZmx(t, createdLine)
+			if _, err := newBackendRunning(t, binary, socketDir(t), environ...).Create(t.Context(), "work", t.TempDir(), []string{"true"}); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			return strings.Split(string(ran(t, log, "env")), "\x00")
+		},
+		"AttachCommand": func(t *testing.T, environ []string) []string {
+			dir := socketDir(t)
+			serve(t, dir, "work", answering(infoFrame(t)))
+			cmd, err := newBackend(t, dir, environ...).AttachCommand(t.Context(), "work")
+			if err != nil {
+				t.Fatalf("AttachCommand: %v", err)
+			}
+			return cmd.Env
+		},
+	}
+	tmux := []string{"TMUX=/tmp/tmux-501/default,1,0", "TMUX_PANE=%1"}
+	identity := []string{"TERM_PROGRAM=tmux", "TERM_PROGRAM_VERSION=3.8"}
+	dropped := map[string][]string{"TERM": nil, "TERM_PROGRAM": nil, "TERM_PROGRAM_VERSION": nil}
+	for _, tt := range []struct {
+		name    string
+		environ []string
+		want    map[string][]string
+	}{
+		{"inside tmux, its TERM naming tmux", slices.Concat(tmux, identity, []string{"TERM=tmux-256color"}), dropped},
+		{"inside tmux, its TERM naming screen", slices.Concat(tmux, identity, []string{"TERM=screen-256color"}), dropped},
+		{"inside tmux, its TERM tmux bare", slices.Concat(tmux, []string{"TERM=tmux"}), dropped},
+		{"inside tmux, its TERM screen bare", slices.Concat(tmux, []string{"TERM=screen"}), dropped},
+		{"inside tmux with an empty TMUX", slices.Concat([]string{"TMUX="}, identity, []string{"TERM=tmux-256color"}), dropped},
+		{"inside tmux, its TERM given twice", slices.Concat(tmux, []string{"TERM=tmux-256color", "TERM=xterm-256color"}),
+			map[string][]string{"TERM": {"xterm-256color"}}},
+		{"inside tmux, its TERM naming another terminal", slices.Concat(tmux, []string{"TERM=xterm-256color"}),
+			map[string][]string{"TERM": {"xterm-256color"}}},
+		{"inside tmux, its TERM only beginning as tmux's does", slices.Concat(tmux, []string{"TERM=tmuxterm"}),
+			map[string][]string{"TERM": {"tmuxterm"}}},
+		{"outside tmux", slices.Concat(identity, []string{"TERM=tmux-256color"}),
+			map[string][]string{"TERM": {"tmux-256color"}, "TERM_PROGRAM": {"tmux"}, "TERM_PROGRAM_VERSION": {"3.8"}}},
+	} {
+		for run, env := range envs {
+			t.Run(tt.name+": "+run, func(t *testing.T) {
+				got := env(t, append(slices.Clone(tt.environ), "PATH=/usr/bin:/bin"))
+
+				for key, want := range tt.want {
+					if values := envValues(got, key); !slices.Equal(values, want) {
+						t.Errorf("env %s = %q, want %q", key, values, want)
+					}
+				}
+				if values := slices.Concat(envValues(got, "TMUX"), envValues(got, "TMUX_PANE")); len(values) != 0 {
+					t.Errorf("env carries the caller's tmux: %q", values)
+				}
+			})
+		}
+	}
+}

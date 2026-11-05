@@ -33,6 +33,10 @@ func AbandonCatching(sig os.Signal) {
 	a.abandon()
 }
 
+// MaxCreatedName is the longest session name the watch reads in zmx's created
+// line.
+var MaxCreatedName = maxCreatedName
+
 // ScanForSwitch feeds reads, in turn, to the watch the runner keeps on its
 // child's output, and returns the index of the read in which zmx's switch
 // ends, -1 for none.

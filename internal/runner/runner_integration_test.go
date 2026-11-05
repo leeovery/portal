@@ -121,6 +121,28 @@ func TestRunOverZmx(t *testing.T) {
 		}
 	})
 
+	t.Run("a zmx attach typed in the session switching to a session it makes still leaves the kill key asking for no kill", func(t *testing.T) {
+		z := attachZmx(t, nil)
+
+		z.h.term.typeIn(t, shellquote.Single(zmxtest.Binary(t))+" attach scratch\r")
+		z.awaitSwitchSeen(t)
+		z.h.term.typeIn(t, keyKill)
+		out, err := z.h.finish(t)
+
+		if err != nil || out.Action != attachkeys.Kill || !errors.Is(out.Err, runner.ErrUnconfirmed) || out.AsksKill() {
+			t.Errorf("Run = %+v, %v; want the kill refused, unconfirmed", out, err)
+		}
+		if shown := z.h.term.output(); !bytes.Contains(shown, []byte(`session "scratch" created`)) {
+			t.Errorf("the terminal shows %q, want zmx's line for the session the switch made", shown)
+		}
+		z.assertEndedByZmx(t)
+		for _, name := range []string{sessionName, "scratch"} {
+			if alive, err := z.b.Exists(t.Context(), name); err != nil || !alive {
+				t.Errorf("Exists(%s) = %v, %v after the kill key, want it alive", name, alive, err)
+			}
+		}
+	})
+
 	t.Run("a zmx inside the session switching its own client leaves the kill key asking to kill the session", func(t *testing.T) {
 		z := attachZmx(t, nil)
 		inner := zmxtest.New(t)

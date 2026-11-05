@@ -269,3 +269,27 @@ func TestRegister_ServingThroughAcceptFailures(t *testing.T) {
 		}
 	})
 }
+
+// Close's cut wins over every deadline the answer sets, before it or after:
+// a request being answered as Close begins never waits on a peer that is
+// slow to send it or to read the answer.
+func TestRegistration_CloseCutsAnAnswerShortWhateverItsDeadlines(t *testing.T) {
+	runner, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	answered := make(chan struct{})
+	start := time.Now()
+
+	go func() {
+		defer close(answered)
+		runnerreg.AnswerClosed(runner, &handler{})
+	}()
+
+	select {
+	case <-answered:
+		if took := time.Since(start); took > runnerreg.Timeout()/4 {
+			t.Errorf("the answer took %s, want it cut short at once, not waiting out %s", took, runnerreg.Timeout())
+		}
+	case <-time.After(2 * runnerreg.Timeout()):
+		t.Fatal("the answer never ended")
+	}
+}

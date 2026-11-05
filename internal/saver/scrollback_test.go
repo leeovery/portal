@@ -179,6 +179,52 @@ func TestPoll_CapturesScrollback(t *testing.T) {
 		})
 	}
 
+	t.Run("a history too large to read is warned of once for each session in the saver's run, the saved transcript kept", func(t *testing.T) {
+		w := newWorld(t)
+		api := stageCaptured(w, "the screen")
+		w.live("web", 2)
+		tooLarge := fmt.Errorf("a 70000000-byte history: %w", backend.ErrHistoryTooLarge)
+		w.fake.Fail(backendtest.OpHistory, tooLarge)
+		sink := logtest.Install(t)
+
+		w.after(time.Minute)
+		warned := sink.Records().Matching("capture", "capture too large").AtExactLevel(slog.LevelWarn)
+		var sessions []string
+		for _, rec := range warned {
+			sessions = append(sessions, rec.AttrString(t, "session"))
+			if got := rec.ErrorAttr(t, "error"); !errors.Is(got, backend.ErrHistoryTooLarge) || !strings.Contains(got.Error(), "70000000") {
+				t.Errorf("capture too large error = %v, want the history's size", got)
+			}
+		}
+		slices.Sort(sessions)
+		if !slices.Equal(sessions, []string{"api", "web"}) {
+			t.Errorf("warned of %v, want api and web once each", sessions)
+		}
+		if got, ok := w.read(scrollbackFile(t, api)); !ok || got != "the screen" {
+			t.Errorf("scrollback = %q, %v; want the saved transcript kept", got, ok)
+		}
+		if got, _ := w.entry("api"); got.ScrollbackFile != scrollbackFile(t, api) {
+			t.Errorf("ScrollbackFile = %q, want the saved transcript still named", got.ScrollbackFile)
+		}
+
+		mark := len(sink.Records())
+		w.after(time.Minute)
+		later := sink.Records()[mark:]
+		if again := later.Matching("capture", "capture too large"); len(again) != 0 {
+			t.Errorf("warned again within the run: %+v", again)
+		}
+		if skips := later.Matching("capture", "capture skipped").AtExactLevel(slog.LevelDebug); len(skips) != 2 {
+			t.Errorf("skips logged %+v, want one at DEBUG for each session", skips)
+		}
+
+		w.restart()
+		mark = len(sink.Records())
+		w.after(time.Minute)
+		if anew := sink.Records()[mark:].Matching("capture", "capture too large").AtExactLevel(slog.LevelWarn); len(anew) != 2 {
+			t.Errorf("a new run warned %d times, want once for each session again", len(anew))
+		}
+	})
+
 	t.Run("a history the session didn't give is asked for again a minute on, not at the next poll", func(t *testing.T) {
 		w := newWorld(t)
 		api := w.live("api", 1)
