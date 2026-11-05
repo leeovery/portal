@@ -44,11 +44,9 @@ func TestIsIDShaped(t *testing.T) {
 	})
 
 	t.Run("every id a generator mints is one", func(t *testing.T) {
-		for _, gen := range []nanoid.Generator{nanoid.NewGenerator(), nanoid.NewPaneTokenGenerator()} {
-			id, err := gen()
-			if err != nil || !nanoid.IsIDShaped(id) {
-				t.Errorf("minted %q, %v; want an id", id, err)
-			}
+		id, err := nanoid.NewGenerator()()
+		if err != nil || !nanoid.IsIDShaped(id) {
+			t.Errorf("minted %q, %v; want an id", id, err)
 		}
 	})
 }
@@ -124,47 +122,6 @@ func TestIsTokenShaped_Rejects(t *testing.T) {
 			if nanoid.IsTokenShaped(key) {
 				t.Errorf("IsTokenShaped(%q) = true, want false", key)
 			}
-		}
-	})
-}
-
-func TestNewPaneTokenGenerator(t *testing.T) {
-	t.Run("it recognises every token the pane-token mint produces", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		for range 200 {
-			token, err := gen()
-			if err != nil {
-				t.Fatalf("mint pane token: %v", err)
-			}
-			if !nanoid.IsTokenShaped(token) {
-				t.Fatalf("IsTokenShaped(%q) = false for a minted pane token, want true", token)
-			}
-		}
-	})
-
-	t.Run("it rejects a key one byte short of the pane-token width", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		token, err := gen()
-		if err != nil {
-			t.Fatalf("mint pane token: %v", err)
-		}
-		if short := token[:len(token)-1]; nanoid.IsTokenShaped(short) {
-			t.Errorf("IsTokenShaped(%q) = true for a token one byte short, want false", short)
-		}
-	})
-
-	t.Run("it mints a distinct token per call", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		seen := map[string]struct{}{}
-		for range 200 {
-			token, err := gen()
-			if err != nil {
-				t.Fatalf("mint pane token: %v", err)
-			}
-			if _, dup := seen[token]; dup {
-				t.Fatalf("pane-token mint produced %q twice in 200 calls", token)
-			}
-			seen[token] = struct{}{}
 		}
 	})
 }

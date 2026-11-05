@@ -61,15 +61,6 @@ func IsProcessAlive(pid int) bool {
 	return false
 }
 
-// DaemonAlive counts a missing or unparseable daemon.pid as not alive.
-func DaemonAlive(dir string) bool {
-	pid, err := ReadPIDFile(dir)
-	if err != nil {
-		return false
-	}
-	return IsProcessAlive(pid)
-}
-
 // WriteVersionFile uses plain AtomicWrite deliberately, as in WritePIDFile.
 func WriteVersionFile(dir, version string, logger *slog.Logger) error {
 	logger = loggerOrDiscard(logger)
