@@ -205,8 +205,8 @@ func TestMigrateCommand(t *testing.T) {
 			"Restored 1 session. Every saved session is restored.\n" +
 			panelLine +
 			"\n" +
-			"Sessions (name ← tmux name):\n" +
-			"  lantern ← lantern\n" +
+			"Sessions (tmux name → name):\n" +
+			"  lantern → lantern\n" +
 			"\n" +
 			"Resume hooks moved:\n" +
 			"  tokLan → lantern\n" +
@@ -226,7 +226,7 @@ func TestMigrateCommand(t *testing.T) {
 			t.Fatalf("migrate: %v", err)
 		}
 
-		want := "Restored no sessions.\n" + panelLine + "\n" + lanternLeft + "\nSessions (name ← tmux name):\n"
+		want := "Restored no sessions.\n" + panelLine + "\n" + lanternLeft + "\nSessions (tmux name → name):\n"
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("stdout:\n%s\nwant it holding:\n%s", stdout, want)
 		}

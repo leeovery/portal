@@ -60,6 +60,41 @@ func TestValidateName(t *testing.T) {
 			t.Errorf("ValidateName of %d two-byte runes = %v, want ErrInvalidName", limit/2+1, err)
 		}
 	})
+
+	t.Run("it refuses a name too long as ErrNameTooLong, and no other", func(t *testing.T) {
+		if err := b.ValidateName(strings.Repeat("a", b.MaxNameLen()+1)); !errors.Is(err, backend.ErrNameTooLong) {
+			t.Errorf("ValidateName of %d bytes = %v, want ErrNameTooLong", b.MaxNameLen()+1, err)
+		}
+		for _, name := range []string{"", "logs", "-x", "x*", "a/b", "a\tb"} {
+			if err := b.ValidateName(name); errors.Is(err, backend.ErrNameTooLong) {
+				t.Errorf("ValidateName(%q) = %v, refused as too long", name, err)
+			}
+		}
+	})
+}
+
+func TestRefusesRune(t *testing.T) {
+	t.Run("it refuses each character a name may never hold, and no other", func(t *testing.T) {
+		for _, r := range []rune{'/', 0, '\t', '\n', '\x1b', '\x7f', '\u0085'} {
+			if !zmx.RefusesRune(r) {
+				t.Errorf("RefusesRune(%q) = false, want true", r)
+			}
+		}
+		for _, r := range []rune{'a', ' ', '-', '*', '.', ':', '=', '$', '·', 'é', '\u202e'} {
+			if zmx.RefusesRune(r) {
+				t.Errorf("RefusesRune(%q) = true, want false", r)
+			}
+		}
+	})
+
+	t.Run("it refuses a character exactly when CheckName refuses a plain name holding it", func(t *testing.T) {
+		for r := range rune(0x100) {
+			refused := zmx.CheckName("a"+string(r)+"a") != nil
+			if refused != zmx.RefusesRune(r) {
+				t.Errorf("CheckName of a name holding %q refuses: %v; RefusesRune: %v", r, refused, zmx.RefusesRune(r))
+			}
+		}
+	})
 }
 
 func TestCheckName(t *testing.T) {

@@ -299,8 +299,8 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		long := strings.Repeat("n", 300)
 
 		assertInvalid(t, t.Context(), b, long)
-		if err := b.ValidateName(long); !errors.Is(err, backend.ErrInvalidName) {
-			t.Errorf("ValidateName of %d bytes = %v, want ErrInvalidName", len(long), err)
+		if err := b.ValidateName(long); !errors.Is(err, backend.ErrInvalidName) || !errors.Is(err, backend.ErrNameTooLong) {
+			t.Errorf("ValidateName of %d bytes = %v, want ErrInvalidName, as ErrNameTooLong", len(long), err)
 		}
 	})
 
@@ -342,8 +342,8 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	t.Run("creation: Create and ValidateName refuse what zmx misreads or cannot list", func(t *testing.T) {
 		b := newSubject(t).Backend()
 		for _, name := range []string{"logs", "-x", "x*", "a\nb", "bad\xffname"} {
-			if err := b.ValidateName(name); !errors.Is(err, backend.ErrInvalidName) {
-				t.Errorf("ValidateName(%q) = %v, want ErrInvalidName", name, err)
+			if err := b.ValidateName(name); !errors.Is(err, backend.ErrInvalidName) || errors.Is(err, backend.ErrNameTooLong) {
+				t.Errorf("ValidateName(%q) = %v, want ErrInvalidName, not as too long", name, err)
 			}
 			if _, err := b.Create(t.Context(), name, t.TempDir(), nil); !errors.Is(err, backend.ErrInvalidName) {
 				t.Errorf("Create(%q) = %v, want ErrInvalidName", name, err)

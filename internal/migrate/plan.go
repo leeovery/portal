@@ -23,10 +23,11 @@ func (p TmuxPane) String() string { return fmt.Sprintf("%s:%d.%d", p.Session, p.
 type Session struct {
 	From TmuxPane
 	Name string
-	// Generated says why Name was generated rather than taken from the tmux
-	// session's name; nil when it wasn't. A pane numbered after a generated
-	// first name carries the first's reason.
-	Generated error
+	// Changed says, in plain words and in order, how Name differs from the
+	// tmux session's own name and why: none when it doesn't, a pane's
+	// number aside. A pane numbered after a changed first name carries the
+	// first's.
+	Changed []string
 	// Label is the label the entry records: empty when it is the name, or
 	// when the index refuses it, LabelRefused then saying why.
 	Label        string
@@ -127,9 +128,12 @@ type Naming struct {
 	// state dir's entries.
 	Taken []string
 	// Validate is the backend's ValidateName: a name it refuses is never
-	// planned.
+	// planned. A name it refuses as backend.ErrNameTooLong is cut to fit.
 	Validate func(name string) error
-	// Mint draws the nanoid a generated name ends in.
+	// Refuses is the backend's rule on single characters (zmx.RefusesRune):
+	// each one a name holds that it refuses becomes '-'.
+	Refuses func(r rune) bool
+	// Mint draws the nanoid a generated name, or a fresh id, ends in.
 	Mint nanoid.Generator
 	// GroupingDir is session.GroupingDir bound to a git runner: the dir a
 	// session working in cwd groups under, false when there is none. A nil
@@ -147,12 +151,11 @@ func (n Naming) dirOf(cwd string) string {
 	return cwd
 }
 
-// migratingSession is a tmux session with panes to migrate: its own name, why
-// that couldn't be reserved, nil when it was, and its panes.
+// migratingSession is a tmux session with panes to migrate: what its own
+// name claimed, and its panes.
 type migratingSession struct {
 	tmuxName string
-	own      string
-	refused  error
+	own      claimed
 	panes    []migratingPane
 }
 
@@ -163,14 +166,20 @@ type migratingPane struct {
 }
 
 // NewPlan works out what migrating legacy writes, given hooks.json's keys.
-//   - Every tmux session's own name, its name up to " · " trimmed, is
-//     reserved first, unless Validate refuses it or it is taken, folding case
-//     as a filesystem may: by Naming.Taken or an earlier session's. A session
-//     whose own name is refused takes a generated {project}-{nanoid}, by the
-//     minting rule, the project its first pane's dir's last element. Each of
-//     a session's other panes then takes the first's name with the lowest
-//     free number above the last pane's, -2, -3 and so on, or a generated
-//     name once no number fits.
+//   - Every tmux session's own name, its name up to " · " trimmed, is made
+//     a name Validate takes and reserved first, unless it is taken, folding
+//     case as a filesystem may: by Naming.Taken or an earlier session's. A
+//     name Validate refuses is made compatible: each character Refuses
+//     refuses becomes '-', a run of '-' that joins collapsing to one, a
+//     leading '-' or space is dropped, and a name too long is cut to fit.
+//     With nothing of it left, or a name Validate still refuses, such as a
+//     reserved word, the session takes a generated {project}-{nanoid}, by
+//     the minting rule, the project its first pane's dir's last element. A
+//     name taken keeps its stem, less any -<nanoid> it ends in, and takes a
+//     fresh nanoid, cut to fit and drawn again while taken. Each of a
+//     session's other panes then takes the first's name with the lowest free
+//     number above the last pane's, -2, -3 and so on, or a fresh nanoid on
+//     the first's stem once the number makes it too long.
 //   - Each label is the tmux session's name, another pane's with its number,
 //     omitted when it is the name or one the index refuses.
 //   - Each entry's dir is the pane's grouping dir, else its cwd.
@@ -181,9 +190,9 @@ type migratingPane struct {
 //     Every other key is removed.
 //
 // A tmux session with no panes is skipped. It errors when Mint fails, or no
-// free name can be generated.
+// free name can be generated or given a fresh id.
 func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
-	n := &namer{validate: naming.Validate, mint: naming.Mint, taken: slices.Clone(naming.Taken)}
+	n := &namer{validate: naming.Validate, refuses: naming.Refuses, mint: naming.Mint, taken: slices.Clone(naming.Taken)}
 	plan := Plan{legacyDir: legacy.dir}
 	var migrating []migratingSession
 	for _, s := range legacy.index.Sessions {
@@ -192,11 +201,10 @@ func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
 			plan.Skipped = append(plan.Skipped, SkippedSession{Name: s.Name, Why: s.empty()})
 			continue
 		}
-		m := migratingSession{tmuxName: s.Name, own: ownName(s.Name)}
+		m := migratingSession{tmuxName: s.Name, own: n.claim(ownName(s.Name))}
 		for _, p := range saved {
 			m.panes = append(m.panes, migratingPane{savedPane: p, dir: naming.dirOf(p.pane.CWD)})
 		}
-		m.refused = n.reserve(m.own)
 		migrating = append(migrating, m)
 	}
 	var panes []savedPane
@@ -229,7 +237,7 @@ func (l Legacy) session(tmuxName string, p migratingPane, n name) (Session, erro
 	return Session{
 		From:         p.at,
 		Name:         n.name,
-		Generated:    n.generated,
+		Changed:      n.changed,
 		Label:        label,
 		LabelRefused: refused,
 		Dir:          p.dir,

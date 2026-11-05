@@ -25,6 +25,10 @@ var (
 	// backend cannot hold.
 	ErrInvalidName = errors.New("invalid session name")
 
+	// ErrNameTooLong is the ErrInvalidName of a name longer than the backend
+	// can hold, which a shorter one need not be.
+	ErrNameTooLong = fmt.Errorf("%w: too long", ErrInvalidName)
+
 	// ErrTimeout is returned, wrapped, by an operation the backend did not
 	// answer in time, such as a kill of a wedged session, and by any call on a
 	// session that is held but not answering at all.

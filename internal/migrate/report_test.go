@@ -28,9 +28,9 @@ func shown(path string) string {
 // reportPlan is a plan with something in each of the report's blocks:
 // lantern's pane's hook moved; tidepool's two panes, the second's scrollback
 // gone; quarry's name taken by a live zmx session; bell's label holding a
-// control character; a session with no windows; and hooks keyed by a pane
-// address, a tmux pane id, a token of no saved pane and a key of no shape
-// Portal wrote.
+// control character; flow's name holding a '/'; a session with no windows;
+// and hooks keyed by a pane address, a tmux pane id, a token of no saved
+// pane and a key of no shape Portal wrote.
 func reportPlan(t *testing.T) migrate.Plan {
 	t.Helper()
 	dir := legacyDir(t, []v1Session{
@@ -38,6 +38,7 @@ func reportPlan(t *testing.T) migrate.Plan {
 		session("tidepool · flaky test", pane(0, codeDir+"tidepool").scrollback("scrollback/tidepool__0.0.bin"), pane(1, codeDir+"tidepool/web").scrollback("scrollback/tidepool__0.1.bin")),
 		session("quarry", pane(0, codeDir+"quarry")),
 		session("bell · ding\a", pane(0, codeDir+"bell")),
+		session("flow-v1/27 · api", pane(0, codeDir+"flow")),
 		sessionOf("empty"),
 	}, map[string]string{
 		"scrollback/pane-tokLan.bin":   "lantern\n",
@@ -50,20 +51,22 @@ func migratedOutcome(plan migrate.Plan) migrate.Outcome {
 	return migrate.Outcome{Course: migrate.Migrated, StateDir: reportState, TmuxDir: reportTmux, Backup: reportBackup, Plan: plan}
 }
 
-const wantMigratedReport = `Migrated 4 tmux sessions to 5 sessions. Skipped 1 tmux session.
+const wantMigratedReport = `Migrated 5 tmux sessions to 6 sessions. Skipped 1 tmux session.
 Moved 1 resume hook. Removed 4, kept in the backup.
-Restored 5 sessions. Every saved session is restored.
+Restored 6 sessions. Every saved session is restored.
 Each migrated session with a resume hook waits on its resume panel the first time you open it.
 
-Sessions (name ← tmux name):
-  lantern ← lantern
-  tidepool ← tidepool · flaky test (window 0, pane 0)
-  tidepool-2 ← tidepool · flaky test (window 0, pane 1)
-  quarry-Gen001 ← quarry
-  bell ← bell · ding\a
+Sessions (tmux name → name):
+  lantern → lantern
+  tidepool · flaky test (window 0, pane 0) → tidepool
+  tidepool · flaky test (window 0, pane 1) → tidepool-2
+  quarry → quarry-Gen001
+  bell · ding\a → bell
+  flow-v1/27 · api → flow-v1-27
 
-Generated names:
-  quarry-Gen001: the name is taken by "quarry"
+Names made compatible (tmux name → name):
+  quarry → quarry-Gen001: quarry was taken, so it has a new id
+  flow-v1/27 · api → flow-v1-27: '/' isn't allowed in a session name, so it became '-'
 
 Labels dropped:
   bell: label refused: it holds a control or formatting character, such as a newline, tab or escape
@@ -89,7 +92,7 @@ hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.
 
 func TestReport(t *testing.T) {
 	t.Run("it reports a migration: a summary, the restore, each session and what changed, and where the old state is", func(t *testing.T) {
-		got := migrate.Report(migratedOutcome(reportPlan(t)), migrate.Restore{End: migrate.RestoreRan, Restored: 5, Waits: true}, shown)
+		got := migrate.Report(migratedOutcome(reportPlan(t)), migrate.Restore{End: migrate.RestoreRan, Restored: 6, Waits: true}, shown)
 
 		if got != wantMigratedReport {
 			t.Errorf("report:\n%s\nwant:\n%s", got, wantMigratedReport)
@@ -216,13 +219,14 @@ func TestReport(t *testing.T) {
 
 		blocks := strings.Split(migrate.Report(migratedOutcome(plan), migrate.Restore{End: migrate.RestoreRan, Restored: len(plan.Sessions)}, shown), "\n\n")
 
-		sessions := blockOf(t, blocks, "Sessions (name ← tmux name):")
+		sessions := blockOf(t, blocks, "Sessions (tmux name → name):")
 		if len(sessions) != len(plan.Sessions) {
 			t.Errorf("%d session lines, want one for each of %d sessions", len(sessions), len(plan.Sessions))
 		}
 		var order []string
 		for _, line := range sessions {
-			order = append(order, strings.Fields(line)[0])
+			_, made, _ := strings.Cut(line, " → ")
+			order = append(order, made)
 		}
 		var movedTo []string
 		for _, line := range blockOf(t, blocks, "Resume hooks moved:") {
