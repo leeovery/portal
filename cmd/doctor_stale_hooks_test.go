@@ -140,6 +140,12 @@ func staleHooksStandDowns() []staleHooksStandDown {
 				t.Fatalf("remove sessions.json: %v", err)
 			}
 		}},
+		{hooksweep.ReasonMassReap, func(t *testing.T, install staleHooksInstall) {
+			body := hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.ReapableSeedB, hookstest.ReapableSeedC)
+			if err := os.WriteFile(install.hooksPath, []byte(body), 0o600); err != nil {
+				t.Fatalf("write hooks.json: %v", err)
+			}
+		}},
 	}
 }
 

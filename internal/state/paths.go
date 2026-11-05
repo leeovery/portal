@@ -19,7 +19,8 @@ const (
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
-// verbatim when set, otherwise <XDG config base>/portal/state.
+// when set, made absolute against the working directory, otherwise
+// <XDG config base>/portal/state.
 func Dir() (string, error) {
 	return xdg.ConfigDirPath(xdg.OSEnv, xdg.StateDir)
 }

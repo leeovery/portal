@@ -173,6 +173,78 @@ func TestSweepRule(t *testing.T) {
 // sixAlphanumerics is a session name in a pane token's shape.
 const sixAlphanumerics = "fabric"
 
+// A hook goes with its session's entry, so a sweep reaping three keys or more
+// that are half of hooks.json or more is judging it against the wrong state:
+// it holds them all, warning once.
+func TestSweepHoldsAMassReap(t *testing.T) {
+	reapable := []string{hookstest.ReapableSeedA, hookstest.ReapableSeedB, hookstest.ReapableSeedC}
+	for name, listed := range map[string][]string{
+		"three of four":                  {hookstest.LiveSeedA},
+		"three of six, exactly the half": {hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC},
+	} {
+		t.Run("it holds "+name+", removing none", func(t *testing.T) {
+			w := newWorld(t, listed...)
+			store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(slices.Concat(listed, reapable)...)})
+			before := hookstest.HooksFileBytes(t, path)
+			persisted, err := store.Load(hooks.ViaInternal)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			sink := logtest.Install(t)
+
+			outcome, err := Run(t.Context(), w.sources(), store)
+
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if outcome.DeclineReason != ReasonMassReap || len(outcome.Removed) != 0 {
+				t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonMassReap)
+			}
+			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that held a mass reap")
+			rec := sink.Records().WithMessage(standDownMsg).AtExactLevel(slog.LevelWarn).Only(t, "the hold's warning")
+			if got := rec.AttrString(t, "reason"); got != string(ReasonMassReap) {
+				t.Errorf("reason = %q, want %q", got, ReasonMassReap)
+			}
+			if got := rec.IntAttr(t, "entries"); got != int64(len(reapable)) {
+				t.Errorf("entries = %d, want the %d keys it held", got, len(reapable))
+			}
+			if stale, d := Stale(t.Context(), w.sources(), persisted); d.Reason() != ReasonMassReap || len(stale) != 0 {
+				t.Errorf("Stale = (%v, %q), want none, declined as %q", stale, d.Reason(), ReasonMassReap)
+			}
+		})
+	}
+
+	for name, tc := range map[string]struct{ listed, keys []string }{
+		"two keys, every one stale but fewer than three": {
+			listed: []string{hookstest.LiveSeedA},
+			keys:   []string{hookstest.ReapableSeedA, hookstest.ReapableSeedB},
+		},
+		"three stale keys of seven, fewer than half": {
+			listed: []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.SubjectSeedA},
+			keys:   slices.Concat([]string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.SubjectSeedA}, reapable),
+		},
+	} {
+		t.Run("it reaps "+name, func(t *testing.T) {
+			w := newWorld(t, tc.listed...)
+			store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(tc.keys...)})
+			sink := logtest.Install(t)
+
+			outcome, err := Run(t.Context(), w.sources(), store)
+
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			want := slices.DeleteFunc(slices.Clone(tc.keys), func(key string) bool { return slices.Contains(tc.listed, key) })
+			if outcome.DeclineReason != "" || !slices.Equal(outcome.Removed, want) {
+				t.Errorf("Run = %+v, want %v removed", outcome, want)
+			}
+			if warnings := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) != 0 {
+				t.Errorf("logged %v, want no warning", warnings)
+			}
+		})
+	}
+}
+
 // standDownCase is a world in which the judgement may not run, and the reason
 // it stands down under.
 type standDownCase struct {

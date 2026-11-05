@@ -98,8 +98,11 @@ func readSaverPresence(ctx context.Context, s doctorSaver) saverPresence {
 }
 
 // otherStateDir is the saver s reads proved another state directory's, nil
-// for any other.
+// for any other, and with no saver to read.
 func otherStateDir(ctx context.Context, s doctorSaver) *saverhost.OtherStateDirError {
+	if s == nil {
+		return nil
+	}
 	other, _ := errors.AsType[*saverhost.OtherStateDirError](s.CheckStateDir(ctx))
 	return other
 }

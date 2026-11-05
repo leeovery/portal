@@ -23,6 +23,7 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -210,7 +211,7 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 
-		if line := fixRefusal(deps); line != "" {
+		if line := fixRefusal(cmd.Context(), deps); line != "" {
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
 			return ErrDoctorUnhealthy
 		}
@@ -232,26 +233,33 @@ var doctorCmd = &cobra.Command{
 }
 
 // The lines of a --fix that repaired nothing: the state's zmx dir check
-// failed, or a migration is cut short, or may be.
+// failed, the saver saves another state, or a migration is cut short, or may
+// be.
 const (
 	fixRefusedLine        = "Skipped every repair: state's zmx dir failed"
+	fixOtherStateDirLine  = "Skipped every repair: " + saver.SessionName + " saves the state in %s, not this one"
 	fixCutShortLine       = "Skipped every repair: a migration was cut short; run portal migrate to finish it"
 	fixCutShortUnreadLine = "Skipped every repair: can't tell whether a migration was cut short"
 )
 
 // fixRefusal is why --fix makes no repair, empty when it may make them. The
 // repairs write state, so a state directory that belongs to another zmx
-// directory gets none, nor one a migration cut short left holding no index
-// of the migrated sessions, whose hooks a prune would reap; the diagnosis
-// names why. A state directory that can't be resolved is the repairs' own to
-// skip.
-func fixRefusal(deps *DoctorDeps) string {
+// directory gets none, nor one beside a saver proved another state
+// directory's, which says this state is a scratch one paired with another's
+// sessions, nor one a migration cut short left holding no index of the
+// migrated sessions; a prune in any of them would reap hooks that are
+// another's. The diagnosis names why. A state directory that can't be
+// resolved is the repairs' own to skip.
+func fixRefusal(ctx context.Context, deps *DoctorDeps) string {
 	dir, err := doctorStateDir(deps)
 	if err != nil {
 		return ""
 	}
 	if zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
 		return fixRefusedLine
+	}
+	if other := otherStateDir(ctx, deps.Saver); other != nil {
+		return fmt.Sprintf(fixOtherStateDirLine, other.Other)
 	}
 	switch cut, err := state.MigrationCutShort(dir); {
 	case err != nil:
@@ -315,6 +323,7 @@ const (
 	noSessionsStandDownPhrase    = "no sessions listed or saved"
 	lockStandDownPhrase          = "hooks.json is locked"
 	tmuxKeysStandDownPhrase      = "hooks.json holds keys in the tmux version's shape"
+	massReapStandDownPhrase      = "half or more of hooks.json's keys name no session listed or saved"
 )
 
 // The phrases of a hook store or sweep that failed. They read alongside the
@@ -354,13 +363,14 @@ var skippedPrunePhrases = map[hooksweep.Reason]string{
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase,
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase,
 	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase,
+	hooksweep.ReasonMassReap:            massReapStandDownPhrase,
 }
 
 // notEvaluableDetails renders a stand-down reason as the reason the count
 // cannot be taken, so the diagnosis reports exactly what the reaper declined
-// to judge. A restore, an install with no sessions and a held lock are states
-// that pass, so they say the count waits on them; the rest name the read that
-// failed.
+// to judge. A restore, an install with no sessions, a held lock, the tmux
+// version's keys and a mass reap held are states, so they say the count waits
+// on them; the rest name the read that failed.
 var notEvaluableDetails = map[hooksweep.Reason]string{
 	hooksweep.ReasonRestoring:           restoreStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
@@ -370,6 +380,7 @@ var notEvaluableDetails = map[hooksweep.Reason]string{
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonMassReap:            massReapStandDownPhrase + " (not evaluable)",
 }
 
 // reportSkippedPrune renders a prune that removed nothing from the shared

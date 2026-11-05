@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
@@ -54,16 +53,12 @@ func buildProductionSpawnSeams(ctx context.Context, b backend.Backend, runners s
 // the sessions, state, config and log its opener did whatever the window's
 // shell sets: this process's PATH, the state directory as resolved here, what
 // b needs to reach its sessions, and each of Portal's path and logging
-// variables as this process has it — a path made absolute against this
-// process's directory, since the window starts in another, and one this
-// process lacks unset.
+// variables as this process has it — a path made xdg.Absolute, since the
+// window starts in another directory, and one this process lacks unset.
 func windowEnv(b backend.Backend) spawn.WindowEnv {
 	return func() (spawn.WindowEnvironment, error) {
 		var env spawn.WindowEnvironment
 		stateDir, err := state.Dir()
-		if err == nil {
-			stateDir, err = filepath.Abs(stateDir)
-		}
 		if err != nil {
 			return env, err
 		}
@@ -72,7 +67,7 @@ func windowEnv(b backend.Backend) spawn.WindowEnv {
 			if name == xdg.StateDir.EnvVar {
 				continue
 			}
-			if err := carry(&env, name, absolutePath); err != nil {
+			if err := carry(&env, name, xdg.Absolute); err != nil {
 				return env, err
 			}
 		}
@@ -99,15 +94,6 @@ func carry(env *spawn.WindowEnvironment, name string, resolve func(string) (stri
 	}
 	env.Set = append(env.Set, name+"="+value)
 	return nil
-}
-
-// absolutePath is path made absolute against this process's directory; set
-// empty, it stays empty, as Portal reads it unset.
-func absolutePath(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	return filepath.Abs(path)
 }
 
 func verbatim(value string) (string, error) { return value, nil }
