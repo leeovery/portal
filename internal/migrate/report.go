@@ -16,8 +16,8 @@ import (
 type RestoreEnd int
 
 const (
-	// RestoreNotRun is a bootstrap that ran no restore: it was owed none, or
-	// found none owed.
+	// RestoreNotRun is a bootstrap that ran no restore: it was owed none,
+	// found none owed, or left the restore unfinished before reaching it.
 	RestoreNotRun RestoreEnd = iota
 	// RestoreRan is a restore that ran to its end.
 	RestoreRan
@@ -42,6 +42,15 @@ type Restore struct {
 	// as Left reads them, and LeftUnread is why they couldn't be read.
 	Left       []string
 	LeftUnread error
+}
+
+// leftHeading heads the sessions left: the bootstrap's fatal, following the
+// report, may stand in the way of restoring them until it is fixed.
+func (r Restore) leftHeading() string {
+	if r.End == RestoreStopped {
+		return leftStoppedHeading
+	}
+	return leftHeading
 }
 
 // WaitingLine is what portal migrate says as a run starts to wait for the
@@ -72,7 +81,7 @@ func Report(o Outcome, r Restore, shown func(path string) string) string {
 		rep.line(alreadyCopy)
 	}
 	rep.restore(r)
-	section(&rep, fmt.Sprintf(leftHeading, count(len(r.Left), "session")), r.Left, func(name string) (string, bool) {
+	section(&rep, fmt.Sprintf(r.leftHeading(), count(len(r.Left), "session")), r.Left, func(name string) (string, bool) {
 		return fmt.Sprintf(leftLine, name), true
 	})
 	if o.Course == Migrated {

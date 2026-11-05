@@ -16,19 +16,27 @@ import (
 // finishes it, dir holds none of the migrated sessions, so nothing may write
 // dir or judge hooks by it: a hook sweep would reap every migrated key. An
 // empty staging dir is a move cut short as it removed the dir itself, with
-// everything in place. Anything it can't look at is an error.
+// everything in place. With no state-tmux/ no migration has reached its
+// renames, whatever is at the staging path, so that one stat answers every
+// command on every install that never migrated. A staging dir it can't look
+// in beside state-tmux/ is an error, as is a state-tmux/ it can't look at
+// beside a staging dir holding anything.
 func MigrationCutShort(dir string) (bool, error) {
-	if staged, err := holdsAnything(MigrationStagingDir(dir)); err != nil || !staged {
-		return false, err
-	}
-	info, err := os.Stat(TmuxStateDir(dir))
+	info, statErr := os.Stat(TmuxStateDir(dir))
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case errors.Is(statErr, fs.ErrNotExist), statErr == nil && !info.IsDir():
 		return false, nil
-	case err != nil:
-		return false, fmt.Errorf("look for the tmux version's migrated state: %w", err)
 	}
-	return info.IsDir(), nil
+	staged, err := holdsAnything(MigrationStagingDir(dir))
+	switch {
+	case err != nil:
+		return false, err
+	case !staged:
+		return false, nil
+	case statErr != nil:
+		return false, fmt.Errorf("look for the tmux version's migrated state: %w", statErr)
+	}
+	return true, nil
 }
 
 // holdsAnything reports whether dir is there holding an entry. A path

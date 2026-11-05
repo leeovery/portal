@@ -5,10 +5,10 @@ package migrate
 // Refusals: a run stops on each, having migrated nothing. stoppedCopy words
 // any other failure that stops a run.
 const (
-	stoppedCopy            = "portal migrate stopped: %v. Once that's fixed, run portal migrate again: it picks up where this run stopped."
+	stoppedCopy            = "portal migrate stopped: %v.%s Once that's fixed, run portal migrate again%s"
 	lockedCopy             = "Another portal migrate is running. Wait for it to finish."
 	unusableIndexCopy      = "Portal can't migrate: %s can't be read: %v"
-	bothStatesCopy         = "Portal can't migrate: %[1]s is still the tmux version's state, but %[2]s is there already from an earlier migration. Nothing was changed. Move %[1]s aside, and keep %[2]s: it holds the backup hooks.json was migrated from."
+	bothStatesCopy         = "Portal can't migrate: %[1]s is still the tmux version's state, but %[2]s is there already from an earlier migration. Nothing was changed. Move %[1]s aside, and keep %[2]s, from the earlier migration."
 	stagingBesideStateCopy = "Portal can't finish migrating: %s holds the migrated state, but %s has been written since the migration began. Nothing was changed. Keep the one you want as the state dir, move the other aside, then run portal migrate again."
 	inTheWayCopy           = "Portal can't finish migrating: %s holds %s, which the migration didn't put there. Nothing was changed. Move it aside, then run portal migrate again; the migrated state is waiting in %s."
 	migratedStateGoneCopy  = "Portal can't migrate: %[2]s is there from an earlier migration, but %[1]s holds none of the state it migrated. Nothing was changed. Put that state back in %[1]s if you have it; otherwise the next portal command starts with no saved sessions."
@@ -17,8 +17,17 @@ const (
 	daemonRunningCopy      = "The tmux version's save daemon (pid %d) is still running %s after its saver was stopped%s, so nothing was migrated. Run portal migrate again once it has exited."
 	daemonUnstoppedCopy    = "The tmux version's save daemon (pid %d) is running with no saver Portal could stop%s, so nothing was migrated. Run portal migrate again once it has exited."
 	daemonUnreadCopy       = ", or Portal can't tell it has exited (%v)"
-	hooksMalformedCopy     = "Portal can't migrate: %s doesn't parse, so nothing was migrated: %v. Fix it, then run portal migrate again."
+	hooksMalformedCopy     = "Portal can't migrate: %s doesn't parse, so nothing was migrated: %v.%s Fix it, then run portal migrate again%s"
 	unlistedCopy           = "Portal can't migrate: zmx's sessions can't be listed: %v. Nothing was changed."
+)
+
+// What stoppedCopy and hooksMalformedCopy add of how far the run they word
+// got: whether it stopped the tmux side, then what a re-run does.
+const (
+	tmuxOffCopy    = " Portal's tmux hooks are off and its tmux saver is stopped, so tmux isn't saving your sessions."
+	againCopy      = "."
+	startsOverCopy = ": it starts over."
+	finishesCopy   = ": it finishes the migration."
 )
 
 // The waiting line: told once, as a run starts to wait for the tmux
@@ -42,8 +51,9 @@ const (
 	unreadRestoreCopy   = "Couldn't restore the sessions: the warning above says why."
 	allRestoredCopy     = "Every saved session is restored."
 	leftUnreadCopy      = "Portal can't tell which sessions are left to restore: %v"
-	waitsCopy           = "Each one with a resume hook waits on its resume panel the first time you open it."
-	leftHeading         = "%s left to restore, at Portal's next start or now with x <name>:"
+	waitsCopy           = "Each migrated session with a resume hook waits on its resume panel the first time you open it."
+	leftHeading         = "%s left to restore. x <name> brings one back now; otherwise they come back at the next restore after a reboot:"
+	leftStoppedHeading  = "%s left to restore. Once the error below is fixed, x <name> brings one back; otherwise they come back at the next restore after a reboot:"
 	leftLine            = "  %s"
 	tmuxDirCopy         = "The tmux version's state is kept at %s."
 	backupCopy          = "hooks.json's backup is at %s."

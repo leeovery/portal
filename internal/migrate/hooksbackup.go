@@ -26,7 +26,7 @@ func HooksBackup(dir string) string { return filepath.Join(dir, hooksBackupName)
 // a backup is never overwritten, since a run cut short may have rewritten
 // hooks.json since. It decodes hooks.json through the hooks codec first, as
 // strictly as the tmux version read it, so a file that doesn't parse is
-// refused, matching ErrMalformed, before anything is written, and it copies
+// malformedHooks, matching ErrMalformed, before anything is written, and it copies
 // the bytes it decoded. It reports whether it wrote a backup: no hooks.json
 // writes none.
 func backUpHooks(live, backup string) (bool, error) {
@@ -88,11 +88,11 @@ func readHooks(path string) (hooks.Snapshot, error) {
 }
 
 // decodeHooks decodes data, the hooks file at path, through the hooks codec.
-// A file that doesn't parse is refused, matching ErrMalformed.
+// A file that doesn't parse is malformedHooks, matching ErrMalformed.
 func decodeHooks(data []byte, path string) (hooks.Snapshot, error) {
 	var held hooks.Snapshot
 	if err := json.Unmarshal(data, &held); err != nil {
-		return nil, refused(hooks.ErrMalformed, hooksMalformedCopy, path, err)
+		return nil, malformedHooks{path: path, err: err}
 	}
 	return held, nil
 }

@@ -38,6 +38,9 @@ const (
 }`
 )
 
+// tmuxOff is what a failure says once the run has stopped Portal's tmux side.
+const tmuxOff = " Portal's tmux hooks are off and its tmux saver is stopped, so tmux isn't saving your sessions."
+
 func runSessions() []v1Session {
 	return []v1Session{
 		session("lantern", pane(0, codeDir+"lantern").token("tokLan").scrollback(lanternScrollback)),
@@ -365,28 +368,31 @@ func TestRun_MigratesInFull(t *testing.T) {
 
 	t.Run("it logs nothing between its renames, not even a sync that failed", func(t *testing.T) {
 		sink := logtest.Install(t)
+		fileutil.FailDirSyncForTest(t, syscall.EIO)
 		w := newRunWorld(t).withTmuxState()
-		// Each mark is the records logged by the sync after a rename: the
-		// first finds the state dir gone, the second the staging dir.
-		var first, second []logtest.Record
-		fileutil.SetDirSyncForTest(t, func(dir string) error {
-			switch {
-			case dir != w.root || !present(t, w.tmuxDir):
-			case first == nil && !present(t, w.dir):
-				first = append([]logtest.Record{}, sink.Records()...)
-			case first != nil && second == nil && !present(t, w.staging):
-				second = append([]logtest.Record{}, sink.Records()...)
+		// landed counts the records logged once the first rename lands, and
+		// made those logged as the second is made; the state dir must still be
+		// gone then.
+		landed, made := -1, -1
+		stateDirBack := false
+		migrate.SetRenameForTest(t, func(from, to string) error {
+			if from == w.staging {
+				made, stateDirBack = len(sink.Records()), present(t, w.dir)
 			}
-			return syscall.EIO
+			err := os.Rename(from, to)
+			if from == w.dir && err == nil {
+				landed = len(sink.Records())
+			}
+			return err
 		})
 
 		w.migrated()
 
-		if first == nil || second == nil {
-			t.Fatalf("saw the syncs after the renames: first %v, second %v; want both", first != nil, second != nil)
+		if landed < 0 || made < 0 {
+			t.Fatalf("saw the first rename land: %v, the second made: %v; want both", landed >= 0, made >= 0)
 		}
-		if logged := second[len(first):]; len(logged) != 0 {
-			t.Errorf("logged %v between the renames, want nothing: a log line makes the state dir", logged)
+		if logged := sink.Records()[landed:made]; len(logged) != 0 || stateDirBack {
+			t.Errorf("logged %v between the renames, the state dir back: %v; want nothing, and it gone: a log line makes the state dir", logged, stateDirBack)
 		}
 	})
 
@@ -424,6 +430,19 @@ func TestRun_MigratesInFull(t *testing.T) {
 		if present(t, filepath.Join(w.dir, "left-over")) || readIndex(t, w.dir).Len() != len(o.Plan.Sessions) {
 			t.Error("the state dir holds what the staging dir held before the run")
 		}
+	})
+
+	t.Run("it builds afresh over a file at the staging path, looking in nothing there first", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		writeFile(t, w.staging, "not a dir")
+		tmuxState := dirFiles(t, w.dir)
+
+		o, err := w.run()
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		assertMigrated(t, w, o, tmuxState, runHooks)
 	})
 
 	t.Run("it lands the swap when the parent dir won't sync, warning after each rename", func(t *testing.T) {
@@ -476,7 +495,7 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 			name:    "the version 1 index won't read",
 			arrange: func(w *runWorld) { writeFile(w.t, sessionindex.Path(w.dir), `{"version": 1, "sessions": []}`) },
 			says: func(*runWorld) string {
-				return "portal migrate stopped: the tmux version's sessions.json has no saved_at. Once that's fixed, run portal migrate again: it picks up where this run stopped."
+				return "portal migrate stopped: the tmux version's sessions.json has no saved_at. Once that's fixed, run portal migrate again."
 			},
 		},
 		{
@@ -559,7 +578,7 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 		})
 	}
 
-	t.Run("it backs up no hooks.json that stopped parsing while it waited for the daemon", func(t *testing.T) {
+	t.Run("it backs up no hooks.json that stopped parsing while it waited for the daemon, saying tmux is stopped", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()
 		w.daemon = func(time.Duration) reading {
 			writeFile(t, w.hooksFile, `{"tokLan": `)
@@ -569,8 +588,10 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 
 		_, err := w.run()
 
-		if !errors.Is(err, hooks.ErrMalformed) {
-			t.Fatalf("Run = %v; want hooks.json refused", err)
+		want := "Portal can't migrate: " + w.hooksFile + " doesn't parse, so nothing was migrated: unexpected end of JSON input." +
+			tmuxOff + " Fix it, then run portal migrate again: it starts over."
+		if !errors.Is(err, hooks.ErrMalformed) || err.Error() != want {
+			t.Fatalf("Run = %v; want hooks.json refused, saying %q", err, want)
 		}
 		if present(t, migrate.HooksBackup(w.dir)) || present(t, w.staging) {
 			t.Error("a backup or a staging dir was written: a backup that doesn't parse would stop every re-run")
@@ -580,25 +601,34 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 		}
 	})
 
-	t.Run("it rewrites no hooks.json and swaps nothing when the build fails, worded as a run stopped", func(t *testing.T) {
-		w := newRunWorld(t).withTmuxState()
-		unreadable := filepath.Join(w.dir, lanternScrollback)
-		if err := os.Chmod(unreadable, 0); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
-		hooksBefore := readBytes(t, w.hooksFile)
-		indexBefore := readBytes(t, sessionindex.Path(w.dir))
+	for name, tc := range map[string]struct {
+		answering bool
+		tmux      string
+	}{
+		"saying tmux is stopped":                      {answering: true, tmux: tmuxOff},
+		"with no tmux server answering to be stopped": {answering: false},
+	} {
+		t.Run("it rewrites no hooks.json and swaps nothing when the build fails, worded as a run stopped, "+name, func(t *testing.T) {
+			w := newRunWorld(t).withTmuxState()
+			w.tmux.answering = tc.answering
+			unreadable := filepath.Join(w.dir, lanternScrollback)
+			if err := os.Chmod(unreadable, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
+			hooksBefore := readBytes(t, w.hooksFile)
+			indexBefore := readBytes(t, sessionindex.Path(w.dir))
 
-		_, err := w.run()
+			_, err := w.run()
 
-		if err == nil || !errors.Is(err, os.ErrPermission) ||
-			!strings.HasPrefix(err.Error(), "portal migrate stopped: ") ||
-			!strings.HasSuffix(err.Error(), ". Once that's fixed, run portal migrate again: it picks up where this run stopped.") {
-			t.Fatalf("Run = %v; want the build's failure, worded as a run stopped", err)
-		}
-		assertNotSwapped(t, w, hooksBefore, indexBefore)
-	})
+			if err == nil || !errors.Is(err, os.ErrPermission) ||
+				!strings.HasPrefix(err.Error(), "portal migrate stopped: ") ||
+				!strings.HasSuffix(err.Error(), "permission denied."+tc.tmux+" Once that's fixed, run portal migrate again: it starts over.") {
+				t.Fatalf("Run = %v; want the build's failure, worded as a run stopped that a re-run starts over", err)
+			}
+			assertNotSwapped(t, w, hooksBefore, indexBefore)
+		})
+	}
 
 	t.Run("it swaps nothing when hooks.json can't be rewritten, and a re-run then migrates", func(t *testing.T) {
 		hooks.SetLockTimeoutForTest(t, 60*time.Millisecond)
@@ -654,6 +684,41 @@ func TestRun_ReRuns(t *testing.T) {
 			t.Errorf("staging still there: %v; steps %v; want it gone, with tmux, the daemon and zmx unreached", present(t, w.staging), w.steps)
 		}
 		hookstest.AssertHooksFileUnchanged(t, w.hooksFile, hooksBefore, "finishing the renames")
+	})
+
+	t.Run("it words a failure past the first rename as one a re-run finishes, and a re-run finishes it", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		migrate.SetRenameForTest(t, func(from, to string) error {
+			if from == w.staging {
+				return errors.New("rename refused")
+			}
+			return os.Rename(from, to)
+		})
+
+		_, err := w.run()
+
+		want := "portal migrate stopped: put the migrated state in place at " + w.dir + ": rename refused." +
+			tmuxOff + " Once that's fixed, run portal migrate again: it finishes the migration."
+		if err == nil || err.Error() != want {
+			t.Fatalf("Run = %v; want %q", err, want)
+		}
+		migrate.SetRenameForTest(t, os.Rename)
+		if o, err := w.run(); err != nil || o.Course != migrate.Finished {
+			t.Errorf("the re-run = %v, %v; want Finished", o.Course, err)
+		}
+	})
+
+	t.Run("it words a failure finishing a run cut short as one a re-run finishes, tmux untouched", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		w.cutShort()
+		migrate.SetRenameForTest(t, func(string, string) error { return errors.New("rename refused") })
+
+		_, err := w.run()
+
+		want := "portal migrate stopped: put the migrated state in place at " + w.dir + ": rename refused. Once that's fixed, run portal migrate again: it finishes the migration."
+		if err == nil || err.Error() != want {
+			t.Fatalf("Run = %v; want %q", err, want)
+		}
 	})
 
 	t.Run("it finishes into a state dir Portal's log made since, keeping the logs", func(t *testing.T) {
@@ -790,7 +855,7 @@ func TestRun_ReRuns(t *testing.T) {
 
 		// Moving state-tmux/ aside instead would leave the next run to back
 		// up hooks.json as rewritten, and strip every key it moved.
-		want := "Portal can't migrate: " + w.dir + " is still the tmux version's state, but " + w.tmuxDir + " is there already from an earlier migration. Nothing was changed. Move " + w.dir + " aside, and keep " + w.tmuxDir + ": it holds the backup hooks.json was migrated from."
+		want := "Portal can't migrate: " + w.dir + " is still the tmux version's state, but " + w.tmuxDir + " is there already from an earlier migration. Nothing was changed. Move " + w.dir + " aside, and keep " + w.tmuxDir + ", from the earlier migration."
 		if !errors.Is(err, migrate.ErrBothStates) || err.Error() != want {
 			t.Fatalf("Run = %v; want ErrBothStates saying %q", err, want)
 		}
