@@ -1621,7 +1621,7 @@ func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
 		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	})
 
-	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ []string) error { return nil })
+	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ resolver.QueryResult, _ []string) error { return nil })
 
 	withFuncSeam(t, &openRawArgs, func() []string { return []string{"portal", "open", "dev*"} })
 
@@ -2282,6 +2282,44 @@ func TestOpenCommand_Ack_MalformedIsAUsageError(t *testing.T) {
 			}
 			if lister.calls != 0 {
 				t.Errorf("sessions listed %d times, want none: --ack is refused before resolution", lister.calls)
+			}
+		})
+	}
+}
+
+// A window a burst spawned names one surface: a line acking more than one
+// would ack one and drop the rest.
+func TestOpenCommand_Ack_BesideMoreThanOneTargetIsAUsageError(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"two positionals":           {"dev", "api", "--ack", "b1:t1"},
+		"two session pins":          {"-s", "dev", "-s", "api", "--ack", "b1:t1"},
+		"a positional and a pin":    {"dev", "-s", "api", "--ack", "b1:t1"},
+		"a pin and a glob":          {"-s", "dev", "-s", "a*", "--ack", "b1:t1"},
+		"a positional, acked first": {"--ack", "b1:t1", "dev", "api"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+			lister := &countingSessionLister{names: []string{"dev", "api"}}
+			withOpenDeps(t, OpenDeps{
+				SessionLister: lister,
+				AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+				Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+				DirValidator:  &testDirValidator{existing: map[string]bool{}},
+			})
+			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, argv...) })
+			withFuncSeam(t, &openSessionFunc, func(*cobra.Command, string) error {
+				t.Error("open attached a session for --ack beside more than one target")
+				return nil
+			})
+			withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, resolver.QueryResult, []string) error {
+				t.Error("open burst for --ack beside more than one target")
+				return nil
+			})
+
+			executeOpenExpectingUsage(t, "open: cannot use --ack with more than one target", argv...)
+
+			if lister.calls != 0 {
+				t.Errorf("sessions listed %d times, want none: the line is refused before resolution", lister.calls)
 			}
 		})
 	}

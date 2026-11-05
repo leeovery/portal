@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/devversion"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -70,16 +72,34 @@ func missingSaver(name string, nothingToSave bool, idle, failed string) checkRes
 	return checkResult{name: name, status: checkFail, detail: failed}
 }
 
-func checkSaver(ctx context.Context, s doctorSaver, nothingToSave bool) checkResult {
-	const name = "saver"
+// saverPresence is one read of whether the saver session runs, which the
+// saver check judges and the kept line reads. unread is no read at all, with
+// no saver to read.
+type saverPresence struct {
+	present bool
+	err     error
+	unread  bool
+}
+
+func readSaverPresence(ctx context.Context, s doctorSaver) saverPresence {
 	if s == nil {
-		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase}
+		return saverPresence{unread: true}
 	}
 	present, err := s.Present(ctx)
+	return saverPresence{present: present, err: err}
+}
+
+// absent reports whether the read found no saver session running.
+func (p saverPresence) absent() bool { return !p.unread && p.err == nil && !p.present }
+
+func checkSaver(p saverPresence, nothingToSave bool) checkResult {
+	const name = "saver"
 	switch {
-	case err != nil:
-		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + err.Error()}
-	case !present:
+	case p.unread:
+		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase}
+	case p.err != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: saverReadPhrase + ": " + p.err.Error()}
+	case !p.present:
 		return missingSaver(name, nothingToSave,
 			saver.SessionName+" not running — nothing to save yet",
 			saver.SessionName+" not running — run portal open to start it")
@@ -216,6 +236,36 @@ func checkPendingResumes(dir string, dirErr error, sessions []backend.Session, l
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read the resume-pending flags"}
 	}
 	return checkResult{name: name, status: checkInfo, detail: pluralCount(waiting, "session waiting to resume", "sessions waiting to resume")}
+}
+
+// keptSessionsDetail names the saved sessions no session holds that the next
+// restore brings back, and how to bring one back now.
+const keptSessionsDetail = "%s — saved but not running, back at the next restore; x <name> brings one back now"
+
+// checkKeptSessions names the kept sessions in the state directory dir,
+// judged by restore's own rule, as the next bootstrap judges them when the
+// saver read finds none running. A saver it couldn't read counts as running,
+// so the sessions named are those kept either way. It states, never judges,
+// and is absent when there are none, and when the sessions, sessions.json or
+// the backend can't be read, which their own checks report.
+func checkKeptSessions(ctx context.Context, dir string, sessions []backend.Session, listErr error, b restore.Names, saverRead saverPresence) []checkResult {
+	if listErr != nil || b == nil {
+		return nil
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return nil
+	}
+	keeping := restore.Keeping{Rule: silentClaimRule(dir, b.ValidateName), Names: b, NoSaver: saverRead.absent()}
+	kept := restore.Kept(ctx, idx.Entries(), sessions, keeping)
+	if len(kept) == 0 {
+		return nil
+	}
+	names := make([]string, len(kept))
+	for i, e := range kept {
+		names[i] = e.Name
+	}
+	return []checkResult{{name: "kept sessions", status: checkInfo, detail: fmt.Sprintf(keptSessionsDetail, strings.Join(names, ", "))}}
 }
 
 // waitingSessions counts the sessions listed in sessions whose resume panel

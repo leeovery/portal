@@ -33,15 +33,19 @@ const (
 	saverRun = saverhost.ReadCeiling + saverhost.JudgeRun + saverhost.ReadCeiling + 2*saverhost.LockWait
 	// restoreRun is restore's listing, before its first session.
 	restoreRun = saverhost.ReadCeiling
+	// lookup is restore's lookup of the session holding a name: a read, then,
+	// when the name is held under a spelling the listing doesn't hold, a read
+	// of whether that spelling answers.
+	lookup = 2 * saverhost.ReadCeiling
 	// restoreSessionRun is a session restore makes: its Create, a run of the
 	// binary, with its grace; then the longer of the Create's refusal of a
 	// session an older zmx made (a read in that zmx's framing and its zmx
 	// kill, a run of the binary) and a second ask: of a Create that read back
-	// no creation, that read finding none, or of one that failed otherwise, a
-	// read, then backend.RecheckAfter's wait and a read again. Its record
-	// waits on commit.lock besides.
+	// no creation, that lookup finding none, or of one that failed otherwise,
+	// a lookup, then backend.RecheckAfter's wait and a lookup again. Its
+	// record waits on commit.lock besides.
 	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace +
-		max(saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace, 2*saverhost.ReadCeiling+backend.RecheckAfter)
+		max(saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace, 2*lookup+backend.RecheckAfter)
 	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
 	// and the flag, latch and index files.
 	lockSlack = 15 * time.Second
@@ -49,16 +53,16 @@ const (
 
 // LockWait bounds the wait for bootstrap.lock while another bootstrap holds
 // it, given the entries sessions.json holds: the holder's longest run, which
-// restores at most that many sessions, then retries those it couldn't make,
-// with lockSlack over. The retries are one term however many there are: no
-// try starts once restore.RetryBudget has run out, so the last starts within
-// it and runs past it: the retry's lookup, a read, then a session's restore.
-// A holder still running past it all is stuck, and the wait gives up rather
-// than queue behind it.
+// looks each up and restores at most that many sessions, then retries those
+// it couldn't make, with lockSlack over. The retries are one term however
+// many there are: no try starts once restore.RetryBudget has run out, so the
+// last starts within it and runs past it: the retry's lookup, then a
+// session's restore. A holder still running past it all is stuck, and the
+// wait gives up rather than queue behind it.
 func LockWait(entries int) time.Duration {
 	each := restoreSessionRun + commitlock.Bound()
-	retries := restore.RetryBudget + saverhost.ReadCeiling + each
-	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*each + retries + lockSlack
+	retries := restore.RetryBudget + lookup + each
+	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*(lookup+each) + retries + lockSlack
 }
 
 // LockNotice is how long a wait for bootstrap.lock goes unremarked.
@@ -67,7 +71,9 @@ const LockNotice = time.Second
 // Locked runs a bootstrap one at a time on its state directory, under
 // bootstrap.lock, so two windows opening at once never restore a session
 // twice. One that waited out another runs only if a bootstrap is still owed
-// once it holds the lock.
+// once it holds the lock. Hold takes the lock alone, as Run does, for other
+// work that must not race a bootstrap's restore, reading only Lock, Notice
+// and Logger.
 type Locked struct {
 	// Lock takes bootstrap.lock, waiting within its bound, and returns its
 	// release.
@@ -88,21 +94,32 @@ var _ Runner = Locked{}
 // it can't take, another bootstrap holding it past its bound included, is
 // fatal, and nothing runs.
 func (l Locked) Run(ctx context.Context) ([]Warning, error) {
-	logger := log.OrDiscard(l.Logger)
 	start := time.Now()
-	stop := l.noticeWait(progressEmitterFromContext(ctx))
-	release, err := l.Lock(ctx)
-	stop()
+	release, err := l.Hold(ctx)
 	if err != nil {
-		logger.Error("bootstrap.lock unavailable", "error", err, log.Took(start))
-		return nil, lockFatal(err)
+		return nil, err
 	}
 	defer release()
 	if !l.Owed(ctx) {
-		logger.Info("bootstrap skipped", "detail", "another bootstrap ran while this one waited", log.Took(start))
+		log.OrDiscard(l.Logger).Info("bootstrap skipped", "detail", "another bootstrap ran while this one waited", log.Took(start))
 		return nil, nil
 	}
 	return l.Bootstrap.Run(ctx)
+}
+
+// Hold takes the lock and returns its release. A wait for it past its notice
+// is told to ctx's progress emitter, once. A lock it can't take, another
+// holder keeping it past its bound included, is fatal.
+func (l Locked) Hold(ctx context.Context) (release func(), err error) {
+	start := time.Now()
+	stop := l.noticeWait(progressEmitterFromContext(ctx))
+	release, err = l.Lock(ctx)
+	stop()
+	if err != nil {
+		log.OrDiscard(l.Logger).Error("bootstrap.lock unavailable", "error", err, log.Took(start))
+		return nil, lockFatal(err)
+	}
+	return release, nil
 }
 
 // noticeWait tells emit, once the notice has passed, that this bootstrap

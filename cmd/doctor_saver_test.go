@@ -106,7 +106,7 @@ func TestDoctorSaverCheck(t *testing.T) {
 	})
 
 	t.Run("it is not evaluable with no saver to read", func(t *testing.T) {
-		assertCheck(t, checkSaver(t.Context(), nil, false), checkNotEvaluable, "could not read _portal-saver")
+		assertCheck(t, checkSaver(readSaverPresence(t.Context(), nil), false), checkNotEvaluable, "could not read _portal-saver")
 	})
 }
 

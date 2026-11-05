@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -71,11 +72,15 @@ type DoctorDeps struct {
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
 	ProtocolVersion func(ctx context.Context, name string) (int, error)
-	HookStore       *hooks.Store
-	ProjectStore    *project.Store
-	PrefsStore      *prefs.Store
-	Detector        TerminalDetector
-	Resolve         spawn.AdapterResolver
+	// Names is the backend as restore asks it about a saved session's name,
+	// bound on ZmxDir. Nil when that dir can't be bound, which leaves the kept
+	// sessions unjudged.
+	Names        restore.Names
+	HookStore    *hooks.Store
+	ProjectStore *project.Store
+	PrefsStore   *prefs.Store
+	Detector     TerminalDetector
+	Resolve      spawn.AdapterResolver
 	// Saver reads the saver session and its daemon. Unset, it is read over
 	// the driver bound on ZmxDir, through a host that signals nothing.
 	Saver doctorSaver
@@ -117,10 +122,11 @@ func resolveDoctorDeps() *DoctorDeps {
 			deps.ProtocolVersion = protocolVersion
 		}
 	}
-	// Detection runs through the driver bound on the dir doctor judges. A dir
-	// it refuses to bind leaves the host-terminal check out; the dir check
-	// reports why.
-	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
+	// Detection and the name rule run through the driver bound on the dir
+	// doctor judges. A dir it refuses to bind leaves the host-terminal check
+	// and the kept sessions out; the dir check reports why.
+	driver, bindErr := bindZmxAt(zmxProgram, deps.ZmxDir)
+	if bindErr == nil && (deps.Detector == nil || deps.Resolve == nil) {
 		// Read-only: detection asks the runner registry, which otherwise
 		// removes the entry of a runner it proves dead.
 		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
@@ -130,6 +136,9 @@ func resolveDoctorDeps() *DoctorDeps {
 		if deps.Resolve == nil {
 			deps.Resolve = seams.Resolve
 		}
+	}
+	if bindErr == nil && deps.Names == nil {
+		deps.Names = driver
 	}
 
 	if deps.Saver == nil {
@@ -398,20 +407,28 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	listed := func(context.Context) ([]backend.Session, error) { return sessions, listErr }
 	idle := nothingToSave(sessions, listErr, dir, dirErr)
 
+	stateZmxDir := checkStateZmxDir(dir, dirErr, deps.ZmxDir)
+	saverRead := readSaverPresence(ctx, deps.Saver)
+
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
-		checkSaver(ctx, deps.Saver, idle),
+		checkSaver(saverRead, idle),
 		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
-		checkStateZmxDir(dir, dirErr, deps.ZmxDir),
+		stateZmxDir,
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
 		checkPendingResumes(dir, dirErr, sessions, listErr),
-		checkKeyConfig(deps.PrefsStore),
 	}
+	// The sessions were listed in the zmx dir doctor binds, which a failed
+	// check says is not the state dir's, or can't say is.
+	if stateZmxDir.status != checkFail {
+		results = append(results, checkKeptSessions(ctx, dir, sessions, listErr, deps.Names, saverRead)...)
+	}
+	results = append(results, checkKeyConfig(deps.PrefsStore))
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
 	}

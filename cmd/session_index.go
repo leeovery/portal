@@ -64,6 +64,10 @@ func forgetting(dir, via string, picked func(sessionindex.Outcome) []sessioninde
 // claimRule is the rule each claim judges by; tests fix the boot it reads.
 var claimRule = state.ClaimRule
 
+// silentClaimRule is claimRule for doctor, which claims nothing and reports
+// what it finds; tests fix the boot it reads.
+var silentClaimRule = state.SilentClaimRule
+
 // claimed is a live session as its backend reports it, for a claim of its
 // entry: Dir is where Portal minted it, empty for any other claimer.
 type claimed struct {

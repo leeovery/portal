@@ -12,12 +12,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -48,10 +52,13 @@ var openDeps *OpenDeps
 type OpenDeps struct {
 	// SessionLister, when nil, lists the backend's user sessions.
 	SessionLister resolver.SessionLister
-	AliasLookup   resolver.AliasLookup
-	Zoxide        resolver.ZoxideQuerier
-	DirValidator  resolver.DirValidator
-	ThemeLoader   *theme.Loader
+	// Kept, when nil, judges a saved session kept by sessions.json and the
+	// backend's sessions.
+	Kept         resolver.KeptLookup
+	AliasLookup  resolver.AliasLookup
+	Zoxide       resolver.ZoxideQuerier
+	DirValidator resolver.DirValidator
+	ThemeLoader  *theme.Loader
 	// Execer replaces the exec that hands the terminal to the backend's
 	// attach command.
 	Execer execer
@@ -88,12 +95,15 @@ var openCmd = &cobra.Command{
 
 With no arguments, open launches the TUI picker so you can choose a destination.
 
-A bare target is resolved through the precedence chain — exact session name → path
-→ alias → zoxide query, first match wins. An exact session name attaches that
-existing session; a path, alias, or zoxide match mints a new session there.
+A bare target is resolved through the precedence chain — exact session name → kept
+saved session → path → alias → zoxide query, first match wins. An exact session
+name attaches that existing session; the name of a saved session that isn't
+running, which the next restore would bring back, brings it back and attaches it;
+a path, alias, or zoxide match mints a new session there.
 
 Domain pins skip the precedence chain and force a single domain:
-  -s, --session   attach the named session or session glob (never mints)
+  -s, --session   attach the named session or session glob (never mints); an
+                  exact name that is a kept saved session is brought back first
   -p, --path      mint a new session at the given directory (must exist)
   -a, --alias     mint a new session at the given alias key or key glob
   -z, --zoxide    mint a new session at zoxide's best match
@@ -155,9 +165,16 @@ in host-terminal windows.`,
 		// Raw argv because cobra collapses repeated same-flag values and splits
 		// positionals from flags, losing the order and repeats the burst needs. Must
 		// precede the single-pin blocks so a two-pin set bursts rather than hitting
-		// the single -s arm.
+		// the single -s arm. A window a burst spawned names its one surface
+		// exactly, so it never bursts again: a name with glob characters would
+		// expand, opening more windows than were asked for. No burst spawns a
+		// window naming more than one, which would ack one and drop the rest.
 		ordered := orderedOpenTargets(openOwnArgs())
-		if isMultiTarget(ordered) {
+		acked := cmd.Flags().Changed("ack")
+		if acked && len(ordered) > 1 {
+			return NewUsageError("open: cannot use --ack with more than one target")
+		}
+		if !acked && isMultiTarget(ordered) {
 			return dispatchOpenBurst(cmd, ordered, command)
 		}
 
@@ -173,25 +190,28 @@ in host-terminal windows.`,
 			return openTUIFunc(cmd, pickerLanding{}, command)
 		}
 
-		query := destination
-
 		qr, err := buildQueryResolver(cmd)
 		if err != nil {
 			return err
 		}
-
-		result, err := qr.Resolve(query)
-		if err != nil {
-			return err
-		}
-
-		emitResolveDecision(query, result)
-
-		if miss, ok := result.(*resolver.MissResult); ok {
-			return singleMissError(miss.Target)
-		}
-		return openResolved(cmd, result, command)
+		return openBare(cmd, qr, destination, command)
 	},
+}
+
+// openBare opens what qr resolves the bare positional query to, logging the
+// decision, a kept session brought back first.
+func openBare(cmd *cobra.Command, qr *resolver.QueryResolver, query string, command []string) error {
+	result, err := qr.Resolve(query)
+	if err != nil {
+		return err
+	}
+	emitResolveDecision(query, result)
+	if miss, ok := result.(*resolver.MissResult); ok {
+		return singleMissError(miss.Target)
+	}
+	return openOr(cmd, result, command, func() error {
+		return openBare(cmd, qr.WithKept(nil), query, command)
+	})
 }
 
 // validateFilterFlag refuses the lines -f cannot open a picker for: it is the
@@ -224,21 +244,34 @@ var pinResolvers = map[string]func(*resolver.QueryResolver, string) (resolver.Qu
 
 func resolvePinAndOpen(cmd *cobra.Command, flag string, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), command []string) error {
 	val, _ := cmd.Flags().GetString(flag)
+	return openPinned(cmd, resolve, val, command)
+}
+
+// openPinned opens what resolve, a pin's resolver, finds for val, a kept
+// session brought back first.
+func openPinned(cmd *cobra.Command, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), val string, command []string) error {
 	qr, err := buildQueryResolver(cmd)
 	if err != nil {
 		return err
 	}
+	return openPinnedBy(cmd, qr, resolve, val, command)
+}
+
+// openPinnedBy is openPinned over qr.
+func openPinnedBy(cmd *cobra.Command, qr *resolver.QueryResolver, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), val string, command []string) error {
 	result, err := resolve(qr, val)
 	if err != nil {
 		return err
 	}
-	return openResolved(cmd, result, command)
+	return openOr(cmd, result, command, func() error {
+		return openPinnedBy(cmd, qr.WithKept(nil), resolve, val, command)
+	})
 }
 
 // openResolved handles no MissResult — the bare-positional path renders its own
 // message and pins never miss — so any other result type is a defensive error.
-// A command (-e/--) is mint-scoped: an attach target is already running its own
-// program, so there is nothing safe to inject it into.
+// A command (-e/--) is mint-scoped: an attach target is already running its
+// own program, so there is nothing safe to inject it into.
 func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
@@ -246,6 +279,8 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 			return NewUsageError(commandAttachOnlyMessage)
 		}
 		return openSessionFunc(cmd, r.Name)
+	case *resolver.KeptResult:
+		return openKept(cmd, r.Name, command)
 	case *resolver.PathResult:
 		return openPathFunc(cmd, r.Path, command)
 	default:
@@ -253,8 +288,10 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 	}
 }
 
-// emitResolveDecision logs one line per resolved query: globs are deterministic
-// rather than guesses, so they emit none.
+// emitResolveDecision logs one line per resolution of a query, so a kept
+// target that is kept no longer by its bring-back logs a second, for its
+// fall-through. Globs are deterministic rather than guesses, so they emit
+// none.
 func emitResolveDecision(query string, result resolver.QueryResult) {
 	if resolver.HasGlobMeta(query) {
 		return
@@ -267,6 +304,8 @@ func resolveDecision(result resolver.QueryResult) (domain resolver.Domain, resol
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		return r.Domain, r.Name
+	case *resolver.KeptResult:
+		return resolver.DomainKept, r.Name
 	case *resolver.PathResult:
 		return r.Domain, r.Path
 	case *resolver.MissResult:
@@ -639,7 +678,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 	sessions := resolverSessions(cmd)
 	if openDeps != nil {
-		return resolver.NewQueryResolver(sessions, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
+		return resolver.NewQueryResolver(sessions, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator).WithKept(resolverKept(cmd)), nil
 	}
 
 	store, err := loadAliasStore()
@@ -650,7 +689,7 @@ func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 	zoxide := resolver.NewZoxideResolver(&resolver.RealCommandRunner{}, exec.LookPath)
 	dirValidator := &resolver.OSDirValidator{}
 
-	return resolver.NewQueryResolver(sessions, store, zoxide, dirValidator), nil
+	return resolver.NewQueryResolver(sessions, store, zoxide, dirValidator).WithKept(resolverKept(cmd)), nil
 }
 
 func resolverSessions(cmd *cobra.Command) resolver.SessionLister {
@@ -658,6 +697,63 @@ func resolverSessions(cmd *cobra.Command) resolver.SessionLister {
 		return openDeps.SessionLister
 	}
 	return backendSessionNames{ctx: cmd.Context()}
+}
+
+func resolverKept(cmd *cobra.Command) resolver.KeptLookup {
+	if openDeps != nil && openDeps.Kept != nil {
+		return openDeps.Kept
+	}
+	return keptSessions{ctx: cmd.Context()}
+}
+
+// keptSessions judges a saved session kept by restore's own rule. A name
+// zmx's Create refuses, its length aside, is never kept, so it costs nothing.
+// Any other is looked up in sessions.json, read without its lock, and the
+// sessions are listed only for a name the index holds, so a target no session
+// was saved under costs one file read. A read that fails is logged here; the
+// resolver then keeps nothing, as a listing that fails lists no session.
+type keptSessions struct {
+	ctx context.Context
+}
+
+func (k keptSessions) IsKept(name string) (bool, error) {
+	if zmx.CheckName(name) != nil {
+		return false, nil
+	}
+	b, err := sessionBackend()
+	if err != nil {
+		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
+		return false, err
+	}
+	dir, e, saved, err := savedEntry(name)
+	if err != nil {
+		restoreLogger.Warn("sessions.json unreadable", "session", name, "error", err)
+		return false, err
+	}
+	if !saved {
+		return false, nil
+	}
+	live, err := b.List(k.ctx)
+	if err != nil {
+		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
+		return false, err
+	}
+	kept := restore.Kept(k.ctx, []sessionindex.Entry{e}, live, restore.Keeping{Rule: claimRule(dir, b.ValidateName), Names: b})
+	return len(kept) == 1, nil
+}
+
+// savedEntry is the state directory and the entry sessions.json there holds
+// for name, and whether it holds one.
+func savedEntry(name string) (dir string, e sessionindex.Entry, saved bool, err error) {
+	if dir, err = state.Dir(); err != nil {
+		return "", sessionindex.Entry{}, false, err
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return "", sessionindex.Entry{}, false, err
+	}
+	e, saved = idx.Lookup(name)
+	return dir, e, saved, nil
 }
 
 // backendSessionNames lists the names of the backend's user sessions, the ones
@@ -677,7 +773,7 @@ func (l backendSessionNames) ListSessionNames() ([]string, error) {
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
-	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
+	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints); an exact name that is a kept saved session is brought back first")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")

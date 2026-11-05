@@ -157,7 +157,7 @@ func installSearchFormSeams(t *testing.T) *searchFormCapture {
 		sc.readsAtTUI = len(sc.fake.CallsTo(backendtest.OpList))
 		return nil
 	})
-	withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, []string) error {
+	withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, resolver.QueryResult, []string) error {
 		sc.burstCalled = true
 		return nil
 	})

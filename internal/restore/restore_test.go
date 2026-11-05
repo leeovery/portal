@@ -141,6 +141,115 @@ func TestRestore_Skips(t *testing.T) {
 			t.Errorf("entry = %+v, %v; want it left for the saver to drop, %+v", got, ok, e)
 		}
 	})
+
+	// zmx finds a session by statting its socket, so on a filesystem that
+	// folds case the live Work holds work's name: Create refuses it.
+	t.Run("a session another spelling of its name holds, its entry left to be made once that ends", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		e := owing(entry(t, "work"))
+		w.save(t, e)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
+			t.Errorf("entry = %+v, %v; want it as saved, %+v", got, ok, e)
+		}
+
+		w.fake.Remove("Work")
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore once Work ended = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once Work ended", got)
+		}
+	})
+
+	for name, answer := range otherSpellingAnswers {
+		t.Run("a lookup that "+name+" skips nothing", func(t *testing.T) {
+			w := newWorld(t, backend.Session{Name: "WORK"})
+			w.save(t, entry(t, "work"))
+			w.answerSession("work", answer)
+
+			w.r.Restore(t.Context())
+
+			w.assertTried(t, "work")
+		})
+	}
+
+	t.Run("a listed session another spelling of its name holds skips it, answering or not", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.fake.StopAnswering("Work")
+		w.save(t, owing(entry(t, "work")))
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
+	// The session listed as Work has ended since, and WORK holds the name now.
+	t.Run("a lookup finding a spelling made since the listing, answering, skips it", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.save(t, entry(t, "work"))
+		w.answerSession("work", errHeldUnderWORK)
+		w.answerSession("WORK", nil)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
+	t.Run("an entry no listed session spells another way costs no lookup", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "api"})
+		w.save(t, entry(t, "work"))
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if asks := w.fake.CallsTo(backendtest.OpSession); len(asks) != 0 {
+			t.Errorf("Session calls = %+v, want none", asks)
+		}
+	})
+}
+
+// otherSpellingAnswers are the answers to a lookup of work, a listed session
+// spelling it WORK, that are no live session holding it under another
+// spelling: a failure that may pass, and the spelling of a stale socket, which
+// no listing holds.
+var otherSpellingAnswers = map[string]error{
+	"fails":                             fmt.Errorf("read session %q: %w", "work", backend.ErrTimeout),
+	"finds a spelling no listing holds": fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "Work"}),
+}
+
+// errHeldUnderWORK is a lookup of work answered as held under WORK: a session
+// of that spelling while one is live, else a socket a session gone left,
+// which Create replaces.
+var errHeldUnderWORK = fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "WORK"})
+
+// sessionAnswer is a backend with Session answering name with err, a nil err
+// a session that answers.
+type sessionAnswer struct {
+	backend.Backend
+	name string
+	err  error
+}
+
+func (s sessionAnswer) Session(ctx context.Context, name string) (backend.Session, error) {
+	if name == s.name {
+		return backend.Session{Name: name, Answered: s.err == nil}, s.err
+	}
+	return s.Backend.Session(ctx, name)
+}
+
+// answerSession has the world's backend, as it stands, answer a lookup of
+// name with err.
+func (w *world) answerSession(name string, err error) {
+	w.witness.Backend = sessionAnswer{Backend: w.witness.Backend, name: name, err: err}
+}
+
+// assertTried checks restore tried to make name, skipping nothing.
+func (w *world) assertTried(t *testing.T, name string) {
+	t.Helper()
+	if created := w.created(); !slices.Contains(created, name) {
+		t.Errorf("created %q, want %s tried", created, name)
+	}
+	if skips := w.sink.Records().WithMessage("session skipped"); len(skips) != 0 {
+		t.Errorf("skips = %v, want none", skips)
+	}
 }
 
 // thisBoot is a saved session's entry created after booted.
@@ -506,9 +615,11 @@ func TestRestore_FailedCreate(t *testing.T) {
 		// zmx finds a session by statting its socket, so on a filesystem that
 		// folds case one held as WORK answers for work.
 		{
-			name:  "a session held under another spelling fails",
-			stage: func(w *world) { w.fake.Add(backend.Session{Name: "WORK"}) },
-			want:  other,
+			name: "a session made since the listing under another spelling fails",
+			stage: func(w *world) {
+				first(w, func(context.Context, string, string, []string) { w.fake.Add(backend.Session{Name: "WORK"}) })
+			},
+			want: other,
 		},
 		{
 			name:  "a refusal leaving no session fails",
@@ -694,14 +805,28 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 	t.Run("a holder found on the first ask is not asked for again", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
-		w.fake.Add(backend.Session{Name: "WORK"})
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.fake.Add(backend.Session{Name: "WORK"})
+			return w.fake.Create(ctx, name, dir, command)
+		})
 
 		w.r.Restore(t.Context())
 
-		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) > 0 {
-			t.Errorf("asked %d times, waiting %v; want once, with no wait", asks, w.slept)
+		if asks := w.asksFor("work"); asks != 1 || len(w.slept) > 0 {
+			t.Errorf("work asked for %d times, waiting %v; want once, with no wait", asks, w.slept)
 		}
 	})
+}
+
+// asksFor is how many times restore looked name up.
+func (w *world) asksFor(name string) int {
+	var asks int
+	for _, call := range w.fake.CallsTo(backendtest.OpSession) {
+		if call.Name == name {
+			asks++
+		}
+	}
+	return asks
 }
 
 func TestRestore_RefusedCreateNamesItsCause(t *testing.T) {

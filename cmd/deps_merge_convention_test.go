@@ -143,6 +143,7 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
 func doctorSeamCases() []seamCase {
+	sentinelNames := backendtest.New()
 	sentinelHookStore := hooks.NewStore("/sentinel/hooks.json")
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
 	sentinelPrefsStore := prefs.NewStore("/sentinel/prefs.json")
@@ -208,6 +209,15 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got, err := resolveDoctorDeps().ProtocolVersion(t.Context(), "s"); err != nil || got != 7 {
 					t.Errorf("ProtocolVersion() = (%d, %v); want the injected seam's 7", got, err)
+				}
+			},
+		},
+		{
+			field:  "Names",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Names: sentinelNames}) },
+			assert: func(t *testing.T) {
+				if got, ok := resolveDoctorDeps().Names.(*backendtest.Fake); !ok || got != sentinelNames {
+					t.Errorf("Names = %v; want the injected backend %p", got, sentinelNames)
 				}
 			},
 		},

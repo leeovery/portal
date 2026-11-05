@@ -4,6 +4,7 @@ package restore_test
 
 import (
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -156,6 +157,29 @@ func (w *rebootWorld) endSessions(t *testing.T) {
 	}
 	if err := b.Kill(t.Context(), restoredSession); err != nil {
 		t.Fatalf("end the session: %v", err)
+	}
+}
+
+// staleSocketFoldingCase leaves a socket nothing listens on at dir/spelling,
+// made before this machine booted, as a crashed daemon leaves one, and skips
+// the test unless the filesystem folds name onto it.
+func staleSocketFoldingCase(t *testing.T, dir, spelling, name string) {
+	t.Helper()
+	path := filepath.Join(dir, spelling)
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	beforeBoot := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, beforeBoot, beforeBoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+		t.Skip("the filesystem does not fold case")
 	}
 }
 
@@ -412,6 +436,20 @@ func TestRestoreAgainstZmx(t *testing.T) {
 		}
 		w.awaitHydrated(t)
 		w.history(t, b, "its transcript", func(shown string) bool { return strings.Contains(shown, savedLine) })
+		w.checkRestored(t, b)
+	})
+
+	// zmx finds a session by statting its socket, so on a filesystem that
+	// folds case a stale socket left under another spelling answers for the
+	// name. No listing holds it, and Create replaces it.
+	t.Run("a stale socket under another spelling of its name doesn't keep it from coming back", func(t *testing.T) {
+		w := saveSession(t, binary, "eager")
+		b := w.reboot(t)
+		staleSocketFoldingCase(t, b.Dir(), strings.ToUpper(restoredSession), restoredSession)
+
+		w.restore(t, b)
+
+		w.awaitHydrated(t)
 		w.checkRestored(t, b)
 	})
 

@@ -170,6 +170,58 @@ func TestLocked(t *testing.T) {
 	})
 }
 
+// decision 78: x <name> brings a kept session back under bootstrap.lock, so
+// it never races a bootstrap's restore; it takes the lock as a bootstrap does.
+func TestLocked_Hold(t *testing.T) {
+	t.Run("it holds the lock until its release, reading nothing but the lock", func(t *testing.T) {
+		dir := t.TempDir()
+
+		release, err := Locked{Lock: lockIn(dir, time.Second)}.Hold(t.Context())
+
+		if err != nil {
+			t.Fatalf("Hold = %v", err)
+		}
+		if _, err := state.AcquireBootstrapLock(t.Context(), dir, 0); !errors.Is(err, state.ErrBootstrapLockHeld) {
+			t.Errorf("the lock while held = %v, want it held", err)
+		}
+		release()
+		if _, err := state.AcquireBootstrapLock(t.Context(), dir, 0); err != nil {
+			t.Errorf("the lock after its release = %v, want it free", err)
+		}
+	})
+
+	t.Run("a wait past its notice is told to the progress emitter once", func(t *testing.T) {
+		dir := t.TempDir()
+		time.AfterFunc(300*time.Millisecond, holdLock(t, dir))
+		var events []StepEvent
+		ctx := WithProgressEmitter(t.Context(), func(ev StepEvent) { events = append(events, ev) })
+
+		release, err := Locked{Lock: lockIn(dir, 5*time.Second), Notice: 50 * time.Millisecond}.Hold(ctx)
+
+		if err != nil {
+			t.Fatalf("Hold = %v", err)
+		}
+		release()
+		if want := []StepEvent{{Waiting: true}}; !slices.Equal(events, want) {
+			t.Errorf("events = %+v, want %+v", events, want)
+		}
+	})
+
+	t.Run("a lock held past its bound is the fatal a bootstrap's wait gives", func(t *testing.T) {
+		dir := t.TempDir()
+		holdLock(t, dir)
+		sink := &logtest.Sink{}
+
+		release, err := Locked{Lock: lockIn(dir, 100*time.Millisecond), Logger: slog.New(sink)}.Hold(t.Context())
+
+		fatal, ok := errors.AsType[*FatalError](err)
+		if !ok || release != nil || !strings.HasPrefix(fatal.UserMessage, "Portal gave up waiting for another Portal to finish starting: ") {
+			t.Errorf("Hold = %v, want the held lock's fatal and no release", err)
+		}
+		sink.Records().WithMessage("bootstrap.lock unavailable").AtExactLevel(slog.LevelError).Only(t, "the held lock")
+	})
+}
+
 func TestLockWait(t *testing.T) {
 	t.Run("it outlasts the saver step's own wait and run", func(t *testing.T) {
 		if bound, saver := LockWait(0), 2*saverhost.LockWait; bound <= saver {
@@ -177,23 +229,28 @@ func TestLockWait(t *testing.T) {
 		}
 	})
 
+	// A lookup of a name reads it, then, when another spelling the listing
+	// doesn't hold has it, reads whether that spelling answers.
+	lookup := 2 * saverhost.ReadCeiling
 	// After its Create, a session's restore runs the longer of the Create's
 	// refusal of an older zmx's session, a read and a zmx kill, and the second
-	// ask of a Create that read back no creation or failed otherwise: a read,
-	// backend.RecheckAfter's wait and a read again.
+	// ask of a Create that read back no creation or failed otherwise: a
+	// lookup, backend.RecheckAfter's wait and a lookup again.
 	refusal := saverhost.ReadCeiling + saverhost.KillCeiling + saverhost.RunGrace
-	askAgain := 2*saverhost.ReadCeiling + backend.RecheckAfter
+	askAgain := 2*lookup + backend.RecheckAfter
 	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()
 
-	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
-		if got := LockWait(20) - LockWait(0); got != 20*each {
-			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)
+	// Before its first session, restore may look up, for each entry, whether
+	// a live session holds its name under another spelling.
+	t.Run("it grows by a lookup and a session's longest restore for each saved entry", func(t *testing.T) {
+		if got, per := LockWait(20)-LockWait(0), lookup+each; got != 20*per {
+			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, per)
 		}
 	})
 
 	t.Run("it holds restore's retries, and the lookup and try that start as their budget ends, as one term", func(t *testing.T) {
 		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
-		if got, want := LockWait(0)-rest, restore.RetryBudget+saverhost.ReadCeiling+each; got != want {
+		if got, want := LockWait(0)-rest, restore.RetryBudget+lookup+each; got != want {
 			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}
 	})
