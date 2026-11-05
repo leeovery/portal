@@ -428,7 +428,7 @@ func sessionsHelpFixture() *Fixture {
 func sessionsFilteringFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-filtering"
-	fx.captureKeys = slices.Concat([]tea.KeyPressMsg{keyRune('/')}, typed(sessionsFilteringTerm))
+	fx.captureKeys = slices.Concat([]tea.KeyPressMsg{keyRune('/')}, keysTyping(sessionsFilteringTerm))
 	fx.landsLastKeyRead = true
 	return fx
 }
@@ -437,7 +437,7 @@ func sessionsFilteringFixture() *Fixture {
 // the flat world.
 const sessionsFilteringTerm = "relay"
 
-func typed(s string) []tea.KeyPressMsg {
+func keysTyping(s string) []tea.KeyPressMsg {
 	keys := make([]tea.KeyPressMsg, 0, len(s))
 	for _, r := range s {
 		keys = append(keys, keyRune(r))
