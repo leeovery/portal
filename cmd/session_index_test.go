@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 )
 
 // isolateStateDir points the state directory at a fresh one of the test's own.
@@ -155,6 +156,90 @@ func TestLegacyIndexStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+// cutShortStateDir points the state directory at one a migration cut short
+// between its renames left: no sessions.json, beside state-tmux/ and the
+// staging dir holding the migrated state. It returns the staging dir.
+func cutShortStateDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	return cutShortBeside(t, dir)
+}
+
+// cutShortBeside makes dir and, beside it, state-tmux/ and a staging dir
+// holding a version 2 sessions.json, and returns the staging dir.
+func cutShortBeside(t *testing.T, dir string) string {
+	t.Helper()
+	staging := state.MigrationStagingDir(dir)
+	for _, d := range []string{dir, state.TmuxStateDir(dir), staging} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(sessionindex.Path(staging), []byte(`{"version": 2, "saved_at": "2026-11-05T00:00:00Z", "sessions": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return staging
+}
+
+func TestMigrationCutShortStop(t *testing.T) {
+	for _, args := range [][]string{
+		{"list"},
+		{"open"},
+		{"hook", "list"},
+		{"rename", "notes"},
+	} {
+		t.Run("it stops "+strings.Join(args, " ")+" with one line pointing at portal migrate", func(t *testing.T) {
+			staging := cutShortStateDir(t)
+			fake := backendtest.New()
+			withBackendDeps(t, BackendDeps{Backend: fake})
+			reached := stubPicker(t)
+
+			stdout, _, err := runRootCmd(t, args...)
+
+			if want := staging + " holds a migration cut short; run portal migrate to finish it"; err == nil || err.Error() != want {
+				t.Errorf("error = %v, want %q", err, want)
+			}
+			if stdout.Len() != 0 || *reached || len(fake.Calls()) != 0 {
+				t.Errorf("stdout = %q, picker reached = %v, backend calls = %+v; want nothing run", stdout, *reached, fake.Calls())
+			}
+		})
+	}
+
+	t.Run("it stops a command when it can't tell, saying why", func(t *testing.T) {
+		staging := cutShortStateDir(t)
+		if err := os.RemoveAll(staging); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(staging, []byte("not a dir"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fake := backendtest.New()
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		_, _, err := runRootCmd(t, "list")
+
+		if err == nil || !strings.Contains(err.Error(), "look in a migration's staging dir") || len(fake.Calls()) != 0 {
+			t.Errorf("error = %v, backend calls = %+v; want the command stopped, saying why", err, fake.Calls())
+		}
+	})
+
+	t.Run("it passes a staging dir emptied as a migration finished", func(t *testing.T) {
+		staging := cutShortStateDir(t)
+		if err := os.Remove(sessionindex.Path(staging)); err != nil {
+			t.Fatal(err)
+		}
+		fake := backendtest.New()
+		withBootstrapDeps(t, BootstrapDeps{})
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		if _, _, err := runRootCmd(t, "list"); err != nil {
+			t.Fatalf("list beside an empty staging dir: %v", err)
+		}
+		assertListed(t, fake)
+	})
 }
 
 func TestReadShownIndex(t *testing.T) {

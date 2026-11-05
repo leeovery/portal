@@ -317,6 +317,31 @@ Before each signal it checks that the process is Portal's save daemon. If that c
 portal uninstall
 ```
 
+### `portal migrate`
+
+Move the tmux version of Portal's saved sessions and resume hooks to this version. Until you run it, every command but `version`, `doctor` and `current` stops on the tmux version's `sessions.json` with one line pointing here (`doctor` reports it instead, and `current` only shows the session's name).
+
+```bash
+portal migrate
+```
+
+It runs in this order, and changes nothing it doesn't name:
+
+1. It reads first everything that could stop it: `hooks.json`, the tmux version's `sessions.json` and zmx's sessions. If any of them stops it, nothing has changed, in tmux or on disk.
+2. **The tmux side.** If a tmux server is running, it removes Portal's tmux hooks (and only Portal's) and ends `_portal-saver`. tmux and your tmux sessions keep running; end them when you're ready.
+3. It waits, up to 30 seconds, for the tmux version's save daemon to save one last time and exit. It signals nothing itself. A daemon still running then stops the migration with nothing migrated, but Portal's tmux hooks and `_portal-saver` are already gone by then; running `portal migrate` again waits again.
+4. It copies `hooks.json` to `hooks.json.tmux` in the state directory, unless that copy is already there; it never overwrites it.
+5. It builds this version's state beside the old one, in `state-migrating/`: one session for each tmux pane, named for its tmux session (the part before ` · `), the full tmux name kept as its label, a second pane's session numbered `-2`, and so on. A name zmx can't hold, or one already taken, gets a generated name instead. Each session keeps its directory and its saved scrollback.
+6. It rewrites `hooks.json` from the copy: each resume hook keyed by a pane token moves to the name of that pane's session. Hooks keyed the older ways, by pane position or tmux pane id, haven't fired since pane tokens arrived, so they're removed; the copy keeps them.
+7. It moves the tmux version's `state/` to `state-tmux/`, beside it, and the new state into `state/`.
+8. It restores the sessions, then prints a report.
+
+Each migrated session with a resume hook opens on its [resume panel](#resume-panel) the first time, whatever its hook's mode: your tmux sessions are still running their programs, and resuming the same command twice at once would collide. After that first restore, the hook's own mode applies. If Portal can't put a session on its panel, it opens at your shell, its hook not run.
+
+The report leads with a summary and the restore: how many sessions it restored, and any it couldn't, by name, which Portal's next start restores, or `x <name>` brings back now. It then lists each session as `name ← tmux name`, any generated names, dropped labels, skipped sessions and missing scrollback with the reason for each, and the hooks moved and removed, and ends with where `state-tmux/` and the `hooks.json` copy are.
+
+Running it again is safe. Stopped part way, before the move, it starts over. Stopped between the two moves, it finishes them; until then every other command stops with one line pointing here, and `doctor --fix` repairs nothing. Already migrated, it changes nothing, restores only what any Portal command would, and reports which sessions are still left to restore and where the tmux version's state is kept. With nothing of the tmux version's to migrate, it says so and exits `0`. It refuses, changing nothing, when both a tmux version's `state/` and an earlier migration's `state-tmux/` are there: move `state/` aside and keep `state-tmux/`, which holds the copy `hooks.json` was migrated from. It refuses too when `state-tmux/` is there but the state directory holds nothing it migrated.
+
 ### `xctl version`
 
 Print the Portal version.

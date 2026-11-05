@@ -202,9 +202,9 @@ func TestLabelFor(t *testing.T) {
 
 func TestMigrated(t *testing.T) {
 	migrating := sessionindex.Entry{Name: "api", Label: " api · user search ", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin"}
-	made := sessionindex.Entry{Name: "api", Label: "api · user search", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true}
+	made := sessionindex.Entry{Name: "api", Label: "api · user search", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true, ResumeLazy: true}
 
-	t.Run("it makes an entry owed a restore and recording no creation, its label as LabelFor gives it", func(t *testing.T) {
+	t.Run("it makes an entry owed a restore, recording no creation and resuming lazily, its label as LabelFor gives it", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "other"}})
 		if err := idx.Migrated(migrating); err != nil {
 			t.Fatalf("Migrated: %v", err)
@@ -217,7 +217,7 @@ func TestMigrated(t *testing.T) {
 	t.Run("it takes only the name, label, dirs and scrollback of what it is handed", func(t *testing.T) {
 		var idx sessionindex.Index
 		handed := migrating
-		handed.CreatedAt, handed.PID, handed.Owed = liveCreation, 4242, false
+		handed.CreatedAt, handed.PID, handed.Owed, handed.ResumeLazy = liveCreation, 4242, false, false
 		if err := idx.Migrated(handed); err != nil {
 			t.Fatalf("Migrated: %v", err)
 		}
@@ -261,7 +261,7 @@ func TestMigrated(t *testing.T) {
 
 	for name, held := range map[string]sessionindex.Entry{
 		"a session's live entry":      {Name: "api", Dir: "/code/api", CreatedAt: liveCreation, PID: 4242},
-		"an entry with another label": {Name: "api", Label: "api · other", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true},
+		"an entry with another label": {Name: "api", Label: "api · other", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true, ResumeLazy: true},
 	} {
 		t.Run("a name "+name+" holds is refused and changes nothing", func(t *testing.T) {
 			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
@@ -294,7 +294,7 @@ func TestMigrated(t *testing.T) {
 		if got := rec.AttrString(t, "value"); got != "/code/api" {
 			t.Errorf("value = %q, want the dir", got)
 		}
-		want := `owed a restore, recording no creation; its label "api · user search" and its scrollback "scrollback/api.bin"`
+		want := `owed a restore, recording no creation, resuming lazily until it is restored; its label "api · user search" and its scrollback "scrollback/api.bin"`
 		if got := rec.AttrString(t, "detail"); got != want {
 			t.Errorf("detail = %q, want %q", got, want)
 		}

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/migrate"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -148,6 +149,12 @@ func TestMain(m *testing.M) {
 	// no portal: a test reaching the real bootstrap panics here.
 	bootstrapExe = func() (string, error) {
 		panic("cmd tests: bootstrapExe reached without withBootstrapDeps")
+	}
+	// Plain tmux reaches whichever server $TMUX names; the poison above makes
+	// that a dead socket, which reads as no server, so a test reaching it
+	// would pass in silence rather than fail.
+	migrateTmux = func() migrate.TmuxServer {
+		panic("cmd tests: migrateTmux reached without withMigrateDeps")
 	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed

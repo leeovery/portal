@@ -103,14 +103,14 @@ func scrollbackFile(t *testing.T, name string) string {
 }
 
 func TestBuild(t *testing.T) {
-	t.Run("it writes each session's entry owed a restore and recording no creation", func(t *testing.T) {
+	t.Run("it writes each session's entry owed a restore, recording no creation, resuming lazily", func(t *testing.T) {
 		m := newMigrating(t)
 		m.build(t)
 
 		want := []sessionindex.Entry{
-			{Name: "lantern", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "lantern"), Owed: true},
-			{Name: "tidepool", Label: "tidepool · flaky test", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "tidepool"), Owed: true},
-			{Name: "tidepool-2", Label: "tidepool · flaky test-2", Dir: orchard, Cwd: orchard + "/web", Owed: true},
+			{Name: "lantern", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "lantern"), Owed: true, ResumeLazy: true},
+			{Name: "tidepool", Label: "tidepool · flaky test", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "tidepool"), Owed: true, ResumeLazy: true},
+			{Name: "tidepool-2", Label: "tidepool · flaky test-2", Dir: orchard, Cwd: orchard + "/web", Owed: true, ResumeLazy: true},
 		}
 		if got := readIndex(t, m.dir).Entries(); !slices.Equal(got, want) {
 			t.Errorf("entries = %+v\nwant %+v", got, want)

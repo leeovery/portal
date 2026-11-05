@@ -1095,6 +1095,49 @@ func TestRestore_HelperArgv(t *testing.T) {
 		}
 	})
 
+	// decision 6: a session portal migrate made waits on its resume panel at
+	// its first restore, whatever its hook's mode.
+	t.Run("it resumes an entry marked lazy lazily, ahead of its transcript", func(t *testing.T) {
+		w := newWorld(t)
+		e, path := w.saveTranscript(t, entry(t, "work"))
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy", "--file", path); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it resumes an entry marked lazy lazily with no transcript", func(t *testing.T) {
+		w := newWorld(t)
+		e := entry(t, "work")
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it brings back a kept entry marked lazy lazily", func(t *testing.T) {
+		w := newWorld(t)
+		e := entry(t, "work")
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		if _, err := w.r.BringBack(t.Context(), "work"); err != nil {
+			t.Fatalf("BringBack: %v", err)
+		}
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("it names none that is no transcript of the session", func(t *testing.T) {
 		w := newWorld(t)
 		e, _ := w.saveTranscript(t, entry(t, "notes"))
@@ -1141,6 +1184,8 @@ func TestRunsHelper(t *testing.T) {
 	}{
 		{"a portal at another path", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
 		{"a portal at another path, replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--file", "/tmp/work.vt"}},
+		{"a portal at another path, resuming lazily", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy"}},
+		{"a portal at another path, resuming lazily and replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy", "--file", "/tmp/work.vt"}},
 		{"a portal at a path the shell would read specially", []string{"/Users/lee/My Apps/it's/portal", "state", "hydrate", "--session", "work"}},
 	} {
 		t.Run("it counts the helper run by "+tc.name, func(t *testing.T) {
@@ -1192,6 +1237,7 @@ func TestRunsHelper(t *testing.T) {
 	// bytes, marking the cut with "..." where that fits. The helper's own
 	// arguments, with "work", run to 29 bytes past its path.
 	transcript := []string{"--file", "/tmp/work.vt"}
+	lazily := slices.Concat([]string{"--lazy"}, transcript)
 	for _, tc := range []struct {
 		name    string
 		command []string
@@ -1200,6 +1246,10 @@ func TestRunsHelper(t *testing.T) {
 		{"the helper, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), transcript), true},
 		{"the helper, whole, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), transcript), true},
 		{"the helper, whole, its transcript's path cut", slices.Concat(helperAt(portalPathOf(215), "work"), transcript), true},
+		{"the helper resuming lazily, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), lazily), true},
+		{"the helper, whole, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), lazily), true},
+		{"the helper, whole, resuming lazily, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(214), "work"), lazily), true},
+		{"the helper for another name, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), lazily), false},
 		{"the helper for another name, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), transcript), false},
 		{"a binary not named portal, cut", slices.Concat(helperAt(portalPathOf(237)+"-dev", "work"), transcript), false},
 		{"another of portal's commands, cut", []string{portalPathOf(237), "state", "resume-wait", "--session", "work"}, false},

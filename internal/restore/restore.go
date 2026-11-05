@@ -878,18 +878,31 @@ func (r *run) warn(msg, name string, attrs ...any) {
 	r.logger.Warn(msg, append([]any{"session", name}, attrs...)...)
 }
 
-// command is the hydrate helper's argv for the entry's session, naming its
-// transcript only when it has one to replay.
+// command is the hydrate helper's argv for the entry's session, resuming it
+// lazily when the entry asks it to, and naming its transcript only when it
+// has one to replay.
 func (r *run) command(e sessionindex.Entry) []string {
 	argv := r.helper(e.Name)
+	if e.ResumeLazy {
+		argv = append(argv, lazyFlag)
+	}
 	if file, ok := r.transcript(e); ok {
 		argv = append(argv, fileFlag, file)
 	}
 	return argv
 }
 
-// fileFlag names the transcript the hydrate helper replays.
-const fileFlag = "--file"
+const (
+	// lazyFlag has the hydrate helper resume its session lazily, whatever
+	// mode its hook registers.
+	lazyFlag = "--lazy"
+	// fileFlag names the transcript the hydrate helper replays.
+	fileFlag = "--file"
+)
+
+// trailingFlags are the flags that may follow the helper's argv, each the
+// first of what follows when present: lazyFlag comes before fileFlag.
+var trailingFlags = []string{lazyFlag, fileFlag}
 
 // helper is the hydrate helper's argv for the named session, before the
 // transcript it may name.
@@ -937,12 +950,12 @@ func portalPath(word string) (string, bool) {
 }
 
 // showsHelper reports whether shown is the command the backend reports of a
-// session made running argv, a hydrate helper, followed by a transcript's
-// arguments or not. zmx cuts the command it reports before the first argument
+// session made running argv, a hydrate helper, followed by its trailing
+// flags or not. zmx cuts the command it reports before the first argument
 // that would take it past 256 bytes, marking the cut with "..." where that
-// fits: a cut within argv shows as argv alone does, transcript or not, and
-// one after it shows argv whole, then what fits of the transcript's
-// arguments, or the mark alone when even the flag naming it doesn't.
+// fits: a cut within argv shows as argv alone does, flags or not, and one
+// after it shows argv whole, then what fits of the flags, or the mark alone
+// when even the first of them doesn't.
 func (r *Restorer) showsHelper(shown string, argv []string) bool {
 	alone := r.backend.DisplayCommand(argv)
 	switch {
@@ -950,8 +963,12 @@ func (r *Restorer) showsHelper(shown string, argv []string) bool {
 		return true
 	case alone != r.uncut(argv):
 		return false
+	case strings.HasPrefix(shown, alone+" "):
+		return true
 	}
-	return strings.HasPrefix(shown, alone+" ") || shown == r.backend.DisplayCommand(slices.Concat(argv, []string{fileFlag}))
+	return slices.ContainsFunc(trailingFlags, func(first string) bool {
+		return shown == r.backend.DisplayCommand(slices.Concat(argv, []string{first}))
+	})
 }
 
 // uncut is argv as the backend shows each of its arguments, joined by

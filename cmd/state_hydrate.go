@@ -51,7 +51,12 @@ const (
 
 // hydrateFlagFile names the session's saved transcript in the helper's argv.
 // Its session is named by --session, as the resume chain's subcommands name it.
-const hydrateFlagFile = "file"
+// hydrateFlagLazy resumes the session lazily whatever mode its hook registers,
+// as restore asks for a session portal migrate made, at its first restore.
+const (
+	hydrateFlagFile = "file"
+	hydrateFlagLazy = "lazy"
+)
 
 type hydrateConfig struct {
 	// Session is the zmx session restore created, as it baked it into the
@@ -65,6 +70,9 @@ type hydrateConfig struct {
 	// OpenTranscript opens it; unset, it is os.Open.
 	File           string
 	OpenTranscript func(path string) (io.ReadCloser, error)
+	// Lazy resumes the session lazily, whatever mode its hook registers and
+	// whatever the install's is.
+	Lazy bool
 
 	Stdout    io.Writer
 	Logger    *slog.Logger
@@ -143,12 +151,12 @@ func runHydrate(ctx context.Context, cfg hydrateConfig) {
 	if !replayed {
 		keepTranscript(cfg)
 	}
-	parked := markIfWaiting(cfg, decision)
+	parked, handed := markIfWaiting(cfg, decision)
 	recordCreation(ctx, cfg, replayed)
 	if replayed {
 		lowerHydrating(cfg)
 	}
-	execShellOrHookAndExit(cfg, decision.Lookup, parked)
+	execShellOrHookAndExit(cfg, handed, parked)
 }
 
 // replayFailedNotice is the line a session whose saved scrollback couldn't be
@@ -329,10 +337,12 @@ func logTranscriptUnreadable(cfg hydrateConfig, cause error) {
 
 // resolveResumeDecision reads the session's registration and the install-wide
 // default once, at the top of the helper, so the hand-off decides by what the
-// helper read before it raised anything.
+// helper read before it raised anything. A session restore asks to resume
+// lazily waits whatever mode its hook registers; one with no hook has nothing
+// to wait for, and never does.
 func resolveResumeDecision(cfg hydrateConfig) resumeDecision {
 	lookup := lookupOnResumeOrLog(cfg)
-	wait := lookup.Found && resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
+	wait := lookup.Found && (cfg.Lazy || resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy)
 	return resumeDecision{Wait: wait, Lookup: lookup}
 }
 
@@ -372,20 +382,32 @@ func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
 }
 
 // markIfWaiting raises the resume-pending flag of a session that is going to
-// wait, while its hydrating flag still keeps the saver off it. A session whose
-// flag can't be raised does not wait: it returns nil, as does one that was
-// never going to.
-func markIfWaiting(cfg hydrateConfig, decision resumeDecision) *parkedChain {
+// wait, while its hydrating flag still keeps the saver off it, and returns
+// its parked chain with the registration handed to it. A session whose flag
+// can't be raised does not wait: it returns no chain, as does one that was
+// never going to, and its hook fires now. One restore asked to wait (--lazy)
+// gets its shell instead, with no hook: the tmux session it was migrated
+// from may still run the program its hook resumes, which would then run
+// twice.
+func markIfWaiting(cfg hydrateConfig, decision resumeDecision) (*parkedChain, hooks.OnResume) {
 	if !decision.Wait {
-		return nil
+		return nil, decision.Lookup
 	}
 	parked, err := markResumePending(cfg)
-	if err != nil {
-		cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err)...)
-		return nil
+	if err == nil {
+		return &parked, decision.Lookup
 	}
-	return &parked
+	if cfg.Lazy {
+		cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err, "detail", lazyParkFailedDetail)...)
+		return nil, hooks.OnResume{}
+	}
+	cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err)...)
+	return nil, decision.Lookup
 }
+
+// lazyParkFailedDetail is why a session restore asked to wait, whose park
+// failed, gets its shell and no hook.
+const lazyParkFailedDetail = "restore asked it to wait, so it gets its shell, its hook unfired"
 
 // The executable is resolved before the flag is raised, so a refusal is taken
 // while the session is still an eager one: a flagged session whose chain could
@@ -621,6 +643,7 @@ var stateHydrateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		session, _ := cmd.Flags().GetString(resumeFlagSession)
 		file, _ := cmd.Flags().GetString(hydrateFlagFile)
+		lazy, _ := cmd.Flags().GetBool(hydrateFlagLazy)
 
 		// A nil store degrades the hook lookup to a bare shell, which beats
 		// failing the per-session helper closed.
@@ -630,6 +653,7 @@ var stateHydrateCmd = &cobra.Command{
 			Session:           session,
 			Current:           currentName(),
 			File:              file,
+			Lazy:              lazy,
 			Stdout:            cmd.OutOrStdout(),
 			Logger:            hydrateLogger,
 			HookStore:         store,
@@ -644,6 +668,7 @@ func init() {
 	stateHydrateCmd.Flags().String(resumeFlagSession, "", "The restored zmx session's name, which keys its hook, its flags and its index entry")
 	// Optional: a session that saved no transcript is restored with none.
 	stateHydrateCmd.Flags().String(hydrateFlagFile, "", "Absolute path to the session's saved scrollback")
+	stateHydrateCmd.Flags().Bool(hydrateFlagLazy, false, "Resume the session lazily, whatever mode its hook registers")
 	_ = stateHydrateCmd.MarkFlagRequired(resumeFlagSession)
 
 	stateCmd.AddCommand(stateHydrateCmd)

@@ -48,6 +48,10 @@ type Outcome struct {
 // and index reads would otherwise resolve against the working directory.
 var errNoStateDir = errors.New("no state directory")
 
+// errMigrationCutShort declines a judgement while portal migrate is cut
+// short between its renames.
+var errMigrationCutShort = errors.New("a migration is cut short, its index in the staging dir")
+
 // restoringStandDown reports whether hook-staleness work may run at all. Both
 // the sweep and the diagnosis take it before they judge a single key, so
 // neither judges an entry the other protects. A bootstrap's restore is
@@ -91,8 +95,17 @@ func listedNames(ctx context.Context, list func(context.Context) ([]backend.Sess
 // indexedNames is every name sessions.json holds an entry for: a saved
 // session awaiting its restore keeps its hook. An index this version must not
 // read — version 1, corrupt or newer — or can't read at all protects nothing
-// it can name, so the judgement stands down on it.
+// it can name, so the judgement stands down on it. So does a migration cut
+// short beside dir (state.MigrationCutShort), or one it can't rule out: the
+// index of the migrated sessions waits in its staging dir, and every key
+// rewritten for them would read as stale.
 func indexedNames(dir string) ([]string, StandDown) {
+	switch cut, err := state.MigrationCutShort(dir); {
+	case err != nil:
+		return nil, decline(ReasonIndexUnusable, "error", err)
+	case cut:
+		return nil, decline(ReasonIndexUnusable, "error", errMigrationCutShort)
+	}
 	idx, err := sessionindex.Read(dir)
 	if err != nil {
 		return nil, decline(ReasonIndexUnusable, "error", err)

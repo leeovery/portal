@@ -89,11 +89,15 @@ func (idx *Index) SetLabel(name, label string) error {
 	return nil
 }
 
-// The zero-width joiner is format-class but builds joined emoji, so it stays.
 func printable(label string) bool {
-	return utf8.ValidString(label) && !strings.ContainsFunc(label, func(r rune) bool {
-		return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
-	})
+	return utf8.ValidString(label) && !strings.ContainsFunc(label, Unprintable)
+}
+
+// Unprintable reports whether r is a character a label may not hold: a
+// control, formatting or line or paragraph separator character. The
+// zero-width joiner is format-class but builds joined emoji, so it passes.
+func Unprintable(r rune) bool {
+	return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
 }
 
 // SetScrollback names the file, relative to the state directory, holding the
@@ -149,7 +153,8 @@ var ErrNameHeld = errors.New("another entry holds the name")
 // Migrated records a session portal migrate brings over from the tmux
 // version: e's name, label, dirs and scrollback file, as an entry made afresh,
 // owed a restore and recording no creation, so the next restore makes it and
-// the claim of its helper takes it over. Its label is the one LabelFor gives,
+// the claim of its helper takes it over, and resuming lazily until that
+// restore finishes. Its label is the one LabelFor gives,
 // and a label LabelFor refuses changes nothing. An entry under the name that
 // is the one Migrated makes already, as migrating again finds it, is left as
 // it is; any other refuses it with ErrNameHeld, changing nothing. It consults
@@ -159,7 +164,7 @@ func (idx *Index) Migrated(e Entry) error {
 	if err != nil {
 		return err
 	}
-	made := Entry{Name: e.Name, Label: label, Dir: e.Dir, Cwd: e.Cwd, ScrollbackFile: e.ScrollbackFile, Owed: true}
+	made := Entry{Name: e.Name, Label: label, Dir: e.Dir, Cwd: e.Cwd, ScrollbackFile: e.ScrollbackFile, Owed: true, ResumeLazy: true}
 	if held, ok := idx.Lookup(e.Name); ok {
 		if held == made {
 			return nil
@@ -176,7 +181,7 @@ func (idx *Index) Migrated(e Entry) error {
 // migratedDetail says what a migrated entry carries over.
 func migratedDetail(e Entry) string {
 	label, scrollback := cmp.Or(e.Label, "none"), cmp.Or(e.ScrollbackFile, "none")
-	return fmt.Sprintf("owed a restore, recording no creation; its label %q and its scrollback %q", label, scrollback)
+	return fmt.Sprintf("owed a restore, recording no creation, resuming lazily until it is restored; its label %q and its scrollback %q", label, scrollback)
 }
 
 // owe marks the entry at i owed a restore, recording why when given, and
@@ -191,12 +196,14 @@ func (idx *Index) owe(i int, why string) bool {
 }
 
 // repay clears the owed mark of the entry at i, recording why, and reports
-// whether it had one.
+// whether it had one. A restore of the entry has finished, so a migrated
+// entry's lazy resume goes with it: later restores take its hook's mode.
 func (idx *Index) repay(i int, why string) bool {
 	if !idx.sessions[i].Owed {
 		return false
 	}
 	idx.sessions[i].Owed = false
+	idx.sessions[i].ResumeLazy = false
 	idx.changes = append(idx.changes, change{op: "clear-owed", session: idx.sessions[i].Name, detail: why})
 	return true
 }
