@@ -17,8 +17,9 @@ func socketArgs(socketPath string, args ...string) []string {
 }
 
 // Socket scopes an isolated tmux server to a single test. The socket is an
-// absolute -S path rooted in /tmp: -L under t.TempDir() would compose a path past
-// darwin's ~104-byte UNIX-socket cap.
+// absolute -S path in a short os.MkdirTemp dir under $TMPDIR: a path under
+// t.TempDir(), which carries the test's name, can pass darwin's ~104-byte
+// UNIX-socket cap.
 type Socket struct {
 	socketPath string
 }
