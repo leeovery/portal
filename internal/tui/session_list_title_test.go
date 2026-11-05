@@ -14,17 +14,17 @@ func TestSessionListTitleForMode(t *testing.T) {
 		want           string
 	}{
 		{
-			name: "Flat outside tmux",
+			name: "Flat outside a session",
 			mode: prefs.ModeFlat,
 			want: "Sessions",
 		},
 		{
-			name: "By Project outside tmux",
+			name: "By Project outside a session",
 			mode: prefs.ModeByProject,
 			want: "Sessions — by project",
 		},
 		{
-			name: "By Tag outside tmux",
+			name: "By Tag outside a session",
 			mode: prefs.ModeByTag,
 			want: "Sessions — by tag",
 		},

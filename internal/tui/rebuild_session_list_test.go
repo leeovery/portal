@@ -244,7 +244,7 @@ func TestWithCurrentSessionRoutesThroughRebuild(t *testing.T) {
 		}
 	})
 
-	t.Run("preserves construction behaviour: empty sessions yields empty list and mode-aware inside-tmux title", func(t *testing.T) {
+	t.Run("preserves construction behaviour: empty sessions yields empty list and mode-aware current-session title", func(t *testing.T) {
 		m := newRebuildTestModel(t, prefs.ModeByTag, nil, nil)
 		m = m.WithCurrentSession("current")
 

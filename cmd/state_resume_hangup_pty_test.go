@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// drainPTY reads whatever the pane writes, as tmux does, so no write to the
-// terminal blocks on a full output queue. The reads poll a non-blocking
-// descriptor: a blocking read in flight would hold the master open past its
-// Close, and the terminal would never hang up.
+// drainPTY reads whatever the session writes, as its zmx daemon does, so no
+// write to the terminal blocks on a full output queue. The reads poll a
+// non-blocking descriptor: a blocking read in flight would hold the master open
+// past its Close, and the terminal would never hang up.
 func drainPTY(t *testing.T, fd int) (stop func()) {
 	t.Helper()
 	if err := syscall.SetNonblock(fd, true); err != nil {

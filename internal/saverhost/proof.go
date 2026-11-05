@@ -25,8 +25,9 @@ var (
 
 // proof proves a process the saver's daemon of one backend's sessions: a
 // portal state daemon by its program and argv, carrying every mark in the
-// environment it was exec'd with. A daemon on argv alone, such as the
-// installed tmux Portal's, lacks the saver session's name. The argv is read
+// environment it was exec'd with. A daemon on argv alone, such as another
+// install's, the tmux version's among them, lacks a mark: the saver session's
+// name, or the backend's directory. The argv is read
 // with the environment, from the one read, so a pid reused since the
 // identity's read proves nothing. A process that has finished exiting is
 // gone, asked before it is identified and again once ps names it no daemon,

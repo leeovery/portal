@@ -20,9 +20,11 @@ type ttyDrain struct {
 	settle, bound time.Duration
 }
 
-// resumeInputDrain settles for as long as the waiter waits for a pane to fall
-// quiet: tmux refills a flushed queue within its own event loop, far inside
-// that.
+// resumeInputDrain settles for as long as the waiter waits for a session to
+// fall quiet, the gap it judges one arrival by. What refills a flushed queue is
+// the session's zmx daemon writing the rest of an attached client's input into
+// the pty. The figure is kept from the tmux version, whose server refilled the
+// queue within its own event loop; the gap under zmx has not been measured.
 var resumeInputDrain = ttyDrain{settle: resumeInputQuiet, bound: time.Second}
 
 // drain runs with canonical processing off, because a canonical terminal

@@ -13,11 +13,11 @@ const (
 	// ViaInternal is Portal reaching the store on its own behalf — the daemon's
 	// stale sweep and the reads that support it.
 	ViaInternal
-	// ViaHydrate is the hydrate helper's lookup of a restored pane's hook.
+	// ViaHydrate is the hydrate helper's lookup of a restored session's hook.
 	ViaHydrate
 	// ViaDoctor is a portal doctor diagnosis.
 	ViaDoctor
-	// ViaPanel is a waiting pane's resume panel answering the user's discard.
+	// ViaPanel is a waiting session's resume panel answering the user's discard.
 	ViaPanel
 	// ViaTUI is the picker, forgetting a session whose index entry one of its
 	// actions dropped.

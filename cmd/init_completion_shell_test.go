@@ -1,7 +1,7 @@
 package cmd
 
 // Drives the scripts `portal init` emits through the real shells, over a recording
-// `portal` stub on PATH: no portal binary is built or run, and no tmux server is
+// `portal` stub on PATH: no portal binary is built or run, and no zmx session is
 // contacted. A shell the machine does not have skips its own case.
 
 import (

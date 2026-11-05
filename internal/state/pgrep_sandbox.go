@@ -63,7 +63,7 @@ func RegisterSandboxDaemon(pid int) {
 
 // RegisterSandboxDaemonSource takes a callback yielding a currently-live
 // test-owned pid, or false. It lives in the test package so this one need not
-// read tmux itself.
+// know where the pid comes from.
 func RegisterSandboxDaemonSource(fn func() (int, bool)) {
 	sandboxMu.Lock()
 	defer sandboxMu.Unlock()

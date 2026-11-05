@@ -29,8 +29,8 @@ type themeExportRun struct {
 	bootstrapCalls int
 }
 
-// The recorder is injected unconditionally so no test here can reach real tmux
-// even if the command lost its bootstrapExempt entry.
+// The recorder is injected unconditionally so no test here can reach the real
+// backend even if the command lost its bootstrapExempt entry.
 func execThemeExport(t *testing.T, args ...string) themeExportRun {
 	t.Helper()
 
@@ -95,7 +95,7 @@ func seedThemesDir(t *testing.T, slug string, source []byte) string {
 
 func TestThemeExport_IsBootstrapExempt(t *testing.T) {
 	if !bootstrapExempt["theme"] {
-		t.Error(`bootstrapExempt["theme"] = false; want true (printing a file starts no tmux server)`)
+		t.Error(`bootstrapExempt["theme"] = false; want true (printing a file needs no bootstrap)`)
 	}
 
 	run := execThemeExport(t, theme.DefaultDarkSlug)

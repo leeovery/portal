@@ -13,8 +13,8 @@ import (
 )
 
 // IsolateStateForTest returns an env slice and a stateDir scoped to a per-test
-// t.TempDir(); assign env to exec.Cmd.Env, then append your own TMUX=<test
-// socket> (see PoisonedTmuxSocket). stateDir exists on return, and both the
+// t.TempDir(); assign env to exec.Cmd.Env, then append your own ZMX_DIR=<test
+// dir> (see zmxtest.PoisonedDir). stateDir exists on return, and both the
 // calling process's PORTAL_STATE_DIR and the returned slice's name it — the same
 // directory the sandbox registry is given. Every other Portal file and directory
 // variable names its place in the same scratch config, in the process and the
@@ -57,13 +57,13 @@ func isolate(t *testing.T) (isolation []string, stateDir string) {
 	t.Setenv("HOME", homeDir)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	// Shells hosted by a test's tmux server flush per-session files as they exit,
+	// Shells hosted by a test's zmx sessions flush per-session files as they exit,
 	// racing the framework's RemoveAll of the temp HOME. zsh's history is that
 	// writer: /etc/zshrc assigns HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history for every
 	// interactive shell whatever it inherited, so only ZDOTDIR moves it — and it
 	// must name a directory outside the tree the framework removes, which homeDir
 	// is not. zsh's session directory hangs off the same prefix and moves with it.
-	// HISTFILE still buys the shells with no such override: a bash pane writes
+	// HISTFILE still buys the shells with no such override: a bash session writes
 	// .bash_history into HOME without it.
 	zdotdir := shellConfigDirOutsideTempTree(t)
 	t.Setenv("HISTFILE", os.DevNull)
@@ -71,8 +71,8 @@ func isolate(t *testing.T) (isolation []string, stateDir string) {
 
 	// Registered after the test's first t.TempDir, whose lone cleanup removes the
 	// parent holding homeDir, so LIFO runs this wait before that RemoveAll; a
-	// fixture must isolate before starting its server, so kill-server runs earlier
-	// still. The writers the env pins above cannot reach get their window to finish.
+	// fixture must isolate before starting its sessions, so their kill runs
+	// earlier still. The writers the env pins above cannot reach get their window to finish.
 	registerHomeQuiescenceGuard(t, homeDir)
 
 	// A failed snapshot is fatal: a silently degraded backstop is worse than none.

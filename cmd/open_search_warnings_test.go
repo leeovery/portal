@@ -298,7 +298,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 		// The decision command this returns is deliberately left unrun: the escape
-		// the user takes from a tmux server too slow to answer it.
+		// the user takes from a backend too slow to answer it.
 		model, decision := model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
 		if decision == nil || model.(tui.Model).ActivePage() != tui.PageLoading {
 			t.Fatal("both gates satisfied must dispatch the decision and hold the loading page")

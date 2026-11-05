@@ -1,6 +1,6 @@
 // Command capturetool renders a named, deterministic fixture of Portal's real
-// TUI offline, through the production tui.Build constructor with every tmux seam
-// faked. It runs no bootstrap — no tmux server, no daemon, no config read. It
+// TUI offline, through the production tui.Build constructor with every backend
+// seam faked. It runs no bootstrap — no zmx session, no daemon, no config read. It
 // runs the fixture live, full screen; or prints its frame once, as text or in
 // colour; or writes the golden frames the capture tests hold the code to.
 //

@@ -20,8 +20,8 @@ const (
 var durationUnits = []string{"Nanosecond", "Microsecond", "Millisecond", "Second", "Minute", "Hour"}
 
 // The picker owns a whole terminal's canvas and sets its background back on exit;
-// a pane owns one region of someone else's terminal and must never move the
-// terminal's default background at all.
+// a waiting session draws into the terminal of whoever attaches to it and must
+// never move that terminal's default background at all.
 func TestBackgroundSet_ConfinedToRestore(t *testing.T) {
 	var callers []string
 	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {

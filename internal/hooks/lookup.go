@@ -23,8 +23,8 @@ type OnResume struct {
 // does on the store's other reads.
 //
 // An empty hookKey is refused before the file is read: the map index is exact,
-// so a stray "" entry would otherwise fire its command on every pane that
-// carries no key. hookKey is otherwise used verbatim - never trimmed, so a
+// so a stray "" entry would otherwise fire its command for every lookup handed
+// no session name. hookKey is otherwise used verbatim - never trimmed, so a
 // whitespace-only key is looked up literally.
 func (s *Store) LookupOnResume(hookKey string, via Via) (OnResume, error) {
 	if hookKey == "" {

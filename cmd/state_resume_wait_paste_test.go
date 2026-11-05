@@ -177,8 +177,8 @@ func (h *arrivalHarness) answered() {
 	}
 }
 
-// A paste through a tmux buffer reaches the pane with its line feeds as
-// carriage returns; one case keeps them as line feeds regardless.
+// A terminal's paste reaches the session with its line feeds as carriage
+// returns; one case keeps them as line feeds regardless.
 var panelPastes = []struct {
 	name  string
 	paste string

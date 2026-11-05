@@ -14,7 +14,8 @@ type IDGenerator = nanoid.Generator
 
 // FallbackProject is the project part of a name whose project sanitises to
 // nothing. A name is never the nanoid alone: a bare nanoid is token-shaped,
-// and the tmux daemon's hook sweep reaps token-shaped keys.
+// and the tmux version's daemon, which shares hooks.json, reaps a token-shaped
+// key that names none of its panes.
 const FallbackProject = "session"
 
 // leadingDropped are the characters a generated name may not open with: zmx

@@ -22,9 +22,9 @@ type OrphanSweeper interface {
 // finish exiting. An orphan is a pid pgrep found that Prove proves, read just
 // before its kill, the saver's daemon of this backend's sessions, and that is
 // neither the saver session's own process nor this one. Argv alone never
-// kills: a dev build's sweep would otherwise kill the installed tmux Portal's
-// daemon, which carries none of the saver session's marks. Every field must
-// be supplied; a sweep missing one kills nothing.
+// kills: a sweep would otherwise kill another install's daemon, the tmux
+// version's among them, which lacks one of the saver session's marks. Every
+// field must be supplied; a sweep missing one kills nothing.
 type OrphanSweepCore struct {
 	// Pgrep finds the candidates. No default: shelling out would pull
 	// os/exec into this pure-orchestration package.

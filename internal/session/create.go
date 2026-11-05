@@ -25,10 +25,9 @@ func ShellFromEnv() string {
 	return shell
 }
 
-// ShellCommand is the argv that runs command in a new session the way tmux
-// ran a command string: the words joined with spaces and read by the user's
-// interactive shell as shell code, which then re-execs itself, so the session
-// outlives the command. The re-exec takes a line of its own, so a command
+// ShellCommand is the argv that runs command in a new session as shell code:
+// the words joined with spaces and read by the user's interactive shell, which
+// then re-execs itself, so the session outlives the command. The re-exec takes a line of its own, so a command
 // ending in "&", a comment or a newline still reaches it. The backend execs
 // an argv directly and ends the session when it exits, so a nil argv, the
 // backend's own login shell, stands for no command.
