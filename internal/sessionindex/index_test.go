@@ -2,9 +2,11 @@ package sessionindex_test
 
 import (
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
@@ -177,6 +179,188 @@ func TestOwe(t *testing.T) {
 	if got := idx.Entries(); len(got) != 2 || !got[0].Owed || got[1].Owed {
 		t.Errorf("sessions = %+v, want a owed and b not, and no entry made for c", got)
 	}
+}
+
+func TestLabelFor(t *testing.T) {
+	for label, want := range map[string]string{
+		"  my work \n": "my work",
+		"":             "",
+		"   ":          "",
+		"a":            "",
+		" a ":          "",
+		"café — 日本":    "café — 日本",
+	} {
+		got, err := sessionindex.LabelFor("a", label)
+		if err != nil || got != want {
+			t.Errorf("LabelFor(a, %q) = %q, %v; want %q", label, got, err, want)
+		}
+	}
+	if _, err := sessionindex.LabelFor("a", "two\nlines inside"); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
+		t.Errorf("LabelFor of an unprintable label = %v, want ErrLabelUnprintable", err)
+	}
+}
+
+func TestMigrated(t *testing.T) {
+	migrating := sessionindex.Entry{Name: "api", Label: " api · user search ", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin"}
+	made := sessionindex.Entry{Name: "api", Label: "api · user search", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true}
+
+	t.Run("it makes an entry owed a restore and recording no creation, its label as LabelFor gives it", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "other"}})
+		if err := idx.Migrated(migrating); err != nil {
+			t.Fatalf("Migrated: %v", err)
+		}
+		if got, _ := idx.Lookup("api"); got != made {
+			t.Errorf("entry = %+v, want %+v", got, made)
+		}
+	})
+
+	t.Run("it takes only the name, label, dirs and scrollback of what it is handed", func(t *testing.T) {
+		var idx sessionindex.Index
+		handed := migrating
+		handed.CreatedAt, handed.PID, handed.Owed = liveCreation, 4242, false
+		if err := idx.Migrated(handed); err != nil {
+			t.Fatalf("Migrated: %v", err)
+		}
+		if got, _ := idx.Lookup("api"); got != made {
+			t.Errorf("entry = %+v, want %+v", got, made)
+		}
+	})
+
+	t.Run("a label equal to the name is omitted", func(t *testing.T) {
+		var idx sessionindex.Index
+		if err := idx.Migrated(sessionindex.Entry{Name: "api", Label: "api"}); err != nil {
+			t.Fatalf("Migrated: %v", err)
+		}
+		if got := labelOf(idx, "api"); got != "" {
+			t.Errorf("label = %q, want none", got)
+		}
+	})
+
+	t.Run("an unprintable label is refused and changes nothing", func(t *testing.T) {
+		var idx sessionindex.Index
+		if err := idx.Migrated(sessionindex.Entry{Name: "api", Label: "red\x1b[31m"}); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
+			t.Errorf("Migrated = %v, want ErrLabelUnprintable", err)
+		}
+		if idx.Len() != 0 {
+			t.Errorf("sessions = %+v, want none", idx.Entries())
+		}
+	})
+
+	t.Run("an entry it made already is left as it is", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, made)
+		before := readFile(t, dir)
+
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.Migrated(migrating) }); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if after := readFile(t, dir); string(after) != string(before) {
+			t.Errorf("sessions.json rewritten:\n%s\nwant untouched:\n%s", after, before)
+		}
+	})
+
+	for name, held := range map[string]sessionindex.Entry{
+		"a session's live entry":      {Name: "api", Dir: "/code/api", CreatedAt: liveCreation, PID: 4242},
+		"an entry with another label": {Name: "api", Label: "api · other", Dir: "/code/api", Cwd: "/code/api/web", ScrollbackFile: "scrollback/api.bin", Owed: true},
+	} {
+		t.Run("a name "+name+" holds is refused and changes nothing", func(t *testing.T) {
+			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+			if err := idx.Migrated(migrating); !errors.Is(err, sessionindex.ErrNameHeld) {
+				t.Errorf("Migrated = %v, want ErrNameHeld", err)
+			}
+			if got := idx.Entries(); len(got) != 1 || got[0] != held {
+				t.Errorf("sessions = %+v, want only %+v", got, held)
+			}
+		})
+	}
+
+	t.Run("a name this update removed is refused", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "api"}})
+		idx.Remove("api")
+		if err := idx.Migrated(migrating); !errors.Is(err, sessionindex.ErrRemoved) {
+			t.Errorf("Migrated = %v, want ErrRemoved", err)
+		}
+	})
+
+	t.Run("it logs the entry it made at INFO, with its dir and what it carries", func(t *testing.T) {
+		dir := t.TempDir()
+		sink := logtest.Install(t)
+
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error { return idx.Migrated(migrating) }); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		rec := sink.Records().Matching("sessions", "migrated").Only(t, "migrated")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "migrated", Component: "sessions", Op: "migrated", Via: "cli"})
+		if got := rec.AttrString(t, "value"); got != "/code/api" {
+			t.Errorf("value = %q, want the dir", got)
+		}
+		want := `owed a restore, recording no creation; its label "api · user search" and its scrollback "scrollback/api.bin"`
+		if got := rec.AttrString(t, "detail"); got != want {
+			t.Errorf("detail = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestCreate(t *testing.T) {
+	create := func(idx *sessionindex.Index) error {
+		idx.Create()
+		return nil
+	}
+
+	t.Run("an index read from no file is written, holding no entry", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := sessionindex.Update(dir, "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		idx, err := sessionindex.Decode(readFile(t, dir))
+		if err != nil || idx.Version != sessionindex.SchemaVersion || idx.Len() != 0 {
+			t.Errorf("sessions.json = %+v, %v; want a version 2 index of no entries", idx, err)
+		}
+	})
+
+	t.Run("it writes the entries the same update makes", func(t *testing.T) {
+		dir := t.TempDir()
+		sink := logtest.Install(t)
+		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
+			idx.Create()
+			return idx.Migrated(sessionindex.Entry{Name: "api", Dir: "/code/api"})
+		}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		idx, err := sessionindex.Decode(readFile(t, dir))
+		if got := idx.Entries(); err != nil || len(got) != 1 || got[0].Name != "api" {
+			t.Errorf("entries = %+v, %v; want api's", got, err)
+		}
+		sink.Records().Matching("sessions", "migrated").Only(t, "migrated")
+	})
+
+	t.Run("an index read from a file is left as it is", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir)
+		before := readFile(t, dir)
+
+		if _, err := sessionindex.Update(dir, "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if after := readFile(t, dir); string(after) != string(before) {
+			t.Errorf("sessions.json rewritten:\n%s\nwant untouched:\n%s", after, before)
+		}
+	})
+
+	t.Run("it logs one INFO naming no session", func(t *testing.T) {
+		sink := logtest.Install(t)
+		if _, err := sessionindex.Update(t.TempDir(), "cli", create); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		rec := sink.Records().Matching("sessions", "create").Only(t, "create")
+		logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "create", Component: "sessions", Op: "create", Via: "cli"})
+		if rec.HasAttr("session") {
+			t.Errorf("create carries a session: %+v", rec.Attrs)
+		}
+	})
 }
 
 func labelOf(idx sessionindex.Index, name string) string {

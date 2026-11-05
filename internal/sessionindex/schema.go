@@ -58,6 +58,9 @@ type Index struct {
 	removed map[string]bool
 	// unknown holds the members this version does not model, as a JSON object.
 	unknown string
+	// absent is an index Read found no sessions.json for, which Create makes
+	// Update write.
+	absent bool
 }
 
 // Entries returns a copy of every entry, in the order the index holds them.
