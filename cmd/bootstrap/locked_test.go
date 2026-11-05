@@ -241,15 +241,20 @@ func TestLockWait(t *testing.T) {
 	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()
 
 	// Before its first session, restore may look up, for each entry, whether
-	// a live session holds its name under another spelling.
-	t.Run("it grows by a lookup and a session's longest restore for each saved entry", func(t *testing.T) {
-		if got, per := LockWait(20)-LockWait(0), lookup+each; got != 20*per {
+	// a live session holds its name under another spelling. Its last listing
+	// records a session it finds made after all, under commit.lock, which the
+	// first pass waited on too when it made that session first, its helper
+	// since dead.
+	t.Run("it grows by a lookup, a session's longest restore and a second record for each saved entry", func(t *testing.T) {
+		if got, per := LockWait(20)-LockWait(0), lookup+each+commitlock.Bound(); got != 20*per {
 			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, per)
 		}
 	})
 
+	// restore's own tests hold a Restore to restore.Listings.
 	t.Run("it holds restore's retries, and the lookup and try that start as their budget ends, as one term", func(t *testing.T) {
-		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + lockSlack
+		listings := restore.Listings * saverhost.ReadCeiling
+		rest := checkRun + sweepRun + saverRun + commitlock.Bound() + listings + lockSlack
 		if got, want := LockWait(0)-rest, restore.RetryBudget+lookup+each; got != want {
 			t.Errorf("LockWait(0) less the steps before restore's sessions = %s, want %s", got, want)
 		}

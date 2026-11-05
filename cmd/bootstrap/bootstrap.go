@@ -155,14 +155,16 @@ type Orchestrator struct {
 // latch goes before the first change and is written only by a pass that ran
 // to the end, so a pass cut short leaves none, and so does one that leaves the
 // restore unfinished: its context's end, a saver it can't judge, sessions it
-// can't mark owed or a listing it can't read. The next command then owes the
+// can't mark owed or a listing it can't read. One whose saver may still run a
+// daemon of another version, one it couldn't replace or one it couldn't read,
+// restores, but writes no latch either. The next command then owes the
 // bootstrap again.
 func (o *Orchestrator) Run(ctx context.Context) ([]Warning, error) {
 	p := &pass{Orchestrator: o, logger: log.OrDiscard(o.Logger), emit: progressEmitterFromContext(ctx)}
 	start := time.Now()
 	for _, s := range p.steps() {
-		if s.finishing && p.unfinished {
-			p.logger.Info("step skipped", "step", s.name, "detail", "the restore is unfinished: no latch is written, and the next command bootstraps again")
+		if why := p.skipping(s); why != "" {
+			p.logger.Info("step skipped", "step", s.name, "detail", why)
 			p.progress(StepEvent{Index: s.index, Name: s.name})
 			continue
 		}
@@ -181,7 +183,8 @@ func (o *Orchestrator) Run(ctx context.Context) ([]Warning, error) {
 }
 
 // pass is one Run: its warnings so far, whether the saver's protocol has
-// been judged Portal's, and whether the restore is left unfinished.
+// been judged Portal's, whether the restore is left unfinished, and why the
+// latch is withheld, if it is.
 type pass struct {
 	*Orchestrator
 	logger     *slog.Logger
@@ -189,6 +192,36 @@ type pass struct {
 	warnings   []Warning
 	judged     bool
 	unfinished bool
+	withheld   string
+}
+
+// skipping says why the pass skips s, and is empty when it runs it: a
+// finishing step once the restore is left unfinished, and the latch once
+// withheld.
+func (p *pass) skipping(s step) string {
+	switch {
+	case s.finishing && p.unfinished:
+		return "the restore is unfinished: no latch is written, and the next command bootstraps again"
+	case s.index == indexWriteLatch && p.withheld != "":
+		return p.withheld + ": no latch is written, and the next command bootstraps again"
+	}
+	return ""
+}
+
+// withholding says why the saver's failure err withholds the latch, and is
+// empty when it doesn't: the saver may still run a daemon of another version,
+// one a recycle couldn't stop or one unread whose version isn't proved this
+// one's, so the next command bootstraps again and tries the replacement
+// again. Restore runs all the same: that daemon saves as it did before the
+// upgrade.
+func withholding(err error) string {
+	switch {
+	case errors.Is(err, saverhost.ErrNotReplaced):
+		return "the saver's daemon couldn't be replaced"
+	case errors.Is(err, saverhost.ErrVersionUnproved):
+		return "the saver couldn't be read, nor its daemon proved this version"
+	}
+	return ""
 }
 
 // step is one of the bootstrap's steps. run returns the step's fatal, nil
@@ -304,6 +337,7 @@ func (p *pass) ensureSaver(ctx context.Context) *FatalError {
 		return UnsupportedCreate(err)
 	case err != nil:
 		p.warn(stepEnsureSaver, saverWarning(err), err)
+		p.withheld = withholding(err)
 	}
 	if !p.judged {
 		p.leaveUnfinished(stepEnsureSaver, UnjudgedWarning(), errors.New("no saver came up to judge zmx's protocol by"))

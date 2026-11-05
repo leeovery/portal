@@ -289,6 +289,7 @@ const (
 	indexStandDownPhrase         = "could not read sessions.json"
 	noSessionsStandDownPhrase    = "no sessions listed or saved"
 	lockStandDownPhrase          = "hooks.json is locked"
+	tmuxKeysStandDownPhrase      = "hooks.json holds keys in the tmux version's shape"
 )
 
 // The phrases of a hook store or sweep that failed. They read alongside the
@@ -327,6 +328,7 @@ var skippedPrunePhrases = map[hooksweep.Reason]string{
 	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase,
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase,
+	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase,
 }
 
 // notEvaluableDetails renders a stand-down reason as the reason the count
@@ -342,6 +344,7 @@ var notEvaluableDetails = map[hooksweep.Reason]string{
 	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase + " (not evaluable)",
 }
 
 // reportSkippedPrune renders a prune that removed nothing from the shared

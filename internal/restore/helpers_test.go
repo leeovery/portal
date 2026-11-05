@@ -77,12 +77,23 @@ func newWorldJudgingByState(t *testing.T, live ...backend.Session) *world {
 }
 
 // flagWitness records each name Create is asked to make, and whether the
-// session's hydrating flag was raised as it was asked.
+// session's hydrating flag was raised as it was asked. It counts each listing
+// in lists, running listing, when set, as it starts.
 type flagWitness struct {
 	backend.Backend
-	dir    string
-	asked  []string
-	raised map[string]bool
+	dir     string
+	asked   []string
+	raised  map[string]bool
+	lists   int
+	listing func(n int)
+}
+
+func (f *flagWitness) List(ctx context.Context) ([]backend.Session, error) {
+	f.lists++
+	if f.listing != nil {
+		f.listing(f.lists)
+	}
+	return f.Backend.List(ctx)
 }
 
 func (f *flagWitness) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {

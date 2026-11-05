@@ -3,10 +3,13 @@ package hooksweep
 import (
 	"context"
 	"errors"
+	"os"
+	"regexp"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -114,6 +117,45 @@ func nothingProtects(listed, indexed []string) StandDown {
 	return StandDown{}
 }
 
+// paneCoordinates is the shape of the hook keys the tmux version wrote before
+// its pane tokens: <session>:<window>.<pane>.
+var paneCoordinates = regexp.MustCompile(`^[^:]+:[0-9]+\.[0-9]+$`)
+
+// tmuxShaped reports whether key has the shape of a key the tmux version
+// wrote: a pane token, or a pane's coordinates.
+func tmuxShaped(key string) bool {
+	return nanoid.IsTokenShaped(key) || paneCoordinates.MatchString(key)
+}
+
+// tmuxKeysStandDown stands the judgement down, until the tmux version's state
+// is migrated beside dir, rather than remove any of the stale keys in the
+// shape of that version's. hooks.json is shared with that version, whose
+// keys name no zmx session: beside a state dir and a zmx dir pointed
+// somewhere fresh, as a dev build's are, each would be stale, and its hook
+// lost. A key in that shape that a session or an entry names is a zmx
+// session's, and never stale. Once migrated, a key in that shape is an
+// ordinary zmx name, as many a session's is, and judged as any other.
+func tmuxKeysStandDown(dir string, stale []string) StandDown {
+	n := 0
+	for _, key := range stale {
+		if tmuxShaped(key) {
+			n++
+		}
+	}
+	if n > 0 && !tmuxStateMigrated(dir) {
+		return decline(ReasonTmuxKeys, "entries", n)
+	}
+	return StandDown{}
+}
+
+// tmuxStateMigrated reports whether the tmux version's state has been
+// migrated beside dir: state.TmuxStateDir exists, a directory. A stat that
+// fails, however it fails, counts as not migrated, so the guard holds.
+func tmuxStateMigrated(dir string) bool {
+	info, err := os.Stat(state.TmuxStateDir(dir))
+	return err == nil && info.IsDir()
+}
+
 // Stale reports the keys of persisted the sweep would remove at this moment,
 // or the stand-down that forbids judging them. It takes the sweep's reads in
 // the sweep's order and removes nothing, so a diagnosis answers the reaper's
@@ -136,7 +178,11 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 	if d := nothingProtects(listed, indexed); d.Declined() {
 		return nil, d
 	}
-	return hooks.StaleKeys(persisted, listed, indexed), StandDown{}
+	stale := hooks.StaleKeys(persisted, listed, indexed)
+	if d := tmuxKeysStandDown(src.StateDir, stale); d.Declined() {
+		return nil, d
+	}
+	return stale, StandDown{}
 }
 
 // A store holding nothing to sweep is an answer, not a failure: it aborts the
@@ -144,13 +190,16 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 var errNothingPersisted = errors.New("no hook entries to sweep")
 
 // clean answers the store's clean with the names that protect a key, or with
-// the stand-down that forbids judging any key at all. It carries the listing
-// to the index read, which the clean takes later under its hold, because only
-// the two together say whether anything protects a key.
+// the stand-down that forbids judging any key at all. It carries the snapshot
+// and the listing to the index read, which the clean takes later under its
+// hold, because only the three together say which keys are stale. The clean
+// removes none the snapshot lacks, so judging the snapshot's keys is judging
+// every key it may remove.
 type clean struct {
-	ctx    context.Context
-	src    Sources
-	listed []string
+	ctx      context.Context
+	src      Sources
+	snapshot hooks.Snapshot
+	listed   []string
 }
 
 // listing answers with the names the backend lists.
@@ -170,7 +219,7 @@ func (c *clean) listing(snapshot hooks.Snapshot) ([]string, error) {
 		return nil, declinedError{d}
 	}
 	logger.Debug(countsMsg, "sessions", len(listed), "entries", len(snapshot))
-	c.listed = listed
+	c.snapshot, c.listed = snapshot, listed
 	return listed, nil
 }
 
@@ -179,6 +228,9 @@ func (c *clean) indexing() ([]string, error) {
 	indexed, d := indexedNames(c.src.StateDir)
 	if !d.Declined() {
 		d = nothingProtects(c.listed, indexed)
+	}
+	if !d.Declined() {
+		d = tmuxKeysStandDown(c.src.StateDir, hooks.StaleKeys(c.snapshot, c.listed, indexed))
 	}
 	if d.Declined() {
 		return nil, declinedError{d}

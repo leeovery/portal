@@ -525,7 +525,7 @@ func TestUpdateSessionIndex_Forgets(t *testing.T) {
 		t.Setenv("HOME", "")
 		sink := logtest.Install(t)
 
-		if err := forgetSession("api-x7Kd9a", "cli"); err != nil {
+		if _, err := forgetSession("api-x7Kd9a", "cli"); err != nil {
 			t.Fatalf("forgetSession: %v", err)
 		}
 

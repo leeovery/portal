@@ -25,6 +25,7 @@ const (
 	ReasonIndexUnusable       Reason = "index-unusable"
 	ReasonNoSessions          Reason = "no-sessions"
 	ReasonLockTimeout         Reason = "lock-timeout"
+	ReasonTmuxKeys            Reason = "tmux-keys"
 )
 
 // Reasons makes the reasons above enumerable, so anything that must cover
@@ -43,4 +44,5 @@ var Reasons = []Reason{
 	ReasonIndexUnusable,
 	ReasonNoSessions,
 	ReasonLockTimeout,
+	ReasonTmuxKeys,
 }

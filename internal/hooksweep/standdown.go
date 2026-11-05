@@ -1,6 +1,9 @@
 package hooksweep
 
 import (
+	"context"
+	"log/slog"
+
 	"github.com/leeovery/portal/internal/hooks"
 )
 
@@ -28,11 +31,16 @@ func (s StandDown) Reason() Reason { return s.reason }
 // Declined reports whether the cycle stood down at all.
 func (s StandDown) Declined() bool { return s.reason != "" }
 
-// emit logs the stand-down at DEBUG, whatever its reason: a deferred prune
-// loses nothing, and the next cycle retries it. A doctor --fix that stood
-// down prints its reason.
+// emit logs the stand-down at DEBUG: a deferred prune loses nothing, and the
+// next cycle retries it. One that waits on the tmux version's hooks to be
+// migrated warns, since no cycle clears it by itself. A doctor --fix that
+// stood down prints its reason.
 func (s StandDown) emit() {
-	logger.Debug(standDownMsg, standDownAttrs(s.reason, s.attrs...)...)
+	level := slog.LevelDebug
+	if s.reason == ReasonTmuxKeys {
+		level = slog.LevelWarn
+	}
+	logger.Log(context.Background(), level, standDownMsg, standDownAttrs(s.reason, s.attrs...)...)
 }
 
 func decline(reason Reason, attrs ...any) StandDown {

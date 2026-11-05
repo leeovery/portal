@@ -499,6 +499,234 @@ func TestRestore_StaleSocketUnderAnotherSpelling(t *testing.T) {
 	}
 }
 
+// Restore's count is checked against a listing after its first pass and
+// another once its retries end, so it says neither more nor less than it made.
+func TestRestore_CountsWhatTheListingsShow(t *testing.T) {
+	// A helper that dies before its claim, on a panic or an exec that fails,
+	// ends its session at once, its entry still owed.
+	t.Run("a session whose helper died before its claim is warned of, and made again", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.witness.listing = func(n int) {
+			if n == 2 { // the listing after the first pass
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made again", got)
+		}
+		rec := w.failureLogged(t, "work")
+		if !strings.Contains(rec.AttrString(t, "error"), "ended before its helper finished") || rec.AttrString(t, "detail") != "may be tried again within this bootstrap" {
+			t.Errorf("failure = %v, want the helper's death named, and that it may be tried again", rec.Attrs)
+		}
+		live, _ := w.fake.Held("work")
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, restoredAs(saved, live)) {
+			t.Errorf("entry = %+v, want %+v", got, restoredAs(saved, live))
+		}
+	})
+
+	t.Run("a session whose helper died, and no retry could make again, counts failed, its entry owed", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				w.fake.Remove("work")
+				w.fake.Fail(backendtest.OpCreate, errRefused)
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got, ok := w.lookup(t, "work"); !ok || !got.Owed {
+			t.Errorf("entry = %+v, %v; want it kept, owed", got, ok)
+		}
+	})
+
+	// A helper that dies every time ends each session the retries make too.
+	t.Run("a session its retries made whose helper died too counts failed, its entry owed, judged by the last listing", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.witness.listing = func(n int) {
+			if n > 1 { // the listings after the first pass and once the retries end
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made again once", got)
+		}
+		if got, ok := w.lookup(t, "work"); !ok || !got.Owed {
+			t.Errorf("entry = %+v, %v; want it kept, owed", got, ok)
+		}
+		failures := w.sink.Records().WithMessage("restore session failed").AtExactLevel(slog.LevelWarn)
+		var details []string
+		for _, rec := range failures {
+			if !strings.Contains(rec.AttrString(t, "error"), "ended before its helper finished") {
+				t.Errorf("failure = %v, want the helper's death named", rec.Attrs)
+			}
+			details = append(details, rec.AttrString(t, "detail"))
+		}
+		if want := []string{"may be tried again within this bootstrap", "left owed for the next bootstrap"}; !slices.Equal(details, want) {
+			t.Errorf("failures say %q, want %q", details, want)
+		}
+		if w.witness.lists != restore.Listings {
+			t.Errorf("listed the sessions %d times, want %d", w.witness.lists, restore.Listings)
+		}
+	})
+
+	t.Run("a session gone whose entry records another creation is no restore's to judge", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				other := saved
+				other.CreatedAt, other.PID, other.Owed = saved.CreatedAt.Add(time.Hour), 99, true
+				w.save(t, other)
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once", got)
+		}
+		if warnings := w.warnings(); len(warnings) > 0 {
+			t.Errorf("logged %v, want no warning", warnings)
+		}
+	})
+
+	// A session that reported no creation records none, so its entry still
+	// records the creation restore read.
+	t.Run("a session that reported no creation whose helper died is warned of, and made again", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		saved.Owed = true
+		w.save(t, saved)
+		w.createWith(func(_ context.Context, name, _ string, command []string) (backend.Session, error) {
+			w.fake.Add(backend.Session{Name: name, PID: 7, Command: w.fake.DisplayCommand(command)})
+			return backend.Session{Name: name}, nil
+		})
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made again", got)
+		}
+		w.failureLogged(t, "work")
+	})
+
+	// The user can close a session the moment its helper has claimed it.
+	t.Run("a session that ended once its helper claimed it counts restored, never made again", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				live, _ := w.fake.Held("work")
+				claimed := restoredAs(saved, live)
+				claimed.Owed = false
+				w.save(t, claimed)
+				w.fake.Remove("work")
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once", got)
+		}
+		if warnings := w.warnings(); len(warnings) > 0 {
+			t.Errorf("logged %v, want no warning", warnings)
+		}
+	})
+
+	// Under load a Create can time out after zmx made the session, and every
+	// lookup after it time out too, while the session runs its helper.
+	t.Run("a session no lookup could settle that the last listing finds running restore's helper counts restored", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				t.Fatal(err)
+			}
+			w.fake.StopAnswering(name)
+			return backend.Session{}, errTimedOut
+		})
+		w.witness.listing = func(n int) {
+			if live, ok := w.fake.Held("work"); n > 1 && ok { // the listing once the retries end
+				w.fake.Add(live)
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once", got)
+		}
+		live, _ := w.fake.Held("work")
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, restoredAs(saved, live)) {
+			t.Errorf("entry = %+v, want %+v", got, restoredAs(saved, live))
+		}
+		if !w.hydrating(t, "work") {
+			t.Error("the hydrating flag came down under the helper, which lowers it")
+		}
+	})
+
+	t.Run("a listing after the first pass that fails is warned of, leaving the count as it stands", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.witness.listing = func(n int) {
+			if n == 2 {
+				w.fake.Fail(backendtest.OpList, errRefused)
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		rec := w.sink.Records().WithMessage("list sessions failed").AtExactLevel(slog.LevelWarn).Only(t, "the listing's failure")
+		if !errors.Is(rec.ErrorAttr(t, "error"), errRefused) || !strings.Contains(rec.AttrString(t, "detail"), "unchecked") {
+			t.Errorf("failure = %v, want the listing's error, saying what it leaves unchecked", rec.Attrs)
+		}
+	})
+
+	t.Run("a session the last listing finds running anything else stays failed", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+		w.witness.listing = func(n int) {
+			if n > 1 {
+				w.fake.Add(backend.Session{Name: "work", Answered: true, Command: "vim notes.md"})
+			}
+		}
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+	})
+}
+
 // decision 75: a Create the backend refuses as a session of a protocol Portal
 // doesn't support stops the retries as it stops the first pass, since every
 // Create after it would make another, and the refused name is never looked up

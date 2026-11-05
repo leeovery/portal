@@ -750,10 +750,9 @@ func TestOrchestratorRun_SoftFailuresStillFinish(t *testing.T) {
 		{"the flag sweep failing", func(r *stepRecorder) { r.FlagsErr = errBoom }, nil},
 		{"the saver's presence unread", func(r *stepRecorder) { r.PresentErr = errBoom }, nil},
 		{"the saver failing to start", func(r *stepRecorder) { r.EnsureErr = errBoom }, []Warning{SaverDownWarning()}},
-		{"the saver unread", func(r *stepRecorder) { r.EnsureErr = fmt.Errorf("%w: %w", saverhost.ErrUnread, errBoom) }, []Warning{SaverUnreadWarning()}},
-		{"the old saver not replaced", func(r *stepRecorder) {
-			r.EnsureErr = fmt.Errorf("recycle the saver: %w: %w", saverhost.ErrNotReplaced, errBoom)
-		}, []Warning{SaverNotReplacedWarning()}},
+		// A saver unread whose daemon.version names this version is this
+		// version's, so the latch is written.
+		{"the saver unread, its version proved", func(r *stepRecorder) { r.EnsureErr = fmt.Errorf("%w: %w", saverhost.ErrUnread, errBoom) }, []Warning{SaverUnreadWarning()}},
 		{"the latch unwritten", func(r *stepRecorder) { r.LatchErr = errBoom }, []Warning{LatchUnwrittenWarning()}},
 		{"this boot's id unread", func(r *stepRecorder) { r.LatchErr = fmt.Errorf("%w: %w", ErrNoBootID, errBoom) }, []Warning{BootIDUnreadWarning()}},
 	} {
@@ -772,6 +771,41 @@ func TestOrchestratorRun_SoftFailuresStillFinish(t *testing.T) {
 			}
 			if !errors.Is(sink.Records().WithMessage("step failed").AtExactLevel(slog.LevelWarn).Only(t, "the failure").ErrorAttr(t, "error"), errBoom) {
 				t.Error("the WARN does not carry the failure")
+			}
+		})
+	}
+}
+
+// An upgrade whose old saver couldn't be stopped, or whose saver couldn't be
+// read before its version was compared, may leave that version's daemon
+// saving. A latch written over it would let every later command run warm,
+// and nothing would try the replacement again until the next boot.
+func TestOrchestratorRun_ASaverThatMayRunAnotherVersionRestoresButWritesNoLatch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		warning Warning
+		detail  string
+	}{
+		{"an old saver not replaced", fmt.Errorf("recycle the saver: %w: %w", saverhost.ErrNotReplaced, errBoom), SaverNotReplacedWarning(), "couldn't be replaced"},
+		{"a saver unread, its version unproved", fmt.Errorf("%w, and %w: %w", saverhost.ErrUnread, saverhost.ErrVersionUnproved, errBoom), SaverUnreadWarning(), "nor its daemon proved this version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRecorder()
+			r.EnsureErr = tc.err
+			sink := &logtest.Sink{}
+
+			warnings := runPass(t, r, sink)
+
+			if want := []Warning{tc.warning}; !equalWarnings(warnings, want) {
+				t.Errorf("warnings = %v, want %v", warnings, want)
+			}
+			if !r.called("Restore") || r.called("WriteLatch") {
+				t.Errorf("calls = %v, want the restore run and no latch written", r.calls)
+			}
+			skip := sink.Records().WithMessage("step skipped").Only(t, "the latch's skip")
+			if skip.AttrString(t, "step") != stepWriteLatch || !strings.Contains(skip.AttrString(t, "detail"), tc.detail) {
+				t.Errorf("skip = %v, want the latch skipped, saying %q", skip.Attrs, tc.detail)
 			}
 		})
 	}
