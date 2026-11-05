@@ -75,15 +75,7 @@ func TestMintFailure(t *testing.T) {
 		if got.ActivePage() != tui.PageLoading || !errors.Is(got.FatalError(), errOlderFatal) {
 			t.Fatalf("page %d, FatalError %v; want the error frame carrying the fatal", got.ActivePage(), got.FatalError())
 		}
-		view := visible(model)
-		if !strings.Contains(view, errOlderFatal.Error()) {
-			t.Errorf("frame lacks the fatal %q:\n%s", errOlderFatal.Error(), view)
-		}
-		for _, label := range []string{tui.LabelCheckingZmx, tui.LabelStartingTheSaver, tui.LabelRestoringSessions} {
-			if strings.Contains(view, label) {
-				t.Errorf("frame shows the step %q, which never ran here:\n%s", label, view)
-			}
-		}
+		assertFatalAlone(t, model)
 		if _, cmd := model.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); runCmd(cmd) == nil {
 			t.Error("q on the error frame issued nothing, want the quit")
 		}
@@ -121,6 +113,32 @@ func TestMintFailure(t *testing.T) {
 				t.Errorf("frame lacks %q:\n%s", want, view)
 			}
 		}
+	})
+
+	// A cold picker that waited out another Portal's bootstrap and owed none
+	// of its own ran no step either.
+	t.Run("a refused create in a picker whose loading page only waited shows the fatal alone", func(t *testing.T) {
+		deps := tui.Deps{
+			Lister:           &mockSessionLister{sessions: []tui.Session{}},
+			Creator:          &mockSessionCreator{err: errRefusedCreate},
+			CreateFatal:      olderFatal,
+			CWD:              "/tmp/cwd",
+			ProgressReceiver: tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Waiting: true} }),
+		}
+		var model tea.Model = tui.Build(deps)
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		model, _ = model.Update(tui.BootstrapProgressMsg{Waiting: true})
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: stagedMintProjects})
+		model, _ = model.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+		if page := model.(tui.Model).ActivePage(); page != tui.PageProjects {
+			t.Fatalf("ActivePage() = %d, want PageProjects", page)
+		}
+
+		model, _ = mint(t, model)
+
+		assertFatalAlone(t, model)
 	})
 
 	t.Run("any other failure flashes, and the picker stays open", func(t *testing.T) {
@@ -197,4 +215,26 @@ func stagedFatalModel(t *testing.T, creator *mockSessionCreator) tea.Model {
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: stagedMintProjects})
 	return model
+}
+
+// assertFatalAlone holds model's frame to the wordmark over the fatal and the
+// quit hint: no progress bar and no step list.
+func assertFatalAlone(t *testing.T, model tea.Model) {
+	t.Helper()
+	var rows []string
+	for line := range strings.SplitSeq(visible(model), "\n") {
+		if row := strings.TrimSpace(line); row != "" {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) < 3 {
+		t.Fatalf("frame rows = %q, want the wordmark, the fatal and the quit hint", rows)
+	}
+	wordmark, footer := rows[:len(rows)-2], rows[len(rows)-2:]
+	if footer[0] != errOlderFatal.Error() || !strings.HasPrefix(footer[1], "q quit") {
+		t.Errorf("frame ends %q, want the fatal, then the quit hint", footer)
+	}
+	if len(wordmark) != 5 {
+		t.Errorf("frame draws %d rows above the fatal, want the wordmark's 5 alone:\n%s", len(wordmark), strings.Join(rows, "\n"))
+	}
 }

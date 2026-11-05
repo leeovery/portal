@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"syscall"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
@@ -68,20 +67,7 @@ func bindZmx(binary string) (backend.Backend, error) {
 // bindZmxAt does no I/O, so binding per call costs nothing. zmx.New refuses a
 // relative or empty directory, which no command can work around.
 func bindZmxAt(binary, dir string) (*zmx.Backend, error) {
-	return zmx.New(zmxConfig(binary, dir))
-}
-
-// zmxConfig binds binary to dir, its Create ending a session an older zmx
-// made through signalProcess, should that zmx's kill fail.
-func zmxConfig(binary, dir string) zmx.Config {
-	return zmx.Config{Binary: binary, Dir: dir, Signal: func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) }}
-}
-
-// readZmxAt is bindZmxAt signalling nothing, for doctor, which only reads.
-func readZmxAt(binary, dir string) (*zmx.Backend, error) {
-	cfg := zmxConfig(binary, dir)
-	cfg.Signal = nil
-	return zmx.New(cfg)
+	return zmx.New(zmx.Config{Binary: binary, Dir: dir})
 }
 
 // userSessions is every session b lists but Portal's own, the one listing

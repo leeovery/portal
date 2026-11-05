@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"syscall"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,30 +11,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tui"
 )
-
-// The zmx a command binds ends a session an older zmx made through
-// signalProcess, the one seam cmd's tests fake, should that zmx's kill fail;
-// doctor's binds nothing that signals.
-func TestZmxConfigSignalsThroughSignalProcess(t *testing.T) {
-	var sent []int
-	withFuncSeam(t, &signalProcess, func(pid int, sig syscall.Signal) error {
-		if sig == syscall.SIGTERM {
-			sent = append(sent, pid)
-		}
-		return nil
-	})
-
-	cfg := zmxConfig(zmxProgram, "/srv/zmx")
-	if cfg.Signal == nil {
-		t.Fatal("zmxConfig binds no Signal: a refused session whose kill fails would be left holding its name")
-	}
-	if err := cfg.Signal(4242, syscall.SIGTERM); err != nil || len(sent) != 1 || sent[0] != 4242 {
-		t.Errorf("Signal(4242) = %v, signalProcess saw %v; want it to reach signalProcess", err, sent)
-	}
-	if _, err := bindZmxAt(zmxProgram, "/srv/zmx"); err != nil {
-		t.Errorf("bindZmxAt = %v", err)
-	}
-}
 
 // failingCreator fails every mint with err.
 type failingCreator struct{ err error }

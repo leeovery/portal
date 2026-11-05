@@ -3559,8 +3559,9 @@ func (m Model) viewString() string {
 func (m Model) viewLoading() string {
 	view := m.loadingProgress.View()
 	switch {
-	case m.fatalActive && !m.Bootstrapping():
-		// No step ran in this process, so the fatal shows alone.
+	case m.fatalActive && !m.loadingProgress.ranStep() && LabelForStepIndex(m.fatalStep) == "":
+		// No step ran on this process's loading page, and the fatal names
+		// none, so it shows alone.
 		view = LoadingProgressView{Message: m.fatalMessage}
 	case m.fatalActive:
 		// No page transition — the model stays on PageLoading awaiting q/Esc.

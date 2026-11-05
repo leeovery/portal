@@ -87,6 +87,14 @@ func TestCanonicalDir(t *testing.T) {
 		}
 	})
 
+	t.Run("a .. past a missing dir under the root keeps its spelling", func(t *testing.T) {
+		const spelling = "/portal-no-such-dir/../x"
+
+		if got := zmx.CanonicalDir(spelling); got != spelling {
+			t.Errorf("CanonicalDir(%q) = %q, want it as written", spelling, got)
+		}
+	})
+
 	// The holder proof compares a process's ZMX_DIR with the backend's own,
 	// which exists: a missing one must never match it.
 	t.Run("a missing dir never compares equal to one that exists", func(t *testing.T) {

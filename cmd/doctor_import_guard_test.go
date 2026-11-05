@@ -225,30 +225,34 @@ func TestOnlyDoctorFixRunsTheHookRepair(t *testing.T) {
 	}
 }
 
-const (
-	saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
-	zmxPkgPath       = "github.com/leeovery/portal/internal/backend/zmx"
-)
+const saverhostPkgPath = "github.com/leeovery/portal/internal/saverhost"
 
 // doctorSaverReads are the saverhost Host methods a doctor source may reach:
 // the reads. Every other method of the host takes saver.lock, signals or
 // creates, so a method it gains is one of those until it is named here.
 var doctorSaverReads = []string{"Present", "SaverPID", "Prove"}
 
-// doctorSignallers are cmd's ways to a process: the seam, the zmx binds whose
-// Create signals through it, what binds one, and the hosts that signal.
+// doctorSignallers are cmd's ways to a process: the seam, the hosts that
+// signal through it, and the full bootstrap, whose sweeps and saver ending
+// signal.
 var doctorSignallers = []string{
 	"signalProcess",
-	"zmxConfig", "bindZmxAt", "bindZmx", "sessionBackend", "attachingBackend", "newProductionBootstrap",
 	"newSaverHost", "saverHostSignalling", "newSaverDaemon", "saverDaemon", "endBySignal",
+	"newProductionBootstrap", "owedBootstrap", "bootstrapFor", "runBootstrap",
+}
+
+// rawSignals are the package functions that send a signal: a doctor source
+// calling one signals without cmd's seam.
+var rawSignals = []struct{ pkgPath, name string }{
+	{"syscall", "Kill"},
+	{"golang.org/x/sys/unix", "Kill"},
 }
 
 // doctorSaverReaches reports each "<file>:<line>: <reach>" a doctor source
 // makes past the saver's reads. The host doctor is given exposes the reads
 // alone, which TestReadOnlySaverHostOnlyReads pins, so this is the way round
 // it: a host doctor builds or holds, any method of it but a read, one of
-// cmd's signallers, a zmx Config's Signal, or an EndDaemon, whatever it is
-// called on.
+// cmd's signallers, an EndDaemon, whatever it is called on, or a raw signal.
 func doctorSaverReaches(pkg sourceguardtest.TypedPackage) []string {
 	return reachesIn(pkg, doctorSaverReach)
 }
@@ -264,17 +268,39 @@ func doctorSaverReach(pkg sourceguardtest.TypedPackage, ident *ast.Ident, _ stri
 	if obj.Pkg().Name() == "cmd" && obj.Parent() == obj.Pkg().Scope() && slices.Contains(doctorSignallers, obj.Name()) {
 		return obj.Name()
 	}
-	if v, ok := obj.(*types.Var); ok && v.IsField() && v.Pkg().Path() == zmxPkgPath && v.Name() == "Signal" {
-		return "zmx.Config's Signal"
-	}
 	if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil && fn.Name() == "EndDaemon" {
 		return "EndDaemon"
+	}
+	return rawSignal(pkg, ident, obj)
+}
+
+// rawSignal names a signal ident sends without cmd's seam: a package function
+// of rawSignals, or os.Process's Signal or Kill.
+func rawSignal(pkg sourceguardtest.TypedPackage, ident *ast.Ident, obj types.Object) string {
+	for _, raw := range rawSignals {
+		if pkg.IsPackageFunc(ident, raw.pkgPath, raw.name) {
+			return raw.pkgPath + "." + raw.name
+		}
+	}
+	if fn, ok := obj.(*types.Func); ok && isProcessMethod(fn) && (fn.Name() == "Signal" || fn.Name() == "Kill") {
+		return "(*os.Process)." + fn.Name()
 	}
 	return ""
 }
 
+// isProcessMethod reports whether fn is a method of os.Process.
+func isProcessMethod(fn *types.Func) bool {
+	return isMethodOf(fn, "os", "Process")
+}
+
 // isHostMethod reports whether fn is a method of saverhost's Host.
 func isHostMethod(fn *types.Func) bool {
+	return isMethodOf(fn, saverhostPkgPath, "Host")
+}
+
+// isMethodOf reports whether fn is a method of the type typeName in the
+// package pkgPath, on a value or a pointer.
+func isMethodOf(fn *types.Func, pkgPath, typeName string) bool {
 	recv := fn.Signature().Recv()
 	if recv == nil {
 		return false
@@ -287,7 +313,7 @@ func isHostMethod(fn *types.Func) bool {
 	if !ok || named.Obj().Pkg() == nil {
 		return false
 	}
-	return named.Obj().Pkg().Path() == saverhostPkgPath && named.Obj().Name() == "Host"
+	return named.Obj().Pkg().Path() == pkgPath && named.Obj().Name() == typeName
 }
 
 func runDoctorSaverReadsGuard(t harnesstest.TestingT, pkg sourceguardtest.TypedPackage) {
@@ -336,15 +362,7 @@ var ensurer = (*saverhost.Host).Ensurer`,
 var signalProcess = syscall.Kill
 
 func checkDaemon() { _ = signalProcess(1, syscall.SIGTERM) }`,
-			[]string{"doctor.go:5: signalProcess", "doctor.go:7: signalProcess"}},
-		{"a zmx backend bound to signal", `import (
-	"syscall"
-
-	"github.com/leeovery/portal/internal/backend/zmx"
-)
-
-func bindDriver() { _, _ = zmx.New(zmx.Config{Dir: "/z", Signal: syscall.Kill}) }`,
-			[]string{"doctor.go:9: zmx.Config's Signal"}},
+			[]string{"doctor.go:5: signalProcess", "doctor.go:5: syscall.Kill", "doctor.go:7: signalProcess"}},
 		{"a daemon ended", `import (
 	"context"
 	"syscall"
@@ -352,14 +370,38 @@ func bindDriver() { _, _ = zmx.New(zmx.Config{Dir: "/z", Signal: syscall.Kill}) 
 	"github.com/leeovery/portal/internal/backend/zmx"
 )
 
-func endIt(ctx context.Context, b *zmx.Backend) { _ = b.EndDaemon(ctx, "x", syscall.Kill) }`,
-			[]string{"doctor.go:10: EndDaemon"}},
-		{"a backend whose creates signal", `func attachingBackend() (any, error) { return nil, nil }
+func endIt(ctx context.Context, b *zmx.Backend, signal func(int, syscall.Signal) error) {
+	_ = b.EndDaemon(ctx, "x", signal)
+}`,
+			[]string{"doctor.go:11: EndDaemon"}},
+		{"the full bootstrap run", `import "context"
 
-func sessionBackend() (any, error) { return nil, nil }
+func owedBootstrap(context.Context) (any, error) { return nil, nil }
 
-func listIt() { _, _ = attachingBackend(); _, _ = sessionBackend() }`,
-			[]string{"doctor.go:3: attachingBackend", "doctor.go:5: sessionBackend", "doctor.go:7: attachingBackend", "doctor.go:7: sessionBackend"}},
+func bootstrapFor() error { return nil }
+
+func runBootstrap() error { return nil }
+
+func checkIt(ctx context.Context) { _, _ = owedBootstrap(ctx); _ = bootstrapFor(); _ = runBootstrap() }`,
+			[]string{
+				"doctor.go:5: owedBootstrap", "doctor.go:7: bootstrapFor", "doctor.go:9: runBootstrap",
+				"doctor.go:11: owedBootstrap", "doctor.go:11: bootstrapFor", "doctor.go:11: runBootstrap",
+			}},
+		{"a raw signal through syscall or unix", `import (
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+func killIt() { _ = syscall.Kill(1, syscall.SIGTERM); _ = unix.Kill(1, unix.SIGTERM) }`,
+			[]string{"doctor.go:9: syscall.Kill", "doctor.go:9: golang.org/x/sys/unix.Kill"}},
+		{"a raw signal through os.Process", `import (
+	"os"
+	"syscall"
+)
+
+func killIt(p *os.Process) { _ = p.Signal(syscall.SIGTERM); _ = p.Kill() }`,
+			[]string{"doctor.go:8: (*os.Process).Signal", "doctor.go:8: (*os.Process).Kill"}},
 		{"the reads, through the host and doctorSaver", `import (
 	"context"
 

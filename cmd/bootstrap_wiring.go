@@ -232,7 +232,9 @@ func (d saverDaemon) End(ctx context.Context) error {
 // EndMade ends the saver session the bootstrap made with zmx kill, run by the
 // zmx on PATH that made it, which speaks its daemon's protocol, so needs no
 // process table: off darwin, the only way. End's signal ends it when that
-// kill fails.
+// kill fails. Create's refusal has no such fallback (decision 80): this
+// proof targets only _portal-saver's daemon, so a wrong match ends a Portal
+// process, never a user's session.
 func (d saverDaemon) EndMade(ctx context.Context) error {
 	driver, err := d.driver()
 	if err != nil {

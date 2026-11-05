@@ -120,16 +120,19 @@ func (b *Backend) isDir(dir string) bool {
 	return filepath.IsAbs(dir) && CanonicalDir(dir) == CanonicalDir(b.dir)
 }
 
-// CanonicalDir is dir with its symbolic links resolved, so two spellings of
-// one zmx directory, as /tmp and /private/tmp are on macOS, compare equal,
-// and two of different directories never do. An absolute dir that doesn't
-// resolve has its deepest prefix that does resolved as the OS resolves it,
-// each .. taken after the links before it, and the rest appended: cleaned
-// when it holds no .., and as written when it does, since a .. past a
-// missing directory names no directory the OS can find, so it compares equal
-// to nothing else. A path that doesn't exist so never compares equal to one
-// that does, which keeps the holder proof as strict as resolving existing
-// paths alone. A relative dir that doesn't resolve is as written, cleaned.
+// CanonicalDir is dir with its symbolic links resolved, so spellings of one
+// zmx directory that differ by links, as /tmp and /private/tmp do on macOS,
+// compare equal, and two different directories never do. Spellings that
+// differ only by case on a case-insensitive volume, or through a firmlink,
+// still compare unequal: the safe side for the holder proof and the record.
+// An absolute dir that doesn't resolve has its deepest prefix that does
+// resolved as the OS resolves it, each .. taken after the links before it,
+// and the rest appended: cleaned when it holds no .., and as written when it
+// does, since a .. past a missing directory names no directory the OS can
+// find, so it compares equal to nothing else. A path that doesn't exist so
+// never compares equal to one that does, which keeps the holder proof as
+// strict as resolving existing paths alone. A relative dir that doesn't
+// resolve is as written, cleaned.
 func CanonicalDir(dir string) string {
 	if path, err := filepath.EvalSymlinks(dir); err == nil {
 		return path
@@ -146,7 +149,7 @@ func CanonicalDir(dir string) string {
 		}
 		rest := elems[i:]
 		if slices.Contains(rest, "..") {
-			return prefix + sep + strings.Join(rest, sep)
+			return strings.TrimSuffix(prefix, sep) + sep + strings.Join(rest, sep)
 		}
 		return filepath.Join(append([]string{prefix}, rest...)...)
 	}
@@ -189,26 +192,16 @@ func (b *Backend) endDaemon(ctx context.Context, name string, signal func(pid in
 	if err != nil {
 		return err
 	}
-	if _, err := b.signalProved(d, signal); err != nil {
-		return err
-	}
-	return b.awaitEnded(ctx, name, d.PID)
-}
-
-// signalProved SIGTERMs d, a process proved a session's daemon, through
-// signal once it reads again as proved. It reports gone, sending nothing, for
-// a daemon gone or exiting by then, and sends nothing on any other failure.
-func (b *Backend) signalProved(d daemon, signal func(pid int, sig syscall.Signal) error) (gone bool, err error) {
 	switch err := b.stillDaemon(d); {
 	case errors.Is(err, proctable.ErrGone):
-		return true, nil
+		return b.awaitEnded(ctx, name, d.PID)
 	case err != nil:
-		return false, err
+		return err
 	}
 	if err := signal(d.PID, syscall.SIGTERM); err != nil {
-		return false, fmt.Errorf("signal pid %d: %w", d.PID, err)
+		return fmt.Errorf("signal pid %d: %w", d.PID, err)
 	}
-	return false, nil
+	return b.awaitEnded(ctx, name, d.PID)
 }
 
 // daemon is a process proved a session's zmx daemon, as the proof read it.

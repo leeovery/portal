@@ -3,13 +3,11 @@ package zmx_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
-	"syscall"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,8 +231,6 @@ type creation struct {
 	// create is Create's own ceiling, zero for its default.
 	create time.Duration
 	kill   string
-	// signal is the Backend's Signal; nil binds none.
-	signal func(pid int, sig syscall.Signal) error
 	// table is the process table the Backend reads; nil holds a zmx daemon
 	// holding the name in dir, and nothing else.
 	table func() ([]zmx.Process, error)
@@ -254,7 +250,6 @@ func (c creation) run(t *testing.T, dir, name string, up func()) createResult {
 		Dir:      dir,
 		Environ:  func() []string { return []string{"PATH=/usr/bin:/bin"} },
 		Hostname: func() (string, error) { return hostname, nil },
-		Signal:   c.signal,
 	})
 	zmx.ShortenCeilings(b, c.probe)
 	if c.create != 0 {
@@ -390,45 +385,22 @@ func TestCreateRefusesASessionOfAnOlderZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("one zmx kill can't end is refused all the same, saying it is left", func(t *testing.T) {
+	// decision 80: zmx kill is the refusal's only end. A signal's proof of
+	// which daemon this Create made can be fooled into reaching a session
+	// Portal didn't make, so one the kill can't end is left, and no process
+	// is even looked for.
+	t.Run("one zmx kill can't end is left, nothing signalled, the refusal saying so", func(t *testing.T) {
 		dir := socketDir(t)
-		kill := "echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1"
-
-		got := createBringingUpKilling(t, dir, "work", ceiling, kill, func() { serve(t, dir, "work", olderDaemon(552)) })
-
-		if !errors.Is(got.err, backend.ErrUnsupportedProtocol) {
-			t.Fatalf("Create = %+v, %v; want ErrUnsupportedProtocol", got.session, got.err)
-		}
-		if msg := got.err.Error(); !strings.Contains(msg, "left running") || !strings.Contains(msg, "SessionUnresponsive") {
-			t.Errorf("Create = %v, want it to say the session is left, with zmx's output", got.err)
-		}
-	})
-
-	t.Run("one zmx kill can't end is ended by a SIGTERM to its proved daemon, that one alone", func(t *testing.T) {
-		dir := socketDir(t)
-		var (
-			mu       sync.Mutex
-			procs    = []zmx.Process{daemonOf(100, dir, "work"), daemonOf(101, dir, "other")}
-			signals  []string
-			signalOf = func(pid int, sig syscall.Signal) error {
-				mu.Lock()
-				defer mu.Unlock()
-				signals = append(signals, fmt.Sprintf("%d %s", pid, sig))
-				if pid == 100 {
-					_ = os.Remove(filepath.Join(dir, "work"))
-					procs = procs[1:]
-				}
-				return nil
-			}
-		)
+		killed := filepath.Join(t.TempDir(), "killed")
+		var looked atomic.Int32
 		c := creation{
-			probe:  ceiling,
-			kill:   "echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1",
-			signal: signalOf,
+			probe: ceiling,
+			kill:  ": > " + shellquote.Single(killed) + "; echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1",
 			table: func() ([]zmx.Process, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				return slices.Clone(procs), nil
+				if _, err := os.Stat(killed); err == nil {
+					looked.Add(1)
+				}
+				return []zmx.Process{daemonOf(100, dir, "work")}, nil
 			},
 		}
 
@@ -437,103 +409,14 @@ func TestCreateRefusesASessionOfAnOlderZmx(t *testing.T) {
 		if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || got.session != (backend.Session{}) {
 			t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", got.session, got.err)
 		}
-		mu.Lock()
-		defer mu.Unlock()
-		if want := []string{"100 " + syscall.SIGTERM.String()}; !slices.Equal(signals, want) {
-			t.Errorf("signals = %q, want %q: work's daemon alone", signals, want)
-		}
-		if msg := got.err.Error(); !strings.Contains(msg, "SessionUnresponsive") || !strings.Contains(msg, "a SIGTERM to its daemon, pid 100, ended the session") {
-			t.Errorf("Create = %v, want the kill's failure, then the session ended by the signal", got.err)
-		}
-	})
-
-	// The fallback signals only the daemon this Create made, pinned before
-	// the judgement and proved again just before the signal.
-	for _, tc := range []struct {
-		name string
-		// before is the table as the pin reads it; after, once zmx kill has
-		// run.
-		before, after func(dir string) []zmx.Process
-		want          string
-	}{
-		{
-			name: "an orphaned daemon of the name, its socket gone, is never signalled",
-			before: func(dir string) []zmx.Process {
-				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
-			},
-			after: func(dir string) []zmx.Process { return []zmx.Process{daemonOf(50, dir, "work")} },
-			want:  "no SIGTERM sent, its daemon not pinned",
-		},
-		{
-			name: "two daemons of the name before the kill pin none, and nothing is signalled",
-			before: func(dir string) []zmx.Process {
-				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
-			},
-			after: func(dir string) []zmx.Process {
-				return []zmx.Process{daemonOf(50, dir, "work"), daemonOf(100, dir, "work")}
-			},
-			want: "no SIGTERM sent, its daemon not pinned",
-		},
-		{
-			name:   "a daemon of the name made again once the pinned one ended is never signalled",
-			before: func(dir string) []zmx.Process { return []zmx.Process{daemonOf(100, dir, "work")} },
-			after:  func(dir string) []zmx.Process { return []zmx.Process{daemonOf(200, dir, "work")} },
-			want:   "its daemon, pid 100, has exited since, sent nothing",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := socketDir(t)
-			killed := filepath.Join(t.TempDir(), "killed")
-			var (
-				mu      sync.Mutex
-				signals []int
-			)
-			c := creation{
-				probe: ceiling,
-				kill:  ": > " + shellquote.Single(killed) + "; echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1",
-				signal: func(pid int, _ syscall.Signal) error {
-					mu.Lock()
-					defer mu.Unlock()
-					signals = append(signals, pid)
-					return nil
-				},
-				table: func() ([]zmx.Process, error) {
-					if _, err := os.Stat(killed); err == nil {
-						return tc.after(dir), nil
-					}
-					return tc.before(dir), nil
-				},
-			}
-
-			got := c.run(t, dir, "work", func() { serve(t, dir, "work", olderDaemon(552)) })
-
-			if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || !strings.Contains(got.err.Error(), tc.want) {
-				t.Errorf("Create = %v, want ErrUnsupportedProtocol saying %q", got.err, tc.want)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if len(signals) != 0 {
-				t.Errorf("signalled pids %v, want none", signals)
-			}
-		})
-	}
-
-	t.Run("one neither zmx kill nor the signal ends is refused all the same, carrying both failures", func(t *testing.T) {
-		dir := socketDir(t)
-		refused := errors.New("signal refused")
-		c := creation{
-			probe:  ceiling,
-			kill:   "echo 'failed to kill session=work: SessionUnresponsive' >&2; exit 1",
-			signal: func(int, syscall.Signal) error { return refused },
-		}
-
-		got := c.run(t, dir, "work", func() { serve(t, dir, "work", olderDaemon(552)) })
-
-		if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || !errors.Is(got.err, refused) {
-			t.Fatalf("Create = %v, want ErrUnsupportedProtocol carrying the signal's failure", got.err)
-		}
 		if msg := got.err.Error(); !strings.Contains(msg, "left running") || !strings.Contains(msg, "SessionUnresponsive") {
-			t.Errorf("Create = %v, want it to say the session is left, with zmx kill's output", got.err)
+			t.Errorf("Create = %v, want it to say the session is left, with zmx's output", got.err)
+		}
+		if n := looked.Load(); n != 0 {
+			t.Errorf("the process table was read %d times after the kill failed, want none: nothing is proved or signalled", n)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "work")); err != nil {
+			t.Errorf("stat the session's socket = %v, want it left", err)
 		}
 	})
 

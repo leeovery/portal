@@ -120,7 +120,7 @@ func resolveDoctorDeps() *DoctorDeps {
 	// Detection runs through the driver bound on the dir doctor judges. A dir
 	// it refuses to bind leaves the host-terminal check out; the dir check
 	// reports why.
-	if driver, err := readZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
+	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
 		// Read-only: detection asks the runner registry, which otherwise
 		// removes the entry of a runner it proves dead.
 		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
@@ -171,7 +171,7 @@ func resolveDoctorDeps() *DoctorDeps {
 // zmxSessionReads are the driver's listing and protocol read, both bound on
 // dir. A dir the driver refuses to bind answers every read with that refusal.
 func zmxSessionReads(dir string) (func(context.Context) ([]backend.Session, error), func(context.Context, string) (int, error)) {
-	driver, err := readZmxAt(zmxProgram, dir)
+	driver, err := bindZmxAt(zmxProgram, dir)
 	if err != nil {
 		return func(context.Context) ([]backend.Session, error) { return nil, err },
 			func(context.Context, string) (int, error) { return 0, err }
