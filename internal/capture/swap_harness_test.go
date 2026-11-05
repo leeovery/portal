@@ -42,6 +42,8 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-paged", page: tui.PageSessions, present: []string{"session-00"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-rename-refused-label", page: tui.PageSessions, present: []string{sessionRow, "label refused: it holds a control or formatting character"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-help", page: tui.PageSessions, present: []string{"Keybindings", "Filter sessions"}},
+		{fixture: "sessions-filtering", page: tui.PageSessions, present: []string{"/ relay", "relayx-3RJDWA"}, absent: []string{sessionRow}},
 		{fixture: "sessions-kill-confirm", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone."}, absent: []string{"tmux", "No sessions yet"}},
 		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "⏎ attach"}, absent: []string{"tmux", "No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
@@ -69,6 +71,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-not-answering", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "not answering", "orchard-pipeline-codify"}, absent: []string{"No sessions yet"}},
 		{fixture: "projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects"}},
 		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"relay-v1-api", "Pick a project to run", "npm run dev"}},
+		{fixture: "projects-edit", page: tui.PageProjects, present: []string{"Edit Project", "relay-v1-api", "rapi", "Loom"}},
 		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "kubectl rollout"}},
 		// The preview opens at the bottom of the buffer, so the top of it is off the frame.
 		{fixture: "preview-long-scrollback", present: []string{"tessera-proxy-Vb3kQw", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},

@@ -33,19 +33,24 @@ func (c cell) String() string {
 	if c.bold {
 		weight = " bold"
 	}
+	reversed := ""
+	if c.reversed {
+		reversed = " reversed"
+	}
 	link := ""
 	if c.link != "" {
 		link = " linked to " + c.link
 	}
-	return fmt.Sprintf("%q %s on %s%s%s", c.glyph, c.fg, c.bg, weight, link)
+	return fmt.Sprintf("%q %s on %s%s%s%s", c.glyph, c.fg, c.bg, weight, reversed, link)
 }
 
-// pen is what a glyph is drawn in: its colours, whether it's bold, and the
-// hyperlink it opens, if any.
+// pen is what a glyph is drawn in: its colours, whether it's bold, whether
+// its colours are reversed, and the hyperlink it opens, if any.
 type pen struct {
-	fg, bg colour
-	bold   bool
-	link   string
+	fg, bg   colour
+	bold     bool
+	reversed bool
+	link     string
 }
 
 // colour is a cell's 24-bit colour, or its palette index, or none where the
@@ -120,7 +125,7 @@ func (g grid) text() []string {
 // closed. A glyph two cells wide, by the width rule frames are drawn with,
 // covers the cell after it too. A newline ends a row, and the frame's last may
 // end in one or not. Anything else, an escape that is neither SGR nor a
-// hyperlink, an SGR attribute but bold, a colour neither 24-bit nor a palette
+// hyperlink, an SGR attribute but bold or reversed, a colour neither 24-bit nor a palette
 // index, a control character, a glyph neither one cell wide nor two, or one of
 // a cluster of code points, whose width a terminal takes from the cluster
 // rather than from each, is an error, rather than read otherwise than a
@@ -231,6 +236,10 @@ func (p *pen) set(params string) error {
 			p.bold = true
 		case 22:
 			p.bold = false
+		case 7:
+			p.reversed = true
+		case 27:
+			p.reversed = false
 		case 39:
 			p.fg = colour{}
 		case 49:
@@ -343,12 +352,14 @@ func filled(row []cell, width int) []cell {
 }
 
 // alike reports whether cells a and b look and act the same on a terminal
-// whose background is canvas: a cell's link, blank or not, opens on a click.
+// whose background is canvas: a cell's link, blank or not, opens on a click,
+// and a reversed blank shows its foreground as a block.
 func alike(a, b cell, canvas colour) bool {
-	if a.glyph != b.glyph || a.bg.or(canvas) != b.bg.or(canvas) || a.link != b.link {
+	if a.glyph != b.glyph || a.bg.or(canvas) != b.bg.or(canvas) || a.link != b.link || a.reversed != b.reversed {
 		return false
 	}
-	return a.glyph == ' ' || a.bold == b.bold && a.fg == b.fg
+	inked := a.glyph != ' '
+	return (!inked || a.bold == b.bold) && (!inked && !a.reversed || a.fg == b.fg)
 }
 
 // shown is how many cells a failure lists before it counts the rest.
@@ -428,6 +439,14 @@ func TestParseReadsSGRAsATerminalDoes(t *testing.T) {
 			)},
 		},
 		{
+			name:  "reversed, carried until turned off alone or reset",
+			frame: "\x1b[7;38;2;1;2;3mA\x1b[1mB\x1b[27mC\x1b[7mD\x1b[0mE",
+			want: grid{slices.Concat(
+				inked("A", pen{fg: other, reversed: true}), inked("B", pen{fg: other, bold: true, reversed: true}),
+				inked("C", pen{fg: other, bold: true}), inked("D", pen{fg: other, bold: true, reversed: true}), inked("E", pen{}),
+			)},
+		},
+		{
 			name:  "a hyperlink with parameters, ended by ST",
 			frame: "\x1b]8;id=1;https://x.test\x1b\\A\x1b]8;;\x1b\\B",
 			want:  grid{slices.Concat(inked("A", pen{link: "https://x.test"}), inked("B", pen{}))},
@@ -452,7 +471,8 @@ func TestParseRefusesWhatItWouldReadOtherwiseThanATerminal(t *testing.T) {
 	}{
 		{name: "faint", frame: "\x1b[2mA", want: `row 1, column 1: SGR "2": attribute 2 isn't read`},
 		{name: "underlined", frame: "AB\x1b[4mC", want: `row 1, column 3: SGR "4": attribute 4 isn't read`},
-		{name: "reversed", frame: "\x1b[7mA", want: "attribute 7 isn't read"},
+		{name: "italic", frame: "\x1b[3mA", want: `SGR "3": attribute 3 isn't read`},
+		{name: "blinking, beside reversed", frame: "\x1b[7;5mA", want: `SGR "7;5": attribute 5 isn't read`},
 		{name: "a basic colour", frame: "\x1b[31mA", want: `SGR "31": attribute 31 isn't read`},
 		{name: "a bright colour", frame: "\x1b[102mA", want: "attribute 102 isn't read"},
 		{name: "a colour cut short", frame: "\x1b[48;2;1;2mA", want: "neither 24-bit nor a palette index"},
@@ -508,6 +528,8 @@ func TestCompareHoldsEachCellToItsFrame(t *testing.T) {
 		{name: "a background unpainted, on the canvas", change: func(g grid) { g[0][1].bg = colour{}; g[1][3].bg = colour{} }},
 		{name: "a background unpainted, off the canvas", change: func(g grid) { g[1][0].bg = colour{} }, want: [][2]int{{2, 1}}},
 		{name: "a blank's foreground and weight", change: func(g grid) { g[0][2].fg = rgb(9, 9, 9); g[1][2].bold = true }},
+		{name: "reversed changed", change: func(g grid) { g[0][1].reversed = true }, want: [][2]int{{1, 2}}},
+		{name: "a blank reversed", change: func(g grid) { g[0][2].reversed = true }, want: [][2]int{{1, 3}}},
 		{name: "a blank's background", change: func(g grid) { g[0][2].bg = rgb(9, 9, 9) }, want: [][2]int{{1, 3}}},
 		{name: "a glyph linked", change: func(g grid) { g[0][3].link = "https://x.test" }, want: [][2]int{{1, 4}}},
 		{name: "a foreground the palette's", change: func(g grid) { g[0][3].fg = paletteColour(1) }, want: [][2]int{{1, 4}}},
@@ -535,6 +557,23 @@ func TestCompareHoldsEachCellToItsFrame(t *testing.T) {
 				t.Errorf("compare found the cells %v differing, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A text input's cursor is a reversed blank: its foreground is the block a
+// terminal shows, so it is held where a plain blank's is not.
+func TestCompareHoldsAReversedBlanksForeground(t *testing.T) {
+	canvas, ink, other := rgb(11, 12, 20), rgb(255, 158, 100), rgb(1, 2, 3)
+	frame := grid{inked(" ", pen{fg: ink, bg: canvas, reversed: true})}
+	drawn := grid{inked(" ", pen{fg: other, bg: canvas, reversed: true})}
+
+	diffs, err := compare(frame, drawn, canvas)
+
+	if err != nil {
+		t.Fatalf("compare error = %v", err)
+	}
+	if len(diffs) != 1 || diffs[0].col != 1 {
+		t.Errorf("compare found %v differing, want the reversed blank at column 1", diffs)
 	}
 }
 
@@ -617,6 +656,10 @@ func TestDescribeNamesEachCellThenCountsTheRest(t *testing.T) {
 	}
 	if last := got[len(got)-1]; len(got) != shown+2 || last != "  and 3 more" {
 		t.Errorf("describe is %d lines, the last %q, want %d, the last %q", len(got), last, shown+2, "  and 3 more")
+	}
+	reversed := describe("sessions-filtering-120x40", []difference{{row: 5, col: 10, frame: cell{glyph: ' ', pen: pen{reversed: true}}, drawn: cell{glyph: ' '}}})
+	if want := "  row 5, column 10: the frame's ' ' default on default reversed, drawn ' ' default on default"; !strings.HasSuffix(reversed, want) {
+		t.Errorf("describe of a reversed cell says %q, want it to end %q", reversed, want)
 	}
 	if one := describe("sessions-flat-120x40", diffs[:1]); strings.Contains(one, "more") {
 		t.Errorf("describe of one cell says %q, want no count of more", one)
