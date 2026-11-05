@@ -12,18 +12,36 @@ import (
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
-// Restore is what the bootstrap a run ends with made of the saved sessions.
+// RestoreEnd is how the restore of the bootstrap a run ends with ended.
+type RestoreEnd int
+
+const (
+	// RestoreNotRun is a bootstrap that ran no restore: it was owed none, or
+	// found none owed.
+	RestoreNotRun RestoreEnd = iota
+	// RestoreRan is a restore that ran to its end.
+	RestoreRan
+	// RestoreStopped is a restore the bootstrap's fatal stopped, or came
+	// before; the fatal follows the report.
+	RestoreStopped
+	// RestoreUnread is a restore that couldn't read sessions.json or list
+	// zmx's sessions, and so made nothing; the bootstrap's warning says which.
+	RestoreUnread
+)
+
+// Restore is what the bootstrap a run ends with made of the saved sessions,
+// and what it left of them.
 type Restore struct {
-	// Ran reports whether a restore ran: a bootstrap finding none owed runs
-	// none.
-	Ran bool
-	// Restored and Failed count the sessions it made and those it couldn't,
-	// which stay for the next restore.
-	Restored, Failed int
-	// Unfinished is a restore owed and not made: a bootstrap ended by a fatal
-	// before it, or a restore that couldn't read sessions.json or list zmx's
-	// sessions.
-	Unfinished bool
+	End RestoreEnd
+	// Restored counts the sessions the restore made.
+	Restored int
+	// Waits reports that a session restored, or still owed a restore, comes
+	// up on its resume panel, as Waits read before the bootstrap.
+	Waits bool
+	// Left names each session still owed a restore once the bootstrap ended,
+	// as Left reads them, and LeftUnread is why they couldn't be read.
+	Left       []string
+	LeftUnread error
 }
 
 // WaitingLine is what portal migrate says as a run starts to wait for the
@@ -31,11 +49,12 @@ type Restore struct {
 func WaitingLine(pid int) string { return fmt.Sprintf(waitingCopy, pid) }
 
 // Report is what portal migrate prints of the run o and the restore r after
-// it: a summary and the restore's result; for a run that migrated, each
-// session it made, as name ← tmux name, and what it generated, dropped,
-// skipped, couldn't carry over, moved and removed, each with why; then where
-// the tmux version's state and hooks.json's backup are kept. A run that found
-// nothing to migrate says so alone. shown is how a path is printed.
+// it: a summary, the restore's result and the sessions it left; for a run
+// that migrated, each session it made, as name ← tmux name, and what it
+// generated, dropped, skipped, couldn't carry over, moved and removed, each
+// with why; then where the tmux version's state and hooks.json's backup are
+// kept. A run that found nothing to migrate says so alone. shown is how a
+// path is printed.
 func Report(o Outcome, r Restore, shown func(path string) string) string {
 	var rep report
 	switch o.Course {
@@ -52,7 +71,10 @@ func Report(o Outcome, r Restore, shown func(path string) string) string {
 	case AlreadyMigrated:
 		rep.line(alreadyCopy)
 	}
-	rep.restore(r, waits(o))
+	rep.restore(r)
+	section(&rep, fmt.Sprintf(leftHeading, count(len(r.Left), "session")), r.Left, func(name string) (string, bool) {
+		return fmt.Sprintf(leftLine, name), true
+	})
 	if o.Course == Migrated {
 		rep.detail(o.Plan)
 	}
@@ -62,19 +84,6 @@ func Report(o Outcome, r Restore, shown func(path string) string) string {
 		rep.line(backupCopy, shown(o.Backup))
 	}
 	return rep.String()
-}
-
-// waits reports whether a restore after o makes sessions that wait on their
-// resume panel: a run that migrated them, or finished doing so, has had none
-// restored before. A run that migrated no hook makes none wait.
-func waits(o Outcome) bool {
-	switch o.Course {
-	case Migrated:
-		return len(o.Plan.Moves) > 0
-	case Finished:
-		return true
-	}
-	return false
 }
 
 // report builds the report a block at a time, a blank line between blocks.
@@ -129,23 +138,31 @@ func (r *report) summary(plan Plan) {
 	r.line("%s", hooks)
 }
 
-// restore is the restore's result, and whether the sessions it made wait on
-// their resume panel.
-func (r *report) restore(res Restore, waits bool) {
+// restore is the restore's result, then every session restored when none is
+// left, and whether a session restored, or left, waits on its resume panel.
+// The sessions left are a block of their own.
+func (r *report) restore(res Restore) {
+	var said []string
 	switch {
-	case res.Unfinished:
-		r.line(unfinishedCopy)
-		return
-	case !res.Ran:
-		r.line(noRestoreCopy)
-		return
+	case res.End == RestoreRan:
+		said = append(said, fmt.Sprintf(restoredCopy, count(res.Restored, "session")))
+	case res.End == RestoreStopped && res.Restored > 0:
+		said = append(said, fmt.Sprintf(stoppedAfterCopy, count(res.Restored, "session")))
+	case res.End == RestoreStopped:
+		said = append(said, stoppedBeforeCopy)
+	case res.End == RestoreUnread:
+		said = append(said, unreadRestoreCopy)
 	}
-	restored := fmt.Sprintf(restoredCopy, count(res.Restored, "session"))
-	if res.Failed > 0 {
-		restored += fmt.Sprintf(unrestoredCopy, count(res.Failed, "session"))
+	switch {
+	case res.LeftUnread != nil:
+		said = append(said, fmt.Sprintf(leftUnreadCopy, res.LeftUnread))
+	case len(res.Left) == 0:
+		said = append(said, allRestoredCopy)
 	}
-	r.line("%s", restored)
-	if waits && res.Restored > 0 {
+	if len(said) > 0 {
+		r.line("%s", strings.Join(said, " "))
+	}
+	if res.Waits {
 		r.line(waitsCopy)
 	}
 }

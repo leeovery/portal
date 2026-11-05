@@ -151,12 +151,12 @@ func runHydrate(ctx context.Context, cfg hydrateConfig) {
 	if !replayed {
 		keepTranscript(cfg)
 	}
-	parked := markIfWaiting(cfg, decision)
+	parked, handed := markIfWaiting(cfg, decision)
 	recordCreation(ctx, cfg, replayed)
 	if replayed {
 		lowerHydrating(cfg)
 	}
-	execShellOrHookAndExit(cfg, decision.Lookup, parked)
+	execShellOrHookAndExit(cfg, handed, parked)
 }
 
 // replayFailedNotice is the line a session whose saved scrollback couldn't be
@@ -382,20 +382,32 @@ func lookupOnResumeOrLog(cfg hydrateConfig) hooks.OnResume {
 }
 
 // markIfWaiting raises the resume-pending flag of a session that is going to
-// wait, while its hydrating flag still keeps the saver off it. A session whose
-// flag can't be raised does not wait: it returns nil, as does one that was
-// never going to.
-func markIfWaiting(cfg hydrateConfig, decision resumeDecision) *parkedChain {
+// wait, while its hydrating flag still keeps the saver off it, and returns
+// its parked chain with the registration handed to it. A session whose flag
+// can't be raised does not wait: it returns no chain, as does one that was
+// never going to, and its hook fires now. One restore asked to wait (--lazy)
+// gets its shell instead, with no hook: the tmux session it was migrated
+// from may still run the program its hook resumes, which would then run
+// twice.
+func markIfWaiting(cfg hydrateConfig, decision resumeDecision) (*parkedChain, hooks.OnResume) {
 	if !decision.Wait {
-		return nil
+		return nil, decision.Lookup
 	}
 	parked, err := markResumePending(cfg)
-	if err != nil {
-		cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err)...)
-		return nil
+	if err == nil {
+		return &parked, decision.Lookup
 	}
-	return &parked
+	if cfg.Lazy {
+		cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err, "detail", lazyParkFailedDetail)...)
+		return nil, hooks.OnResume{}
+	}
+	cfg.Logger.Warn("set resume pending flag failed", resumeLogAttrs(cfg.Session, "error", err)...)
+	return nil, decision.Lookup
 }
+
+// lazyParkFailedDetail is why a session restore asked to wait, whose park
+// failed, gets its shell and no hook.
+const lazyParkFailedDetail = "restore asked it to wait, so it gets its shell, its hook unfired"
 
 // The executable is resolved before the flag is raised, so a refusal is taken
 // while the session is still an eager one: a flagged session whose chain could

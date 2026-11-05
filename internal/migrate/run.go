@@ -81,24 +81,30 @@ type Outcome struct {
 // one run at a time: another holding the state dir's parent is ErrLocked.
 // What it does follows from what it finds there:
 //   - A version 1 sessions.json with no state-tmux/ beside it migrates in
-//     full: the tmux side first (Portal's tmux hooks unset and the saver
-//     killed, when a tmux server answers, then the wait for the tmux
-//     version's daemon to exit); hooks.json read and backed up; the plan;
-//     the zmx version's state built in a fresh staging dir beside it and
-//     hooks.json rewritten from the backup; then the commit point, the state
-//     dir renamed to state-tmux/ and the staging dir to the state dir.
-//   - state-tmux/ and a staging dir with no sessions.json in the state dir
-//     finishes the second rename.
-//   - state-tmux/ and no staging dir is a migration landed.
+//     full: first every read that may refuse it (the hooks the plan reads,
+//     the version 1 index and zmx's sessions); then the tmux side (Portal's
+//     tmux hooks unset and the saver killed, when a tmux server answers,
+//     then the wait for the tmux version's daemon to exit); hooks.json
+//     backed up; the plan, from the index read again; the zmx version's
+//     state built in a fresh staging dir beside it and hooks.json rewritten
+//     from the backup; then the commit point, the state dir renamed to
+//     state-tmux/ and the staging dir to the state dir.
+//   - A migration cut short between its renames (state.MigrationCutShort),
+//     with no sessions.json in the state dir, finishes the second rename.
+//   - state-tmux/, no staging dir and a version 2 sessions.json is a
+//     migration landed.
 //   - No state-tmux/ and no version 1 sessions.json is nothing to migrate.
-//   - A version 1 sessions.json beside state-tmux/, a staging dir beside
-//     state-tmux/ and a version 2 sessions.json, and a sessions.json that
-//     can't be read are refused, changing nothing.
+//   - A version 1 sessions.json beside state-tmux/, a migration cut short
+//     beside a version 2 sessions.json, state-tmux/ beside a state dir
+//     holding no sessions.json and no migration cut short, and a
+//     sessions.json that can't be read are refused, changing nothing.
 //
 // Until the commit point the state dir is still the tmux version's, so every
 // other command refuses it and the zmx saver and hook sweep stand down: a run
-// stopped before it is redone whole, with a fresh plan. Every refusal and
-// failure is logged at ERROR and returned, worded for the user.
+// stopped before it is redone whole, with a fresh plan. Between the renames
+// they refuse and stand down on the migration cut short, until a run
+// finishes it. Every refusal and failure is logged at ERROR and returned,
+// worded for the user.
 func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	start := time.Now()
 	o := Outcome{StateDir: cfg.StateDir, TmuxDir: state.TmuxStateDir(cfg.StateDir)}
@@ -131,6 +137,10 @@ func Run(ctx context.Context, cfg Config) (Outcome, error) {
 	return o, nil
 }
 
+// Stopped is err, a failure that stops portal migrate before a run starts,
+// worded and logged as a run's own.
+func Stopped(err error) error { return refuse(err) }
+
 // refuse logs why a run stopped, worded for the user, and returns it.
 func refuse(err error) error {
 	err = worded(err)
@@ -155,17 +165,22 @@ func logOutcome(o Outcome, start time.Time) {
 // migrateState migrates the tmux version's state in full, and returns the
 // plan it wrote.
 func migrateState(ctx context.Context, cfg Config) (Plan, error) {
-	if err := stopTmux(ctx, cfg.Tmux); err != nil {
-		return Plan{}, err
-	}
-	if err := awaitDaemon(ctx, cfg); err != nil {
-		return Plan{}, err
-	}
 	backup := HooksBackup(cfg.StateDir)
+	live, err := precheck(ctx, cfg, backup)
+	if err != nil {
+		return Plan{}, err
+	}
+	stopped, err := stopTmux(ctx, cfg.Tmux)
+	if err != nil {
+		return Plan{}, err
+	}
+	if err := awaitDaemon(ctx, cfg, stopped); err != nil {
+		return Plan{}, err
+	}
 	if err := backUp(cfg.HooksFile, backup); err != nil {
 		return Plan{}, err
 	}
-	plan, err := planFor(ctx, cfg, backup)
+	plan, err := planFor(cfg, backup, live)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -179,38 +194,64 @@ func migrateState(ctx context.Context, cfg Config) (Plan, error) {
 	return plan, swap(cfg.StateDir, staging)
 }
 
-// stopTmux unsets Portal's tmux hooks and kills the tmux version's saver.
-// With no tmux server answering there are none: they ended with it. Either
-// failing stops the run, since a tmux hook left would run the tmux version
-// against the state dir migrate rewrites.
-func stopTmux(ctx context.Context, tmux TmuxServer) error {
+// precheck takes, before the tmux side is stopped, every read that may
+// refuse the run, so a refusal leaves the tmux version saving as it did:
+// the hooks the plan reads, as strictly as it reads them; the version 1
+// index, as the plan reads it; and zmx's sessions, which it returns for the
+// plan's names. Neither file can pass now and fail later: the tmux version's
+// writers refuse a hooks.json that doesn't parse, and its daemon's flush
+// writes the index it reads itself, which the plan reads afresh.
+func precheck(ctx context.Context, cfg Config, backup string) ([]string, error) {
+	source, err := hooksSource(cfg.HooksFile, backup)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := readHooks(source); err != nil {
+		return nil, err
+	}
+	if _, err := ReadLegacy(cfg.StateDir); err != nil {
+		return nil, err
+	}
+	live, err := cfg.Live(ctx)
+	if err != nil {
+		return nil, refused(nil, unlistedCopy, err)
+	}
+	return live, nil
+}
+
+// stopTmux unsets Portal's tmux hooks and kills the tmux version's saver,
+// reporting whether it killed one. With no tmux server answering there are
+// none: they ended with it. Either failing stops the run, since a tmux hook
+// left would run the tmux version against the state dir migrate rewrites.
+func stopTmux(ctx context.Context, tmux TmuxServer) (bool, error) {
 	if !tmux.Answering(ctx) {
 		logger.Info("no tmux server", "detail", "Portal's tmux hooks and saver ended with it")
-		return nil
+		return false, nil
 	}
 	unset, err := tmux.RemoveHooks(ctx)
 	if err != nil {
-		return refused(nil, tmuxHooksLeftCopy, err)
+		return false, refused(nil, tmuxHooksLeftCopy, err)
 	}
 	logger.Info("tmux hooks removed", "unset", unset)
 	killed, err := tmux.KillSaver(ctx)
 	if err != nil {
-		return refused(nil, tmuxSaverLeftCopy, err)
+		return false, refused(nil, tmuxSaverLeftCopy, err)
 	}
 	if killed {
 		logger.Info("tmux saver killed")
 	}
-	return nil
+	return killed, nil
 }
 
-// awaitDaemon waits for the tmux version's daemon to exit.
-func awaitDaemon(ctx context.Context, cfg Config) error {
+// awaitDaemon waits for the tmux version's daemon to exit, its saver killed
+// when stopped says so.
+func awaitDaemon(ctx context.Context, cfg Config, stopped bool) error {
 	start := time.Now()
 	waiting := cfg.Waiting
 	if waiting == nil {
 		waiting = func(int) {}
 	}
-	pid, err := cfg.Daemon.AwaitExit(ctx, cfg.StateDir, waiting)
+	pid, err := cfg.Daemon.AwaitExit(ctx, cfg.StateDir, stopped, waiting)
 	if err != nil {
 		return err
 	}
@@ -223,9 +264,6 @@ func awaitDaemon(ctx context.Context, cfg Config) error {
 // backUp backs hooks.json up, logging where.
 func backUp(live, backup string) error {
 	wrote, err := backUpHooks(live, backup)
-	if errors.Is(err, hooks.ErrMalformed) {
-		return refused(nil, hooksMalformedCopy, live, err)
-	}
 	if err != nil {
 		return err
 	}
@@ -236,9 +274,9 @@ func backUp(live, backup string) error {
 }
 
 // planFor plans the migration of the tmux version's state, from its version
-// 1 index and the keys of hooks.json's backup, its names clear of zmx's
-// sessions.
-func planFor(ctx context.Context, cfg Config, backup string) (Plan, error) {
+// 1 index, read again now its daemon has flushed, and the keys of
+// hooks.json's backup, its names clear of live, the sessions zmx holds.
+func planFor(cfg Config, backup string, live []string) (Plan, error) {
 	legacy, err := ReadLegacy(cfg.StateDir)
 	if err != nil {
 		return Plan{}, err
@@ -246,10 +284,6 @@ func planFor(ctx context.Context, cfg Config, backup string) (Plan, error) {
 	keys, err := backupKeys(backup)
 	if err != nil {
 		return Plan{}, err
-	}
-	live, err := cfg.Live(ctx)
-	if err != nil {
-		return Plan{}, refused(nil, unlistedCopy, err)
 	}
 	naming := cfg.Naming
 	naming.Taken = slices.Concat(naming.Taken, live)

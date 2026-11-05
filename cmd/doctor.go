@@ -210,10 +210,8 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 
-		// The repairs write state, so a state directory that belongs to
-		// another zmx directory gets none; the diagnosis above names why.
-		if dir, err := doctorStateDir(deps); err == nil && zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), fixRefusedLine)
+		if line := fixRefusal(deps); line != "" {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
 			return ErrDoctorUnhealthy
 		}
 		// The exit is driven solely by the post-repair re-diagnosis below; the
@@ -233,9 +231,36 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
-// fixRefusedLine is a --fix that repaired nothing, the state's zmx dir check
-// having failed.
-const fixRefusedLine = "Skipped every repair: state's zmx dir failed"
+// The lines of a --fix that repaired nothing: the state's zmx dir check
+// failed, or a migration is cut short, or may be.
+const (
+	fixRefusedLine        = "Skipped every repair: state's zmx dir failed"
+	fixCutShortLine       = "Skipped every repair: a migration was cut short; run portal migrate to finish it"
+	fixCutShortUnreadLine = "Skipped every repair: can't tell whether a migration was cut short"
+)
+
+// fixRefusal is why --fix makes no repair, empty when it may make them. The
+// repairs write state, so a state directory that belongs to another zmx
+// directory gets none, nor one a migration cut short left holding no index
+// of the migrated sessions, whose hooks a prune would reap; the diagnosis
+// names why. A state directory that can't be resolved is the repairs' own to
+// skip.
+func fixRefusal(deps *DoctorDeps) string {
+	dir, err := doctorStateDir(deps)
+	if err != nil {
+		return ""
+	}
+	if zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
+		return fixRefusedLine
+	}
+	switch cut, err := state.MigrationCutShort(dir); {
+	case err != nil:
+		return fixCutShortUnreadLine
+	case cut:
+		return fixCutShortLine
+	}
+	return ""
+}
 
 // runDoctorFix applies only repairs that are reversible by reconstruction, each
 // best-effort so a failure is left for the re-diagnosis to report. Themes get no
@@ -714,13 +739,28 @@ func checkDirReadable(name, dir string) checkResult {
 	return checkResult{name: name, status: checkPass, detail: dir}
 }
 
-// An absent sessions.json is a fresh install, told apart from an empty index.
-// Doctor is exempt from the root's stop on an unusable index, so it names each
-// kind itself.
+// The sessions.json check's failures while a migration is cut short.
+const (
+	// cutShortDetail is a migration cut short: where the migrated state waits.
+	cutShortDetail = "a migration was cut short, its state waiting in %s; run portal migrate to finish it"
+	// cutShortUnreadDetail is a migration doctor can't rule out: why.
+	cutShortUnreadDetail = "can't tell whether a migration was cut short: %v"
+)
+
+// An absent sessions.json is a fresh install, told apart from an empty index,
+// and from a state dir a migration cut short left without one. Doctor is
+// exempt from the root's stop on an unusable index and on a migration cut
+// short, so it names each itself.
 func checkSessionsJSON(dir string, dirErr error) checkResult {
 	const name = "sessions.json"
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
+	}
+	switch cut, err := state.MigrationCutShort(dir); {
+	case err != nil:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortUnreadDetail, err)}
+	case cut:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortDetail, state.MigrationStagingDir(dir))}
 	}
 	if _, err := os.Stat(sessionindex.Path(dir)); errors.Is(err, fs.ErrNotExist) {
 		return checkResult{name: name, status: checkPass, detail: "no sessions indexed yet"}

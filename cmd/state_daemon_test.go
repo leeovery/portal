@@ -227,6 +227,23 @@ func TestStateDaemon_RefusesAnIndexItMustNotTouch(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a migration cut short, holding nothing", func(t *testing.T) {
+		staging := cutShortStateDir(t)
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		withFuncSeam(t, &daemonTickLoopFunc, func(context.Context, *daemonDeps) error {
+			t.Error("the tick loop ran")
+			return nil
+		})
+		sink := logtest.Install(t)
+
+		_, _, err := runRootCmd(t, "state", "daemon")
+
+		if want := staging + " holds a migration cut short; run portal migrate to finish it"; err == nil || err.Error() != want {
+			t.Errorf("state daemon = %v, want %q", err, want)
+		}
+		sink.Records().Matching("daemon", "refused to start").AtExactLevel(slog.LevelWarn).Only(t, "the refusal")
+	})
 }
 
 func TestDefaultDaemonRun_ASecondDaemonExitsHoldingNothing(t *testing.T) {

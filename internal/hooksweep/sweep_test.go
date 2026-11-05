@@ -203,6 +203,21 @@ func standDownCases() []standDownCase {
 		{name: "a corrupt index", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
 			w.writeIndexBytes(t, []byte(`{"version": 2, "sessions": [`))
 		}},
+		// Between its renames, a migration's index is in its staging dir,
+		// and the state dir holds none: every rewritten key would be stale.
+		{name: "a migration cut short beside the state dir", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			w.besideMigration(t, func(staging string) {
+				writeFileAt(t, filepath.Join(staging, "sessions.json"), `{"version": 2, "sessions": []}`)
+			})
+		}},
+		{name: "a migration it can't rule out", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			w.besideMigration(t, func(staging string) {
+				if err := os.Remove(staging); err != nil {
+					t.Fatal(err)
+				}
+				writeFileAt(t, staging, "not a dir")
+			})
+		}},
 		{name: "the restoring flag raised", reason: ReasonRestoring, stage: func(t *testing.T, w *world) {
 			w.raiseRestoring(t)
 		}},

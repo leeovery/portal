@@ -25,6 +25,11 @@ var (
 	// ErrInTheWay is a state dir holding what no run put there, where a run
 	// finishing its renames would put the staging dir.
 	ErrInTheWay = errors.New("the state dir holds what no migration put there")
+	// ErrMigratedStateGone is state-tmux/ beside a state dir holding no
+	// index, with no staging dir: no run leaves that, since every build
+	// writes an index, so migrate can't tell what became of the state it
+	// migrated.
+	ErrMigratedStateGone = errors.New("an earlier migration's state is gone from the state dir")
 	// ErrDaemonRunning is the tmux version's daemon still running at the
 	// bound: it would write the tmux version's state over migrate's.
 	ErrDaemonRunning = errors.New("the tmux version's daemon is still running")
@@ -73,16 +78,18 @@ const (
 )
 
 // found is what a run finds before it changes anything: the state dir's
-// index, and whether state-tmux/ and a staging dir are beside it.
+// index, whether state-tmux/ is beside it, and whether a run was cut short
+// between its renames (state.MigrationCutShort).
 type found struct {
-	dir, tmuxDir, staging  string
-	index                  indexKind
-	hasTmuxDir, hasStaging bool
+	dir, tmuxDir, staging string
+	index                 indexKind
+	hasTmuxDir, cutShort  bool
 }
 
-// inspect reads what is in and beside the state dir dir. A sessions.json
-// there that can't be read, or is of another version than 1 or 2, is an
-// error, as is anything it can't look for.
+// inspect reads what is in and beside the state dir dir, removing first an
+// empty staging dir. A sessions.json there that can't be read, or is of
+// another version than 1 or 2, is an error, as is anything it can't look
+// for.
 func inspect(dir string) (found, error) {
 	f := found{dir: dir, tmuxDir: state.TmuxStateDir(dir), staging: state.MigrationStagingDir(dir)}
 	var err error
@@ -92,24 +99,27 @@ func inspect(dir string) (found, error) {
 	if f.hasTmuxDir, err = exists(f.tmuxDir); err != nil {
 		return f, err
 	}
-	f.hasStaging, err = stagingHolds(f.staging)
+	if err := removeEmptyStaging(f.staging); err != nil {
+		return f, err
+	}
+	f.cutShort, err = state.MigrationCutShort(dir)
 	return f, err
 }
 
-// stagingHolds reports whether a staging dir holding anything is there. An
-// empty one is what a move into the state dir cut short as it ended leaves,
-// everything moved but the dir itself, which it removes.
-func stagingHolds(staging string) (bool, error) {
+// removeEmptyStaging removes the staging dir when it is there holding
+// nothing: what a move into the state dir cut short as it ended leaves,
+// everything moved but the dir itself.
+func removeEmptyStaging(staging string) error {
 	names, err := entryNames(staging)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return false, nil
+		return nil
 	case err != nil:
-		return false, fmt.Errorf("look for %s: %w", staging, err)
+		return fmt.Errorf("look for %s: %w", staging, err)
 	case len(names) > 0:
-		return true, nil
+		return nil
 	}
-	return false, os.Remove(staging)
+	return os.Remove(staging)
 }
 
 func readIndexKind(dir string) (indexKind, error) {
@@ -134,12 +144,14 @@ func (f found) course() (Course, error) {
 		return 0, refused(ErrBothStates, bothStatesCopy, f.dir, f.tmuxDir)
 	case f.index == tmuxIndex:
 		return Migrated, nil
-	case f.hasTmuxDir && f.hasStaging && f.index == zmxIndex:
+	case f.cutShort && f.index == zmxIndex:
 		return 0, refused(ErrStagingBesideState, stagingBesideStateCopy, f.staging, f.dir)
-	case f.hasTmuxDir && f.hasStaging:
+	case f.cutShort:
 		return Finished, nil
-	case f.hasTmuxDir:
+	case f.hasTmuxDir && f.index == zmxIndex:
 		return AlreadyMigrated, nil
+	case f.hasTmuxDir:
+		return 0, refused(ErrMigratedStateGone, migratedStateGoneCopy, f.dir, f.tmuxDir)
 	case f.index == zmxIndex:
 		return NotTmux, nil
 	}

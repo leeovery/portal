@@ -276,7 +276,7 @@ func assertMigrated(t *testing.T, w *runWorld, o migrate.Outcome, tmuxState map[
 }
 
 func TestRun_MigratesInFull(t *testing.T) {
-	t.Run("it stops tmux, waits out its daemon, backs up, plans, builds, rewrites and swaps, in that order", func(t *testing.T) {
+	t.Run("it lists zmx's sessions, stops tmux, waits out its daemon, then backs up, plans, builds, rewrites and swaps, in that order", func(t *testing.T) {
 		sink := logtest.Install(t)
 		w := newRunWorld(t).withTmuxState()
 		w.daemon = until(time.Second, readRunning, readDead)
@@ -287,13 +287,12 @@ func TestRun_MigratesInFull(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 
-		if got, want := w.stepNames(), []string{"answering", "remove hooks", "kill saver", "identify", "live"}; !slices.Equal(got, want) {
+		if got, want := w.stepNames(), []string{"live", "answering", "remove hooks", "kill saver", "identify"}; !slices.Equal(got, want) {
 			t.Fatalf("steps = %v, want %v", got, want)
 		}
 		for _, s := range w.steps {
-			wantBackup := s.name == "live"
-			if s.backedUp != wantBackup || s.staged {
-				t.Errorf("at %s: backed up %v, staged %v; want backed up %v and nothing staged", s.name, s.backedUp, s.staged, wantBackup)
+			if s.backedUp || s.staged {
+				t.Errorf("at %s: backed up %v, staged %v; want the backup and the build after the daemon's exit", s.name, s.backedUp, s.staged)
 			}
 		}
 		if len(w.told) != 1 || w.told[0] != daemonPID {
@@ -339,11 +338,56 @@ func TestRun_MigratesInFull(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 
-		if got, want := w.stepNames(), []string{"answering", "identify", "live"}; !slices.Equal(got, want) {
+		if got, want := w.stepNames(), []string{"live", "answering", "identify"}; !slices.Equal(got, want) {
 			t.Errorf("steps = %v, want %v", got, want)
 		}
 		assertMigrated(t, w, o, tmuxState, runHooks)
 		sink.Records().Matching("migrate", "no tmux server").Only(t, "no tmux server")
+	})
+
+	t.Run("it plans from the index the tmux version's daemon flushed as it exited", func(t *testing.T) {
+		w := newRunWorld(t).withTmuxState()
+		flushed := append(runSessions(), session("quarry", pane(0, codeDir+"quarry")))
+		w.daemon = func(time.Duration) reading {
+			if w.clock.naps > 0 {
+				return readDead
+			}
+			legacyAt(t, w.dir, flushed, nil)
+			return readRunning
+		}
+
+		o := w.migrated()
+
+		if got := namesOf(o.Plan); !slices.Contains(got, "quarry") {
+			t.Errorf("planned %v, want the session the daemon's flush saved", got)
+		}
+	})
+
+	t.Run("it logs nothing between its renames, not even a sync that failed", func(t *testing.T) {
+		sink := logtest.Install(t)
+		w := newRunWorld(t).withTmuxState()
+		// Each mark is the records logged by the sync after a rename: the
+		// first finds the state dir gone, the second the staging dir.
+		var first, second []logtest.Record
+		fileutil.SetDirSyncForTest(t, func(dir string) error {
+			switch {
+			case dir != w.root || !present(t, w.tmuxDir):
+			case first == nil && !present(t, w.dir):
+				first = append([]logtest.Record{}, sink.Records()...)
+			case first != nil && second == nil && !present(t, w.staging):
+				second = append([]logtest.Record{}, sink.Records()...)
+			}
+			return syscall.EIO
+		})
+
+		w.migrated()
+
+		if first == nil || second == nil {
+			t.Fatalf("saw the syncs after the renames: first %v, second %v; want both", first != nil, second != nil)
+		}
+		if logged := second[len(first):]; len(logged) != 0 {
+			t.Errorf("logged %v between the renames, want nothing: a log line makes the state dir", logged)
+		}
 	})
 
 	t.Run("it migrates with no hooks.json, keeping no backup", func(t *testing.T) {
@@ -400,38 +444,97 @@ func TestRun_MigratesInFull(t *testing.T) {
 }
 
 func TestRun_RefusesWritingNothing(t *testing.T) {
-	stoppedBeforeTheBackup := []string{"answering", "remove hooks", "kill saver", "identify"}
+	stopped := []string{"live", "answering", "remove hooks", "kill saver", "identify"}
 	for _, tc := range []struct {
 		name    string
 		arrange func(w *runWorld)
 		is      error
-		says    string
+		says    func(w *runWorld) string
 		steps   []string
 	}{
+		// Refused before the tmux side is touched: Portal's tmux hooks stay
+		// set and its saver running, so the tmux version saves as it did.
+		{
+			name:    "hooks.json doesn't parse",
+			arrange: func(w *runWorld) { writeFile(w.t, w.hooksFile, `{"tokLan": `) },
+			is:      hooks.ErrMalformed,
+			says: func(w *runWorld) string {
+				return "Portal can't migrate: " + w.hooksFile + " doesn't parse, so nothing was migrated: unexpected end of JSON input. Fix it, then run portal migrate again."
+			},
+		},
+		{
+			name: "the backup a run cut short kept doesn't parse",
+			arrange: func(w *runWorld) {
+				writeFile(w.t, migrate.HooksBackup(w.dir), `{"tokLan": `)
+			},
+			is: hooks.ErrMalformed,
+			says: func(w *runWorld) string {
+				return "Portal can't migrate: " + migrate.HooksBackup(w.dir) + " doesn't parse"
+			},
+		},
+		{
+			name:    "the version 1 index won't read",
+			arrange: func(w *runWorld) { writeFile(w.t, sessionindex.Path(w.dir), `{"version": 1, "sessions": []}`) },
+			says: func(*runWorld) string {
+				return "portal migrate stopped: the tmux version's sessions.json has no saved_at. Once that's fixed, run portal migrate again: it picks up where this run stopped."
+			},
+		},
+		{
+			name:    "zmx's sessions can't be listed",
+			arrange: func(w *runWorld) { w.liveErr = errors.New("zmx: permission denied") },
+			says: func(*runWorld) string {
+				return "Portal can't migrate: zmx's sessions can't be listed: zmx: permission denied. Nothing was changed."
+			},
+			steps: []string{"live"},
+		},
 		{
 			name:    "Portal's tmux hooks can't be removed",
 			arrange: func(w *runWorld) { w.tmux.hooksErr = errors.New("tmux show-hooks -g pane-focus-out: exit status 1") },
-			says:    "Portal couldn't remove its tmux hooks, so nothing was migrated: tmux show-hooks -g pane-focus-out: exit status 1. Run portal migrate again.",
-			steps:   []string{"answering", "remove hooks"},
+			says: func(*runWorld) string {
+				return "Portal couldn't remove its tmux hooks, so nothing was migrated: tmux show-hooks -g pane-focus-out: exit status 1. Run portal migrate again."
+			},
+			steps: []string{"live", "answering", "remove hooks"},
 		},
 		{
 			name:    "the saver can't be killed",
 			arrange: func(w *runWorld) { w.tmux.saverErr = errors.New("tmux kill-session: exit status 1") },
-			says:    "Portal couldn't stop the tmux version's saver (_portal-saver), so nothing was migrated: tmux kill-session: exit status 1. Run portal migrate again.",
-			steps:   []string{"answering", "remove hooks", "kill saver"},
+			says: func(*runWorld) string {
+				return "Portal couldn't stop the tmux version's saver (_portal-saver), so nothing was migrated: tmux kill-session: exit status 1. Run portal migrate again."
+			},
+			steps: []string{"live", "answering", "remove hooks", "kill saver"},
 		},
 		{
 			name:    "the daemon is still running at the bound",
 			arrange: func(w *runWorld) { w.daemon = always(readRunning) },
 			is:      migrate.ErrDaemonRunning,
-			steps:   stoppedBeforeTheBackup,
+			says: func(*runWorld) string {
+				return "The tmux version's save daemon (pid 4242) is still running 30s after its saver was stopped, so nothing was migrated."
+			},
+			steps: stopped,
 		},
 		{
-			name:    "hooks.json doesn't parse",
-			arrange: func(w *runWorld) { writeFile(w.t, w.hooksFile, `{"tokLan": `) },
-			is:      hooks.ErrMalformed,
-			says:    "Portal can't migrate: hooks.json at ",
-			steps:   stoppedBeforeTheBackup,
+			name: "the daemon is still running at the bound with no saver to stop",
+			arrange: func(w *runWorld) {
+				w.daemon = always(readRunning)
+				w.tmux.saver = false
+			},
+			is: migrate.ErrDaemonRunning,
+			says: func(*runWorld) string {
+				return "The tmux version's save daemon (pid 4242) is running with no saver Portal could stop, so nothing was migrated."
+			},
+			steps: stopped,
+		},
+		{
+			name: "the daemon is still running at the bound with no tmux server answering",
+			arrange: func(w *runWorld) {
+				w.daemon = always(readRunning)
+				w.tmux.answering = false
+			},
+			is: migrate.ErrDaemonRunning,
+			says: func(*runWorld) string {
+				return "The tmux version's save daemon (pid 4242) is running with no saver Portal could stop, so nothing was migrated."
+			},
+			steps: []string{"live", "answering", "identify"},
 		},
 	} {
 		t.Run("it stops when "+tc.name, func(t *testing.T) {
@@ -442,8 +545,8 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 
 			_, err := w.run()
 
-			if err == nil || tc.is != nil && !errors.Is(err, tc.is) || !strings.HasPrefix(err.Error(), tc.says) {
-				t.Fatalf("Run = %v; want a refusal matching %v, saying %q", err, tc.is, tc.says)
+			if says := tc.says(w); err == nil || tc.is != nil && !errors.Is(err, tc.is) || !strings.HasPrefix(err.Error(), says) {
+				t.Fatalf("Run = %v; want a refusal matching %v, saying %q", err, tc.is, says)
 			}
 			if got := w.stepNames(); !slices.Equal(got, tc.steps) {
 				t.Errorf("steps = %v, want %v", got, tc.steps)
@@ -456,20 +559,24 @@ func TestRun_RefusesWritingNothing(t *testing.T) {
 		})
 	}
 
-	t.Run("it stops before building when zmx's sessions can't be listed", func(t *testing.T) {
+	t.Run("it backs up no hooks.json that stopped parsing while it waited for the daemon", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()
-		w.liveErr = errors.New("zmx: permission denied")
-		hooksBefore := readBytes(t, w.hooksFile)
+		w.daemon = func(time.Duration) reading {
+			writeFile(t, w.hooksFile, `{"tokLan": `)
+			return readDead
+		}
 		indexBefore := readBytes(t, sessionindex.Path(w.dir))
 
 		_, err := w.run()
 
-		if want := "Portal can't migrate: zmx's sessions can't be listed, so nothing was migrated: zmx: permission denied"; err == nil || err.Error() != want {
-			t.Fatalf("Run = %v; want %q", err, want)
+		if !errors.Is(err, hooks.ErrMalformed) {
+			t.Fatalf("Run = %v; want hooks.json refused", err)
 		}
-		assertNotSwapped(t, w, hooksBefore, indexBefore)
-		if present(t, w.staging) {
-			t.Error("a staging dir was made")
+		if present(t, migrate.HooksBackup(w.dir)) || present(t, w.staging) {
+			t.Error("a backup or a staging dir was written: a backup that doesn't parse would stop every re-run")
+		}
+		if got := readBytes(t, sessionindex.Path(w.dir)); !bytes.Equal(got, indexBefore) || present(t, w.tmuxDir) {
+			t.Error("the state dir was swapped")
 		}
 	})
 
@@ -681,14 +788,49 @@ func TestRun_ReRuns(t *testing.T) {
 
 		_, err := w.run()
 
-		if !errors.Is(err, migrate.ErrBothStates) || !strings.Contains(err.Error(), w.dir+" is still") || !strings.Contains(err.Error(), w.tmuxDir) {
-			t.Fatalf("Run = %v; want ErrBothStates naming both dirs", err)
+		// Moving state-tmux/ aside instead would leave the next run to back
+		// up hooks.json as rewritten, and strip every key it moved.
+		want := "Portal can't migrate: " + w.dir + " is still the tmux version's state, but " + w.tmuxDir + " is there already from an earlier migration. Nothing was changed. Move " + w.dir + " aside, and keep " + w.tmuxDir + ": it holds the backup hooks.json was migrated from."
+		if !errors.Is(err, migrate.ErrBothStates) || err.Error() != want {
+			t.Fatalf("Run = %v; want ErrBothStates saying %q", err, want)
 		}
 		if len(w.steps) != 0 {
 			t.Errorf("steps = %v; want nothing reached", w.steps)
 		}
 		assertUnchanged(t, w, before, "refused")
 	})
+
+	for name, arrange := range map[string]func(w *runWorld){
+		"no state dir": func(w *runWorld) {
+			if err := os.RemoveAll(w.dir); err != nil {
+				w.t.Fatal(err)
+			}
+		},
+		"a state dir holding only Portal's log": func(w *runWorld) {
+			if err := os.RemoveAll(w.dir); err != nil {
+				w.t.Fatal(err)
+			}
+			writeFile(w.t, state.PortalLog(w.dir), "a log line\n")
+		},
+	} {
+		t.Run("it refuses state-tmux/ beside "+name+", naming both", func(t *testing.T) {
+			w := newRunWorld(t).withTmuxState()
+			w.migrated()
+			arrange(w)
+			before := w.tree()
+
+			o, err := w.run()
+
+			want := "Portal can't migrate: " + w.tmuxDir + " is there from an earlier migration, but " + w.dir + " holds none of the state it migrated. Nothing was changed."
+			if !errors.Is(err, migrate.ErrMigratedStateGone) || !strings.HasPrefix(err.Error(), want) || o.Course.Bootstraps() {
+				t.Fatalf("Run = %v, %v; want ErrMigratedStateGone saying %q, and no bootstrap", o.Course, err, want)
+			}
+			if len(w.steps) != 0 {
+				t.Errorf("steps = %v; want nothing reached", w.steps)
+			}
+			assertUnchanged(t, w, before, "refused")
+		})
+	}
 
 	t.Run("it refuses a staging dir beside state-tmux/ and a state dir written since", func(t *testing.T) {
 		w := newRunWorld(t).withTmuxState()

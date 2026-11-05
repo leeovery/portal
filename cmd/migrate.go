@@ -25,7 +25,8 @@ type MigrateDeps struct {
 	Tmux   migrate.TmuxServer
 	Daemon migrate.Daemon
 	// Bootstrap runs the bootstrap a run ends with, its progress told on
-	// stderr, and returns what its restore made and its warnings.
+	// stderr, and returns how its restore ended, with what it restored, and
+	// its warnings.
 	Bootstrap func(ctx context.Context, stderr io.Writer) (migrate.Restore, []bootstrap.Warning, error)
 }
 
@@ -70,7 +71,7 @@ func init() {
 func runMigrate(ctx context.Context, deps MigrateDeps, stdout, stderr io.Writer) error {
 	cfg, err := migrateConfig(deps, stderr)
 	if err != nil {
-		return err
+		return migrate.Stopped(err)
 	}
 	outcome, err := migrate.Run(ctx, cfg)
 	if err != nil {
@@ -79,18 +80,29 @@ func runMigrate(ctx context.Context, deps MigrateDeps, stdout, stderr io.Writer)
 	var restored migrate.Restore
 	var bootErr error
 	if outcome.Course.Bootstraps() {
-		var warnings []bootstrap.Warning
-		restored, warnings, bootErr = deps.Bootstrap(ctx, stderr)
-		for _, w := range warnings {
-			bootstrapWarnings.Add(w)
-		}
-		bootstrapWarnings.EmitTo(stderr)
+		restored, bootErr = bootstrapMigrated(ctx, deps, cfg, stderr)
 	}
 	shown := func(path string) string { return resolver.AbbreviateHome(resolver.ProcessHome(), path) }
 	if _, err := fmt.Fprint(stdout, migrate.Report(outcome, restored, shown)); err != nil {
 		return err
 	}
 	return bootErr
+}
+
+// bootstrapMigrated runs the bootstrap on the state dir cfg names, showing
+// its warnings, and returns what it restored, whether any session waits on
+// its resume panel, read before it, and what it left, read after it from the
+// index, with its fatal.
+func bootstrapMigrated(ctx context.Context, deps MigrateDeps, cfg migrate.Config, stderr io.Writer) (migrate.Restore, error) {
+	waits := migrate.Waits(cfg)
+	restored, warnings, err := deps.Bootstrap(ctx, stderr)
+	for _, w := range warnings {
+		bootstrapWarnings.Add(w)
+	}
+	bootstrapWarnings.EmitTo(stderr)
+	restored.Waits = waits
+	restored.Left, restored.LeftUnread = migrate.Left(ctx, cfg)
+	return restored, err
 }
 
 // migrateConfig is the run over the state dir and hooks.json the environment
@@ -138,11 +150,13 @@ func sessionNames(ctx context.Context, b backend.Backend) ([]string, error) {
 }
 
 // migrateBootstrap runs the bootstrap a run ends with, when one is owed, as
-// any command runs it off the picker, and returns what its restore made.
+// any command runs it off the picker, and returns how its restore ended.
+// Like any command's, it runs none when none is owed, whatever the index
+// still owes: a re-run forces no restore.
 func migrateBootstrap(ctx context.Context, stderr io.Writer) (migrate.Restore, []bootstrap.Warning, error) {
 	p, err := newProductionBootstrap()
 	if err != nil {
-		return migrate.Restore{Unfinished: true}, nil, err
+		return migrate.Restore{End: migrate.RestoreStopped}, nil, err
 	}
 	if !p.gate.Owed(ctx) {
 		return migrate.Restore{}, nil, nil
@@ -150,23 +164,28 @@ func migrateBootstrap(ctx context.Context, stderr io.Writer) (migrate.Restore, [
 	var restored *restore.Result
 	runner, err := p.runnerTelling(func(res restore.Result) { restored = &res })
 	if err != nil {
-		return migrate.Restore{Unfinished: true}, nil, err
+		return migrate.Restore{End: migrate.RestoreStopped}, nil, err
 	}
 	warnings, err := runner.Run(bootstrap.WithProgressEmitter(ctx, waitNotice(stderr)))
 	return restoreOf(restored, err), warnings, err
 }
 
-// restoreOf is what a bootstrap that ended with err made of the saved
-// sessions, res its restore's result, nil when it ran none. One that ran
-// none is unfinished when it ended on a fatal, and found none owed under its
-// lock otherwise; one whose restore couldn't read sessions.json or list zmx's
-// sessions restored nothing, and left the restore owed.
+// restoreOf is how the restore of a bootstrap that ended with err ended, res
+// its result, nil when it ran none. A fatal, before the restore or during it,
+// stops it, after the sessions it made; with none, a bootstrap that ran no
+// restore found none owed under its lock. A restore that couldn't read
+// sessions.json or list zmx's sessions made nothing, for the reason the
+// bootstrap's warning gives.
 func restoreOf(res *restore.Result, err error) migrate.Restore {
-	if res == nil {
-		return migrate.Restore{Unfinished: err != nil}
+	switch {
+	case err != nil && res != nil:
+		return migrate.Restore{End: migrate.RestoreStopped, Restored: res.Restored}
+	case err != nil:
+		return migrate.Restore{End: migrate.RestoreStopped}
+	case res == nil:
+		return migrate.Restore{}
+	case res.IndexErr != nil || res.ListErr != nil:
+		return migrate.Restore{End: migrate.RestoreUnread}
 	}
-	if res.IndexErr != nil || res.ListErr != nil {
-		return migrate.Restore{Unfinished: true}
-	}
-	return migrate.Restore{Ran: true, Restored: res.Restored, Failed: res.Failed}
+	return migrate.Restore{End: migrate.RestoreRan, Restored: res.Restored}
 }

@@ -36,15 +36,17 @@ type Daemon struct {
 
 // AwaitExit waits, within DaemonBound, for the daemon the tmux version's
 // state dir dir names in daemon.pid to exit, and returns its pid, zero when
-// it names none. Nothing is signalled: killing the saver session sent the
-// daemon tmux's SIGHUP, on which it flushes and exits. The pid is proved the
-// daemon as it is read, its process's argv a portal state daemon's; a pid
-// that names no process, or one that isn't the daemon, as a pid reused, has
-// exited. waiting hears the pid once, when the daemon is first read running.
-// A daemon still running at the bound, or one whose process can't be read
-// until then, is refused with ErrDaemonRunning. A daemon.pid that can't be
-// read is an error; one absent, or not a number, names no daemon.
-func (d Daemon) AwaitExit(ctx context.Context, dir string, waiting func(pid int)) (int, error) {
+// it names none. Nothing is signalled: killing the saver session, as stopped
+// says a run did, sent the daemon tmux's SIGHUP, on which it flushes and
+// exits; with no saver killed, a daemon outside one exits as it finds itself
+// no saver's. The pid is proved the daemon as it is read, its process's argv
+// a portal state daemon's; a pid that names no process, or one that isn't
+// the daemon, as a pid reused, has exited. waiting hears the pid once, when
+// the daemon is first read running. A daemon still running at the bound, or
+// one whose process can't be read until then, is refused with
+// ErrDaemonRunning, worded by whether a saver was stopped. A daemon.pid that
+// can't be read is an error; one absent, or not a number, names no daemon.
+func (d Daemon) AwaitExit(ctx context.Context, dir string, stopped bool, waiting func(pid int)) (int, error) {
 	pid, err := state.ReadPIDFile(dir)
 	if _, unnumbered := errors.AsType[*strconv.NumError](err); errors.Is(err, state.ErrPIDFileAbsent) || unnumbered {
 		return 0, nil
@@ -64,7 +66,7 @@ func (d Daemon) AwaitExit(ctx context.Context, dir string, waiting func(pid int)
 			told = true
 		}
 		if !d.now().Before(deadline) {
-			return pid, stillRunning(pid, err)
+			return pid, stillRunning(pid, stopped, err)
 		}
 		if err := d.sleep(ctx, daemonPoll); err != nil {
 			return pid, fmt.Errorf("wait for the tmux version's daemon (pid %d): %w", pid, err)
@@ -73,11 +75,14 @@ func (d Daemon) AwaitExit(ctx context.Context, dir string, waiting func(pid int)
 }
 
 // stillRunning refuses a run while the daemon pid runs, or can't be told to
-// have exited, its process unreadable for unread.
-func stillRunning(pid int, unread error) error {
+// have exited, its process unreadable for unread, its saver stopped or not.
+func stillRunning(pid int, stopped bool, unread error) error {
 	why := ""
 	if unread != nil {
 		why = fmt.Sprintf(daemonUnreadCopy, unread)
+	}
+	if !stopped {
+		return refused(ErrDaemonRunning, daemonUnstoppedCopy, pid, why)
 	}
 	return refused(ErrDaemonRunning, daemonRunningCopy, pid, DaemonBound, why)
 }

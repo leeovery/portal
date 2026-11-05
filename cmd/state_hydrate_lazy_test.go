@@ -377,6 +377,45 @@ func TestHydrateLazy_FiresTheHookOnEveryTailWhenTheFlagCannotBeRaised(t *testing
 	}
 }
 
+// A session restore asked to wait came from a tmux session that may still
+// run the program its hook resumes: a park that fails gives it its shell,
+// never the hook, whatever the hook's mode.
+func TestHydrateLazy_ARestoreAskingLazyGivesTheShellWhenTheFlagCannotBeRaised(t *testing.T) {
+	refusals := map[string]func(t *testing.T, cfg *hydrateConfig){
+		"the executable can't be resolved": func(_ *testing.T, cfg *hydrateConfig) {
+			cfg.ResolveExe = func() (string, error) { return "", errors.New("no executable") }
+		},
+		"the flag can't be raised": func(_ *testing.T, cfg *hydrateConfig) {
+			cfg.SetPending = func(string, string) error { return errors.New("disk full") }
+		},
+	}
+	for name, refuse := range refusals {
+		for _, mode := range []resumemode.Mode{resumemode.Eager, resumemode.Lazy} {
+			for _, tail := range hydrateTails() {
+				t.Run(name+"/"+mode.String()+"/"+tail.name, func(t *testing.T) {
+					exec := &stubExecShell{}
+					logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+					cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", mode), lazyPrefs(t, ""), exec)
+					cfg.Logger = logger
+					cfg.Lazy = true
+					refuse(t, &cfg)
+
+					lazyRun(t, tail, cfg)
+
+					if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"-zsh"}) {
+						t.Errorf("exec = %q %v, want the login shell -zsh, the hook unfired", exec.target, exec.args)
+					}
+					assertOneFlagRefusalWarn(t, sink, hydrateSession)
+					if warn := execLogLine(t, sink.Body(), "WARN", "set resume pending flag failed"); !strings.Contains(warn, "its hook unfired") {
+						t.Errorf("refusal WARN = %q, want it saying the hook goes unfired", warn)
+					}
+					assertNoFlag(t)
+				})
+			}
+		}
+	}
+}
+
 func TestHydrateLazy_ResolvesTheShippedDefaultWhenThePrefsCannotBeRead(t *testing.T) {
 	unreadable := t.TempDir()
 	for name, load := range map[string]func() (*prefs.Store, error){

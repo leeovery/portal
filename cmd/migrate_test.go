@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/migrate"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -21,11 +24,14 @@ import (
 
 // migrateWorld is a state dir and hooks.json of the test's own, the zmx
 // backend, the tmux version's server and the bootstrap migrate ends with
-// staged, each noting it was reached.
+// staged, each noting it was reached. The bootstrap's restore makes the
+// sessions makes names, as zmx's.
 type migrateWorld struct {
 	dir, hooksFile string
+	backend        *backendtest.Fake
 	tmux           *fakeMigrateTmux
 	bootstraps     int
+	makes          []string
 	restored       migrate.Restore
 	warnings       []bootstrap.Warning
 	bootErr        error
@@ -37,16 +43,23 @@ func newMigrateWorld(t *testing.T) *migrateWorld {
 	w := &migrateWorld{
 		dir:       filepath.Join(t.TempDir(), "state"),
 		hooksFile: filepath.Join(t.TempDir(), "hooks.json"),
+		backend:   backendtest.New(),
 		tmux:      &fakeMigrateTmux{answering: true},
-		restored:  migrate.Restore{Ran: true, Restored: 1},
 	}
 	t.Setenv("PORTAL_STATE_DIR", w.dir)
 	t.Setenv("PORTAL_HOOKS_FILE", w.hooksFile)
-	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+	withBackendDeps(t, BackendDeps{Backend: w.backend})
 	withBootstrapDeps(t, BootstrapDeps{Owed: func(context.Context) bool {
 		t.Error("the root's bootstrap was asked whether one is owed")
 		return false
 	}})
+	return w
+}
+
+// restores has w's bootstrap restore the sessions named.
+func (w *migrateWorld) restores(names ...string) *migrateWorld {
+	w.makes = names
+	w.restored = migrate.Restore{End: migrate.RestoreRan, Restored: len(names)}
 	return w
 }
 
@@ -58,6 +71,9 @@ func (w *migrateWorld) stage(t *testing.T) {
 		Daemon: w.daemon,
 		Bootstrap: func(context.Context, io.Writer) (migrate.Restore, []bootstrap.Warning, error) {
 			w.bootstraps++
+			for _, name := range w.makes {
+				w.backend.Add(backend.Session{Name: name})
+			}
 			return w.restored, w.warnings, w.bootErr
 		},
 	})
@@ -73,6 +89,17 @@ func (w *migrateWorld) withTmuxState(t *testing.T) *migrateWorld {
 	writeTestFile(t, sessionindex.Path(w.dir), index)
 	writeTestFile(t, w.hooksFile, `{"tokLan": {"on-resume": "claude --resume lantern"}}`)
 	return w
+}
+
+// migrated runs w to a full migration whose bootstrap restores nothing,
+// then forgets that it bootstrapped.
+func (w *migrateWorld) migrated(t *testing.T) {
+	t.Helper()
+	w.stage(t)
+	if _, _, err := runRootCmd(t, "migrate"); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	w.bootstraps = 0
 }
 
 func writeTestFile(t *testing.T, path, content string) {
@@ -105,9 +132,22 @@ func (f *fakeMigrateTmux) KillSaver(context.Context) (bool, error) {
 	return true, nil
 }
 
+// keptLines are the report's last lines, where the tmux version's state and
+// hooks.json's backup are kept beside the state dir dir.
+func keptLines(dir string) string {
+	return "The tmux version's state is kept at " + state.TmuxStateDir(dir) + ".\n" +
+		"hooks.json's backup is at " + migrate.HooksBackup(state.TmuxStateDir(dir)) + ".\n"
+}
+
+// lanternLeft is the report's block naming lantern left to restore.
+const lanternLeft = "1 session left to restore, at Portal's next start or now with x <name>:\n" +
+	"  lantern\n"
+
+const panelLine = "Each one with a resume hook waits on its resume panel the first time you open it.\n"
+
 func TestMigrateCommand(t *testing.T) {
 	t.Run("it migrates a version 1 state past the state check and the root's bootstrap, then bootstraps and reports", func(t *testing.T) {
-		w := newMigrateWorld(t).withTmuxState(t)
+		w := newMigrateWorld(t).withTmuxState(t).restores("lantern")
 		w.stage(t)
 
 		stdout, _, err := runRootCmd(t, "migrate")
@@ -133,8 +173,8 @@ func TestMigrateCommand(t *testing.T) {
 		}
 		want := "Migrated 1 tmux session to 1 session.\n" +
 			"Moved 1 resume hook.\n" +
-			"Restored 1 session.\n" +
-			"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+			"Restored 1 session. Every saved session is restored.\n" +
+			panelLine +
 			"\n" +
 			"Sessions (name ← tmux name):\n" +
 			"  lantern ← lantern\n" +
@@ -142,10 +182,24 @@ func TestMigrateCommand(t *testing.T) {
 			"Resume hooks moved:\n" +
 			"  tokLan → lantern\n" +
 			"\n" +
-			"The tmux version's state is kept at " + state.TmuxStateDir(w.dir) + ".\n" +
-			"hooks.json's backup is at " + migrate.HooksBackup(state.TmuxStateDir(w.dir)) + ".\n"
+			keptLines(w.dir)
 		if stdout.String() != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+	})
+
+	t.Run("it names a session the restore didn't make as left, and what brings it back", func(t *testing.T) {
+		w := newMigrateWorld(t).withTmuxState(t).restores()
+		w.stage(t)
+
+		stdout, _, err := runRootCmd(t, "migrate")
+		if err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+
+		want := "Restored no sessions.\n" + panelLine + "\n" + lanternLeft + "\nSessions (name ← tmux name):\n"
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout:\n%s\nwant it holding:\n%s", stdout, want)
 		}
 	})
 
@@ -177,6 +231,64 @@ func TestMigrateCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("it finishes a migration cut short between its renames, then bootstraps and reports", func(t *testing.T) {
+		w := newMigrateWorld(t).withTmuxState(t)
+		w.migrated(t)
+		if err := os.Rename(w.dir, state.MigrationStagingDir(w.dir)); err != nil {
+			t.Fatal(err)
+		}
+		w.restores("lantern")
+
+		stdout, _, err := runRootCmd(t, "migrate")
+		if err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+
+		if w.bootstraps != 1 {
+			t.Errorf("bootstrapped %d times, want once", w.bootstraps)
+		}
+		want := "Finished a migration cut short: the migrated state is in place at " + w.dir + ".\n" +
+			"Restored 1 session. Every saved session is restored.\n" +
+			panelLine +
+			"\n" +
+			keptLines(w.dir)
+		if stdout.String() != want {
+			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+	})
+
+	t.Run("it reports a re-run owed no bootstrap from the index: the sessions left, and what brings them back", func(t *testing.T) {
+		w := newMigrateWorld(t).withTmuxState(t)
+		w.migrated(t)
+
+		stdout, _, err := runRootCmd(t, "migrate")
+		if err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+
+		want := "Already migrated.\n" + panelLine + "\n" + lanternLeft + "\n" + keptLines(w.dir)
+		if stdout.String() != want {
+			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+	})
+
+	t.Run("it reports a re-run with every session restored, and none waiting", func(t *testing.T) {
+		w := newMigrateWorld(t).withTmuxState(t)
+		w.migrated(t)
+		w.backend.Add(backend.Session{Name: "lantern"})
+		// As the helper's claim leaves it: owed nothing, resuming as its hook says.
+		writeTestFile(t, sessionindex.Path(w.dir), `{"version": 2, "saved_at": "2026-11-05T09:00:00Z", "sessions": [{"name": "lantern", "dir": "/srv/lantern"}]}`)
+
+		stdout, _, err := runRootCmd(t, "migrate")
+		if err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+
+		if want := "Already migrated.\nEvery saved session is restored.\n\n" + keptLines(w.dir); stdout.String() != want {
+			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+	})
+
 	t.Run("it tells of the wait for the tmux version's daemon on stderr", func(t *testing.T) {
 		w := newMigrateWorld(t).withTmuxState(t)
 		if err := state.WritePIDFile(w.dir, 4242); err != nil {
@@ -204,7 +316,7 @@ func TestMigrateCommand(t *testing.T) {
 
 	t.Run("it reports, then fails with the bootstrap's fatal", func(t *testing.T) {
 		w := newMigrateWorld(t).withTmuxState(t)
-		w.restored, w.bootErr = migrate.Restore{Unfinished: true}, errors.New("zmx not found on PATH")
+		w.restored, w.bootErr = migrate.Restore{End: migrate.RestoreStopped}, errors.New("zmx not found on PATH")
 		w.stage(t)
 
 		stdout, _, err := runRootCmd(t, "migrate")
@@ -212,8 +324,9 @@ func TestMigrateCommand(t *testing.T) {
 		if !errors.Is(err, w.bootErr) {
 			t.Errorf("migrate = %v, want the bootstrap's fatal", err)
 		}
-		if !strings.Contains(stdout.String(), "Couldn't restore the sessions yet; the next portal command tries again.\n") {
-			t.Errorf("stdout:\n%s\nwant the report, its restore unfinished", stdout)
+		want := "Couldn't restore the sessions: the error below says why.\n" + panelLine + "\n" + lanternLeft
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout:\n%s\nwant the report holding:\n%s", stdout, want)
 		}
 	})
 
@@ -226,6 +339,27 @@ func TestMigrateCommand(t *testing.T) {
 
 		if err != nil || !strings.HasPrefix(stderr.String(), "Portal state file unusable — restoration skipped.\n") {
 			t.Errorf("migrate = %v, stderr %q; want the warning", err, stderr)
+		}
+	})
+
+	t.Run("it words and logs a failure before the run as a run stopped", func(t *testing.T) {
+		newMigrateWorld(t).stage(t)
+		t.Setenv("PORTAL_STATE_DIR", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", "")
+		sink := logtest.Install(t)
+
+		stdout, _, err := runRootCmd(t, "migrate")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "portal migrate stopped: ") || !strings.HasSuffix(err.Error(), ". Once that's fixed, run portal migrate again: it picks up where this run stopped.") {
+			t.Fatalf("migrate = %v; want the failure worded as a run stopped", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want no report", stdout)
+		}
+		logged := sink.Records().Matching("migrate", "stopped").AtExactLevel(slog.LevelError).Only(t, "the failure")
+		if logged.ErrorAttr(t, "error").Error() != err.Error() {
+			t.Errorf("logged %v, want the failure returned", logged)
 		}
 	})
 
@@ -243,15 +377,16 @@ func TestRestoreOf(t *testing.T) {
 		err  error
 		want migrate.Restore
 	}{
-		"a restore made":                   {&restore.Result{Restored: 3, Failed: 1}, nil, migrate.Restore{Ran: true, Restored: 3, Failed: 1}},
-		"a restore made before a fatal":    {&restore.Result{Restored: 2}, fatal, migrate.Restore{Ran: true, Restored: 2}},
+		"a restore made, some failing":     {&restore.Result{Restored: 3, Failed: 1}, nil, migrate.Restore{End: migrate.RestoreRan, Restored: 3}},
+		"a restore stopped by a fatal":     {&restore.Result{Restored: 2, Unsupported: fatal}, fatal, migrate.Restore{End: migrate.RestoreStopped, Restored: 2}},
 		"no restore owed under the lock":   {nil, nil, migrate.Restore{}},
-		"a fatal before the restore":       {nil, fatal, migrate.Restore{Unfinished: true}},
-		"a sessions.json it couldn't read": {&restore.Result{IndexErr: errors.New("corrupt")}, nil, migrate.Restore{Unfinished: true}},
-		"zmx's sessions it couldn't list":  {&restore.Result{ListErr: errors.New("refused")}, nil, migrate.Restore{Unfinished: true}},
+		"a fatal before the restore":       {nil, fatal, migrate.Restore{End: migrate.RestoreStopped}},
+		"a sessions.json it couldn't read": {&restore.Result{IndexErr: errors.New("corrupt")}, nil, migrate.Restore{End: migrate.RestoreUnread}},
+		"zmx's sessions it couldn't list":  {&restore.Result{ListErr: errors.New("refused")}, nil, migrate.Restore{End: migrate.RestoreUnread}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := restoreOf(tc.res, tc.err); got != tc.want {
+			got := restoreOf(tc.res, tc.err)
+			if got.End != tc.want.End || got.Restored != tc.want.Restored {
 				t.Errorf("restoreOf = %+v, want %+v", got, tc.want)
 			}
 		})

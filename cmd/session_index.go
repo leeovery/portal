@@ -25,6 +25,16 @@ func (e legacyIndexError) Error() string {
 
 func (legacyIndexError) Unwrap() error { return sessionindex.ErrLegacyIndex }
 
+// migrationCutShortError is a portal migrate cut short between its renames,
+// the migrated state still in its staging dir.
+type migrationCutShortError struct {
+	staging string
+}
+
+func (e migrationCutShortError) Error() string {
+	return e.staging + " holds a migration cut short; run portal migrate to finish it"
+}
+
 // readSessionIndexIn reads sessions.json from the state directory dir; a
 // missing file is an empty index.
 func readSessionIndexIn(dir string) (sessionindex.Index, error) {
@@ -125,8 +135,9 @@ func forgetEntries(dir string, entries []sessionindex.Entry, via string) {
 }
 
 // refuseUnusableState stops a command while the state directory holds an
-// index this version must not touch, as refuseUnusableIndexIn judges it. A
-// state directory that cannot be resolved passes too.
+// index this version must not touch, or a migration is cut short beside it,
+// as refuseUnusableIndexIn judges them. A state directory that cannot be
+// resolved passes too.
 func refuseUnusableState() error {
 	dir, err := state.Dir()
 	if err != nil {
@@ -139,8 +150,16 @@ func refuseUnusableState() error {
 // version must not touch it: a version 1 sessions.json, or one that is corrupt
 // or from a newer version. A missing one passes. So does one that cannot be
 // read, which shows nothing to protect; a command that needs it fails on its
-// own.
+// own. It refuses too while a migration is cut short beside dir, or while it
+// can't tell: dir then holds no index of the migrated sessions, and a
+// bootstrap would start the saver on it.
 func refuseUnusableIndexIn(dir string) error {
+	switch cut, err := state.MigrationCutShort(dir); {
+	case err != nil:
+		return fmt.Errorf("state directory %s: %w", dir, err)
+	case cut:
+		return migrationCutShortError{staging: state.MigrationStagingDir(dir)}
+	}
 	_, err := readSessionIndexIn(dir)
 	if _, unreadable := errors.AsType[*fs.PathError](err); unreadable {
 		return nil

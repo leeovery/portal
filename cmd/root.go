@@ -40,7 +40,8 @@ var bootstrapExempt = map[string]bool{
 }
 
 // The state check spares version, which reads no state; doctor, which reports
-// an unusable sessions.json itself and writes none; current, which only reads
+// an unusable sessions.json, or a migration cut short, itself, and repairs
+// nothing on either; current, which only reads
 // it and shows the name alone when it can't, since footers run it on every
 // refresh; migrate, whose subject is the version 1 sessions.json the check
 // refuses, and which judges each state dir it finds itself; and the hidden

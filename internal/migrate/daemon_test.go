@@ -52,13 +52,15 @@ var (
 )
 
 // daemonWorld is the tmux version's state dir, its daemon read by the
-// answers of identify, on a fake clock.
+// answers of identify, on a fake clock, its saver stopped unless
+// unstopped.
 type daemonWorld struct {
-	dir      string
-	clock    *fakeClock
-	identify func(elapsed time.Duration) reading
-	asked    []int
-	told     []int
+	dir       string
+	clock     *fakeClock
+	identify  func(elapsed time.Duration) reading
+	unstopped bool
+	asked     []int
+	told      []int
 }
 
 func newDaemonWorld(t *testing.T, pidFile string, identify func(elapsed time.Duration) reading) *daemonWorld {
@@ -83,7 +85,7 @@ func (w *daemonWorld) daemon() migrate.Daemon {
 }
 
 func (w *daemonWorld) await(ctx context.Context) (int, error) {
-	return w.daemon().AwaitExit(ctx, w.dir, func(pid int) { w.told = append(w.told, pid) })
+	return w.daemon().AwaitExit(ctx, w.dir, !w.unstopped, func(pid int) { w.told = append(w.told, pid) })
 }
 
 // always answers r on every read.
@@ -214,6 +216,21 @@ func TestAwaitExit(t *testing.T) {
 		}
 	})
 
+	t.Run("it refuses a daemon still running with no saver stopped, saying so", func(t *testing.T) {
+		w := newDaemonWorld(t, pidFile, always(readRunning))
+		w.unstopped = true
+
+		_, err := w.await(context.Background())
+
+		if !errors.Is(err, migrate.ErrDaemonRunning) || w.clock.elapsed() != migrate.DaemonBound {
+			t.Fatalf("AwaitExit = %v after %v; want ErrDaemonRunning at the bound", err, w.clock.elapsed())
+		}
+		want := "The tmux version's save daemon (pid 4242) is running with no saver Portal could stop, so nothing was migrated. Run portal migrate again once it has exited."
+		if err.Error() != want {
+			t.Errorf("refusal = %q, want %q", err, want)
+		}
+	})
+
 	t.Run("it refuses a daemon it can't read at the bound, saying why", func(t *testing.T) {
 		w := newDaemonWorld(t, pidFile, always(readFailing))
 
@@ -247,7 +264,7 @@ func TestAwaitExit(t *testing.T) {
 		daemon := w.daemon()
 		daemon.Sleep = nil
 
-		_, err := daemon.AwaitExit(ctx, w.dir, func(int) {})
+		_, err := daemon.AwaitExit(ctx, w.dir, true, func(int) {})
 
 		if !errors.Is(err, context.Canceled) || errors.Is(err, migrate.ErrDaemonRunning) {
 			t.Errorf("AwaitExit = %v; want the context's end", err)
@@ -257,7 +274,7 @@ func TestAwaitExit(t *testing.T) {
 	t.Run("it proves the pid by the process table by default", func(t *testing.T) {
 		w := newDaemonWorld(t, strconv.Itoa(os.Getpid()), nil)
 
-		pid, err := migrate.Daemon{}.AwaitExit(context.Background(), w.dir, func(int) {})
+		pid, err := migrate.Daemon{}.AwaitExit(context.Background(), w.dir, true, func(int) {})
 
 		if pid != os.Getpid() || err != nil {
 			t.Errorf("AwaitExit = %d, %v; want the test binary, no daemon, read as exited", pid, err)

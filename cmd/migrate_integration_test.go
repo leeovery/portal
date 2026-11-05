@@ -390,7 +390,7 @@ func TestMigrateAgainstZmx(t *testing.T) {
 	t.Run("it reports the migration", func(t *testing.T) {
 		want := "Migrated 2 tmux sessions to 2 sessions.\n" +
 			"Moved 1 resume hook. Removed 1, kept in the backup.\n" +
-			"Restored 2 sessions.\n" +
+			"Restored 2 sessions. Every saved session is restored.\n" +
 			"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
 			"\n" +
 			"Sessions (name ← tmux name):\n" +
@@ -415,7 +415,7 @@ func TestMigrateAgainstZmx(t *testing.T) {
 
 		again, _ := w.mustMigrate(t)
 
-		if want := "Already migrated.\nNo restore was owed: the sessions are restored already.\n\n" + w.keptReport(); again != want {
+		if want := "Already migrated.\nEvery saved session is restored.\n\n" + w.keptReport(); again != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", again, want)
 		}
 		if !maps.Equal(treeOf(t, w.tmuxDir), kept) {
@@ -459,10 +459,22 @@ func TestMigrateCutShortBetweenItsRenamesAgainstZmx(t *testing.T) {
 		t.Fatalf("zmx sessions = %v, want none before the bootstrap", live)
 	}
 
+	// Until a run finishes the migration, a command stops on it rather than
+	// bootstrap the state dir holding none of the migrated sessions.
+	hooksBefore := readFileOrEmpty(t, w.hooksFile)
+	said, err := w.command("list").CombinedOutput()
+	if want := staging + " holds a migration cut short; run portal migrate to finish it"; err == nil || !strings.Contains(string(said), want) {
+		t.Fatalf("portal list = %v, saying %q; want it stopped, saying %q", err, said, want)
+	}
+	if live := w.liveSessions(t); len(live) != 0 {
+		t.Fatalf("zmx sessions = %v after portal list, want none: no bootstrap, no saver", live)
+	}
+	hookstest.AssertHooksFileUnchanged(t, w.hooksFile, hooksBefore, "the stopped command")
+
 	stdout, _ := w.mustMigrate(t)
 
 	want := "Finished a migration cut short: the migrated state is in place at " + w.dir.StateDir + ".\n" +
-		"Restored 2 sessions.\n" +
+		"Restored 2 sessions. Every saved session is restored.\n" +
 		"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
 		"\n" + w.keptReport()
 	if stdout != want {

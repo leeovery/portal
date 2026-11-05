@@ -1,6 +1,7 @@
 package migrate_test
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func migratedOutcome(plan migrate.Plan) migrate.Outcome {
 
 const wantMigratedReport = `Migrated 4 tmux sessions to 5 sessions. Skipped 1 tmux session.
 Moved 1 resume hook. Removed 4, kept in the backup.
-Restored 5 sessions.
+Restored 5 sessions. Every saved session is restored.
 Each one with a resume hook waits on its resume panel the first time you open it.
 
 Sessions (name ← tmux name):
@@ -88,13 +89,15 @@ hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.
 
 func TestReport(t *testing.T) {
 	t.Run("it reports a migration: a summary, the restore, each session and what changed, and where the old state is", func(t *testing.T) {
-		got := migrate.Report(migratedOutcome(reportPlan(t)), migrate.Restore{Ran: true, Restored: 5}, shown)
+		got := migrate.Report(migratedOutcome(reportPlan(t)), migrate.Restore{End: migrate.RestoreRan, Restored: 5, Waits: true}, shown)
 
 		if got != wantMigratedReport {
 			t.Errorf("report:\n%s\nwant:\n%s", got, wantMigratedReport)
 		}
 	})
 
+	landed := migrate.Outcome{Course: migrate.AlreadyMigrated, StateDir: reportState, TmuxDir: reportTmux}
+	const kept = "\nThe tmux version's state is kept at ~/.config/portal/state-tmux.\n"
 	for name, tc := range map[string]struct {
 		outcome migrate.Outcome
 		restore migrate.Restore
@@ -110,37 +113,65 @@ func TestReport(t *testing.T) {
 		},
 		"a run cut short, finished": {
 			outcome: migrate.Outcome{Course: migrate.Finished, StateDir: reportState, TmuxDir: reportTmux, Backup: reportBackup},
-			restore: migrate.Restore{Ran: true, Restored: 3},
+			restore: migrate.Restore{End: migrate.RestoreRan, Restored: 3, Waits: true},
 			want: "Finished a migration cut short: the migrated state is in place at ~/.config/portal/state.\n" +
-				"Restored 3 sessions.\n" +
+				"Restored 3 sessions. Every saved session is restored.\n" +
+				"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
+				kept +
+				"hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.\n",
+		},
+		"a migration landed, owed no restore, every session restored": {
+			outcome: landed,
+			want:    "Already migrated.\nEvery saved session is restored.\n" + kept,
+		},
+		"a migration landed, owed no restore, sessions left that wait on their panel": {
+			outcome: landed,
+			restore: migrate.Restore{Left: []string{"lantern", "quarry-Gen001"}, Waits: true},
+			want: "Already migrated.\n" +
 				"Each one with a resume hook waits on its resume panel the first time you open it.\n" +
 				"\n" +
-				"The tmux version's state is kept at ~/.config/portal/state-tmux.\n" +
-				"hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.\n",
+				"2 sessions left to restore, at Portal's next start or now with x <name>:\n" +
+				"  lantern\n" +
+				"  quarry-Gen001\n" +
+				kept,
 		},
-		"a migration landed, with no hooks.json to back up and no restore owed": {
-			outcome: migrate.Outcome{Course: migrate.AlreadyMigrated, StateDir: reportState, TmuxDir: reportTmux},
+		"a restore with a session it couldn't make": {
+			outcome: landed,
+			restore: migrate.Restore{End: migrate.RestoreRan, Restored: 2, Left: []string{"bell"}},
 			want: "Already migrated.\n" +
-				"No restore was owed: the sessions are restored already.\n" +
+				"Restored 2 sessions.\n" +
 				"\n" +
-				"The tmux version's state is kept at ~/.config/portal/state-tmux.\n",
+				"1 session left to restore, at Portal's next start or now with x <name>:\n" +
+				"  bell\n" +
+				kept,
 		},
-		"a migration landed, its restore not made": {
-			outcome: migrate.Outcome{Course: migrate.AlreadyMigrated, StateDir: reportState, TmuxDir: reportTmux, Backup: reportBackup},
-			restore: migrate.Restore{Unfinished: true},
+		"a restore the bootstrap's fatal stopped part way": {
+			outcome: landed,
+			restore: migrate.Restore{End: migrate.RestoreStopped, Restored: 1, Left: []string{"bell", "tidepool"}},
 			want: "Already migrated.\n" +
-				"Couldn't restore the sessions yet; the next portal command tries again.\n" +
+				"Restored 1 session, then stopped on the error below.\n" +
 				"\n" +
-				"The tmux version's state is kept at ~/.config/portal/state-tmux.\n" +
-				"hooks.json's backup is at ~/.config/portal/state-tmux/hooks.json.tmux.\n",
+				"2 sessions left to restore, at Portal's next start or now with x <name>:\n" +
+				"  bell\n" +
+				"  tidepool\n" +
+				kept,
 		},
-		"a migration landed, a session not restored": {
-			outcome: migrate.Outcome{Course: migrate.AlreadyMigrated, StateDir: reportState, TmuxDir: reportTmux},
-			restore: migrate.Restore{Ran: true, Restored: 2, Failed: 1},
+		"a bootstrap's fatal before its restore": {
+			outcome: landed,
+			restore: migrate.Restore{End: migrate.RestoreStopped, Left: []string{"bell"}},
 			want: "Already migrated.\n" +
-				"Restored 2 sessions. Couldn't restore 1 session; kept for the next restore.\n" +
+				"Couldn't restore the sessions: the error below says why.\n" +
 				"\n" +
-				"The tmux version's state is kept at ~/.config/portal/state-tmux.\n",
+				"1 session left to restore, at Portal's next start or now with x <name>:\n" +
+				"  bell\n" +
+				kept,
+		},
+		"a restore that couldn't read the index, nor the read after it": {
+			outcome: landed,
+			restore: migrate.Restore{End: migrate.RestoreUnread, LeftUnread: errors.New("decode sessions.json: unexpected EOF")},
+			want: "Already migrated.\n" +
+				"Couldn't restore the sessions: the warning above says why. Portal can't tell which sessions are left to restore: decode sessions.json: unexpected EOF\n" +
+				kept,
 		},
 	} {
 		t.Run("it reports "+name, func(t *testing.T) {
@@ -153,10 +184,10 @@ func TestReport(t *testing.T) {
 	t.Run("it reports a migration of no session, and no hook, in its summary alone", func(t *testing.T) {
 		plan := planOf(t, legacyDir(t, []v1Session{sessionOf("empty")}, nil), nil, naming(t))
 
-		got := migrate.Report(migratedOutcome(plan), migrate.Restore{Ran: true}, shown)
+		got := migrate.Report(migratedOutcome(plan), migrate.Restore{End: migrate.RestoreRan}, shown)
 
 		want := "The tmux version saved no sessions to migrate. Skipped 1 tmux session.\n" +
-			"Restored no sessions.\n" +
+			"Restored no sessions. Every saved session is restored.\n" +
 			"\n" +
 			"Skipped:\n" +
 			"  empty: version 1 saved no windows for it\n" +
@@ -168,13 +199,13 @@ func TestReport(t *testing.T) {
 		}
 	})
 
-	t.Run("it tells of no resume panel when no hook moved", func(t *testing.T) {
+	t.Run("it tells of no resume panel when no session restored or left waits on one", func(t *testing.T) {
 		plan := planSessions(t, session("lantern", pane(0, codeDir+"lantern")))
 
-		got := migrate.Report(migratedOutcome(plan), migrate.Restore{Ran: true, Restored: 1}, shown)
+		got := migrate.Report(migratedOutcome(plan), migrate.Restore{End: migrate.RestoreRan, Restored: 1}, shown)
 
 		if strings.Contains(got, "resume panel") {
-			t.Errorf("report tells of the resume panel with no hook moved:\n%s", got)
+			t.Errorf("report tells of the resume panel with no session waiting on one:\n%s", got)
 		}
 	})
 
@@ -183,7 +214,7 @@ func TestReport(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: body, SidecarAbsent: true})
 		plan := planOf(t, dir, hookKeys(t, store), naming(t, realisticTaken...))
 
-		blocks := strings.Split(migrate.Report(migratedOutcome(plan), migrate.Restore{Ran: true, Restored: len(plan.Sessions)}, shown), "\n\n")
+		blocks := strings.Split(migrate.Report(migratedOutcome(plan), migrate.Restore{End: migrate.RestoreRan, Restored: len(plan.Sessions)}, shown), "\n\n")
 
 		sessions := blockOf(t, blocks, "Sessions (name ← tmux name):")
 		if len(sessions) != len(plan.Sessions) {
