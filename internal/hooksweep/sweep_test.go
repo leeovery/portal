@@ -1,8 +1,12 @@
 package hooksweep
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -114,7 +118,60 @@ func TestSweepRule(t *testing.T) {
 	t.Run("it judges a key in the tmux version's shape that a listed session names as that session's", func(t *testing.T) {
 		survives(t, newWorld(t, hookstest.TmuxEraSeedA), hookstest.TmuxEraSeedA)
 	})
+
+	// Migration moves the tmux version's state to state-tmux and its keys out
+	// of hooks.json, so a key in their shape is a zmx name: a project called
+	// fabric names its sessions so.
+	t.Run("once the tmux version's state is migrated, it reaps a stale name in a token's shape, warning nothing", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		if err := os.Mkdir(state.TmuxStateDir(w.dir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
+		persisted, err := store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		sink := logtest.Install(t)
+
+		if stale, d := Stale(t.Context(), w.sources(), persisted); d.Declined() || !slices.Equal(stale, []string{sixAlphanumerics}) {
+			t.Errorf("Stale = (%v, %q), want [%s] and no stand-down", stale, d.Reason(), sixAlphanumerics)
+		}
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if outcome.DeclineReason != "" || !slices.Equal(outcome.Removed, []string{sixAlphanumerics}) {
+			t.Errorf("Run = %+v, want [%s] removed", outcome, sixAlphanumerics)
+		}
+		if warnings := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) != 0 {
+			t.Errorf("logged %v, want no warning", warnings)
+		}
+	})
+
+	t.Run("a state-tmux path that can't be read holds the guard", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		path := state.TmuxStateDir(w.dir)
+		if err := os.Symlink(filepath.Base(path), path); err != nil { // a loop: every stat of it fails
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(path); err == nil || errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("stat %s = %v, want a failure other than not-exist; the case is vacuous", path, err)
+		}
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
+
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
+			t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
+		}
+	})
 }
+
+// sixAlphanumerics is a session name in a pane token's shape.
+const sixAlphanumerics = "fabric"
 
 // standDownCase is a world in which the judgement may not run, and the reason
 // it stands down under.

@@ -3,6 +3,7 @@ package hooksweep
 import (
 	"context"
 	"errors"
+	"os"
 	"regexp"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -126,24 +127,33 @@ func tmuxShaped(key string) bool {
 	return nanoid.IsTokenShaped(key) || paneCoordinates.MatchString(key)
 }
 
-// tmuxKeysStandDown stands the judgement down rather than remove any of the
-// stale keys in the shape of the tmux version's. hooks.json is shared with
-// that version, whose keys name no zmx session: beside a state dir and a zmx
-// dir pointed somewhere fresh, as a dev build's are, each would be stale, and
-// its hook lost. Only the tmux version's hooks being migrated clears it. A
-// key in that shape that a session or an entry names is a zmx session's, and
-// never stale.
-func tmuxKeysStandDown(stale []string) StandDown {
+// tmuxKeysStandDown stands the judgement down, until the tmux version's state
+// is migrated beside dir, rather than remove any of the stale keys in the
+// shape of that version's. hooks.json is shared with that version, whose
+// keys name no zmx session: beside a state dir and a zmx dir pointed
+// somewhere fresh, as a dev build's are, each would be stale, and its hook
+// lost. A key in that shape that a session or an entry names is a zmx
+// session's, and never stale. Once migrated, a key in that shape is an
+// ordinary zmx name, as many a session's is, and judged as any other.
+func tmuxKeysStandDown(dir string, stale []string) StandDown {
 	n := 0
 	for _, key := range stale {
 		if tmuxShaped(key) {
 			n++
 		}
 	}
-	if n > 0 {
+	if n > 0 && !tmuxStateMigrated(dir) {
 		return decline(ReasonTmuxKeys, "entries", n)
 	}
 	return StandDown{}
+}
+
+// tmuxStateMigrated reports whether the tmux version's state has been
+// migrated beside dir: state.TmuxStateDir exists, a directory. A stat that
+// fails, however it fails, counts as not migrated, so the guard holds.
+func tmuxStateMigrated(dir string) bool {
+	info, err := os.Stat(state.TmuxStateDir(dir))
+	return err == nil && info.IsDir()
 }
 
 // Stale reports the keys of persisted the sweep would remove at this moment,
@@ -169,7 +179,7 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 		return nil, d
 	}
 	stale := hooks.StaleKeys(persisted, listed, indexed)
-	if d := tmuxKeysStandDown(stale); d.Declined() {
+	if d := tmuxKeysStandDown(src.StateDir, stale); d.Declined() {
 		return nil, d
 	}
 	return stale, StandDown{}
@@ -220,7 +230,7 @@ func (c *clean) indexing() ([]string, error) {
 		d = nothingProtects(c.listed, indexed)
 	}
 	if !d.Declined() {
-		d = tmuxKeysStandDown(hooks.StaleKeys(c.snapshot, c.listed, indexed))
+		d = tmuxKeysStandDown(c.src.StateDir, hooks.StaleKeys(c.snapshot, c.listed, indexed))
 	}
 	if d.Declined() {
 		return nil, declinedError{d}

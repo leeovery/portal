@@ -55,6 +55,14 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("once the tmux version's state is migrated, it counts a name in a token's shape as any other", func(t *testing.T) {
+		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.LiveSeedB, "fabric"))
+		if err := os.Mkdir(state.TmuxStateDir(install.deps.StateDir), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		assertCheck(t, staleHooksCheck(t, install), checkFail, "1 stale hook entry")
+	})
+
 	t.Run("it passes when a listed session or an index entry names every key", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.LiveSeedB))
 		assertCheck(t, staleHooksCheck(t, install), checkPass, "no stale hooks")

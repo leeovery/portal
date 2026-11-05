@@ -15,6 +15,7 @@ const (
 	portalLogName     = "portal.log"
 	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
+	tmuxStateName     = "state-tmux"
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
@@ -55,3 +56,10 @@ func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }
 func PortalLogOld(dir string) string { return filepath.Join(dir, portalLogOldName) }
 
 func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubdir) }
+
+// TmuxStateDir is where the migration from the tmux version moves that
+// version's state: state-tmux, beside the state directory dir. It exists only
+// once that migration has run.
+func TmuxStateDir(dir string) string {
+	return filepath.Join(filepath.Dir(dir), tmuxStateName)
+}
