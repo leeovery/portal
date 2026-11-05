@@ -55,7 +55,7 @@ func coldWorld() *Fixture {
 // demo/portal-tour.tape presses s at 1.5, 3.5 and 5.5, by project, by tag and
 // flat again; / at 7, typing a fuzzy term after it; esc at 9.5; ↓↓ at 10.5; ␣
 // at 11.5 to preview, ↓ at 13.5 to the next session's, ␣ at 15 back; x at 16 to
-// Projects and x at 18 back; and hides at 19.5, a row selected. Over the same
+// Projects and x at 18 back; and hides at 20, a row selected. Over the same
 // world, demo/themes.tape presses t to open the theme panel, arrows through
 // the six built-ins, each previewed as the cursor reaches it, and closes it
 // with esc: Enter would commit, through no persister.

@@ -117,7 +117,7 @@ var held = map[string]holding{
 	"filtering":       {plays: fixtureIn("sessions-filtering")},
 	"kill-confirm":    {plays: fixtureIn("sessions-kill-confirm")},
 	"resume-panel":    {plays: fixtureIn("resume-panel-waiting")},
-	"theme-panel":     {plays: fixtureIn("theme-panel-invalid-row")},
+	"theme-panel":     {plays: fixtureIn("theme-panel-open")},
 }
 
 // heldTape is the named tape and what it's held to.

@@ -1,5 +1,5 @@
 # A still: the theme panel over the sessions, its cursor on tokyo-night, the
-# theme it paints. capturetool runs the theme-panel-invalid-row fixture
+# theme it paints. capturetool runs the theme-panel-open fixture
 # (internal/capture/fixtures.go) live; its last frame is the art, as
 # testdata/vhs/frames draws the fixture.
 #
@@ -24,10 +24,10 @@ Set WaitTimeout 2m
 
 Hide
 # In UTC, as the frames are drawn, whatever the recording machine's zone.
-Type "TZ=UTC demo/out/capturetool --theme tokyo-night --fixture theme-panel-invalid-row"
+Type "TZ=UTC demo/out/capturetool --theme tokyo-night --fixture theme-panel-open"
 Enter
 Wait+Screen /P O R T A L/
-# Reached by theme-panel-invalid-row's keys, typed while hidden.
+# Reached by theme-panel-open's keys, typed while hidden.
 Type "t"
 Sleep 500ms
 Show

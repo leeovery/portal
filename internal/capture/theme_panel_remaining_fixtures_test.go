@@ -20,6 +20,7 @@ func remainingPanelFixtureNames() []string {
 		panelFixtureNamePrefix + "narrow",
 		panelFixtureNamePrefix + "paginated",
 		panelFixtureNamePrefix + "projects",
+		panelFixtureNamePrefix + "open",
 	}
 }
 
