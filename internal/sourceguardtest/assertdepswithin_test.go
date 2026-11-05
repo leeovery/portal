@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	hooksPkg     = "github.com/leeovery/portal/internal/hooks"
-	nanoidPkg    = "github.com/leeovery/portal/internal/nanoid"
-	themePkg     = "github.com/leeovery/portal/internal/theme"
-	fileutilPkg  = "github.com/leeovery/portal/internal/fileutil"
-	logPkg       = "github.com/leeovery/portal/internal/log"
-	nanoidPkgDir = "../nanoid"
+	hooksPkg      = "github.com/leeovery/portal/internal/hooks"
+	nanoidPkg     = "github.com/leeovery/portal/internal/nanoid"
+	themePkg      = "github.com/leeovery/portal/internal/theme"
+	fileutilPkg   = "github.com/leeovery/portal/internal/fileutil"
+	logPkg        = "github.com/leeovery/portal/internal/log"
+	shellquotePkg = "github.com/leeovery/portal/internal/shellquote"
+	nanoidPkgDir  = "../nanoid"
 
 	fixtureModule       = "portalguardfixture"
 	fixtureLanePkg      = fixtureModule + "/lane"
@@ -81,7 +82,7 @@ func TestAssertDepsWithin_FatalsWhenNoAllowlistedInternalDepIsPresent(t *testing
 func TestAssertDepsWithin_LeavesAnotherModuleAloneByDefault(t *testing.T) {
 	rec := &harnesstest.Recorder{}
 
-	rec.Run(func() { AssertDepsWithin(rec, themePkg, []string{logPkg}) })
+	rec.Run(func() { AssertDepsWithin(rec, themePkg, []string{logPkg, shellquotePkg}) })
 
 	if rec.Failed() {
 		t.Errorf("AssertDepsWithin faulted a dependency outside the package's own module: %s", rec.Report())

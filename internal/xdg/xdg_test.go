@@ -7,51 +7,49 @@ import (
 	"github.com/leeovery/portal/internal/xdg"
 )
 
-func TestConfigBase(t *testing.T) {
-	t.Run("returns XDG_CONFIG_HOME when set", func(t *testing.T) {
-		t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
+func TestConfigBaseFrom(t *testing.T) {
+	t.Run("returns XDG_CONFIG_HOME when the lookup carries it", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "/tmp/process-xdg")
 		t.Setenv("HOME", t.TempDir())
 
-		got, err := xdg.ConfigBase()
+		got, err := xdg.ConfigBaseFrom(xdg.EnvSlice([]string{"XDG_CONFIG_HOME=/tmp/xdg-config"}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		want := "/tmp/xdg-config"
 		if got != want {
-			t.Errorf("ConfigBase() = %q; want %q", got, want)
+			t.Errorf("ConfigBaseFrom() = %q; want %q", got, want)
 		}
 	})
 
-	t.Run("falls back to home/.config when XDG_CONFIG_HOME is unset", func(t *testing.T) {
+	t.Run("falls back to home/.config when the lookup has no XDG_CONFIG_HOME", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", "")
 		t.Setenv("HOME", home)
 
-		got, err := xdg.ConfigBase()
+		got, err := xdg.ConfigBaseFrom(xdg.EnvSlice(nil))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		want := filepath.Join(home, ".config")
 		if got != want {
-			t.Errorf("ConfigBase() = %q; want %q", got, want)
+			t.Errorf("ConfigBaseFrom() = %q; want %q", got, want)
 		}
 	})
 
 	t.Run("treats empty XDG_CONFIG_HOME as unset", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", "")
 		t.Setenv("HOME", home)
 
-		got, err := xdg.ConfigBase()
+		got, err := xdg.ConfigBaseFrom(xdg.EnvSlice([]string{"XDG_CONFIG_HOME="}))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		want := filepath.Join(home, ".config")
 		if got != want {
-			t.Errorf("ConfigBase() = %q; want %q", got, want)
+			t.Errorf("ConfigBaseFrom() = %q; want %q", got, want)
 		}
 	})
 }

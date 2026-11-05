@@ -133,7 +133,7 @@ func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
 		t.Errorf("a registered hook must map to result=hit: %q", dbg)
 	}
 	info := execLogLine(t, body, "INFO", "exec")
-	for _, want := range []string{"target=/bin/sh", "args=sh -c trap : TERM; echo hi; exec '/bin/zsh' -l", "hook_present=true"} {
+	for _, want := range []string{"target=/bin/sh", `args=sh -c 'trap : TERM; echo hi; exec '\''/bin/zsh'\'' -l'`, "hook_present=true"} {
 		if !strings.Contains(info, want) {
 			t.Errorf("exec INFO %q missing %s", info, want)
 		}
@@ -143,7 +143,7 @@ func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
 	}
 }
 
-func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing.T) {
+func TestHydrateExecLog_HitQuotesTheChainAsOneArgumentIncludingEmbeddedQuotes(t *testing.T) {
 	rawCmd := "echo 'it works' && echo \"quoted\""
 	t.Setenv("SHELL", "/bin/zsh")
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
@@ -152,8 +152,8 @@ func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing
 	execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store, ExecShell: (&stubExecShell{}).fn()})
 
 	info := execLogLine(t, sink.Body(), "INFO", "exec")
-	if want := "args=sh -c trap : TERM; " + rawCmd + "; exec '/bin/zsh' -l"; !strings.Contains(info, want) {
-		t.Errorf("exec INFO args not rendered verbatim; want substring %q in %q", want, info)
+	if want := `args=sh -c 'trap : TERM; echo '\''it works'\'' && echo "quoted"; exec '\''/bin/zsh'\'' -l'`; !strings.Contains(info, want) {
+		t.Errorf("exec INFO args not quoted as the argv exec'd; want substring %q in %q", want, info)
 	}
 }
 

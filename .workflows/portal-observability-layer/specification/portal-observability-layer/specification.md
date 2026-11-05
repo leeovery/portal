@@ -216,7 +216,7 @@ This list is the **single source of truth** for the component count. Mid-move to
 
 **Hydrate** (set per hook-firing exec-chain event) — 3: `result`, `hook_present`, `bytes`.
 
-**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 69-key total counts it once).
+**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. `args` (on `process: start` and on every exec marker, the failed exec's WARN included) is the argv after the program rendered by `shellquote.Readable`: a word a shell reads back unchanged stays bare and any other is single-quoted, so an argument holding a space, such as a session name, reads as the one argument it is. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 69-key total counts it once).
 
 **Spawn** (set per `spawn:` event — host-terminal detection, `terminals.json` load, per-window outcome, batch summary) — 8:
 
@@ -614,7 +614,7 @@ func main() {
 
 ```go
 // At the AttachConnector call site, immediately before syscall.Exec:
-log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv, " "))
+log.For("process").Info("exec", "target", "tmux", "args", shellquote.Readable(argv))
 syscall.Exec(tmuxPath, argv, env)
 ```
 
@@ -643,7 +643,7 @@ The `process`-component lifecycle set — `start`, `exit`, `exec`, `panic`, and 
 ### Notes
 
 - **`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
-- **Privacy on `args` attr: verbatim.** CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
+- **Privacy on `args` attr: in full.** CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the whole argv in `portal.log`, quoted only where a shell would need it. Acceptable for portal's single-user threat model.
 
 ---
 

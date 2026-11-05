@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func foundHook(command string) func(string) (hooks.OnResume, error) {
@@ -58,8 +59,8 @@ func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []st
 	if got := rec.AttrOrEmpty("target"); got != wantProg {
 		t.Errorf("exec marker target = %q, want %q", got, wantProg)
 	}
-	if got := rec.AttrOrEmpty("args"); got != strings.Join(wantArgs, " ") {
-		t.Errorf("exec marker args = %q, want %q", got, strings.Join(wantArgs, " "))
+	if got := rec.AttrOrEmpty("args"); got != shellquote.Readable(wantArgs) {
+		t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(wantArgs))
 	}
 	if got := rec.AttrOrEmpty("hook_present"); got != strconv.FormatBool(wantHook) {
 		t.Errorf("exec marker hook_present = %q, want %v", got, wantHook)

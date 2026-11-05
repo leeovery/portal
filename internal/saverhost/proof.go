@@ -3,6 +3,7 @@ package saverhost
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/leeovery/portal/internal/proctable"
@@ -33,10 +34,11 @@ var (
 // gone, asked before it is identified and again once ps names it no daemon,
 // as ps shows a zombie.
 type proof struct {
-	marks    []string
-	running  func(pid int) bool
-	identify func(pid int) (state.IdentifyResult, error)
-	args     func(pid int) (proctable.Args, error)
+	marks     []string
+	canonical map[string]func(dir string) string
+	running   func(pid int) bool
+	identify  func(pid int) (state.IdentifyResult, error)
+	args      func(pid int) (proctable.Args, error)
 }
 
 func (p proof) prove(pid int) error {
@@ -64,7 +66,7 @@ func (p proof) prove(pid int) error {
 		return fmt.Errorf("pid %d runs %q, no portal state daemon: %w", pid, args.Argv, ErrNotSaverDaemon)
 	}
 	for _, mark := range p.marks {
-		if !carries(args.Env, mark) {
+		if !carries(args.Env, mark, p.canonical) {
 			return fmt.Errorf("pid %d's environment lacks %s: %w", pid, mark, ErrNotSaverDaemon)
 		}
 	}
@@ -73,20 +75,33 @@ func (p proof) prove(pid int) error {
 
 // carries reports whether environ sets entry's variable, and to entry's value
 // every time it sets it: a process reading the first and one reading the last
-// of a repeated variable must agree.
-func carries(environ []string, entry string) bool {
-	key, _, _ := strings.Cut(entry, "=")
+// of a repeated variable must agree. A variable canonical keys names a
+// directory, whose absolute spellings of entry's directory count as its value.
+func carries(environ []string, entry string, canonical map[string]func(dir string) string) bool {
+	key, want, _ := strings.Cut(entry, "=")
 	set := false
 	for _, kv := range environ {
-		if k, _, _ := strings.Cut(kv, "="); k != key {
+		k, got, _ := strings.Cut(kv, "=")
+		if k != key {
 			continue
 		}
-		if kv != entry {
+		if !sameValue(got, want, canonical[key]) {
 			return false
 		}
 		set = true
 	}
 	return set
+}
+
+// sameValue reports whether got, a process's value, is want, the mark's: the
+// same string, or, given the canonical spelling of the directories they name,
+// one directory once canonical. A relative got is only ever itself: it
+// resolves against the process's working directory, not this one.
+func sameValue(got, want string, canonical func(dir string) string) bool {
+	if got == want {
+		return true
+	}
+	return canonical != nil && filepath.IsAbs(got) && canonical(got) == canonical(want)
 }
 
 // checkMarks refuses marks that could prove a daemon other than this

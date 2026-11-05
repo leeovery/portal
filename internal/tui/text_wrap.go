@@ -115,7 +115,13 @@ type rowWalk struct {
 	carry, trail string
 }
 
+// ansi.Wrap can end on an empty line after one it over-packed, as it does a
+// space and then a word as wide as the row: a break with no source after it,
+// which gives back neither text nor whitespace, so it is no row.
 func (w *rowWalk) take(line string) {
+	if line == "" && w.trail == "" && len(w.rows) > 0 {
+		return
+	}
 	body := strings.TrimLeftFunc(line, breaksWrap)
 	head, carry := rowAndCarry(body, w.width)
 	text := strings.TrimRightFunc(head, breaksWrap)

@@ -25,13 +25,10 @@ const holdBound = 15 * time.Second
 // runs, holds the lock now and then, so it waits that out.
 func HoldForTest(t *testing.T, dir string) *os.File {
 	t.Helper()
-	f, err := os.OpenFile(Path(dir), os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := lock(Path(dir), holdBound)
 	if err != nil {
-		t.Fatalf("open commit lock: %v", err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	if err := lock(f, Path(dir), holdBound); err != nil {
 		t.Fatalf("hold commit lock: %v", err)
 	}
+	t.Cleanup(func() { _ = f.Close() })
 	return f
 }

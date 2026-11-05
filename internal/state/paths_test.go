@@ -180,7 +180,6 @@ func TestAccessors(t *testing.T) {
 			{"daemon.version", state.DaemonVersion(dir), filepath.Join(dir, "daemon.version")},
 			{"daemon.lock", state.DaemonLock(dir), filepath.Join(dir, "daemon.lock")},
 			{"portal.log", state.PortalLog(dir), filepath.Join(dir, "portal.log")},
-			{"portal.log.old", state.PortalLogOld(dir), filepath.Join(dir, "portal.log.old")},
 			{"scrollback dir", state.ScrollbackDir(dir), filepath.Join(dir, "scrollback")},
 			{"the tmux version's migrated state, beside it", state.TmuxStateDir(dir), "/tmp/state-tmux"},
 			{"the tmux version's migrated state, beside it given with a trailing separator", state.TmuxStateDir(dir + "/"), "/tmp/state-tmux"},

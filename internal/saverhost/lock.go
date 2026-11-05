@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -74,32 +75,17 @@ func (h *Host) lockCreating(ctx context.Context) (func(), error) {
 // fails with an error wrapping fs.ErrNotExist.
 func (h *Host) lock(ctx context.Context) (func(), error) {
 	path := LockPath(h.stateDir)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open saver.lock: %w", err)
+	f, err := fileutil.LockWithin(ctx, path, fileutil.LockSpec{
+		Flag: os.O_RDWR | os.O_CREATE, How: unix.LOCK_EX, Wait: h.lockWait, Poll: h.poll,
+	})
+	var lockErr *fileutil.LockError
+	switch {
+	case errors.Is(err, fileutil.ErrLockTimedOut):
+		return nil, fmt.Errorf("%w for %s: %s", ErrLockHeld, h.lockWait, path)
+	case errors.As(err, &lockErr) && lockErr.Step == fileutil.LockOpen:
+		return nil, fmt.Errorf("open saver.lock: %w", lockErr.Err)
+	case err != nil:
+		return nil, err
 	}
-	release := func() { _ = f.Close() }
-	deadline := time.NewTimer(h.lockWait)
-	defer deadline.Stop()
-	tick := time.NewTicker(h.poll)
-	defer tick.Stop()
-	for {
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		switch {
-		case err == nil:
-			return release, nil
-		case !errors.Is(err, unix.EWOULDBLOCK):
-			release()
-			return nil, fmt.Errorf("flock %s: %w", path, err)
-		}
-		select {
-		case <-ctx.Done():
-			release()
-			return nil, fmt.Errorf("wait for %s: %w", path, context.Cause(ctx))
-		case <-deadline.C:
-			release()
-			return nil, fmt.Errorf("%w for %s: %s", ErrLockHeld, h.lockWait, path)
-		case <-tick.C:
-		}
-	}
+	return func() { _ = f.Close() }, nil
 }

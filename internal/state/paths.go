@@ -13,7 +13,6 @@ const (
 	daemonVersionName = "daemon.version"
 	daemonLockName    = "daemon.lock"
 	portalLogName     = "portal.log"
-	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
 	tmuxStateName     = "state-tmux"
 	stagingName       = "state-migrating"
@@ -53,8 +52,6 @@ func DaemonVersion(dir string) string { return filepath.Join(dir, daemonVersionN
 func DaemonLock(dir string) string { return filepath.Join(dir, daemonLockName) }
 
 func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }
-
-func PortalLogOld(dir string) string { return filepath.Join(dir, portalLogOldName) }
 
 func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubdir) }
 
