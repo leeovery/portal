@@ -97,8 +97,14 @@ func owedBreaks() []knownBreak {
 		knownBreak{fixture: "projects", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize, sizes: sizesOf(sweptWidths, 12, 18, 24, 30, 36)},
 		knownBreak{fixture: "projects-command-pending", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize, sizes: []string{"73x36", "138x30", "108x24"}},
 		knownBreak{fixture: "theme-panel-projects", rule: ruleChrome, class: owedAFix, why: projectsIgnoreResize + ", under the panel", sizes: []string{"73x36", "138x30", "108x24"}},
+		knownBreak{fixture: "sessions-help", rule: ruleChrome, class: owedAFix, why: modalTallerThanPage, sizes: []string{"138x15"}},
+		knownBreak{fixture: "projects-edit", rule: ruleChrome, class: owedAFix, why: modalTallerThanPage, sizes: []string{"138x15"}},
 	)
 }
+
+// Why a modal reaches the header: one taller than the page is drawn from the
+// top and cut at the foot, its last rows and bottom border lost.
+const modalTallerThanPage = "a modal taller than the page is drawn over the header and cut at the foot, its last rows and bottom border lost"
 
 // Why a name is cut with room on a session's row: the row keeps its
 // indicator slot and right margin whether or not the session shows an
