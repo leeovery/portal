@@ -1,10 +1,48 @@
 package sessionindex
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
+
+var (
+	// ErrNameRefused is matched by a claim's refusal of a name the backend
+	// could never create: restore could never make the session again, so
+	// nothing is kept for it.
+	ErrNameRefused = errors.New("a name Portal could never restore")
+	// ErrNoCreation refuses a claim knowing no creation: it can judge no entry
+	// by it, and an entry recording none could never be dropped.
+	ErrNoCreation = errors.New("it reported no creation")
+)
+
+// The refusal of a name the backend's Create refuses, as rename, the picker's
+// r and hook set show it.
+const (
+	// nameRefusedCopy names the session, then the backend's reason.
+	nameRefusedCopy = "Portal could never restore %s: %v"
+	// nameRefusedNamedCopy is for a reason naming the session itself, as
+	// zmx's do, so the name isn't said twice.
+	nameRefusedNamedCopy = "Portal could never restore this session: %v"
+)
+
+// nameRefusal is a claim's refusal of a name the backend's Create refuses,
+// for reason. It matches ErrNameRefused and reason.
+type nameRefusal struct {
+	name   string
+	reason error
+}
+
+func (e nameRefusal) Error() string {
+	if strings.Contains(e.reason.Error(), strconv.Quote(e.name)) {
+		return fmt.Sprintf(nameRefusedNamedCopy, e.reason)
+	}
+	return fmt.Sprintf(nameRefusedCopy, e.name, e.reason)
+}
+
+func (e nameRefusal) Unwrap() []error { return []error{ErrNameRefused, e.reason} }
 
 // Rule is what a claim judges an entry from another creation by. A session
 // recreated under a name outside Portal is a new session and starts clean, so
@@ -19,6 +57,8 @@ type Rule struct {
 	judges    bool
 	booted    time.Time
 	restoring func(name string) bool
+	hydrating func(name string) bool
+	names     func(name string) error
 }
 
 // NewRule judges an entry created before booted as saved before this boot,
@@ -26,6 +66,41 @@ type Rule struct {
 // restoring.
 func NewRule(booted time.Time, restoring func(name string) bool) Rule {
 	return Rule{judges: true, booted: booted, restoring: restoring}
+}
+
+// ReadingHydrating is the rule reading, through hydrating, whether a
+// session's restore is unfinished, its hydrating flag raised. A claim of such
+// a session repays no restore, and one taking over its entry owes one: only
+// its helper's claim repays it (Hydrated).
+func (r Rule) ReadingHydrating(hydrating func(name string) bool) Rule {
+	r.hydrating = hydrating
+	return r
+}
+
+// RefusingNames is the rule refusing, through names, a claim of a name the
+// backend's Create refuses, which restore could never make again.
+func (r Rule) RefusingNames(names func(name string) error) Rule {
+	r.names = names
+	return r
+}
+
+// restoreUnfinished reports whether the named session's restore is
+// unfinished, as the rule reads it. Under a rule reading none, no session's
+// is.
+func (r Rule) restoreUnfinished(name string) bool { return r.hydrating != nil && r.hydrating(name) }
+
+// refusal says why a claim of the session named name, created at created, is
+// refused, nil when it isn't.
+func (r Rule) refusal(name string, created time.Time) error {
+	if r.names != nil {
+		if err := r.names(name); err != nil {
+			return nameRefusal{name: name, reason: err}
+		}
+	}
+	if created.IsZero() {
+		return fmt.Errorf("session %s: %w", name, ErrNoCreation)
+	}
+	return nil
 }
 
 // adoption says why the live session takes over e, an entry from another
@@ -81,10 +156,12 @@ func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule)
 }
 
 // Claim makes the session's entry the live session's: the one its backend
-// created at created, running pid, each zero when it reports none.
+// created at created, running pid, the pid zero when it reports none.
+//   - A name rule refuses is refused, wrapping ErrNameRefused, and a claim
+//     knowing no creation, which can judge none, with ErrNoCreation. Neither
+//     changes anything.
 //   - A session with no entry gets one, unless this Update removed its entry:
 //     then the claim changes nothing.
-//   - A claim knowing no creation can judge none, and changes nothing.
 //   - An entry of the same creation keeps everything, taking the dir and pid
 //     it records none of.
 //   - An entry rule says the live session takes over gets its creation, and
@@ -92,78 +169,102 @@ func (idx *Index) LookupLive(name string, created time.Time, pid int, rule Rule)
 //   - Any other is replaced whole, a change of its own, replace, saying what it
 //     dropped, and Update reports the entry it read dropped.
 //
-// An entry kept or taken over is owed no restore any more: its session is
-// live. It reports whether it changed the session's entry.
-func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule) bool {
+// An entry kept or taken over is owed no restore any more, its session live,
+// unless rule reads that session's restore as unfinished: then it repays
+// nothing, and an entry it takes over is owed a restore, which only the
+// session's helper repays (Hydrated). It reports whether it changed the
+// session's entry.
+func (idx *Index) Claim(name, dir string, created time.Time, pid int, rule Rule) (bool, error) {
+	if err := rule.refusal(name, created); err != nil {
+		return false, err
+	}
 	i := idx.indexOf(name)
 	switch {
 	case i < 0:
 		if _, made := idx.add(Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}); !made {
-			return false
+			return false, nil
 		}
-	case created.IsZero():
-		return false
 	case idx.sessions[i].SameCreation(created, pid):
-		repaid := idx.repay(i, liveAgain)
+		repaid := !rule.restoreUnfinished(name) && idx.repay(i, liveAgain)
 		if !idx.sessions[i].fillIn(dir, pid) {
-			return repaid
+			return repaid, nil
 		}
 	default:
 		if why := rule.adoption(idx.sessions[i]); why != "" {
 			idx.adopt(i, created, pid, "adopt", why)
-			idx.repay(i, liveAgain)
+			if rule.restoreUnfinished(name) {
+				idx.owe(i, restoreUnfinished)
+			} else {
+				idx.repay(i, liveAgain)
+			}
 			idx.sessions[i].fillIn(dir, 0)
-			return true
+			return true, nil
 		}
 		earlier := idx.sessions[i]
 		idx.sessions[i] = Entry{Name: name, Dir: dir, CreatedAt: created, PID: pid}
 		idx.markFresh(name)
 		idx.changes = append(idx.changes, change{op: "replace", session: name, value: dir, detail: dropped(earlier)})
-		return true
+		return true, nil
 	}
 	idx.changes = append(idx.changes, change{op: "claim", session: name, value: dir})
-	return true
+	return true, nil
 }
 
 // Restored records the creation restore just made, created and pid, as the
 // entry's own that restore read as read, keeping everything else it was saved
-// with, and owed no restore any more. It reports whether the entry now
-// records that creation. It changes nothing in an entry that no longer
-// records the creation restore read, one a claim has taken over for another
-// creation since: that is no longer restore's to overwrite. A created of zero
-// records no creation, so the entry keeps the one it was saved with, and its
-// owed mark, for a later claim to take over: the claim rule adopts an owed
-// entry whatever creation it records. It consults no rule, so restore is its
-// only caller, which a guard holds to.
+// with, and owes it a restore until the session's helper finishes it
+// (Hydrated): an entry recording a creation of this boot is no longer one that
+// may predate it, so the mark alone keeps it from a drop and brings it back
+// should the helper never finish. It reports whether the entry now records
+// that creation. It changes nothing in an entry that records it already, as
+// one the helper's claim reached first does, nor in one that no longer records
+// the creation restore read, one a claim has taken over for another creation
+// since: that is no longer restore's to overwrite. A created of zero records
+// no creation, so the entry keeps the one it was saved with, and its owed
+// mark, for a later claim to take over: the claim rule adopts an owed entry
+// whatever creation it records. It consults no rule, so restore is its only
+// caller, which a guard holds to.
 func (idx *Index) Restored(read Entry, created time.Time, pid int) bool {
 	i := idx.indexOf(read.Name)
 	if i < 0 {
 		return false
 	}
 	e := idx.sessions[i]
-	same := e.SameCreation(created, pid)
 	switch {
-	case !same && !e.recordsCreationOf(read):
-		return false
-	case created.IsZero():
+	case e.SameCreation(created, pid):
+		return true
+	case !e.RecordsCreationOf(read), created.IsZero():
 		return false
 	}
-	idx.repay(i, restoreMadeIt)
-	if !same {
-		idx.adopt(i, created, pid, "restored", restoreMadeIt)
-	}
+	idx.adopt(i, created, pid, "restored", restoreMadeIt)
+	idx.owe(i, restoreUnfinished)
 	return true
 }
 
-// Why an entry is owed no restore any more.
+// Hydrated records that the hydrate helper has finished restoring the session
+// created at created, running pid: the entry recording that creation is owed
+// no restore any more. It reports whether that changed the entry. A restore
+// completes here and nowhere else, so the helper's claim is its only caller,
+// which a guard holds to.
+func (idx *Index) Hydrated(name string, created time.Time, pid int) bool {
+	i := idx.indexOf(name)
+	if i < 0 || !idx.sessions[i].SameCreation(created, pid) {
+		return false
+	}
+	return idx.repay(i, restoreFinished)
+}
+
+// Why an entry is owed a restore, or no longer.
 const (
-	liveAgain     = "its session is live"
-	restoreMadeIt = "restore made it"
+	liveAgain         = "its session is live"
+	restoreMadeIt     = "restore made it"
+	restoreUnfinished = "its restore is unfinished until its helper's claim"
+	restoreFinished   = "its helper finished its restore"
 )
 
-// recordsCreationOf reports whether the entry still records the creation read
+// RecordsCreationOf reports whether the entry still records the creation read
 // recorded: none, if read recorded none.
-func (e Entry) recordsCreationOf(read Entry) bool {
+func (e Entry) RecordsCreationOf(read Entry) bool {
 	if read.CreatedAt.IsZero() {
 		return e.CreatedAt.IsZero()
 	}

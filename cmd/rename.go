@@ -41,7 +41,7 @@ func setSessionLabel(ctx context.Context, b backend.Backend, name, label, via st
 	// recorded dir is only ever where Portal minted the session, and the live
 	// cwd frozen in its place would regroup the session by an exact key it
 	// does not match.
-	return claimSession(via, live, func(idx *sessionindex.Index) error {
+	return claimSession(via, b.ValidateName, live, func(idx *sessionindex.Index) error {
 		return idx.SetLabel(name, label)
 	}, nil)
 }

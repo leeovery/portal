@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/resumemode"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/vtcapture"
@@ -119,8 +120,15 @@ func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
 // steps keep this order, which the session's saved transcript depends on: the
 // saver captures a session only once its hydrating flag is down, so that flag
 // stays raised until the replay has settled, a waiting session has raised its
-// resume-pending flag in its place, and the session's creation is recorded
-// while the claim rule still reads the session as restoring.
+// resume-pending flag in its place, and the session's creation is recorded,
+// its restore finished, while the claim rule still reads the session as
+// restoring.
+//
+// A transcript it couldn't replay leaves the restore unfinished, so the saved
+// one is kept: the session says so and where it is, and its hydrating flag
+// stays raised, so the saver never captures it over that transcript, and its
+// entry owed, so the saver never drops the session if it ends, and the next
+// restore replays it.
 //
 // ExecShell replaces the process image, so in production it never returns.
 func runHydrate(ctx context.Context, cfg hydrateConfig) {
@@ -131,11 +139,27 @@ func runHydrate(ctx context.Context, cfg hydrateConfig) {
 		return
 	}
 	decision := resolveResumeDecision(cfg)
-	replayTranscript(cfg)
+	replayed := replayTranscript(cfg) == nil
+	if !replayed {
+		keepTranscript(cfg)
+	}
 	parked := markIfWaiting(cfg, decision)
-	recordCreation(ctx, cfg)
-	lowerHydrating(cfg)
+	recordCreation(ctx, cfg, replayed)
+	if replayed {
+		lowerHydrating(cfg)
+	}
 	execShellOrHookAndExit(cfg, decision.Lookup, parked)
+}
+
+// replayFailedNotice is the line a session whose saved scrollback couldn't be
+// replayed shows above its prompt, naming the file kept.
+const replayFailedNotice = "Portal couldn't replay this session's saved scrollback; it's kept at %s"
+
+// keepTranscript tells the session its saved transcript couldn't be replayed
+// and is kept, and where.
+func keepTranscript(cfg hydrateConfig) {
+	_, _ = fmt.Fprintf(cfg.Stdout, replayFailedNotice+"\r\n", cfg.File)
+	cfg.Logger.Info("scrollback kept for the next restore", "session", cfg.Session, "path", cfg.File)
 }
 
 // sessionNameRefusal says why the helper must act for no session: zmx names
@@ -165,9 +189,13 @@ func sessionNameRefusal(session, current string) error {
 // form this build doesn't read is replayed whole, its cursor placement with
 // it, so that is recorded too: zmx changing its closing state would otherwise
 // bring the prompt back over the rows unseen.
-func replayTranscript(cfg hydrateConfig) {
+//
+// It returns why a transcript it could not replay whole wasn't: nil for one
+// replayed whole, for no transcript, and for one gone, which leaves nothing
+// to keep.
+func replayTranscript(cfg hydrateConfig) error {
 	if cfg.File == "" {
-		return
+		return nil
 	}
 	open := cfg.OpenTranscript
 	if open == nil {
@@ -176,7 +204,10 @@ func replayTranscript(cfg hydrateConfig) {
 	file, err := open(cfg.File)
 	if err != nil {
 		logTranscriptUnreadable(cfg, err)
-		return
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
 	defer func() { _ = file.Close() }()
 	start := time.Now()
@@ -198,6 +229,7 @@ func replayTranscript(cfg hydrateConfig) {
 	default:
 		logTranscriptUnreadable(cfg, err)
 	}
+	return err
 }
 
 func settleReplay(cfg hydrateConfig) {
@@ -383,23 +415,26 @@ func markResumePending(cfg hydrateConfig) (parkedChain, error) {
 }
 
 // recordCreation records the creation the session's backend reports as its
-// index entry's, through the claim every claimer makes. It runs while the
-// session is still flagged hydrating, so the rule adopts whatever entry
-// restore saved and never replaces it: a restore that died between creating
-// the session and recording it leaves the entry its saved creation, which the
-// saver would replace once the flag is down. An entry already recording this
-// creation is left as it is. A failure is the helper's to record, never to
-// wait on: the session is handed on regardless.
+// index entry's, through the claim every claimer makes, and, the replay
+// having finished, finishes the session's restore: its entry is owed none any
+// more. It runs while the session is still flagged hydrating, so the rule
+// adopts whatever entry restore saved and never replaces it: a restore that
+// died between creating the session and recording it leaves the entry its
+// saved creation, which the saver would replace once the flag is down. An
+// entry already recording this creation and owed nothing is left as it is. A
+// failure is the helper's to record, never to wait on: the session is handed
+// on regardless, its restore unfinished until a claim finds it live once the
+// flag is down.
 //
 // A session whose flag is proved down, as when the helper is run by hand,
 // claims nothing: the rule would judge its entry as any claim's, and could
 // replace it.
-func recordCreation(ctx context.Context, cfg hydrateConfig) {
+func recordCreation(ctx context.Context, cfg hydrateConfig, replayed bool) {
 	if !stillHydrating(cfg.Session) {
 		cfg.Logger.Debug("session creation not claimed: its hydrating flag is down", "session", cfg.Session)
 		return
 	}
-	if err := claimCreation(ctx, cfg); err != nil {
+	if err := claimCreation(ctx, cfg, replayed); err != nil {
 		cfg.Logger.Warn("record session creation failed", "session", cfg.Session, "error", err)
 	}
 }
@@ -409,14 +444,12 @@ func recordCreation(ctx context.Context, cfg hydrateConfig) {
 // it.
 func stillHydrating(session string) bool {
 	dir, err := state.Dir()
-	if err != nil {
-		return true
-	}
-	raised, err := state.Hydrating.Exists(dir, session)
-	return raised || err != nil
+	return err != nil || state.Hydrating.Raised(dir, session)
 }
 
-func claimCreation(ctx context.Context, cfg hydrateConfig) error {
+// claimCreation claims the session's entry for the creation its backend
+// reports, finishing its restore in the same write when it replayed.
+func claimCreation(ctx context.Context, cfg hydrateConfig, replayed bool) error {
 	b, err := sessionBackend()
 	if err != nil {
 		return err
@@ -431,7 +464,14 @@ func claimCreation(ctx context.Context, cfg hydrateConfig) error {
 	if err != nil {
 		return err
 	}
-	return claimSession("internal", live, nil, nil)
+	var finish func(*sessionindex.Index) error
+	if replayed {
+		finish = func(idx *sessionindex.Index) error {
+			idx.Hydrated(live.Name, live.Created, live.PID)
+			return nil
+		}
+	}
+	return claimSession("internal", b.ValidateName, live, finish, nil)
 }
 
 // lowerHydrating ends the session's restore: from here the saver captures it,

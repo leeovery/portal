@@ -189,7 +189,7 @@ func TestReadShownIndex(t *testing.T) {
 	t.Run("it judges entries by the claim rule", func(t *testing.T) {
 		thisBoot := sessionindex.Entry{Name: "api-x7Kd9a", Label: "api", CreatedAt: testBoot.Add(time.Hour), PID: 1717}
 		dir := seedIndex(t, thisBoot)
-		withFuncSeam(t, &claimRule, func(got string) sessionindex.Rule {
+		withFuncSeam(t, &claimRule, func(got string, _ func(string) error) sessionindex.Rule {
 			if got != dir {
 				t.Errorf("claimRule(%q), want the state directory %q", got, dir)
 			}
@@ -251,11 +251,15 @@ func TestUpdateSessionIndexLanding(t *testing.T) {
 
 func landedNothing(sessionindex.Outcome) error { return nil }
 
+// acceptName is a name rule refusing no name, for a fixture claiming names it
+// knows Create takes.
+func acceptName(string) error { return nil }
+
 func TestIndexWritesMakeTheStateDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	err := claimSession("cli", claimed{Name: "api-x7Kd9a", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
+	err := claimSession("cli", acceptName, claimed{Name: "api-x7Kd9a", Created: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), PID: 4242}, nil, nil)
 	if err != nil {
 		t.Fatalf("claimSession with no state dir yet: %v", err)
 	}

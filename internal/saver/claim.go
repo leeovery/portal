@@ -29,7 +29,12 @@ func (s *Saver) claim(ctx context.Context, idx *sessionindex.Index, l listing, r
 		if !s.claimable(ctx, idx, live) {
 			continue
 		}
-		if idx.Claim(live.Name, "", live.Created, live.PID, rule) {
+		changed, err := idx.Claim(live.Name, "", live.Created, live.PID, rule)
+		if err != nil {
+			claimSkipped(live.Name, "the claim rule refuses it", err)
+			continue
+		}
+		if changed {
 			claimed++
 		}
 		if live.Dir != "" {

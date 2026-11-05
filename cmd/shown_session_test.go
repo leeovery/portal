@@ -24,7 +24,9 @@ func fakePickerLister(sessions ...backend.Session) tui.SessionLister {
 func labelSession(t *testing.T, stateDir string, s backend.Session, label string) {
 	t.Helper()
 	if _, err := sessionindex.Update(stateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(s.Name, "", s.Created, s.PID, claimRule(stateDir))
+		if _, err := idx.Claim(s.Name, "", s.Created, s.PID, claimRule(stateDir, acceptName)); err != nil {
+			return err
+		}
 		return idx.SetLabel(s.Name, label)
 	}); err != nil {
 		t.Fatalf("label %s as %q: %v", s.Name, label, err)
@@ -116,7 +118,7 @@ var wantJoined = []tui.Session{
 }
 
 func TestShownSession(t *testing.T) {
-	shown := shownIndex{idx: entryIndexOf(t, joinEntries()...), rule: claimRule("")}
+	shown := shownIndex{idx: entryIndexOf(t, joinEntries()...), rule: claimRule("", nil)}
 	silent := backend.Session{Name: joinSilent.Name}
 	for _, tc := range []struct {
 		name string
@@ -141,7 +143,7 @@ func TestShownSession(t *testing.T) {
 		live.PID = 4243
 		recorded := shownIndex{
 			idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: joinCreated, PID: 4242}),
-			rule: claimRule(""),
+			rule: claimRule("", nil),
 		}
 
 		if got := recorded.show(live); got.Label != "" || got.Dir != "" {
@@ -160,7 +162,7 @@ func TestShownSession(t *testing.T) {
 		t.Run("an entry "+name+" gives its label and dir, as a claim would take it over", func(t *testing.T) {
 			recorded := shownIndex{
 				idx:  entryIndexOf(t, sessionindex.Entry{Name: joinOwn.Name, Label: "api work", Dir: "/work/api", CreatedAt: created, PID: 1717}),
-				rule: claimRule(""),
+				rule: claimRule("", nil),
 			}
 
 			if got := recorded.show(withAnswered(joinOwn)); got != wantJoined[0] {

@@ -115,11 +115,17 @@ func (idx *Index) setField(name, op, value string, level slog.Level, field func(
 // restore, which a guard holds to.
 func (idx *Index) Owe(name string) bool {
 	i := idx.indexOf(name)
-	if i < 0 || idx.sessions[i].Owed {
+	return i >= 0 && idx.owe(i, "")
+}
+
+// owe marks the entry at i owed a restore, recording why when given, and
+// reports whether that changed it.
+func (idx *Index) owe(i int, why string) bool {
+	if idx.sessions[i].Owed {
 		return false
 	}
 	idx.sessions[i].Owed = true
-	idx.changes = append(idx.changes, change{op: "set-owed", session: name})
+	idx.changes = append(idx.changes, change{op: "set-owed", session: idx.sessions[i].Name, detail: why})
 	return true
 }
 

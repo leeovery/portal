@@ -1,10 +1,13 @@
 package sessionindex_test
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
@@ -19,6 +22,15 @@ var (
 // as restoring.
 func ruleRestoring(restoring ...string) sessionindex.Rule {
 	return sessionindex.NewRule(thisBoot, func(name string) bool { return slices.Contains(restoring, name) })
+}
+
+// claimFor claims the session's entry under ruleRestoring, as a fixture for a
+// test about something else, failing it on a refusal.
+func claimFor(t *testing.T, idx *sessionindex.Index, name, dir string, created time.Time, pid int) {
+	t.Helper()
+	if _, err := idx.Claim(name, dir, created, pid, ruleRestoring()); err != nil {
+		t.Fatalf("Claim(%s): %v", name, err)
+	}
 }
 
 // keeping is a's entry holding everything a claim must not lose, created at
@@ -75,6 +87,7 @@ func TestClaim(t *testing.T) {
 		pid      int
 		want     sessionindex.Entry
 		replaced bool
+		refused  error
 	}{
 		{
 			name: "an entry of the same creation keeps everything",
@@ -132,19 +145,24 @@ func TestClaim(t *testing.T) {
 			want: keeping(liveCreation, 4242),
 		},
 		{
-			name: "an entry of this boot claimed knowing no creation is kept untouched",
+			name: "an entry of this boot claimed knowing no creation is refused, and kept untouched",
 			held: keeping(earlierThisBoot, 1717), rule: judged,
-			want: keeping(earlierThisBoot, 1717),
+			want: keeping(earlierThisBoot, 1717), refused: sessionindex.ErrNoCreation,
 		},
 		{
-			name: "an entry saved before this boot claimed knowing no creation is kept untouched",
+			name: "an entry saved before this boot claimed knowing no creation is refused, and kept untouched",
 			held: keeping(beforeBoot, 1717), rule: judged,
-			want: keeping(beforeBoot, 1717),
+			want: keeping(beforeBoot, 1717), refused: sessionindex.ErrNoCreation,
 		},
 		{
-			name: "an entry recording no creation or dir claimed knowing no creation is kept untouched",
+			name: "an entry recording no creation or dir claimed knowing no creation is refused, and kept untouched",
 			held: withDir(keeping(time.Time{}, 0), ""), rule: judged,
-			want: withDir(keeping(time.Time{}, 0), ""),
+			want: withDir(keeping(time.Time{}, 0), ""), refused: sessionindex.ErrNoCreation,
+		},
+		{
+			name: "an entry under a name the rule refuses is refused, and kept untouched",
+			held: keeping(earlierThisBoot, 1717), rule: judged.RefusingNames(refusing("a")), created: liveCreation, pid: 4242,
+			want: keeping(earlierThisBoot, 1717), refused: sessionindex.ErrNameRefused,
 		},
 		{
 			name: "an owed entry of the same creation is owed no more, keeping everything else",
@@ -157,9 +175,29 @@ func TestClaim(t *testing.T) {
 			want: keeping(liveCreation, 4242),
 		},
 		{
-			name: "an owed entry claimed knowing no creation stays owed",
+			name: "an owed entry claimed knowing no creation is refused, and stays owed",
 			held: owed(keeping(earlierThisBoot, 1717)), rule: judged,
-			want: owed(keeping(earlierThisBoot, 1717)),
+			want: owed(keeping(earlierThisBoot, 1717)), refused: sessionindex.ErrNoCreation,
+		},
+		{
+			name: "an owed entry of the same creation stays owed while its session is hydrating",
+			held: owed(keeping(liveCreation, 4242)), rule: judged.ReadingHydrating(hydrating("a")), created: liveCreation, pid: 4242,
+			want: owed(keeping(liveCreation, 4242)),
+		},
+		{
+			name: "an entry saved before this boot is adopted while its session is hydrating, and owed a restore",
+			held: keeping(beforeBoot, 1717), rule: judged.ReadingHydrating(hydrating("a")), created: liveCreation, pid: 4242,
+			want: owed(keeping(liveCreation, 4242)),
+		},
+		{
+			name: "an owed entry is adopted while its session is hydrating, and stays owed",
+			held: owed(keeping(beforeBoot, 1717)), rule: judged.ReadingHydrating(hydrating("a")), created: liveCreation, pid: 4242,
+			want: owed(keeping(liveCreation, 4242)),
+		},
+		{
+			name: "an owed entry is adopted, and owed no more, while only another session is hydrating",
+			held: owed(keeping(beforeBoot, 1717)), rule: judged.ReadingHydrating(hydrating("b")), created: liveCreation, pid: 4242,
+			want: keeping(liveCreation, 4242),
 		},
 		{
 			name: "an entry of an earlier creation this boot is replaced whole",
@@ -193,12 +231,16 @@ func TestClaim(t *testing.T) {
 			seedIndex(t, dir, tc.held, neighbour)
 
 			var changed bool
+			var claimErr error
 			outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-				changed = idx.Claim("a", "/a", tc.created, tc.pid, tc.rule)
+				changed, claimErr = idx.Claim("a", "/a", tc.created, tc.pid, tc.rule)
 				return nil
 			})
 			if err != nil {
 				t.Fatalf("Update: %v", err)
+			}
+			if (claimErr == nil) != (tc.refused == nil) || !errors.Is(claimErr, tc.refused) {
+				t.Errorf("Claim error = %v, want %v", claimErr, tc.refused)
 			}
 			if want := !sameEntry(tc.held, tc.want); changed != want {
 				t.Errorf("Claim = %v, want %v: it reports whether it changed the entry", changed, want)
@@ -221,42 +263,116 @@ func TestClaim(t *testing.T) {
 		})
 	}
 
-	for _, tc := range []struct {
+	t.Run("a session with no entry gets one, recording its creation", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
+
+		if changed, err := idx.Claim("a", "/a", liveCreation, 4242, judged); !changed || err != nil {
+			t.Errorf("Claim = %v, %v; want true, nil for the entry it made", changed, err)
+		}
+
+		if got, ok := idx.Lookup("a"); !ok || !sameEntry(got, fresh) || idx.Len() != 2 {
+			t.Errorf("sessions = %+v, want b and a as %+v", idx.Entries(), fresh)
+		}
+	})
+
+	// decisions 32 and 74: a mint, rename, hook set or saver claim never
+	// records an entry no restore could make again, nor one no drop could
+	// remove.
+	for name, c := range map[string]struct {
 		name    string
 		created time.Time
-		want    sessionindex.Entry
+		rule    sessionindex.Rule
+		refused error
 	}{
-		{"a session with no entry gets one, recording its creation", liveCreation, fresh},
-		{"a session with no entry claimed knowing no creation gets one with its dir", time.Time{}, sessionindex.Entry{Name: "a", Dir: "/a"}},
+		"knowing no creation":           {name: "a", rule: judged, refused: sessionindex.ErrNoCreation},
+		"under a name the rule refuses": {name: "foo*", created: liveCreation, rule: judged.RefusingNames(refusing("foo*")), refused: sessionindex.ErrNameRefused},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run("a session with no entry claimed "+name+" is refused, and gets none", func(t *testing.T) {
 			idx := sessionindex.IndexOf([]sessionindex.Entry{{Name: "b"}})
-			pid := 0
-			if !tc.created.IsZero() {
-				pid = 4242
-			}
 
-			if !idx.Claim("a", "/a", tc.created, pid, judged) {
-				t.Error("Claim = false, want true for the entry it made")
-			}
+			changed, err := idx.Claim(c.name, "/a", c.created, 4242, c.rule)
 
-			if got, ok := idx.Lookup("a"); !ok || !sameEntry(got, tc.want) || idx.Len() != 2 {
-				t.Errorf("sessions = %+v, want b and a as %+v", idx.Entries(), tc.want)
+			if changed || !errors.Is(err, c.refused) || !strings.Contains(err.Error(), c.name) {
+				t.Errorf("Claim = %v, %v; want false and a refusal naming %s, %v", changed, err, c.name, c.refused)
+			}
+			if idx.Len() != 1 {
+				t.Errorf("sessions = %+v, want b alone", idx.Entries())
 			}
 		})
 	}
+
+	t.Run("a refused name carries the name rule's own reason", func(t *testing.T) {
+		idx := sessionindex.IndexOf(nil)
+
+		_, err := idx.Claim("foo*", "/a", liveCreation, 4242, judged.RefusingNames(refusing("foo*")))
+
+		if !errors.Is(err, errRefusedName) {
+			t.Errorf("Claim = %v, want it to wrap the name rule's %v", err, errRefusedName)
+		}
+	})
 
 	t.Run("a session whose entry this Update removed gets none, and the claim reports no change", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(liveCreation, 4242)})
 		idx.Remove("a")
 
-		if idx.Claim("a", "/a", liveCreation, 4242, judged) {
-			t.Error("Claim = true, want false for the entry it could not make")
+		if changed, err := idx.Claim("a", "/a", liveCreation, 4242, judged); changed || err != nil {
+			t.Errorf("Claim = %v, %v; want false, nil for the entry it could not make", changed, err)
 		}
 		if _, ok := idx.Lookup("a"); ok {
 			t.Errorf("sessions = %+v, want a's entry still removed", idx.Entries())
 		}
 	})
+}
+
+// The refusal is what rename, the picker's r and hook set show: one sentence
+// naming the session once.
+func TestClaim_RefusalCopy(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason, want string
+	}{
+		{
+			name:   "a reason naming the session stands in for the name",
+			reason: `invalid session name: "notes*" ends with '*', which zmx kill reads as a prefix match`,
+			want:   `Portal could never restore this session: invalid session name: "notes*" ends with '*', which zmx kill reads as a prefix match`,
+		},
+		{
+			name:   "a reason that doesn't name it follows the name",
+			reason: "invalid session name: it ends with '*'",
+			want:   "Portal could never restore notes*: invalid session name: it ends with '*'",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reason := errors.New(tc.reason)
+			idx := sessionindex.IndexOf(nil)
+
+			_, err := idx.Claim("notes*", "", liveCreation, 4242, ruleRestoring().RefusingNames(func(string) error { return reason }))
+
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("refusal = %v, want %q", err, tc.want)
+			}
+			if !errors.Is(err, sessionindex.ErrNameRefused) || !errors.Is(err, reason) {
+				t.Errorf("refusal = %v, want it to match ErrNameRefused and its reason", err)
+			}
+		})
+	}
+}
+
+// errRefusedName is the name rule refusing's refusal.
+var errRefusedName = errors.New("invalid session name")
+
+// refusing is a name rule refusing the names given.
+func refusing(names ...string) func(string) error {
+	return func(name string) error {
+		if slices.Contains(names, name) {
+			return errRefusedName
+		}
+		return nil
+	}
+}
+
+// hydrating reports the names given as sessions whose restore is unfinished.
+func hydrating(names ...string) func(string) bool {
+	return func(name string) bool { return slices.Contains(names, name) }
 }
 
 func TestLookupLive(t *testing.T) {
@@ -328,15 +444,18 @@ func TestLookupLive(t *testing.T) {
 func TestRestored(t *testing.T) {
 	saved := keeping(beforeBoot, 1717)
 
-	t.Run("it records the new creation and keeps everything else", func(t *testing.T) {
+	// decision 72: an entry recording a creation of this boot no longer may
+	// predate it, so the mark alone keeps it from a drop until the session's
+	// helper finishes the restore.
+	t.Run("it records the new creation, owed until its helper finishes, and keeps everything else", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{saved, {Name: "b", Label: "Beta"}})
 
 		if !idx.Restored(saved, liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
 		}
 
-		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
-			t.Errorf("entry = %+v, want %+v", got, keeping(liveCreation, 4242))
+		if got, _ := idx.Lookup("a"); !sameEntry(got, owed(keeping(liveCreation, 4242))) {
+			t.Errorf("entry = %+v, want %+v", got, owed(keeping(liveCreation, 4242)))
 		}
 		if got, _ := idx.Lookup("b"); got != (sessionindex.Entry{Name: "b", Label: "Beta"}) {
 			t.Errorf("b = %+v, want it untouched", got)
@@ -350,8 +469,8 @@ func TestRestored(t *testing.T) {
 		if !idx.Restored(read, liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
 		}
-		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
-			t.Errorf("entry = %+v, want %+v", got, keeping(liveCreation, 4242))
+		if got, _ := idx.Lookup("a"); !sameEntry(got, owed(keeping(liveCreation, 4242))) {
+			t.Errorf("entry = %+v, want %+v", got, owed(keeping(liveCreation, 4242)))
 		}
 	})
 
@@ -395,33 +514,40 @@ func TestRestored(t *testing.T) {
 			if !idx.Restored(c.read, liveCreation, 4242) {
 				t.Fatal("Restored = false, want the creation recorded")
 			}
-			if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
-				t.Errorf("entry = %+v, want %+v", got, keeping(liveCreation, 4242))
+			if got, _ := idx.Lookup("a"); !sameEntry(got, owed(keeping(liveCreation, 4242))) {
+				t.Errorf("entry = %+v, want %+v", got, owed(keeping(liveCreation, 4242)))
 			}
 		})
 	}
 
-	t.Run("the entry it records the creation of is owed no more", func(t *testing.T) {
+	t.Run("an owed entry it records the creation of stays owed", func(t *testing.T) {
 		idx := sessionindex.IndexOf([]sessionindex.Entry{owed(saved)})
 
 		if !idx.Restored(owed(saved), liveCreation, 4242) {
 			t.Fatal("Restored = false, want the creation recorded")
 		}
-		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
-			t.Errorf("entry = %+v, want %+v, owed no more", got, keeping(liveCreation, 4242))
+		if got, _ := idx.Lookup("a"); !sameEntry(got, owed(keeping(liveCreation, 4242))) {
+			t.Errorf("entry = %+v, want %+v", got, owed(keeping(liveCreation, 4242)))
 		}
 	})
 
-	t.Run("an owed entry that already records the creation is owed no more: restore made its session", func(t *testing.T) {
-		held := owed(keeping(liveCreation, 4242))
-		idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+	// The helper's claim can land before restore's record of the creation,
+	// and has finished the restore when it replayed.
+	for name, held := range map[string]sessionindex.Entry{
+		"owed":         owed(keeping(liveCreation, 4242)),
+		"owed nothing": keeping(liveCreation, 4242),
+	} {
+		t.Run("an entry already recording the creation, "+name+", is left as it is", func(t *testing.T) {
+			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
 
-		idx.Restored(held, liveCreation, 4242)
-
-		if got, _ := idx.Lookup("a"); got.Owed {
-			t.Errorf("entry = %+v, want it owed no more", got)
-		}
-	})
+			if !idx.Restored(saved, liveCreation, 4242) {
+				t.Error("Restored = false, want the creation reported recorded")
+			}
+			if got, _ := idx.Lookup("a"); !sameEntry(got, held) {
+				t.Errorf("entry = %+v, want it untouched, %+v", got, held)
+			}
+		})
+	}
 
 	// The claim rule adopts an owed entry whatever creation it records, so
 	// the mark is what lets the saver take over a session restore made but
@@ -468,6 +594,63 @@ func TestRestored(t *testing.T) {
 		}
 		if idx.Len() != 1 {
 			t.Errorf("sessions = %+v, want only b", idx.Entries())
+		}
+	})
+}
+
+// decision 72: a restore completes at its helper's claim, and only there.
+func TestHydrated(t *testing.T) {
+	t.Run("the owed entry recording the creation is owed no more", func(t *testing.T) {
+		dir := t.TempDir()
+		seedIndex(t, dir, owed(keeping(liveCreation, 4242)), owed(sessionindex.Entry{Name: "b", CreatedAt: liveCreation, PID: 4242}))
+		sink := logtest.Install(t)
+
+		var changed bool
+		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
+			changed = idx.Hydrated("a", liveCreation, 4242)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		idx, err := sessionindex.Read(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := idx.Lookup("a"); !changed || !sameEntry(got, keeping(liveCreation, 4242)) {
+			t.Errorf("Hydrated = %v, entry %+v; want true and %+v", changed, got, keeping(liveCreation, 4242))
+		}
+		if got, _ := idx.Lookup("b"); !got.Owed {
+			t.Errorf("b = %+v, want it owed still", got)
+		}
+		rec := sink.Records().Matching("sessions", "clear-owed").Only(t, "the repayment")
+		if got := rec.AttrString(t, "detail"); got != "its helper finished its restore" {
+			t.Errorf("detail = %q, want the helper's finish named", got)
+		}
+	})
+
+	for name, held := range map[string]sessionindex.Entry{
+		"another creation":           owed(keeping(earlierThisBoot, 4242)),
+		"the same time, another pid": owed(keeping(liveCreation, 1717)),
+		"an entry owed nothing":      keeping(liveCreation, 4242),
+	} {
+		t.Run("it changes nothing in "+name, func(t *testing.T) {
+			idx := sessionindex.IndexOf([]sessionindex.Entry{held})
+
+			if idx.Hydrated("a", liveCreation, 4242) {
+				t.Error("Hydrated = true, want false")
+			}
+			if got, _ := idx.Lookup("a"); !sameEntry(got, held) {
+				t.Errorf("entry = %+v, want it untouched, %+v", got, held)
+			}
+		})
+	}
+
+	t.Run("a session with no entry gets none", func(t *testing.T) {
+		idx := sessionindex.IndexOf(nil)
+
+		if idx.Hydrated("a", liveCreation, 4242) || idx.Len() != 0 {
+			t.Errorf("Hydrated changed %+v, want nothing", idx.Entries())
 		}
 	})
 }

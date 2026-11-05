@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/bootid"
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
@@ -85,7 +86,9 @@ func (w *bootWorld) save(t *testing.T, name string) {
 	t.Helper()
 	dir := t.TempDir()
 	if _, err := sessionindex.Update(w.dir.StateDir, "cli", func(idx *sessionindex.Index) error {
-		idx.Claim(name, dir, savedBefore, 0, state.ClaimRule(w.dir.StateDir))
+		if _, err := idx.Claim(name, dir, savedBefore, 0, state.ClaimRule(w.dir.StateDir, w.dir.Backend.ValidateName)); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		t.Fatalf("save %s: %v", name, err)
@@ -535,10 +538,76 @@ func TestBootstrapKeepsWhatItCouldNotRestoreAgainstZmx(t *testing.T) {
 	if got, want := w.portal(t, "list", "--short"), made+"\n"; got != want {
 		t.Errorf("portal list = %q, want %q, the owed session back", got, want)
 	}
+	// Its helper's claim repays it before the helper lowers its flag.
+	w.awaitNoFlags(t)
 	if e, held := w.entry(made); !held || e.Owed {
-		t.Errorf("entry for %s = %+v, %v once restored; want it held, owed no longer", made, e, held)
+		t.Errorf("entry for %s = %+v, %v once its helper finished; want it held, owed no longer", made, e, held)
+	}
+}
+
+// Decisions 72 and 73: a restored session whose helper can't replay its
+// transcript keeps its hydrating flag, so its entry stays owed and its
+// transcript named. Closed by the user, it is never dropped, its transcript
+// and hook are kept, and the next bootstrap brings it back.
+func TestRestoreWhoseReplayFailedAgainstZmx(t *testing.T) {
+	w, ended := loggedOut(t, 1)
+	made := ended[0]
+	saved, _ := w.entry(made)
+	if saved.ScrollbackFile == "" {
+		t.Fatalf("entry for %s = %+v, want the saver's transcript named", made, saved)
+	}
+	transcript := filepath.Join(w.dir.StateDir, filepath.FromSlash(saved.ScrollbackFile))
+	if err := os.Chmod(transcript, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(transcript, 0o600) })
+	hooksFile := hookstest.ResolveHooksFilePathFromEnv(t, w.env)
+	hookstest.StageStore(t, hookstest.Staging{
+		Dir:  filepath.Dir(hooksFile),
+		Seed: `{"` + made + `": {"on-resume": {"command": "true", "resume": "eager"}}}`,
+	})
+
+	if got, want := w.portal(t, "list", "--short"), made+"\n"; got != want {
+		t.Fatalf("portal list = %q, want %q, the session restored", got, want)
+	}
+	if !harnesstest.PollUntil(t, bootSettle, 20*time.Millisecond, func() bool {
+		return strings.Contains(w.log(), "hydrate: scrollback kept for the next restore session="+made+" ")
+	}) {
+		t.Fatalf("%s's helper never kept its transcript\n--- portal.log ---\n%s", made, w.log())
+	}
+	w.end(t, made)
+
+	watched := w.open(t)
+	w.end(t, watched)
+	w.awaitDropped(t, watched)
+	if e, held := w.entry(made); !held || !e.Owed || e.ScrollbackFile != saved.ScrollbackFile {
+		t.Fatalf("entry for %s = %+v, %v once the saver dropped %s; want it kept, owed, naming %s\n--- portal.log ---\n%s",
+			made, e, held, watched, saved.ScrollbackFile, w.log())
+	}
+	if got := w.flags(t); !slices.Contains(got, string(state.Hydrating)+"/"+made) {
+		t.Errorf("flags = %v, want %s's hydrating flag still raised", got, made)
+	}
+	if _, err := os.Lstat(transcript); err != nil {
+		t.Errorf("stat %s's transcript = %v, want it kept", made, err)
+	}
+	if body := string(hookstest.HooksFileBytes(t, hooksFile)); !strings.Contains(body, `"`+made+`"`) {
+		t.Errorf("hooks.json = %s, want %s's hook kept", body, made)
+	}
+
+	if err := os.Chmod(transcript, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w.oweBootstrap(t)
+	if got, want := w.portal(t, "list", "--short"), made+"\n"; got != want {
+		t.Errorf("portal list = %q, want %q, the session back", got, want)
 	}
 	w.awaitNoFlags(t)
+	if e, held := w.entry(made); !held || e.Owed {
+		t.Errorf("entry for %s = %+v, %v once its helper finished; want it held, owed no longer", made, e, held)
+	}
+	if !strings.Contains(w.log(), "hydrate: scrollback replayed ") {
+		t.Errorf("portal.log records no replay of the kept transcript\n--- portal.log ---\n%s", w.log())
+	}
 }
 
 // interrupt kills run once until holds, and waits out its end.

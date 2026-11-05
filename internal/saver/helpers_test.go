@@ -173,7 +173,9 @@ func (w *world) update(fn func(*sessionindex.Index)) {
 func (w *world) claim(s backend.Session, dir string) {
 	w.t.Helper()
 	w.update(func(idx *sessionindex.Index) {
-		idx.Claim(s.Name, dir, s.Created, s.PID, state.ClaimRule(w.dir))
+		if _, err := idx.Claim(s.Name, dir, s.Created, s.PID, state.ClaimRule(w.dir, w.fake.ValidateName)); err != nil {
+			w.t.Fatalf("Claim: %v", err)
+		}
 	})
 }
 

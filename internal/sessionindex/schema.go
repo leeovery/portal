@@ -70,10 +70,11 @@ func (idx *Index) Len() int { return len(idx.sessions) }
 // is where Portal minted the session; Cwd is where the saver last saw it. A
 // creation is CreatedAt, with PID, the process the session runs, zero where
 // none was recorded. ScrollbackFile is relative to the state directory. Owed
-// marks an entry whose session ended with no saver to see it end, which every
-// restore brings back and no saver drops until restore has made it again or
-// a claim has found it live; an index written before the mark reads with
-// none owed.
+// marks an entry whose session ended with no saver to see it end, or whose
+// restore its helper hasn't finished, which every restore brings back and no
+// saver drops until the helper of a restore that made it has finished, or a
+// claim has found it live once no restore of it is unfinished; an index
+// written before the mark reads with none owed.
 type Entry struct {
 	Name           string    `json:"name"`
 	Label          string    `json:"label,omitempty"`

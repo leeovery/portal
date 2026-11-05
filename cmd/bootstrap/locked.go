@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -42,11 +43,16 @@ const (
 
 // LockWait bounds the wait for bootstrap.lock while another bootstrap holds
 // it, given the entries sessions.json holds: the holder's longest run, which
-// restores at most that many sessions, with lockSlack over. A holder still
-// running past it is stuck, and the wait gives up rather than queue behind it.
+// restores at most that many sessions, then retries those it couldn't make,
+// with lockSlack over. The retries are one term however many there are: no
+// try starts once restore.RetryBudget has run out, so the last starts within
+// it and runs past it: the retry's lookup, a read, then a session's restore.
+// A holder still running past it all is stuck, and the wait gives up rather
+// than queue behind it.
 func LockWait(entries int) time.Duration {
 	each := restoreSessionRun + commitlock.Bound()
-	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*each + lockSlack
+	retries := restore.RetryBudget + saverhost.ReadCeiling + each
+	return checkRun + sweepRun + saverRun + commitlock.Bound() + restoreRun + time.Duration(entries)*each + retries + lockSlack
 }
 
 // LockNotice is how long a wait for bootstrap.lock goes unremarked.

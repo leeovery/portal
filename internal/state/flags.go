@@ -89,6 +89,13 @@ func (f SessionFlag) Exists(dir, name string) (bool, error) {
 	return flagFileExists(path)
 }
 
+// Raised reports whether the session's flag is raised, a flag that can't be
+// looked for counting as raised, so what it guards stays guarded on a doubt.
+func (f SessionFlag) Raised(dir, name string) bool {
+	up, err := f.Exists(dir, name)
+	return up || err != nil
+}
+
 // List names the sessions whose flag is raised, in name order. A directory
 // not made yet raises none; anything in it but a regular file named by a
 // session's stem, a .DS_Store or a directory, is no flag.

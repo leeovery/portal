@@ -82,7 +82,9 @@ func TestPoll_RenameDuringCaptureKeepsItsLabel(t *testing.T) {
 	w.fake.SetHistory("api", []byte("second"))
 	w.race.afterHistory = func(string) {
 		w.update(func(idx *sessionindex.Index) {
-			idx.Claim(api.Name, "", api.Created, api.PID, state.ClaimRule(w.dir))
+			if _, err := idx.Claim(api.Name, "", api.Created, api.PID, state.ClaimRule(w.dir, w.fake.ValidateName)); err != nil {
+				w.t.Fatalf("Claim: %v", err)
+			}
 			if err := idx.SetLabel("api", "Renamed"); err != nil {
 				t.Fatal(err)
 			}
@@ -208,8 +210,9 @@ func TestPoll_RestoreRaces(t *testing.T) {
 
 		want := e
 		want.CreatedAt, want.PID, want.Cwd = made.Created, made.PID, made.Dir
+		want.Owed = true
 		if got, ok := w.entry("api"); !ok || !sameEntry(got, want) {
-			t.Errorf("api = %+v, %v; want the restored creation %+v, keeping all it was saved with", got, ok, want)
+			t.Errorf("api = %+v, %v; want the restored creation %+v, owed until its helper claims it, keeping all it was saved with", got, ok, want)
 		}
 		if _, ok := w.read(e.ScrollbackFile); !ok {
 			t.Error("the saved transcript went while the session hydrates")
@@ -226,8 +229,9 @@ func TestPoll_RestoreRaces(t *testing.T) {
 
 		want := e
 		want.CreatedAt, want.PID, want.Cwd = made.Created, made.PID, made.Dir
+		want.Owed = true
 		if got, _ := w.entry("api"); !sameEntry(got, want) {
-			t.Errorf("api = %+v, want the restored creation %+v, keeping all it was saved with", got, want)
+			t.Errorf("api = %+v, want the restored creation %+v, owed until its helper claims it, keeping all it was saved with", got, want)
 		}
 	})
 }

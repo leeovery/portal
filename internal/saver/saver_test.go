@@ -213,6 +213,7 @@ func TestPoll_ClaimsAnsweringSessions(t *testing.T) {
 		name  string
 		held  func(w *world) sessionindex.Entry
 		stage func(w *world)
+		owed  bool
 	}{
 		{
 			name: "an entry saved before this boot",
@@ -226,6 +227,7 @@ func TestPoll_ClaimsAnsweringSessions(t *testing.T) {
 			name:  "an entry of an earlier creation this boot, its session hydrating",
 			held:  func(w *world) sessionindex.Entry { return labelled(w.thisBoot(0), 1717) },
 			stage: func(w *world) { w.raise(state.Hydrating, "api") },
+			owed:  true,
 		},
 		{
 			name:  "an entry of an earlier creation this boot, its session waiting to resume",
@@ -246,6 +248,7 @@ func TestPoll_ClaimsAnsweringSessions(t *testing.T) {
 
 			want := held
 			want.CreatedAt, want.PID, want.Cwd = api.Created, api.PID, "/srv/api"
+			want.Owed = tc.owed
 			if got, _ := w.entry("api"); !sameEntry(got, want) {
 				t.Errorf("api = %+v, want %+v", got, want)
 			}

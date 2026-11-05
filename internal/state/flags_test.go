@@ -130,6 +130,29 @@ func TestFlag(t *testing.T) {
 	})
 }
 
+func TestSessionFlag_Raised(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	writeFile(t, blocker, "")
+	raised := t.TempDir()
+	if err := state.Hydrating.Set(raised, "api-x7Kd9a"); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		dir  string
+		want bool
+	}{
+		"a raised flag is raised":                   {raised, true},
+		"a lowered flag is not":                     {t.TempDir(), false},
+		"a flag that can't be looked for is raised": {blocker, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := state.Hydrating.Raised(c.dir, "api-x7Kd9a"); got != c.want {
+				t.Errorf("Raised = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestSessionFlag(t *testing.T) {
 	for _, flag := range []state.SessionFlag{state.Hydrating, state.ResumePending} {
 		t.Run(string(flag)+" round-trips: set, exists, list, clear", func(t *testing.T) {

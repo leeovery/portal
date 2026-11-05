@@ -28,7 +28,7 @@ func readShownIndex() (shownIndex, error) {
 	if err != nil {
 		return shownIndex{}, err
 	}
-	return shownIndex{idx: idx, rule: claimRule(dir)}, nil
+	return shownIndex{idx: idx, rule: claimRule(dir, nil)}, nil
 }
 
 // show joins a live session with the index: what every surface that names a

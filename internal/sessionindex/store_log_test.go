@@ -16,6 +16,19 @@ import (
 	"github.com/leeovery/portal/internal/sessionindex"
 )
 
+// ofSession is the records naming session, as one op's records for several
+// sessions are told apart.
+func ofSession(t *testing.T, recs logtest.Records, session string) logtest.Records {
+	t.Helper()
+	var named logtest.Records
+	for _, rec := range recs {
+		if rec.AttrString(t, "session") == session {
+			named = append(named, rec)
+		}
+	}
+	return named
+}
+
 // unwritableStateDir is a state dir whose commit lock opens but in which no
 // temp file can be created, so Update fails at the write.
 func unwritableStateDir(t *testing.T) string {
@@ -43,8 +56,8 @@ func TestUpdate_Logging(t *testing.T) {
 			_ = idx.SetLabel("c", "Gamma")
 			_ = idx.SetLabel("a", "")
 			idx.Remove("b")
-			idx.Claim("d", "/d", time.Time{}, 0, ruleRestoring())
-			idx.Claim("f", "/f", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "d", "/d", liveCreation, 0)
+			claimFor(t, idx, "f", "/f", liveCreation, 4242)
 			idx.Restored(sessionindex.Entry{Name: "e", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC)}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 4242)
 			idx.SetScrollback("e", "scrollback/e.bin")
 			idx.RecordCwd("e", "/work/e")
@@ -68,7 +81,7 @@ func TestUpdate_Logging(t *testing.T) {
 			{"record-cwd", "e", "/work/e", slog.LevelDebug},
 			{"set-owed", "g", "", slog.LevelInfo},
 		} {
-			rec := sink.Records().Matching("sessions", want.op).Only(t, want.op)
+			rec := ofSession(t, sink.Records().Matching("sessions", want.op), want.session).Only(t, want.op)
 			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: want.level, Msg: want.op, Component: "sessions", Op: want.op, Via: "tui"})
 			if got := rec.AttrString(t, "session"); got != want.session {
 				t.Errorf("%s session = %q, want %q", want.op, got, want.session)
@@ -81,12 +94,12 @@ func TestUpdate_Logging(t *testing.T) {
 
 	t.Run("an owed mark cleared logs at INFO, saying why", func(t *testing.T) {
 		dir := t.TempDir()
-		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","created_at":"2026-11-04T10:00:00Z","pid":4242,"owed":true},{"name":"b","created_at":"2026-11-02T08:00:00Z","owed":true}]}`)
+		writeIndex(t, dir, `{"version":2,"sessions":[{"name":"a","created_at":"2026-11-04T10:00:00Z","pid":4242,"owed":true},{"name":"b","created_at":"2026-11-04T09:00:00Z","pid":1717,"owed":true}]}`)
 		sink := logtest.Install(t)
 
 		if _, err := sessionindex.Update(dir, "internal", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "", liveCreation, 4242, ruleRestoring())
-			idx.Restored(sessionindex.Entry{Name: "b", CreatedAt: time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC), Owed: true}, time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 1717)
+			claimFor(t, idx, "a", "", liveCreation, 4242)
+			idx.Hydrated("b", time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC), 1717)
 			return nil
 		}); err != nil {
 			t.Fatalf("Update: %v", err)
@@ -97,7 +110,7 @@ func TestUpdate_Logging(t *testing.T) {
 			logtest.AssertRecord(t, rec, logtest.RecordWant{Level: slog.LevelInfo, Msg: "clear-owed", Component: "sessions", Op: "clear-owed", Via: "internal"})
 			why[rec.AttrString(t, "session")] = rec.AttrString(t, "detail")
 		}
-		if want := map[string]string{"a": "its session is live", "b": "restore made it"}; !maps.Equal(why, want) {
+		if want := map[string]string{"a": "its session is live", "b": "its helper finished its restore"}; !maps.Equal(why, want) {
 			t.Errorf("clear-owed records = %v, want %v", why, want)
 		}
 	})
@@ -134,7 +147,7 @@ func TestUpdate_Logging(t *testing.T) {
 			sink := logtest.Install(t)
 
 			if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-				idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring())
+				claimFor(t, idx, "a", "/a", liveCreation, 4242)
 				return nil
 			}); err != nil {
 				t.Fatalf("Update: %v", err)
@@ -164,6 +177,7 @@ func TestUpdate_Logging(t *testing.T) {
 		name    string
 		body    string
 		created time.Time
+		refused error
 	}{
 		{
 			name:    "the same creation, its dir recorded",
@@ -171,12 +185,14 @@ func TestUpdate_Logging(t *testing.T) {
 			created: time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC),
 		},
 		{
-			name: "no creation time, and nothing to drop",
-			body: `{"version":2,"sessions":[{"name":"a","dir":"/a"}]}`,
+			name:    "no creation time, and nothing to drop",
+			body:    `{"version":2,"sessions":[{"name":"a","dir":"/a"}]}`,
+			refused: sessionindex.ErrNoCreation,
 		},
 		{
-			name: "no creation time over an entry of this boot",
-			body: `{"version":2,"sessions":[{"name":"a","label":"Alpha","created_at":"2026-11-04T09:00:00Z","pid":1717}]}`,
+			name:    "no creation time over an entry of this boot",
+			body:    `{"version":2,"sessions":[{"name":"a","label":"Alpha","created_at":"2026-11-04T09:00:00Z","pid":1717}]}`,
+			refused: sessionindex.ErrNoCreation,
 		},
 	} {
 		t.Run("a claim of "+tc.name+" changes nothing and logs one DEBUG noop", func(t *testing.T) {
@@ -185,7 +201,9 @@ func TestUpdate_Logging(t *testing.T) {
 			sink := logtest.Install(t)
 
 			if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-				idx.Claim("a", "/a", tc.created, 0, ruleRestoring())
+				if _, err := idx.Claim("a", "/a", tc.created, 0, ruleRestoring()); !errors.Is(err, tc.refused) {
+					t.Errorf("Claim = %v, want %v", err, tc.refused)
+				}
 				return nil
 			}); err != nil {
 				t.Fatalf("Update: %v", err)
@@ -204,7 +222,7 @@ func TestUpdate_Logging(t *testing.T) {
 		sink := logtest.Install(t)
 
 		if _, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "/a", liveCreation, 0, ruleRestoring())
+			claimFor(t, idx, "a", "/a", liveCreation, 0)
 			return nil
 		}); err != nil {
 			t.Fatalf("Update: %v", err)

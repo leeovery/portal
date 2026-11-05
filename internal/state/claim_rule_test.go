@@ -25,10 +25,15 @@ func bootedAt(at time.Time) func() (time.Time, error) {
 func claims(t *testing.T, dir string, held sessionindex.Entry) bool {
 	t.Helper()
 	idx := entryIndexOf(t, held)
-	idx.Claim(held.Name, "", ruleBooted.Add(2*time.Hour), 4242, state.ClaimRule(dir))
+	if _, err := idx.Claim(held.Name, "", ruleBooted.Add(2*time.Hour), 4242, state.ClaimRule(dir, anyName)); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
 	got, _ := idx.Lookup(held.Name)
 	return got.Label == held.Label
 }
+
+// anyName is a name rule refusing none.
+func anyName(string) error { return nil }
 
 // entryIndexOf is a version 2 index holding entries as sessions.json would.
 func entryIndexOf(t *testing.T, entries ...sessionindex.Entry) sessionindex.Index {
@@ -153,6 +158,88 @@ func TestClaimRule(t *testing.T) {
 	t.Run("it reads this machine's boot time", func(t *testing.T) {
 		if claims(t, t.TempDir(), labelled(time.Now().Add(-time.Minute))) {
 			t.Error("an entry from a minute ago was adopted, want it replaced as of this boot")
+		}
+	})
+}
+
+// decision 72: a restore completes at its helper's claim, so a session whose
+// hydrating flag is up has a restore no claim but the helper's finishes.
+func TestClaimRule_ReadsTheHydratingFlag(t *testing.T) {
+	blocked := func(t *testing.T) string {
+		blocker := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return blocker
+	}
+	for _, tc := range []struct {
+		name       string
+		stage      func(t *testing.T) string
+		unfinished bool
+	}{
+		{"a session whose hydrating flag is raised has its restore unfinished", raisedFor(state.Hydrating, forgotten), true},
+		{"a session whose hydrating flag can't be looked for has its restore unfinished", blocked, true},
+		{"a session whose resume-pending flag alone is raised has not", raisedFor(state.ResumePending, forgotten), false},
+		{"a session whose neighbour's hydrating flag alone is raised has not", raisedFor(state.Hydrating, neighbour), false},
+	} {
+		t.Run(tc.name+", which a claim of it reads", func(t *testing.T) {
+			for name, boot := range map[string]func() (time.Time, error){
+				"judging by the boot": bootedAt(ruleBooted),
+				"with no boot time":   func() (time.Time, error) { return time.Time{}, errors.New("no sysctl") },
+			} {
+				t.Run(name, func(t *testing.T) {
+					state.SetBootTimeForTest(t, boot)
+					live := ruleBooted.Add(time.Hour)
+					idx := entryIndexOf(t, sessionindex.Entry{Name: forgotten, CreatedAt: live, PID: 4242, Owed: true})
+
+					if _, err := idx.Claim(forgotten, "", live, 4242, state.ClaimRule(tc.stage(t), anyName)); err != nil {
+						t.Fatalf("Claim: %v", err)
+					}
+
+					if got, _ := idx.Lookup(forgotten); got.Owed != tc.unfinished {
+						t.Errorf("entry = %+v; want it owed still %v, its restore unfinished", got, tc.unfinished)
+					}
+				})
+			}
+		})
+	}
+}
+
+// decision 74: no writer of sessions.json keeps an entry under a name restore
+// could never make again.
+func TestClaimRule_RefusesNamesCreateRefuses(t *testing.T) {
+	refused := errors.New("invalid session name: ends with '*'")
+	refuse := func(name string) error {
+		if name == "foo*" {
+			return refused
+		}
+		return nil
+	}
+	for name, boot := range map[string]func() (time.Time, error){
+		"judging by the boot": bootedAt(ruleBooted),
+		"with no boot time":   func() (time.Time, error) { return time.Time{}, errors.New("no sysctl") },
+	} {
+		t.Run("it refuses a name the rule given refuses, "+name, func(t *testing.T) {
+			state.SetBootTimeForTest(t, boot)
+			idx := entryIndexOf(t)
+
+			_, err := idx.Claim("foo*", "", ruleBooted.Add(time.Hour), 4242, state.ClaimRule(t.TempDir(), refuse))
+
+			if !errors.Is(err, refused) || !errors.Is(err, sessionindex.ErrNameRefused) || idx.Len() != 0 {
+				t.Errorf("Claim = %v, index %+v; want the name refused and no entry", err, idx.Entries())
+			}
+			if _, err := idx.Claim("foo", "", ruleBooted.Add(time.Hour), 4242, state.ClaimRule(t.TempDir(), refuse)); err != nil {
+				t.Errorf("Claim of a name it takes = %v", err)
+			}
+		})
+	}
+
+	t.Run("a rule given no name rule refuses every name", func(t *testing.T) {
+		state.SetBootTimeForTest(t, bootedAt(ruleBooted))
+		idx := entryIndexOf(t)
+
+		if _, err := idx.Claim(forgotten, "", ruleBooted.Add(time.Hour), 4242, state.ClaimRule(t.TempDir(), nil)); !errors.Is(err, sessionindex.ErrNameRefused) {
+			t.Errorf("Claim = %v, want the name refused", err)
 		}
 	})
 }

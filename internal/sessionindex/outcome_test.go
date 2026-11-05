@@ -31,7 +31,7 @@ func TestUpdate_Outcome(t *testing.T) {
 		outcome := update(t, func(idx *sessionindex.Index) error {
 			idx.Remove("gone")
 			for _, name := range []string{"recreated", "same", "saved", "unrecorded", "fresh"} {
-				idx.Claim(name, "/"+name, liveCreation, 4242, ruleRestoring())
+				claimFor(t, idx, name, "/"+name, liveCreation, 4242)
 			}
 			idx.Restored(restored, liveCreation, 4242)
 			_ = idx.SetLabel("saved", "Relabelled")
@@ -52,7 +52,7 @@ func TestUpdate_Outcome(t *testing.T) {
 
 		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
 			idx.Remove("saved")
-			idx.Claim("saved", "/new", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "saved", "/new", liveCreation, 4242)
 			return nil
 		})
 		if err != nil {
@@ -86,7 +86,7 @@ func TestUpdate_Outcome(t *testing.T) {
 
 	t.Run("a name replaced and then removed reports the entry it read", func(t *testing.T) {
 		outcome := update(t, func(idx *sessionindex.Index) error {
-			idx.Claim("recreated", "/new", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "recreated", "/new", liveCreation, 4242)
 			idx.Remove("recreated")
 			return nil
 		}, held...)
@@ -98,7 +98,7 @@ func TestUpdate_Outcome(t *testing.T) {
 
 	t.Run("a replaced entry is reported with the scrollback it was read with, not the replacement's", func(t *testing.T) {
 		outcome := update(t, func(idx *sessionindex.Index) error {
-			idx.Claim("recreated", "/new", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "recreated", "/new", liveCreation, 4242)
 			idx.SetScrollback("recreated", "scrollback/recreated-2.bin")
 			return nil
 		}, held...)
@@ -110,7 +110,7 @@ func TestUpdate_Outcome(t *testing.T) {
 
 	t.Run("a name fn adds and removes again reports nothing, as none was read", func(t *testing.T) {
 		outcome := update(t, func(idx *sessionindex.Index) error {
-			idx.Claim("fresh", "/fresh", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "fresh", "/fresh", liveCreation, 4242)
 			idx.Remove("fresh")
 			return nil
 		}, held...)
@@ -124,7 +124,7 @@ func TestUpdate_Outcome(t *testing.T) {
 		"fn errors":          func(idx *sessionindex.Index) error { idx.Remove("gone"); return errors.New("boom") },
 		"fn changes nothing": func(idx *sessionindex.Index) error { idx.Remove("absent"); return nil },
 		"fn claims an entry of its own creation": func(idx *sessionindex.Index) error {
-			idx.Claim("same", "", liveCreation, 4242, ruleRestoring())
+			claimFor(t, idx, "same", "", liveCreation, 4242)
 			return nil
 		},
 	} {
@@ -144,7 +144,7 @@ func TestUpdate_Outcome(t *testing.T) {
 		dir := unwritableStateDir(t)
 
 		outcome, err := sessionindex.Update(dir, "cli", func(idx *sessionindex.Index) error {
-			idx.Claim("a", "/a", liveCreation, 0, ruleRestoring())
+			claimFor(t, idx, "a", "/a", liveCreation, 0)
 			return nil
 		})
 
