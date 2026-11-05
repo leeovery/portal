@@ -185,6 +185,7 @@ func fixtureBuilders() []func() *Fixture {
 		projectsEditFixture,
 		themePanelAdaptivePairFixture,
 		themePanelConstantPreviewingFixture,
+		themePanelOpenFixture,
 		themePanelInvalidRowFixture,
 		themePanelDirUnreadableFixture,
 		themePanelNarrowFixture,
@@ -694,6 +695,24 @@ func themePanelConstantPreviewingFixture() *Fixture {
 		{Slot: theme.SlotConstant, Requested: "nord", Resolved: "nord"},
 	}
 	fx.initialThemeCursor = theme.DefaultLightSlug
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('t')}
+	return fx
+}
+
+// The README's still of the panel: the six built-ins alone, the constant
+// tokyo-night marked and under the cursor, so the theme the panel previews is
+// the frames' own and the still is the truth. Capture with `--theme
+// tokyo-night`.
+func themePanelOpenFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "theme-panel-open"
+	fx.themeKeys = theme.RawKeys{Theme: FramesThemeSlug}
+	fx.themeEnumeration = themePanelDirEnumeration()
+	fx.themeUnion = themePanelUnionFrom(fx.themeEnumeration, fx.themeKeys)
+	fx.themeSlots = []theme.SlotResolution{
+		{Slot: theme.SlotConstant, Requested: FramesThemeSlug, Resolved: FramesThemeSlug},
+	}
+	fx.initialThemeCursor = FramesThemeSlug
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('t')}
 	return fx
 }

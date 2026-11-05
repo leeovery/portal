@@ -17,20 +17,6 @@ import (
 	"github.com/leeovery/portal/internal/xdg"
 )
 
-// press is keys pressed together, at a moment of a play.
-type press struct {
-	at   time.Duration
-	keys []tea.KeyPressMsg
-}
-
-// walk is what a scenario's play presses, and when it ends: the keys its tape
-// is timed for, restated from the cues' comments in scenarios.go, so every
-// screen a recording shows is played here.
-type walk struct {
-	presses []press
-	ends    time.Duration
-}
-
 var (
 	keyUp    = tea.KeyPressMsg{Code: tea.KeyUp}
 	keyDown  = tea.KeyPressMsg{Code: tea.KeyDown}
@@ -38,70 +24,30 @@ var (
 	keyEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
 )
 
-// pressing is a press of keys at the given seconds into a play.
-func pressing(seconds float64, keys ...tea.KeyPressMsg) press {
-	return press{at: offset(seconds), keys: keys}
-}
-
-// typing is text typed from the given seconds, a key every 50ms, as a tape
-// types at its default speed.
-func typing(seconds float64, text string) []press {
-	var presses []press
-	for i, r := range text {
-		presses = append(presses, press{at: offset(seconds) + time.Duration(i)*50*time.Millisecond, keys: []tea.KeyPressMsg{keyRune(r)}})
-	}
-	return presses
-}
-
-// walks are every scenario's walk, by its name.
-var walks = map[string]walk{
-	"portal-cold": {
-		presses: []press{pressing(4.5, keyDown, keyDown), pressing(5.5, keySpace), pressing(8.5, keyDown)},
-		ends:    offset(10.5),
-	},
-	"portal-tour": {
-		presses: slices.Concat(
-			[]press{pressing(1.5, keyRune('s')), pressing(3.5, keyRune('s')), pressing(5.5, keyRune('s')), pressing(7, keyRune('/'))},
-			typing(7.25, "sync"),
-			[]press{
-				pressing(9.5, keyEsc), pressing(10.5, keyDown, keyDown), pressing(11.5, keySpace),
-				pressing(13.5, keyDown), pressing(15, keySpace), pressing(16, keyRune('x')), pressing(18, keyRune('x')),
-			},
-		),
-		ends: offset(19.5),
-	},
-	// tokyo-night's row sits fifth of the six, so the arrows go up to the
-	// first, then down through every one to the last.
-	"themes": {
-		presses: []press{
-			pressing(1, keyRune('t')),
-			pressing(2, keyUp), pressing(2.6, keyUp), pressing(3.2, keyUp), pressing(3.8, keyUp),
-			pressing(5, keyDown), pressing(6, keyDown), pressing(7, keyDown), pressing(8, keyDown), pressing(9, keyDown),
-			pressing(10.5, keyEsc),
-		},
-		ends: offset(12),
-	},
-}
-
-// walked plays the scenario's walk to its end, calling checkpoint every step
-// from the start, with the play as it stands then, before any key pressed at
-// that moment.
-func walked(t *testing.T, s Scenario, step time.Duration, checkpoint func(at time.Duration, p *player)) {
+// walked plays the scenario as its tape, demo/<name>.tape, plays it, pressing
+// the tape's keys at their moments till its last Show ends, so every screen a
+// recording shows is played here. It calls checkpoint every step from the
+// start, with the play as it stands then, before any key pressed at that
+// moment, and returns the play as the tape's last Show ends.
+func walked(t *testing.T, s Scenario, step time.Duration, checkpoint func(at time.Duration, p *player)) *player {
 	t.Helper()
-	w, ok := walks[s.Name]
-	if !ok {
-		t.Fatalf("%s has no walk", s.Name)
-	}
+	tp := readTape(t, s.Name)
+	ends := tp.lastShownEnd(t)
+	keys := tp.recorded()
 	p := playScenario(t, s, s.Size)
-	presses := w.presses
-	for at := time.Duration(0); at <= w.ends; at += step {
-		for len(presses) > 0 && presses[0].at < at {
-			p.press(presses[0].at, presses[0].keys...)
-			presses = presses[1:]
+	for at := time.Duration(0); at <= ends; at += step {
+		for len(keys) > 0 && keys[0].at < at {
+			p.press(keys[0].at, keys[0].key)
+			keys = keys[1:]
 		}
 		p.until(at)
 		checkpoint(at, p)
 	}
+	for _, k := range keys {
+		p.press(k.at, k.key)
+	}
+	p.until(ends)
+	return p
 }
 
 // scenarioNamed is the named scenario, failing the test where there is none.
@@ -178,15 +124,12 @@ func TestEachScenarioIsMadeForTheFramesSize(t *testing.T) {
 	}
 }
 
-func TestEveryScenarioHasAWalk(t *testing.T) {
+// Each scenario is played by a tape of its name, so walked, and the tests that
+// walk every scenario, play what its recording shows.
+func TestEveryScenarioIsPlayedByATapeOfItsName(t *testing.T) {
 	for _, name := range ScenarioNames() {
-		if _, ok := walks[name]; !ok {
-			t.Errorf("%s has no walk, so no test plays it", name)
-		}
-	}
-	for name := range walks {
-		if !slices.Contains(ScenarioNames(), name) {
-			t.Errorf("the walk of %s plays no scenario", name)
+		if l := readTape(t, name).launched(t); l != scenarioIn(name) {
+			t.Errorf("demo/%s.tape plays %s, want the %s scenario", name, l, name)
 		}
 	}
 }
@@ -407,12 +350,9 @@ func TestNoScenarioWritesOrReachesTheSystem(t *testing.T) {
 				t.Setenv(name, filepath.Join(root, name))
 			}
 			synctest.Test(t, func(t *testing.T) {
-				walked(t, s, time.Second, func(at time.Duration, p *player) {
-					if at == walks[s.Name].ends {
-						p.press(at, keyEsc, keyRune('k'), keyRune('y'), keyRune('r'), keyRune('z'), keyEnter(), keyRune('s'),
-							keyRune('t'), keyEnter(), keyRune('m'), keyRune('n'))
-					}
-				})
+				p := walked(t, s, time.Second, func(time.Duration, *player) {})
+				p.press(readTape(t, s.Name).lastShownEnd(t), keyEsc, keyRune('k'), keyRune('y'), keyRune('r'), keyRune('z'), keyEnter(),
+					keyRune('s'), keyRune('t'), keyEnter(), keyRune('m'), keyRune('n'))
 			})
 			if entries, err := os.ReadDir(root); err != nil || len(entries) > 0 {
 				t.Errorf("played, %s wrote %v (%v) where home and the config resolve, want nothing", s.Name, entries, err)

@@ -54,6 +54,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-no-tags-signpost", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "No tags yet"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-adaptive-pair", page: tui.PageSessions, present: []string{sessionRow, "Themes", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-constant-previewing", page: tui.PageSessions, present: []string{sessionRow, "Themes", "●"}, absent: []string{"No sessions yet", "● light", "● dark"}},
+		{fixture: "theme-panel-open", page: tui.PageSessions, present: []string{sessionRow, "Themes", "gitlab-dark-grey", "tokyo-night-day", "●"}, absent: []string{"No sessions yet", "⚠", "● light", "● dark", "catppuccin-latte"}},
 		{fixture: "theme-panel-invalid-row", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ bad syntax", "My Gorgeous Midnight Pa…", "● dark"}, absent: []string{"No sessions yet", "bad colour"}},
 		{fixture: "theme-panel-dir-unreadable", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ dir unreadable", "solarized-dusk", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-narrow", page: tui.PageSessions, present: []string{sessionRow, "Themes", "● light", "● dark"}, absent: []string{"No sessions yet"}},

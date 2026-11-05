@@ -15,7 +15,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-stills=" "
+stills=" sessions-by-tag preview loading help-modal projects edit-project filtering kill-confirm resume-panel theme-panel "
 
 names=("$@")
 if [ ${#names[@]} -eq 0 ]; then
