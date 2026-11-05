@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -625,7 +624,7 @@ func parkedResumeChain(parked parkedChain, payload resumeChainPayload) string {
 // handoff.
 func defaultExecShell(prog string, args []string) {
 	err := syscall.Exec(prog, args, os.Environ())
-	hydrateLogger.Warn("exec handoff failed", "target", prog, "args", strings.Join(args, " "), "error", err)
+	hydrateLogger.Warn("exec handoff failed", "target", prog, "args", shellquote.Readable(args), "error", err)
 	log.Close(1)
 	osExit(1)
 }

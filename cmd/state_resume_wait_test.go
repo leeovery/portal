@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resumekeys"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -204,8 +205,8 @@ func assertHandOff(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload)
 	if got := rec.AttrOrEmpty("target"); got != exe {
 		t.Errorf("exec marker target = %q, want %q", got, exe)
 	}
-	if got := rec.AttrOrEmpty("args"); got != strings.Join(want, " ") {
-		t.Errorf("exec marker args = %q, want %q", got, strings.Join(want, " "))
+	if got := rec.AttrOrEmpty("args"); got != shellquote.Readable(want) {
+		t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(want))
 	}
 	if rec.Level != slog.LevelInfo {
 		t.Errorf("exec marker level = %v, want INFO", rec.Level)

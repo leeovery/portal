@@ -42,22 +42,21 @@ func activeLabelText(v tui.LoadingProgressView) string {
 func TestStepMapsToFriendlyLabel(t *testing.T) {
 	cases := []struct {
 		name      string
-		event     tui.BootstrapProgressMsg
+		index     int
 		wantLabel string
 	}{
-		{"step 1 CheckZmx", tui.BootstrapProgressMsg{Index: 1}, tui.LabelCheckingZmx},
-		{"step 2 RemoveLatch", tui.BootstrapProgressMsg{Index: 2}, tui.LabelStartingTheSaver},
-		{"step 3 Sweep", tui.BootstrapProgressMsg{Index: 3}, tui.LabelStartingTheSaver},
-		{"step 4 EnsureSaver", tui.BootstrapProgressMsg{Index: 4}, tui.LabelStartingTheSaver},
-		{"step 5 Restore, a session (M>0)", tui.BootstrapProgressMsg{Index: 5, RestoreN: 1, RestoreM: 3}, tui.LabelRestoringSessions},
-		{"step 5 Restore complete (M==0)", tui.BootstrapProgressMsg{Index: 5}, tui.LabelRestoringSessions},
-		{"step 6 WriteLatch", tui.BootstrapProgressMsg{Index: 6}, tui.LabelRestoringSessions},
+		{"step 1 CheckZmx", 1, tui.LabelCheckingZmx},
+		{"step 2 RemoveLatch", 2, tui.LabelStartingTheSaver},
+		{"step 3 Sweep", 3, tui.LabelStartingTheSaver},
+		{"step 4 EnsureSaver", 4, tui.LabelStartingTheSaver},
+		{"step 5 Restore", 5, tui.LabelRestoringSessions},
+		{"step 6 WriteLatch", 6, tui.LabelRestoringSessions},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tui.LabelForStep(tc.event); got != tc.wantLabel {
-				t.Errorf("LabelForStep(step %d) = %q; want %q", tc.event.Index, got, tc.wantLabel)
+			if got := tui.LabelForStepIndex(tc.index); got != tc.wantLabel {
+				t.Errorf("LabelForStepIndex(%d) = %q; want %q", tc.index, got, tc.wantLabel)
 			}
 		})
 	}
@@ -231,7 +230,7 @@ func TestMappingCoversTheSixStepsNoGaps(t *testing.T) {
 		tui.LabelRestoringSessions: true,
 	}
 	for step := 1; step <= bootstrapSteps; step++ {
-		got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: step})
+		got := tui.LabelForStepIndex(step)
 		if got == "" {
 			t.Errorf("step %d resolved to no label (gap in the step→label mapping)", step)
 			continue
@@ -241,7 +240,7 @@ func TestMappingCoversTheSixStepsNoGaps(t *testing.T) {
 		}
 	}
 	for _, bad := range []int{0, 7, 10, 99} {
-		if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: bad}); got != "" {
+		if got := tui.LabelForStepIndex(bad); got != "" {
 			t.Errorf("out-of-range step %d mapped to label %q; want none", bad, got)
 		}
 		v := feed(tui.LoadingProgress{}, tui.BootstrapProgressMsg{Index: bad}).View()

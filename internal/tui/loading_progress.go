@@ -48,11 +48,6 @@ var stepLabelTable = map[int]string{
 // rather than completing it.
 const restoreStep = 5
 
-// LabelForStep returns "" for an out-of-range index.
-func LabelForStep(e BootstrapProgressMsg) string {
-	return stepLabelTable[e.Index]
-}
-
 // Counter is populated only for LabelRestoringSessions.
 type LoadingLabel struct {
 	Text    string

@@ -107,8 +107,9 @@ func TestHoldForTest_WaitsOutAHolder(t *testing.T) {
 	_ = held.Close()
 }
 
-func TestCommitlockPackage_ImportsNoInternalPackage(t *testing.T) {
+func TestCommitlockPackage_ImportsOnlyFileutil(t *testing.T) {
+	allowed := []string{"github.com/leeovery/portal/internal/fileutil"}
 	for _, lane := range sourceguardtest.Lanes() {
-		sourceguardtest.AssertDepsWithin(t, "github.com/leeovery/portal/internal/commitlock", nil, lane)
+		sourceguardtest.AssertDepsWithin(t, "github.com/leeovery/portal/internal/commitlock", allowed, lane)
 	}
 }

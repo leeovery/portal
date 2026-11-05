@@ -58,6 +58,13 @@ type Config struct {
 	// are zmx.SessionMarks: the session's name, which zmx sets, and the
 	// backend's directory, which every zmx run the backend makes sets.
 	Marks []string
+	// Canonical, keyed by a mark's variable, names that variable a directory
+	// and gives its canonical spelling, as the backend compares directories:
+	// on zmx, ZMX_DIR's is zmx.CanonicalDir. An absolute value then carries
+	// the mark when it spells the mark's directory, so only the spelling may
+	// differ, never which directory it is. Any other value of any mark must be
+	// the mark's value exactly.
+	Canonical map[string]func(dir string) string
 	// Signal sends sig to pid. Only a pid proved the saver's daemon as it is
 	// sent is ever its target.
 	Signal func(pid int, sig syscall.Signal) error
@@ -108,7 +115,7 @@ func NewHost(cfg Config) (*Host, error) {
 	return &Host{
 		backend:   cfg.Backend,
 		stateDir:  cfg.StateDir,
-		proof:     proof{marks: cfg.Marks, running: cfg.Running, identify: cfg.Identify, args: cfg.Args},
+		proof:     proof{marks: cfg.Marks, canonical: cfg.Canonical, running: cfg.Running, identify: cfg.Identify, args: cfg.Args},
 		signal:    cfg.Signal,
 		running:   cfg.Running,
 		lockWait:  cfg.LockWait,

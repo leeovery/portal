@@ -29,3 +29,26 @@ func Join(argv []string) string {
 	}
 	return strings.Join(words, " ")
 }
+
+// Readable renders argv as one command line for a person to read: a word a
+// shell reads back unchanged is left bare and any other is quoted through
+// Single, so where one argument ends stays plain without every word carrying
+// quotes. An empty argv renders as the empty string.
+func Readable(argv []string) string {
+	words := make([]string, len(argv))
+	for i, arg := range argv {
+		words[i] = arg
+		if arg == "" || strings.ContainsFunc(arg, needsQuoting) {
+			words[i] = Single(arg)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func needsQuoting(r rune) bool {
+	switch {
+	case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		return false
+	}
+	return !strings.ContainsRune("_@%+=:,./-", r)
+}

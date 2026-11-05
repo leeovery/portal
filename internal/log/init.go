@@ -5,8 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // Duplicated rather than taken from internal/state: internal/log must not
@@ -43,7 +44,7 @@ func emitLifecycleMarkers(level slog.Level, source, raw string) {
 	process := For(processComponent)
 	process.Info("start",
 		"cmd", filepath.Base(os.Args[0]),
-		"args", strings.Join(os.Args[1:], " "),
+		"args", shellquote.Readable(os.Args[1:]),
 	)
 	process.Info("log-level resolved",
 		"resolved", levelString(level),

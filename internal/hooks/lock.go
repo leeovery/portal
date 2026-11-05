@@ -1,12 +1,14 @@
 package hooks
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -64,26 +66,21 @@ func (s *Store) lockPath() string {
 // it is granted or bound elapses, returning ErrLockHeld on expiry. The returned
 // file must be closed by the caller, which releases the lock.
 func acquireLock(path string, openFlags, flockMode int, bound time.Duration) (*os.File, error) {
-	f, err := os.OpenFile(path, openFlags, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("%w: open: %w", ErrLockFailed, err)
-	}
-
-	deadline := time.Now().Add(bound)
-	for {
-		err := unix.Flock(int(f.Fd()), flockMode|unix.LOCK_NB)
-		if err == nil {
-			return f, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
-			_ = f.Close()
-			return nil, fmt.Errorf("%w: flock %s: %w", ErrLockFailed, path, err)
-		}
-		if !time.Now().Before(deadline) {
-			_ = f.Close()
-			return nil, fmt.Errorf("%w: %s", ErrLockHeld, path)
-		}
-		time.Sleep(lockPollInterval)
+	f, err := fileutil.LockWithin(context.Background(), path, fileutil.LockSpec{
+		Flag: openFlags, How: flockMode, Wait: bound, Poll: lockPollInterval,
+	})
+	var lockErr *fileutil.LockError
+	switch {
+	case err == nil:
+		return f, nil
+	case !errors.As(err, &lockErr):
+		return nil, err
+	case lockErr.Step == fileutil.LockOpen:
+		return nil, fmt.Errorf("%w: open: %w", ErrLockFailed, lockErr.Err)
+	case lockErr.Step == fileutil.LockTimedOut:
+		return nil, fmt.Errorf("%w: %s", ErrLockHeld, path)
+	default:
+		return nil, fmt.Errorf("%w: flock %s: %w", ErrLockFailed, path, lockErr.Err)
 	}
 }
 

@@ -18,8 +18,12 @@ const themesDirEnvVar = "PORTAL_THEMES_DIR"
 // The loader resolves nothing and decides nothing about logging: the themes
 // directory is resolved by cmd/config.go and arrives here as an injected
 // value, which rules out internal/xdg in particular. The one edge the package
-// does own is the event logger it emits through.
-var themeMayImport = []string{"github.com/leeovery/portal/internal/log"}
+// does own is the event logger it emits through, with the stdlib-only
+// shellquote leaf that logger reaches.
+var themeMayImport = []string{
+	"github.com/leeovery/portal/internal/log",
+	"github.com/leeovery/portal/internal/shellquote",
+}
 
 func TestThemePackage_ResolvesNoPaths(t *testing.T) {
 	t.Run("depends on no path-resolving package", func(t *testing.T) {

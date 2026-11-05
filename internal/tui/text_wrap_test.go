@@ -86,3 +86,37 @@ func TestSpaceWrappedRows(t *testing.T) {
 		}
 	})
 }
+
+// ansi.Wrap over-packs a space and a word as wide as the row onto one line and
+// ends on an empty one, which is no row of the text's.
+func TestWrap_LeadingSpaceAndARowWideWord(t *testing.T) {
+	word := strings.Repeat("a", 60)
+	for name, wrap := range map[string]func(string, int) []string{
+		"prose":   wrappedLines,
+		"command": spaceWrappedLines,
+	} {
+		t.Run("the "+name+" path leaves no trailing empty row", func(t *testing.T) {
+			if got, want := wrap(" "+word, 60), []string{word}; !reflect.DeepEqual(got, want) {
+				t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
+			}
+			if got, want := wrap(" "+word+" b", 60), []string{word, "b"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("with a word after, the rows read\n got: %q\nwant: %q", got, want)
+			}
+		})
+
+		t.Run("the "+name+" path keeps the row a line break ends on", func(t *testing.T) {
+			if got, want := wrap(word+"\n", 60), []string{word, ""}; !reflect.DeepEqual(got, want) {
+				t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
+			}
+		})
+	}
+
+	t.Run("a capped wrap fills its rows from the text alone", func(t *testing.T) {
+		if got, want := wrapCappedAtSpaces(" "+word+" b", 60, 2, "…"), []string{word, "b"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
+		}
+		if got, want := wrapCapped(" "+word, 60, 1, "…"), []string{word}; !reflect.DeepEqual(got, want) {
+			t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
+		}
+	})
+}

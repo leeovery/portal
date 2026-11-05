@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -37,32 +38,14 @@ func AcquireBootstrapLock(ctx context.Context, dir string, wait time.Duration) (
 		return nil, fmt.Errorf("create the state directory: %w", err)
 	}
 	path := BootstrapLock(dir)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := fileutil.LockWithin(ctx, path, fileutil.LockSpec{
+		Flag: os.O_RDWR | os.O_CREATE, How: unix.LOCK_EX, Wait: wait, Poll: bootstrapLockPoll,
+	})
+	if errors.Is(err, fileutil.ErrLockTimedOut) {
+		return nil, fmt.Errorf("%w for %s: %s", ErrBootstrapLockHeld, wait, path)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, err
 	}
-	release = func() { _ = f.Close() }
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
-	tick := time.NewTicker(bootstrapLockPoll)
-	defer tick.Stop()
-	for {
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		switch {
-		case err == nil:
-			return release, nil
-		case !errors.Is(err, unix.EWOULDBLOCK):
-			release()
-			return nil, fmt.Errorf("flock %s: %w", path, err)
-		}
-		select {
-		case <-ctx.Done():
-			release()
-			return nil, fmt.Errorf("wait for %s: %w", path, context.Cause(ctx))
-		case <-deadline.C:
-			release()
-			return nil, fmt.Errorf("%w for %s: %s", ErrBootstrapLockHeld, wait, path)
-		case <-tick.C:
-		}
-	}
+	return func() { _ = f.Close() }, nil
 }

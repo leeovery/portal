@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func TestResumeHandOff(t *testing.T) {
@@ -38,8 +39,8 @@ func TestResumeHandOff(t *testing.T) {
 		if got := rec.AttrString(t, "target"); got != gotProg {
 			t.Errorf("exec marker target = %q, want the handed-over program %q", got, gotProg)
 		}
-		if got := rec.AttrString(t, "args"); got != strings.Join(gotArgs, " ") {
-			t.Errorf("exec marker args = %q, want %q", got, strings.Join(gotArgs, " "))
+		if got := rec.AttrString(t, "args"); got != shellquote.Readable(gotArgs) {
+			t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(gotArgs))
 		}
 		if rec.HasAttr("hook_present") {
 			t.Error("the chain's hand-off marker carries hook_present")
@@ -206,8 +207,8 @@ func TestHandOffToHookOrShell(t *testing.T) {
 			if got := rec.AttrString(t, "target"); got != tt.wantProg {
 				t.Errorf("exec marker target = %q, want %q", got, tt.wantProg)
 			}
-			if got := rec.AttrString(t, "args"); got != strings.Join(tt.wantArgs, " ") {
-				t.Errorf("exec marker args = %q, want %q", got, strings.Join(tt.wantArgs, " "))
+			if got := rec.AttrString(t, "args"); got != shellquote.Readable(tt.wantArgs) {
+				t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(tt.wantArgs))
 			}
 			if got := rec.AttrString(t, "hook_present"); got != tt.wantPresent {
 				t.Errorf("exec marker hook_present = %q, want %q", got, tt.wantPresent)

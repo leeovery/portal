@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
@@ -20,6 +19,7 @@ import (
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/theme"
@@ -323,7 +323,7 @@ func logExecHandoff(argv []string) {
 	if len(args) > 0 {
 		args = args[1:]
 	}
-	log.For("process").Info("exec", "target", "zmx", "args", strings.Join(args, " "))
+	log.For("process").Info("exec", "target", "zmx", "args", shellquote.Readable(args))
 }
 
 func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, error) {

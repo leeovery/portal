@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/hooks"
@@ -136,7 +135,7 @@ func resumeHandOff(logger *slog.Logger, execSelf func(prog string, args []string
 	}
 	argv := resumeChainArgv(exe, subcommand, p)
 
-	logger.Info("exec", "target", exe, "args", strings.Join(argv, " "))
+	logger.Info("exec", "target", exe, "args", shellquote.Readable(argv))
 	execSelf(exe, argv)
 	return nil
 }
@@ -145,7 +144,7 @@ func resumeHandOff(logger *slog.Logger, execSelf func(prog string, args []string
 // sites whose marker also records whether the session carried a registered
 // command.
 func execHandOff(logger *slog.Logger, execShell func(prog string, args []string), prog string, args []string, hookPresent bool) {
-	logger.Info("exec", "target", prog, "args", strings.Join(args, " "), "hook_present", hookPresent)
+	logger.Info("exec", "target", prog, "args", shellquote.Readable(args), "hook_present", hookPresent)
 	execShell(prog, args)
 }
 

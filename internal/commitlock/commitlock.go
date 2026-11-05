@@ -1,16 +1,20 @@
 // Package commitlock owns commit.lock, the sidecar every writer of the state
-// directory's sessions.json holds exclusively. It is a leaf so that
-// internal/state and internal/sessionindex take the one lock without either
-// importing the other.
+// directory's sessions.json holds exclusively. sessionindex takes it around
+// every write, the bootstrap reads its Bound to bound a run that commits, and
+// migrate its Path to name what a migration builds. It imports no Portal
+// package but fileutil, so sessionindex, whose imports are held to leaves,
+// can take it.
 package commitlock
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -40,33 +44,26 @@ func Path(dir string) string { return filepath.Join(dir, name) }
 // The lock is released by closing the returned file, and by the kernel when
 // the holding process exits, so a crashed holder never wedges the next one.
 func Acquire(dir string) (*os.File, error) {
-	path := Path(dir)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open commit lock: %w", err)
-	}
-	if err := lock(f, path, timeout); err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return f, nil
+	return lock(Path(dir), timeout)
 }
 
-// lock takes f's lock on path exclusively, retrying until bound has passed. A
-// lock not granted within it is an error wrapping ErrHeld.
-func lock(f *os.File, path string, bound time.Duration) error {
-	deadline := time.Now().Add(bound)
-	for {
-		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
-			return fmt.Errorf("flock commit lock %s: %w", path, err)
-		}
-		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%w: %s", ErrHeld, path)
-		}
-		time.Sleep(pollInterval)
+// lock opens path, creating it, and takes its lock exclusively, retrying until
+// bound has passed. A lock not granted within it is an error wrapping ErrHeld.
+func lock(path string, bound time.Duration) (*os.File, error) {
+	f, err := fileutil.LockWithin(context.Background(), path, fileutil.LockSpec{
+		Flag: os.O_RDWR | os.O_CREATE, How: unix.LOCK_EX, Wait: bound, Poll: pollInterval,
+	})
+	var lockErr *fileutil.LockError
+	switch {
+	case err == nil:
+		return f, nil
+	case !errors.As(err, &lockErr):
+		return nil, err
+	case lockErr.Step == fileutil.LockOpen:
+		return nil, fmt.Errorf("open commit lock: %w", lockErr.Err)
+	case lockErr.Step == fileutil.LockTimedOut:
+		return nil, fmt.Errorf("%w: %s", ErrHeld, path)
+	default:
+		return nil, fmt.Errorf("flock commit lock %s: %w", path, lockErr.Err)
 	}
 }

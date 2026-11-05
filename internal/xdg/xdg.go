@@ -40,14 +40,9 @@ func Dirs() []ConfigDirID {
 // resolution reads.
 func OSEnv(name string) string { return os.Getenv(name) }
 
-// ConfigBase returns $XDG_CONFIG_HOME verbatim when set and non-empty, else
-// $HOME/.config. It errors only when neither is available.
-func ConfigBase() (string, error) {
-	return ConfigBaseFrom(OSEnv)
-}
-
-// ConfigBaseFrom is ConfigBase against a supplied environment. The home
-// fallback reads the process's own home directory whatever the lookup is: a
+// ConfigBaseFrom returns the lookup's $XDG_CONFIG_HOME verbatim when set and
+// non-empty, else $HOME/.config. It errors only when neither is available. The
+// home fallback reads the process's own home directory whatever the lookup is: a
 // lookup carrying neither layer has nothing to say about where home is.
 func ConfigBaseFrom(lookup Lookup) (string, error) {
 	if base := lookup(configBaseVar); base != "" {

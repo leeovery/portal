@@ -414,7 +414,7 @@ func TestUpdateThen(t *testing.T) {
 // never import state or anything that reaches tmux.
 func TestSessionindexPackage_ImportsOnlyLeaves(t *testing.T) {
 	const prefix = "github.com/leeovery/portal/"
-	allowed := []string{prefix + "internal/commitlock", prefix + "internal/fileutil", prefix + "internal/log"}
+	allowed := []string{prefix + "internal/commitlock", prefix + "internal/fileutil", prefix + "internal/log", prefix + "internal/shellquote"}
 	for _, lane := range sourceguardtest.Lanes() {
 		sourceguardtest.AssertDepsWithin(t, prefix+"internal/sessionindex", allowed, lane)
 	}

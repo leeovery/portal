@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"strings"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/backend"
@@ -57,14 +58,34 @@ func newReadOnlySaverHost(b backend.Backend, stateDir string) (readOnlySaverHost
 // through signal. It refuses a b whose reach names no directory, by whose
 // saver session's name alone a saver in any directory would be proved.
 func saverHostSignalling(b backend.Backend, stateDir string, signal func(pid int, sig syscall.Signal) error) (*saverhost.Host, error) {
-	marks, err := zmx.SessionMarks(saver.SessionName, b.ReachEnv())
+	cfg, err := saverHostConfig(b, stateDir)
 	if err != nil {
 		return nil, err
 	}
-	return saverhost.NewHost(saverhost.Config{
-		Backend:  b,
-		StateDir: stateDir,
-		Marks:    marks,
-		Signal:   signal,
-	})
+	cfg.Signal = signal
+	return saverhost.NewHost(cfg)
+}
+
+// saverHostConfig is the Config of b's saver's host over stateDir, short of
+// its signal: the marks of b's saver session, and its zmx directory compared
+// as the zmx-dir claim compares it.
+func saverHostConfig(b backend.Backend, stateDir string) (saverhost.Config, error) {
+	reach := b.ReachEnv()
+	marks, err := zmx.SessionMarks(saver.SessionName, reach)
+	if err != nil {
+		return saverhost.Config{}, err
+	}
+	return saverhost.Config{Backend: b, StateDir: stateDir, Marks: marks, Canonical: reachDirs(reach)}, nil
+}
+
+// reachDirs keys each variable of a zmx reach, which names the zmx directory
+// alone, to zmx.CanonicalDir, so a saver started under another spelling of
+// the directory is still proved.
+func reachDirs(reach []string) map[string]func(dir string) string {
+	dirs := make(map[string]func(dir string) string, len(reach))
+	for _, entry := range reach {
+		key, _, _ := strings.Cut(entry, "=")
+		dirs[key] = zmx.CanonicalDir
+	}
+	return dirs
 }
