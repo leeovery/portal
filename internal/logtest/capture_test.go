@@ -52,9 +52,9 @@ func TestSink_RendersBoundComponentOnEveryLine(t *testing.T) {
 	logger, sink := logtest.NewCaptureLogger(t)
 	bound := logger.With("component", "daemon")
 
-	bound.Info("lock acquired", "tmux_pane", "%42")
+	bound.Info("lock acquired", "session", "_portal-saver")
 
-	if got, want := sink.Body(), "INFO lock acquired component=daemon tmux_pane=%42"; got != want {
+	if got, want := sink.Body(), "INFO lock acquired component=daemon session=_portal-saver"; got != want {
 		t.Errorf("Body() = %q, want %q", got, want)
 	}
 }

@@ -171,9 +171,9 @@ func TestHydrateLazy_PinnedLazyBeatsAnEagerInstall(t *testing.T) {
 	}
 }
 
-// decision 6: a session portal migrate made waits on its panel at its first
-// restore whatever its hook's mode, since the tmux session it came from may
-// still run the program its hook resumes.
+// decision 6: a restore asking lazy (--lazy, which restore passes for an entry
+// marked resume_lazy, as portal migrate marks every entry it makes) parks the
+// session on its panel whatever its hook's mode.
 func TestHydrateLazy_ARestoreAskingLazyParksWhateverTheMode(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -377,9 +377,9 @@ func TestHydrateLazy_FiresTheHookOnEveryTailWhenTheFlagCannotBeRaised(t *testing
 	}
 }
 
-// A session restore asked to wait came from a tmux session that may still
-// run the program its hook resumes: a park that fails gives it its shell,
-// never the hook, whatever the hook's mode.
+// A restore asking lazy whose park fails hands the session its shell, never
+// the hook, whatever the hook's mode: the session asked to wait, not to run
+// its hook now.
 func TestHydrateLazy_ARestoreAskingLazyGivesTheShellWhenTheFlagCannotBeRaised(t *testing.T) {
 	refusals := map[string]func(t *testing.T, cfg *hydrateConfig){
 		"the executable can't be resolved": func(_ *testing.T, cfg *hydrateConfig) {

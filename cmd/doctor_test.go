@@ -680,9 +680,9 @@ func TestDoctorFixUnderAnotherZmxDir(t *testing.T) {
 	})
 }
 
-func TestDoctorRegisteredInSkipTmuxCheck(t *testing.T) {
+func TestDoctorIsBootstrapExempt(t *testing.T) {
 	if !bootstrapExempt["doctor"] {
-		t.Error("bootstrapExempt[\"doctor\"] = false; want true (Bootstrap Exemption)")
+		t.Error("bootstrapExempt[\"doctor\"] = false; want true: doctor must run no bootstrap")
 	}
 }
 
