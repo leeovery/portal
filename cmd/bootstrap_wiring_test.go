@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -30,6 +32,9 @@ type zmxFake struct {
 
 	olderAsks, kills, ends int
 	names                  []string
+	// dirs is what each EndDaemon was asked to prove the daemon by, beside
+	// the session's own marks.
+	dirs [][]string
 }
 
 func (f *zmxFake) KillByCLI(_ context.Context, name string) error {
@@ -49,8 +54,9 @@ func (f *zmxFake) OlderZmx(_ context.Context, name string) (bool, error) {
 	return f.older, f.olderErr
 }
 
-func (f *zmxFake) EndDaemon(_ context.Context, name string, signal func(pid int, sig syscall.Signal) error) error {
+func (f *zmxFake) EndDaemon(_ context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error {
 	f.names = append(f.names, name)
+	f.dirs = append(f.dirs, dirs)
 	f.ends++
 	if f.signals {
 		if err := signal(4242, syscall.SIGTERM); err != nil {
@@ -60,8 +66,11 @@ func (f *zmxFake) EndDaemon(_ context.Context, name string, signal func(pid int,
 	return f.endErr
 }
 
+// daemonState is the state directory daemonOver's saver saves.
+const daemonState = "/srv/portal/state"
+
 func daemonOver(f *zmxFake) saverDaemon {
-	return saverDaemon{driver: func() (saverZmx, error) { return f, nil }}
+	return saverDaemon{stateDir: daemonState, driver: func() (saverZmx, error) { return f, nil }}
 }
 
 var errBoom = errors.New("boom")
@@ -141,6 +150,7 @@ func TestSaverDaemon_End(t *testing.T) {
 		if want := fmt.Sprintf("4242 %v", syscall.SIGTERM); len(sent) != 1 || sent[0] != want {
 			t.Errorf("signals = %v, want %q through signalProcess", sent, want)
 		}
+		assertProvedByStateDir(t, fake)
 	})
 
 	t.Run("an end that fails fails it", func(t *testing.T) {
@@ -191,6 +201,7 @@ func TestSaverDaemon_EndMade(t *testing.T) {
 		if want := fmt.Sprintf("4242 %v", syscall.SIGTERM); len(sent) != 1 || sent[0] != want {
 			t.Errorf("signals = %v, want %q through signalProcess", sent, want)
 		}
+		assertProvedByStateDir(t, fake)
 	})
 
 	t.Run("both failing fails it with both", func(t *testing.T) {
@@ -210,6 +221,16 @@ func TestSaverDaemon_EndMade(t *testing.T) {
 			t.Errorf("EndMade = %v, want the bind's failure", err)
 		}
 	})
+}
+
+// assertProvedByStateDir asserts fake's one EndDaemon proved the daemon by
+// the mark of the state directory its saver saves, so another state
+// directory's saver is never signalled.
+func assertProvedByStateDir(t *testing.T, fake *zmxFake) {
+	t.Helper()
+	if want := []string{saverhost.StateDirMark(daemonState)}; len(fake.dirs) != 1 || !slices.Equal(fake.dirs[0], want) {
+		t.Errorf("EndDaemon proved by %q, want %q once", fake.dirs, want)
+	}
 }
 
 func TestSaverDaemon_Unusable(t *testing.T) {

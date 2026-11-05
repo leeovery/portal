@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -23,16 +24,22 @@ import (
 const removal = "To remove Portal completely, uninstall the binary and delete that directory.\n"
 
 // stopperFake is a stop that finds a saver when stopped, failing with err,
-// which it hands to orElse, and counts the stops asked of it.
+// which it hands to orElse, and counts the stops asked of it. One whose saver
+// is theirs, another state directory's, fails with it, orElse unasked, as
+// saverhost's does.
 type stopperFake struct {
 	stopped bool
 	err     error
+	theirs  *saverhost.OtherStateDirError
 	stops   int
 }
 
 func (s *stopperFake) StopOr(ctx context.Context, orElse func(context.Context, error) (bool, error)) (bool, error) {
 	s.stops++
-	if s.err != nil {
+	switch {
+	case s.theirs != nil:
+		return s.stopped, fmt.Errorf("pid %d isn't confirmed as the save daemon, so nothing was sent to it: %w", s.theirs.PID, s.theirs)
+	case s.err != nil:
 		return orElse(ctx, s.err)
 	}
 	return s.stopped, nil
@@ -155,6 +162,27 @@ func TestUninstall(t *testing.T) {
 		}
 		if daemon.ends != 1 {
 			t.Errorf("ends = %d, want one", daemon.ends)
+		}
+	})
+
+	t.Run("a saver another state directory's is refused in the bootstrap's terms, nothing judged or ended, printing nothing", func(t *testing.T) {
+		theirs := &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other: "/srv/portal/state", PID: 4242}
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{stopped: true, theirs: theirs}, Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if !errors.Is(err, theirs) {
+			t.Fatalf("uninstall = %v, want the refusal", err)
+		}
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.OtherStateDir(theirs).UserMessage; err.Error() != want {
+			t.Errorf("error = %q, want %q", err, want)
+		}
+		if daemon.asks != 0 || daemon.ends != 0 {
+			t.Errorf("the daemon was judged %d times and ended %d, want neither", daemon.asks, daemon.ends)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
 		}
 	})
 

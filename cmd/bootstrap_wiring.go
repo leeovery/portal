@@ -56,7 +56,7 @@ func newProductionBootstrap() (*productionBootstrap, error) {
 	}
 	p := &productionBootstrap{dir: dir, backend: b, host: host, owner: zmxDirOwner(dir, zmx.DirFor(os.Environ()))}
 	p.running, p.bootErr = runningLatch()
-	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, ZmxDir: p.owner.Claimed, Present: host.Present, Logger: bootstrapLogger}
+	p.gate = bootstrap.Gate{StateDir: dir, Running: p.running, ZmxDir: p.owner.Claimed, Saver: host.Recorded, Logger: bootstrapLogger}
 	return p, nil
 }
 
@@ -114,7 +114,7 @@ func (p *productionBootstrap) runnerTelling(restored func(restore.Result)) (boot
 			Logger:    bootstrapLogger,
 		},
 		FlagSweeper: &bootstrap.FlagSweepCore{Dir: p.dir, List: p.backend.List, RunsHelper: restorer.RunsHelper, Logger: bootstrapLogger},
-		Saver:       bootSaver{Ensurer: ensurer, host: p.host, saverDaemon: newSaverDaemon()},
+		Saver:       bootSaver{Ensurer: ensurer, host: p.host, saverDaemon: newSaverDaemon(p.dir)},
 		Protocol:    zmx.ProtocolVersion,
 		Restore:     restoring,
 		Logger:      bootstrapLogger,
@@ -206,25 +206,28 @@ type bootSaver struct {
 
 func (s bootSaver) Present(ctx context.Context) (bool, error) { return s.host.Present(ctx) }
 
+func (s bootSaver) CheckStateDir(ctx context.Context) error { return s.host.CheckStateDir(ctx) }
+
 // saverZmx is the zmx driver's reach to the saver session's daemon, whatever
 // protocol it speaks.
 type saverZmx interface {
 	ProtocolVersion(ctx context.Context, name string) (int, error)
 	OlderZmx(ctx context.Context, name string) (bool, error)
 	KillByCLI(ctx context.Context, name string) error
-	EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error) error
+	EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error
 }
 
-// saverDaemon is the saver session's daemon, read and ended through the zmx
-// driver its driver binds.
+// saverDaemon is the saver session's daemon of the state directory stateDir,
+// read and ended through the zmx driver its driver binds.
 type saverDaemon struct {
-	driver func() (saverZmx, error)
+	driver   func() (saverZmx, error)
+	stateDir string
 }
 
-// newSaverDaemon reads the saver session's daemon through the zmx on PATH,
-// in the directory the environment names.
-func newSaverDaemon() saverDaemon {
-	return saverDaemon{driver: func() (saverZmx, error) {
+// newSaverDaemon reads the saver session's daemon of the state directory
+// stateDir through the zmx on PATH, in the directory the environment names.
+func newSaverDaemon(stateDir string) saverDaemon {
+	return saverDaemon{stateDir: stateDir, driver: func() (saverZmx, error) {
 		driver, err := bindZmxAt(zmxProgram, zmx.DirFor(os.Environ()))
 		if err != nil {
 			return nil, err
@@ -256,13 +259,14 @@ func (d saverDaemon) Protocol(ctx context.Context) (int, error) {
 }
 
 // End ends the saver session's daemon, whatever protocol it speaks, by a
-// SIGTERM, through signalProcess, to the one process proved that daemon.
+// SIGTERM, through signalProcess, to the one process proved that daemon of
+// the state directory's saver.
 func (d saverDaemon) End(ctx context.Context) error {
 	driver, err := d.driver()
 	if err != nil {
 		return err
 	}
-	return endBySignal(ctx, driver)
+	return d.endBySignal(ctx, driver)
 }
 
 // EndMade ends the saver session the bootstrap made with zmx kill, run by the
@@ -280,14 +284,18 @@ func (d saverDaemon) EndMade(ctx context.Context) error {
 	if killErr == nil {
 		return nil
 	}
-	if err := endBySignal(ctx, driver); err != nil {
+	if err := d.endBySignal(ctx, driver); err != nil {
 		return fmt.Errorf("%w; then: %w", killErr, err)
 	}
 	return nil
 }
 
-func endBySignal(ctx context.Context, driver saverZmx) error {
-	return driver.EndDaemon(ctx, saver.SessionName, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) })
+// endBySignal ends the saver session's daemon through driver, proved by the
+// state directory's mark beside the session's own, so another state
+// directory's saver is never signalled.
+func (d saverDaemon) endBySignal(ctx context.Context, driver saverZmx) error {
+	return driver.EndDaemon(ctx, saver.SessionName, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) },
+		saverhost.StateDirMark(d.stateDir))
 }
 
 // unusable reports whether the saver session's daemon speaks a protocol

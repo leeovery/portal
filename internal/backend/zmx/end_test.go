@@ -165,6 +165,61 @@ func TestEndDaemon_SignalsNothingWithoutTheProof(t *testing.T) {
 	}
 }
 
+// A caller may name directories the daemon's environment must name too, as
+// the saver's state directory: a daemon of another such directory is never
+// signalled.
+func TestEndDaemon_ProvesTheDirectoriesItIsGiven(t *testing.T) {
+	state := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(state, link); err != nil {
+		t.Fatal(err)
+	}
+	mark := "PORTAL_STATE_DIR=" + state
+
+	for name, env := range map[string][]string{
+		"the same spelling":       {mark},
+		"another spelling of it":  {"PORTAL_STATE_DIR=" + link + "/"},
+		"every setting naming it": {mark, "PORTAL_STATE_DIR=" + link},
+	} {
+		t.Run("it signals a daemon naming "+name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			d := daemonOf(100, w.dir, "work")
+			d.Args.Env = append(d.Args.Env, env...)
+			w.table(d)
+
+			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() { w.unlink(t); w.table() }), mark); err != nil {
+				t.Fatalf("EndDaemon(work) = %v", err)
+			}
+			if got := w.signals(); len(got) != 1 || got[0] != syscall.SIGTERM {
+				t.Errorf("signals sent = %v, want one SIGTERM", got)
+			}
+		})
+	}
+
+	for name, env := range map[string][]string{
+		"no such directory":          nil,
+		"another directory":          {"PORTAL_STATE_DIR=" + t.TempDir()},
+		"a relative directory":       {"PORTAL_STATE_DIR=state"},
+		"it, then another directory": {mark, "PORTAL_STATE_DIR=" + t.TempDir()},
+		"another directory, then it": {"PORTAL_STATE_DIR=" + t.TempDir(), mark},
+		"it under another variable":  {"PORTAL_STATE=" + state},
+	} {
+		t.Run("it signals nothing to a daemon naming "+name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			d := daemonOf(100, w.dir, "work")
+			d.Args.Env = append(d.Args.Env, env...)
+			w.table(d)
+
+			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}), mark); err == nil {
+				t.Error("EndDaemon(work) = nil, want the proof's failure")
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+}
+
 func TestEndDaemon_SignalsNothingWhenTheTableCantBeListed(t *testing.T) {
 	w := newEndingWorld(t)
 	zmx.FakeProcesses(w.b, nil, proctable.ErrUnsupported)

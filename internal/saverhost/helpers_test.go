@@ -41,7 +41,10 @@ type proc struct {
 	verdict     state.IdentifyResult
 	identifyErr error
 	argv, env   []string
-	argsErr     error
+	// saves has env carry, besides, the mark of the state directory of the
+	// Host reading it, as its saver's daemon does.
+	saves   bool
+	argsErr error
 	// exited is a process every read finds gone; it runs on through lingers
 	// more reads of whether it is running, still exiting.
 	exited  bool
@@ -53,14 +56,26 @@ type proc struct {
 	onSignal func(p *proc, sig syscall.Signal)
 }
 
-// daemon is the saver's daemon: a portal state daemon carrying the marks.
+// daemon is the saver's daemon: a portal state daemon carrying the marks, the
+// state directory's of the Host reading it among them.
 func daemon(onSignal func(*proc, syscall.Signal)) *proc {
 	return &proc{
 		verdict:  state.IdentifyIsPortalDaemon,
 		argv:     daemonArgv,
 		env:      append([]string{"PATH=/usr/bin", "HOME=/nonexistent"}, marks...),
+		saves:    true,
 		onSignal: onSignal,
 	}
+}
+
+// theirs is the saver's daemon of the state directory other: a portal state
+// daemon carrying every mark but the state directory's of the Host reading
+// it, naming other in its place.
+func theirs(other string, onSignal func(*proc, syscall.Signal)) *proc {
+	d := daemon(onSignal)
+	d.saves = false
+	d.env = append(d.env, saverhost.StateDirMark(other))
+	return d
 }
 
 // exiting is a process every read finds gone, still exiting for lingers
@@ -79,10 +94,12 @@ func exitsOn(sigs ...syscall.Signal) func(*proc, syscall.Signal) {
 }
 
 // procs is the process table the fakes read and signal, recording each read
-// and signal in order.
+// and signal in order. stateDir is the state directory of the Host reading
+// it.
 type procs struct {
-	table  map[int]*proc
-	events []string
+	table    map[int]*proc
+	stateDir string
+	events   []string
 }
 
 func newProcs(table map[int]*proc) *procs { return &procs{table: table} }
@@ -110,7 +127,11 @@ func (p *procs) args(pid int) (proctable.Args, error) {
 	if !ok {
 		return proctable.Args{}, fmt.Errorf("read arguments of process %d: %w", pid, proctable.ErrGone)
 	}
-	return proctable.Args{Argv: pr.argv, Env: pr.env}, pr.argsErr
+	env := pr.env
+	if pr.saves {
+		env = append(slices.Clone(env), saverhost.StateDirMark(p.stateDir))
+	}
+	return proctable.Args{Argv: pr.argv, Env: env}, pr.argsErr
 }
 
 func (p *procs) running(pid int) bool {
@@ -151,6 +172,7 @@ func (p *procs) signals() []string {
 // config is a Config over b and the state directory dir that reads and
 // signals p alone, at the tests' bounds.
 func config(b backend.Backend, p *procs, dir string) saverhost.Config {
+	p.stateDir = dir
 	return saverhost.Config{
 		Backend:   b,
 		StateDir:  dir,

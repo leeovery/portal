@@ -96,11 +96,11 @@ func (f *flagWitness) List(ctx context.Context) ([]backend.Session, error) {
 	return f.Backend.List(ctx)
 }
 
-func (f *flagWitness) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+func (f *flagWitness) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	up, err := state.Hydrating.Exists(f.dir, name)
 	f.asked = append(f.asked, name)
 	f.raised[name] = up && err == nil
-	return f.Backend.Create(ctx, name, dir, command)
+	return f.Backend.Create(ctx, name, dir, command, env...)
 }
 
 // createFunc is the Fake with Create replaced by create.
@@ -109,7 +109,7 @@ type createFunc struct {
 	create func(ctx context.Context, name, dir string, command []string) (backend.Session, error)
 }
 
-func (c createFunc) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+func (c createFunc) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	return c.create(ctx, name, dir, command)
 }
 

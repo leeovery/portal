@@ -72,6 +72,26 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
+	t.Run("it sets the entries it is given in zmx's environment, over those it inherits", func(t *testing.T) {
+		binary, log := fakeZmx(t, createdLine)
+		b := newBackendRunning(t, binary, socketDir(t), "PATH=/usr/bin:/bin", "PORTAL_STATE_DIR=/Users/lee/.config/portal/state")
+
+		if _, err := b.Create(t.Context(), "work", t.TempDir(), nil, "PORTAL_STATE_DIR=/tmp/ps-scratch", "PORTAL_MARK=1"); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		env := strings.Split(string(ran(t, log, "env")), "\x00")
+		for key, want := range map[string][]string{
+			"PORTAL_STATE_DIR": {"/tmp/ps-scratch"},
+			"PORTAL_MARK":      {"1"},
+			"PATH":             {"/usr/bin:/bin"},
+		} {
+			if got := envValues(env, key); !slices.Equal(got, want) {
+				t.Errorf("zmx env %s = %q, want %q", key, got, want)
+			}
+		}
+	})
+
 	t.Run("it succeeds on zmx's created line whatever the exit code", func(t *testing.T) {
 		binary, _ := fakeZmx(t, createdLine+"; echo 'cannot connect' >&2; exit 1")
 

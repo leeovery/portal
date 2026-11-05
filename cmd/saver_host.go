@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 // signalProcess signals a process the saver's lifecycle has proved the saver's
@@ -21,8 +22,8 @@ var signalProcess = syscall.Kill
 var errSignalsNothing = errors.New("this saver host signals nothing")
 
 // newSaverHost runs b's saver's lifecycle over the state directory stateDir,
-// proving its daemon by the marks of b's saver session and signalling
-// through signalProcess.
+// proving its daemon by the marks of b's saver session and of stateDir, and
+// signalling through signalProcess.
 func newSaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
 	return saverHostSignalling(b, stateDir, func(pid int, sig syscall.Signal) error { return signalProcess(pid, sig) })
 }
@@ -31,9 +32,10 @@ func newSaverHost(b backend.Backend, stateDir string) (*saverhost.Host, error) {
 // reads alone, never the host, so nothing holding it can reach the host's
 // stop, ensure or signal: doctor reads the saver through it.
 type readOnlySaverHost struct {
-	present  func(ctx context.Context) (bool, error)
-	saverPID func(ctx context.Context) (int, bool, error)
-	prove    func(pid int) error
+	present       func(ctx context.Context) (bool, error)
+	saverPID      func(ctx context.Context) (int, bool, error)
+	prove         func(pid int) error
+	checkStateDir func(ctx context.Context) error
 }
 
 func (h readOnlySaverHost) Present(ctx context.Context) (bool, error) { return h.present(ctx) }
@@ -44,6 +46,8 @@ func (h readOnlySaverHost) SaverPID(ctx context.Context) (pid int, present bool,
 
 func (h readOnlySaverHost) Prove(pid int) error { return h.prove(pid) }
 
+func (h readOnlySaverHost) CheckStateDir(ctx context.Context) error { return h.checkStateDir(ctx) }
+
 // newReadOnlySaverHost reads b's saver as newSaverHost's host does. Its host
 // refuses every signal besides, though none of its reads sends one.
 func newReadOnlySaverHost(b backend.Backend, stateDir string) (readOnlySaverHost, error) {
@@ -51,7 +55,7 @@ func newReadOnlySaverHost(b backend.Backend, stateDir string) (readOnlySaverHost
 	if err != nil {
 		return readOnlySaverHost{}, err
 	}
-	return readOnlySaverHost{present: host.Present, saverPID: host.SaverPID, prove: host.Prove}, nil
+	return readOnlySaverHost{present: host.Present, saverPID: host.SaverPID, prove: host.Prove, checkStateDir: host.CheckStateDir}, nil
 }
 
 // saverHostSignalling is b's saver's host over stateDir, sending its signals
@@ -67,22 +71,22 @@ func saverHostSignalling(b backend.Backend, stateDir string, signal func(pid int
 }
 
 // saverHostConfig is the Config of b's saver's host over stateDir, short of
-// its signal: the marks of b's saver session, and its zmx directory compared
-// as the zmx-dir claim compares it.
+// its signal: the marks of b's saver session, and its zmx directory and state
+// directory compared as the zmx-dir claim compares directories.
 func saverHostConfig(b backend.Backend, stateDir string) (saverhost.Config, error) {
 	reach := b.ReachEnv()
 	marks, err := zmx.SessionMarks(saver.SessionName, reach)
 	if err != nil {
 		return saverhost.Config{}, err
 	}
-	return saverhost.Config{Backend: b, StateDir: stateDir, Marks: marks, Canonical: reachDirs(reach)}, nil
+	return saverhost.Config{Backend: b, StateDir: stateDir, Marks: marks, Canonical: markDirs(reach)}, nil
 }
 
-// reachDirs keys each variable of a zmx reach, which names the zmx directory
-// alone, to zmx.CanonicalDir, so a saver started under another spelling of
-// the directory is still proved.
-func reachDirs(reach []string) map[string]func(dir string) string {
-	dirs := make(map[string]func(dir string) string, len(reach))
+// markDirs keys each variable of a zmx reach, which names the zmx directory
+// alone, and the state directory's variable to zmx.CanonicalDir, so a saver
+// started under another spelling of either directory is still proved.
+func markDirs(reach []string) map[string]func(dir string) string {
+	dirs := map[string]func(dir string) string{xdg.StateDir.EnvVar: zmx.CanonicalDir}
 	for _, entry := range reach {
 		key, _, _ := strings.Cut(entry, "=")
 		dirs[key] = zmx.CanonicalDir

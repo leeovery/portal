@@ -9,6 +9,7 @@ import (
 	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 // Every failed proof wraps exactly one of these.
@@ -24,49 +25,112 @@ var (
 	ErrUnreadable = errors.New("the process could not be read")
 )
 
-// proof proves a process the saver's daemon of one backend's sessions: a
-// portal state daemon by its program and argv, carrying every mark in the
-// environment it was exec'd with. A daemon on argv alone, such as another
-// install's, the tmux version's among them, lacks a mark: the saver session's
-// name, or the backend's directory. The argv is read
-// with the environment, from the one read, so a pid reused since the
-// identity's read proves nothing. A process that has finished exiting is
+// OtherStateDirError is a saver proved another state directory's: its
+// daemon carries every mark of the Host's saver session but the state
+// directory's, its environment naming the state directory it saves instead.
+// It is a failed proof, wrapping ErrNotSaverDaemon.
+type OtherStateDirError struct {
+	// StateDir is the Host's state directory.
+	StateDir string
+	// Other is the state directory the saver's daemon saves.
+	Other string
+	// PID is that daemon.
+	PID int
+}
+
+func (e *OtherStateDirError) Error() string {
+	return fmt.Sprintf("pid %d is the saver's daemon of the state in %s, not %s", e.PID, e.Other, e.StateDir)
+}
+
+func (e *OtherStateDirError) Unwrap() error { return ErrNotSaverDaemon }
+
+// StateDirMark is the mark of the saver of the state directory dir: the
+// entry, PORTAL_STATE_DIR=dir, that the Host creates the saver with, so every
+// process its session runs carries it, and that keeps its daemon's state in
+// dir.
+func StateDirMark(dir string) string {
+	return xdg.StateDir.EnvVar + "=" + dir
+}
+
+// proof proves a process the saver's daemon of one backend's sessions and one
+// state directory: a portal state daemon by its program and argv, carrying
+// every mark in the environment it was exec'd with. A daemon on argv alone,
+// such as another install's, the tmux version's among them, lacks a mark: the
+// saver session's name, the backend's directory, or the state directory. The
+// argv is read with the environment, from the one read, so a pid reused since
+// the identity's read proves nothing. A process that has finished exiting is
 // gone, asked before it is identified and again once ps names it no daemon,
 // as ps shows a zombie.
 type proof struct {
+	// marks are the backend's marks of the saver session. stateDir is the
+	// Host's state directory, and state its mark, which another state
+	// directory's saver lacks.
 	marks     []string
+	stateDir  string
+	state     string
 	canonical map[string]func(dir string) string
 	running   func(pid int) bool
 	identify  func(pid int) (state.IdentifyResult, error)
 	args      func(pid int) (proctable.Args, error)
 }
 
+// prove proves pid the saver's daemon. A daemon carrying every mark but the
+// state directory's, its environment naming another state directory in that
+// mark's place, one directory, absolute, every time it sets the variable,
+// fails as an *OtherStateDirError: the saver of that state directory.
 func (p proof) prove(pid int) error {
+	args, err := p.daemonArgs(pid)
+	if err != nil {
+		return err
+	}
+	if err := p.marked(pid, args.Env); err != nil {
+		return err
+	}
+	if carries(args.Env, p.state, p.canonical) {
+		return nil
+	}
+	key, _, _ := strings.Cut(p.state, "=")
+	if other, ok := soleValue(args.Env, key); ok && filepath.IsAbs(other) {
+		return &OtherStateDirError{StateDir: p.stateDir, Other: other, PID: pid}
+	}
+	return fmt.Errorf("pid %d's environment lacks %s: %w", pid, p.state, ErrNotSaverDaemon)
+}
+
+// daemonArgs proves pid a portal state daemon by its program and argv, and is
+// the argv and environment it was exec'd with, from the read that proves its
+// argv.
+func (p proof) daemonArgs(pid int) (proctable.Args, error) {
 	if !p.running(pid) {
-		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+		return proctable.Args{}, fmt.Errorf("pid %d: %w", pid, ErrGone)
 	}
 	verdict, err := p.identify(pid)
 	switch {
 	case err != nil:
-		return fmt.Errorf("%w: %w", ErrUnreadable, err)
+		return proctable.Args{}, fmt.Errorf("%w: %w", ErrUnreadable, err)
 	case verdict == state.IdentifyDead:
-		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+		return proctable.Args{}, fmt.Errorf("pid %d: %w", pid, ErrGone)
 	case verdict != state.IdentifyIsPortalDaemon && !p.running(pid):
-		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+		return proctable.Args{}, fmt.Errorf("pid %d: %w", pid, ErrGone)
 	case verdict != state.IdentifyIsPortalDaemon:
-		return fmt.Errorf("pid %d is no portal state daemon: %w", pid, ErrNotSaverDaemon)
+		return proctable.Args{}, fmt.Errorf("pid %d is no portal state daemon: %w", pid, ErrNotSaverDaemon)
 	}
 	args, err := p.args(pid)
 	switch {
 	case errors.Is(err, proctable.ErrGone):
-		return fmt.Errorf("pid %d: %w", pid, ErrGone)
+		return proctable.Args{}, fmt.Errorf("pid %d: %w", pid, ErrGone)
 	case err != nil:
-		return fmt.Errorf("%w: %w", ErrUnreadable, err)
+		return proctable.Args{}, fmt.Errorf("%w: %w", ErrUnreadable, err)
 	case !state.IsDaemonArgv(args.Argv):
-		return fmt.Errorf("pid %d runs %q, no portal state daemon: %w", pid, args.Argv, ErrNotSaverDaemon)
+		return proctable.Args{}, fmt.Errorf("pid %d runs %q, no portal state daemon: %w", pid, args.Argv, ErrNotSaverDaemon)
 	}
+	return args, nil
+}
+
+// marked fails unless environ, pid's, carries every one of the backend's
+// marks.
+func (p proof) marked(pid int, environ []string) error {
 	for _, mark := range p.marks {
-		if !carries(args.Env, mark, p.canonical) {
+		if !carries(environ, mark, p.canonical) {
 			return fmt.Errorf("pid %d's environment lacks %s: %w", pid, mark, ErrNotSaverDaemon)
 		}
 	}
@@ -91,6 +155,23 @@ func carries(environ []string, entry string, canonical map[string]func(dir strin
 		set = true
 	}
 	return set
+}
+
+// soleValue is the value environ sets key to, and whether it sets it, and to
+// that one value every time.
+func soleValue(environ []string, key string) (string, bool) {
+	value, set := "", false
+	for _, kv := range environ {
+		k, got, _ := strings.Cut(kv, "=")
+		switch {
+		case k != key:
+			continue
+		case set && got != value:
+			return "", false
+		}
+		value, set = got, true
+	}
+	return value, set
 }
 
 // sameValue reports whether got, a process's value, is want, the mark's: the

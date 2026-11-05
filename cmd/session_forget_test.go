@@ -339,8 +339,8 @@ func sameButCreation(a, b sessionindex.Entry) bool {
 // made but its name, as one whose readback failed does.
 type bareReadback struct{ *backendtest.Fake }
 
-func (b bareReadback) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
-	if _, err := b.Fake.Create(ctx, name, dir, command); err != nil {
+func (b bareReadback) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
+	if _, err := b.Fake.Create(ctx, name, dir, command, env...); err != nil {
 		return backend.Session{}, err
 	}
 	return backend.Session{Name: name}, nil

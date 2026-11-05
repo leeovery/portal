@@ -2,9 +2,11 @@ package bootstrap
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/warning"
 )
 
@@ -31,6 +33,21 @@ func NewFatal(userMsg string, cause error) *FatalError {
 // nor end: the fatal of a bootstrap that finds one, and uninstall's failure on
 // one.
 const SaverLeftMessage = "Portal can't use the _portal-saver session left running on another zmx, and couldn't end it. End it with that zmx (zmx kill _portal-saver), or restart your computer."
+
+// OtherStateDirMessage is a _portal-saver proved another state directory's,
+// which a bootstrap and uninstall refuse, sending it nothing: the state
+// directory it saves, and this Portal's.
+const OtherStateDirMessage = "The _portal-saver running in this zmx directory saves Portal's state in %[1]s, not this Portal's state in %[2]s. Run it with PORTAL_STATE_DIR=%[1]s, or give it a zmx directory of its own with ZMX_DIR. If the state in %[1]s is gone, end its saver with zmx kill _portal-saver."
+
+// OtherStateDir is err as the fatal of a saver another state directory's
+// when it carries a *saverhost.OtherStateDirError, and nil otherwise.
+func OtherStateDir(err error) *FatalError {
+	other, ok := errors.AsType[*saverhost.OtherStateDirError](err)
+	if !ok {
+		return nil
+	}
+	return NewFatal(fmt.Sprintf(OtherStateDirMessage, other.Other, other.StateDir), err)
+}
 
 // OlderZmxMessage is the fatal of a zmx that speaks zmx 0.8.1's protocol: a
 // saver judged so, or a session any create just made, which the backend

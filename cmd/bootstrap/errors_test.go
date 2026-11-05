@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,29 @@ func TestFatalError_UnwrapNilCause(t *testing.T) {
 
 	if got := fatal.Unwrap(); got != nil {
 		t.Errorf("Unwrap() = %v, want nil", got)
+	}
+}
+
+func TestOtherStateDir(t *testing.T) {
+	t.Run("a saver another state directory's is the fatal naming both, carrying it", func(t *testing.T) {
+		err := fmt.Errorf("create the saver: %w", theirs)
+
+		fatal := OtherStateDir(err)
+
+		if fatal == nil || fatal.UserMessage != theirsMessage {
+			t.Fatalf("OtherStateDir = %v, want %q", fatal, theirsMessage)
+		}
+		if !errors.Is(fatal, theirs) {
+			t.Errorf("cause = %v, want it to carry the saver's error", fatal.Cause)
+		}
+	})
+
+	for name, err := range map[string]error{"none": nil, "any other failure": errors.New("pid 4242 isn't confirmed as the save daemon")} {
+		t.Run(name+" is no fatal", func(t *testing.T) {
+			if fatal := OtherStateDir(err); fatal != nil {
+				t.Errorf("OtherStateDir(%v) = %v, want nil", err, fatal)
+			}
+		})
 	}
 }
 
