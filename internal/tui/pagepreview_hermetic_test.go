@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
 func TestPreviewHermetic_FullLifecycleReadsTheHistoryOnceAtOpen(t *testing.T) {
@@ -43,29 +45,6 @@ func TestPreviewHermetic_FullLifecycleReadsTheHistoryOnceAtOpen(t *testing.T) {
 	}
 }
 
-func readPagePreviewFiles(t *testing.T) map[string]string {
-	t.Helper()
-	matches, err := filepath.Glob("pagepreview*.go")
-	if err != nil {
-		t.Fatalf("glob pagepreview*.go: %v", err)
-	}
-	out := make(map[string]string, len(matches))
-	for _, path := range matches {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		out[path] = string(data)
-	}
-	if len(out) == 0 {
-		t.Fatalf("expected at least one pagepreview*.go production file in working dir; got 0")
-	}
-	return out
-}
-
 func readAllTUIProductionFiles(t *testing.T) map[string]string {
 	t.Helper()
 	matches, err := filepath.Glob("*.go")
@@ -100,69 +79,23 @@ func TestPreviewHermetic_NoHooksDependency(t *testing.T) {
 	}
 }
 
-func TestPreviewHermetic_NoStatePackageWriters(t *testing.T) {
-	forbiddenSymbols := []string{
-		"state.SetSkeletonMarker",
-		"state.UnsetSkeletonMarker",
-		"state.UnsetSkeletonMarkerForFIFO",
-		"state.WriteScrollbackIfChanged",
-		"state.CaptureAndHashPane",
-		"state.CaptureStructure",
-		"state.SeedHashMap",
-		"state.Commit",
-		"state.BootstrapPortalSaver",
-		"state.EnsurePortalSaverVersion",
-	}
-	files := readAllTUIProductionFiles(t)
-	for path, src := range files {
-		for _, sym := range forbiddenSymbols {
-			if strings.Contains(src, sym) {
-				t.Errorf("%s references forbidden state writer %s — preview code path must not call state writers",
-					path, sym)
+// zmxtest drives a real zmx, which runs only in the integration lane: the
+// preview's tests stay hermetic, reading history through the seam's fake.
+func TestPreviewHermetic_TestFilesDoNotImportZmxtest(t *testing.T) {
+	const forbidden = `"github.com/leeovery/portal/internal/zmxtest"`
+	var scanned int
+	for _, source := range sourceguardtest.ParsePackageSources(t, ".", true) {
+		if !strings.HasSuffix(source.Path, "_test.go") {
+			continue
+		}
+		scanned++
+		for _, imp := range source.File.Imports {
+			if imp.Path.Value == forbidden {
+				t.Errorf("%s imports %s; internal/tui's tests must not drive a real zmx", source.Path, forbidden)
 			}
 		}
 	}
-}
-
-func TestPreviewHermetic_NoFIFOReferences(t *testing.T) {
-	files := readPagePreviewFiles(t)
-	needles := []string{"FIFO", "fifo"}
-	for path, src := range files {
-		for _, needle := range needles {
-			if strings.Contains(src, needle) {
-				t.Errorf("%s references forbidden token %q — preview pipeline must not touch FIFOs",
-					path, needle)
-			}
-		}
-	}
-}
-
-func TestPreviewHermetic_TestFilesDoNotImportTmuxtest(t *testing.T) {
-	// Assembled from fragments so the forbidden paths never appear contiguously
-	// here — this file is one of the files scanned, and would self-trip.
-	const importPathPrefix = `"github.com/leeovery/portal/internal/`
-	forbiddenImports := []string{
-		importPathPrefix + "tmux" + `test"`,
-	}
-
-	matches, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob *_test.go: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("expected at least one *_test.go file in working dir; got 0")
-	}
-	for _, path := range matches {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		src := string(data)
-		for _, imp := range forbiddenImports {
-			if strings.Contains(src, imp) {
-				t.Errorf("%s imports forbidden test-only package %s — internal/tui tests must not depend on a real-tmux driver",
-					path, imp)
-			}
-		}
+	if scanned == 0 {
+		t.Fatal("no internal/tui test sources scanned; the guard is vacuous")
 	}
 }

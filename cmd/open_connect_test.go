@@ -283,17 +283,6 @@ func TestOpenSession_AttachesThroughTheRunner(t *testing.T) {
 		assertExeced(t, rec, "api-x7Kd9a")
 	})
 
-	t.Run("inside tmux it still attaches through the runner, never switching a tmux client", func(t *testing.T) {
-		// The command carries no tmux client, so any tmux call panics.
-		t.Setenv("TMUX", "/tmp/portal-open-inside-tmux-test,1,0")
-		_, rec := stageAttach(t, "api-x7Kd9a")
-
-		if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		assertAttached(t, rec, "api-x7Kd9a")
-	})
-
 	t.Run("an attach command with no argv is refused, attaching nothing", func(t *testing.T) {
 		fake, rec := stageAttach(t, "api-x7Kd9a")
 		withBackendDeps(t, BackendDeps{Backend: envBackend{Fake: fake, emptyArgv: true}})
