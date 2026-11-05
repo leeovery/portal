@@ -655,6 +655,95 @@ func TestHydrated(t *testing.T) {
 	})
 }
 
+// lazy is e as portal migrate leaves it, resuming lazily until it is
+// restored.
+func lazy(e sessionindex.Entry) sessionindex.Entry {
+	e.ResumeLazy = true
+	return e
+}
+
+// decision 6: a migrated session waits on its resume panel at its first
+// restore only, so its lazy resume lasts exactly as long as that restore is
+// owed.
+func TestResumeLazy(t *testing.T) {
+	migrated := lazy(owed(keeping(time.Time{}, 0)))
+
+	t.Run("restore's record of the creation keeps it, the entry owed still", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{migrated})
+
+		idx.Restored(migrated, liveCreation, 4242)
+
+		if got, _ := idx.Lookup("a"); !sameEntry(got, lazy(owed(keeping(liveCreation, 4242)))) {
+			t.Errorf("entry = %+v, want it resuming lazily, owed, recording the creation", got)
+		}
+	})
+
+	t.Run("a claim while the session is hydrating keeps it", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{lazy(owed(keeping(liveCreation, 4242)))})
+
+		if _, err := idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring().ReadingHydrating(hydrating("a"))); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, _ := idx.Lookup("a"); !got.ResumeLazy || !got.Owed {
+			t.Errorf("entry = %+v, want it owed and resuming lazily still", got)
+		}
+	})
+
+	t.Run("the helper's claim finishing the restore ends it", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{lazy(owed(keeping(liveCreation, 4242)))})
+
+		if !idx.Hydrated("a", liveCreation, 4242) {
+			t.Fatal("Hydrated = false, want the restore finished")
+		}
+
+		if got, _ := idx.Lookup("a"); !sameEntry(got, keeping(liveCreation, 4242)) {
+			t.Errorf("entry = %+v, want it owed nothing and resuming by its hook's mode", got)
+		}
+	})
+
+	// The helper's claim failed but it handed the session on, so the restore
+	// did finish.
+	t.Run("a claim finding the session live with its flag down ends it", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{lazy(owed(keeping(liveCreation, 4242)))})
+
+		if _, err := idx.Claim("a", "/a", liveCreation, 4242, ruleRestoring().ReadingHydrating(hydrating())); err != nil {
+			t.Fatal(err)
+		}
+
+		if got, _ := idx.Lookup("a"); got.ResumeLazy || got.Owed {
+			t.Errorf("entry = %+v, want it owed nothing and resuming by its hook's mode", got)
+		}
+	})
+
+	t.Run("an owed mark never sets it", func(t *testing.T) {
+		idx := sessionindex.IndexOf([]sessionindex.Entry{keeping(beforeBoot, 1717)})
+
+		idx.Owe("a")
+
+		if got, _ := idx.Lookup("a"); got.ResumeLazy {
+			t.Errorf("entry = %+v, want an owed entry portal migrate didn't make resuming by its hook's mode", got)
+		}
+	})
+
+	t.Run("it is written as resume_lazy, and omitted when false", func(t *testing.T) {
+		data, err := sessionindex.Encode(sessionindex.IndexOf([]sessionindex.Entry{migrated, {Name: "b"}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Count(string(data), `"resume_lazy": true`); got != 1 {
+			t.Errorf("sessions.json = %s, want resume_lazy written once, for a alone", data)
+		}
+		decoded, err := sessionindex.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := decoded.Lookup("a"); !got.ResumeLazy {
+			t.Errorf("decoded entry = %+v, want it resuming lazily", got)
+		}
+	})
+}
+
 func TestSameCreation(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

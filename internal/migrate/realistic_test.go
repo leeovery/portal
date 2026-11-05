@@ -296,14 +296,14 @@ func TestRealisticFixture(t *testing.T) {
 		t.Fatalf("RewriteHooks: %v", err)
 	}
 
-	t.Run("sessions.json holds every session owed a restore, recording no creation", func(t *testing.T) {
+	t.Run("sessions.json holds every session owed a restore, recording no creation, resuming lazily", func(t *testing.T) {
 		idx := readIndex(t, newDir)
 		if idx.Len() != len(plan.Sessions) {
 			t.Fatalf("%d entries, want %d", idx.Len(), len(plan.Sessions))
 		}
 		for _, s := range plan.Sessions {
 			e, ok := idx.Lookup(s.Name)
-			want := sessionindex.Entry{Name: s.Name, Label: s.Label, Dir: s.Dir, Cwd: s.Cwd, ScrollbackFile: s.Transcript.File, Owed: true}
+			want := sessionindex.Entry{Name: s.Name, Label: s.Label, Dir: s.Dir, Cwd: s.Cwd, ScrollbackFile: s.Transcript.File, Owed: true, ResumeLazy: true}
 			if !ok || e != want {
 				t.Errorf("entry %+v, want %+v", e, want)
 			}

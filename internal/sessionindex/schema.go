@@ -77,7 +77,11 @@ func (idx *Index) Len() int { return len(idx.sessions) }
 // restore its helper hasn't finished, which every restore brings back and no
 // saver drops until the helper of a restore that made it has finished, or a
 // claim has found it live once no restore of it is unfinished; an index
-// written before the mark reads with none owed.
+// written before the mark reads with none owed. ResumeLazy marks an entry
+// portal migrate made, whose restore brings its session up on the resume
+// panel whatever mode its hook registers, since the tmux session it came from
+// may still run the program its hook resumes; it goes with the owed mark,
+// once a restore has finished.
 type Entry struct {
 	Name           string    `json:"name"`
 	Label          string    `json:"label,omitempty"`
@@ -87,6 +91,7 @@ type Entry struct {
 	PID            int       `json:"pid,omitempty"`
 	ScrollbackFile string    `json:"scrollback_file,omitempty"`
 	Owed           bool      `json:"owed,omitempty"`
+	ResumeLazy     bool      `json:"resume_lazy,omitempty"`
 
 	// unknown holds the members this version does not model, as a JSON
 	// object, kept as a string so an Entry stays comparable.

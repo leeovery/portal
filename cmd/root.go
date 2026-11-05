@@ -17,9 +17,10 @@ import (
 )
 
 // Bootstrap must not run for these: it would heal doctor's subject, build what
-// uninstall then tears down, run again inside the saver and the helpers its
-// `state` subcommands are, and run on every __complete TAB; the rest only read
-// or label sessions. A match anywhere in the parent chain exempts
+// uninstall then tears down, run on migrate's version 1 state before migrate
+// runs it on the state it makes, run again inside the saver and the helpers
+// its `state` subcommands are, and run on every __complete TAB; the rest only
+// read or label sessions. A match anywhere in the parent chain exempts
 // the invocation, keyed on cobra's canonical Name() so the silent `hooks` alias
 // rides on "hook".
 var bootstrapExempt = map[string]bool{
@@ -30,6 +31,7 @@ var bootstrapExempt = map[string]bool{
 	"help":       true,
 	"hook":       true,
 	"init":       true,
+	"migrate":    true,
 	"rename":     true,
 	"state":      true,
 	"theme":      true,
@@ -40,11 +42,14 @@ var bootstrapExempt = map[string]bool{
 // The state check spares version, which reads no state; doctor, which reports
 // an unusable sessions.json itself and writes none; current, which only reads
 // it and shows the name alone when it can't, since footers run it on every
-// refresh; and the hidden state commands, the helpers a restored session runs:
-// a refused helper exits, and the session it runs in ends with it.
+// refresh; migrate, whose subject is the version 1 sessions.json the check
+// refuses, and which judges each state dir it finds itself; and the hidden
+// state commands, the helpers a restored session runs: a refused helper
+// exits, and the session it runs in ends with it.
 var stateCheckExempt = map[string]bool{
 	"current": true,
 	"doctor":  true,
+	"migrate": true,
 	"state":   true,
 	"version": true,
 }

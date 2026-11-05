@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 	"github.com/leeovery/portal/cmd"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/bootid"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
@@ -146,9 +147,16 @@ func (w *restoreWorld) awaitHydrated(t *testing.T, name string) {
 // it as the backend gave it.
 func (w *restoreWorld) awaitHistory(t *testing.T, name, what string, shows func(history string) bool) string {
 	t.Helper()
+	return awaitSessionHistory(t, w.b, name, what, shows)
+}
+
+// awaitSessionHistory waits for the history of b's session name to satisfy
+// shows, and returns it as b gave it.
+func awaitSessionHistory(t *testing.T, b *zmx.Backend, name, what string, shows func(history string) bool) string {
+	t.Helper()
 	var history string
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
-		raw, err := w.b.History(t.Context(), name, 0)
+		raw, err := b.History(t.Context(), name, 0)
 		history = string(raw)
 		return err == nil && shows(history)
 	}) {

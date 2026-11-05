@@ -83,11 +83,16 @@ func sessionOf(name string, windows ...v1Window) v1Session {
 // content.
 func legacyDir(t *testing.T, sessions []v1Session, files map[string]string) string {
 	t.Helper()
+	return legacyAt(t, t.TempDir(), sessions, files)
+}
+
+// legacyAt is legacyDir at dir, made if it isn't there.
+func legacyAt(t *testing.T, dir string, sessions []v1Session, files map[string]string) string {
+	t.Helper()
 	data, err := json.MarshalIndent(v1Index{Version: 1, SavedAt: savedAt, Sessions: sessions}, "", "  ")
 	if err != nil {
 		t.Fatalf("encode sessions.json: %v", err)
 	}
-	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "sessions.json"), string(data))
 	for name, content := range files {
 		writeFile(t, filepath.Join(dir, filepath.FromSlash(name)), content)

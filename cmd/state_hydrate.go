@@ -51,7 +51,12 @@ const (
 
 // hydrateFlagFile names the session's saved transcript in the helper's argv.
 // Its session is named by --session, as the resume chain's subcommands name it.
-const hydrateFlagFile = "file"
+// hydrateFlagLazy resumes the session lazily whatever mode its hook registers,
+// as restore asks for a session portal migrate made, at its first restore.
+const (
+	hydrateFlagFile = "file"
+	hydrateFlagLazy = "lazy"
+)
 
 type hydrateConfig struct {
 	// Session is the zmx session restore created, as it baked it into the
@@ -65,6 +70,9 @@ type hydrateConfig struct {
 	// OpenTranscript opens it; unset, it is os.Open.
 	File           string
 	OpenTranscript func(path string) (io.ReadCloser, error)
+	// Lazy resumes the session lazily, whatever mode its hook registers and
+	// whatever the install's is.
+	Lazy bool
 
 	Stdout    io.Writer
 	Logger    *slog.Logger
@@ -329,10 +337,12 @@ func logTranscriptUnreadable(cfg hydrateConfig, cause error) {
 
 // resolveResumeDecision reads the session's registration and the install-wide
 // default once, at the top of the helper, so the hand-off decides by what the
-// helper read before it raised anything.
+// helper read before it raised anything. A session restore asks to resume
+// lazily waits whatever mode its hook registers; one with no hook has nothing
+// to wait for, and never does.
 func resolveResumeDecision(cfg hydrateConfig) resumeDecision {
 	lookup := lookupOnResumeOrLog(cfg)
-	wait := lookup.Found && resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy
+	wait := lookup.Found && (cfg.Lazy || resumemode.Resolve(lookup.Mode, installResumeMode(cfg)) == resumemode.Lazy)
 	return resumeDecision{Wait: wait, Lookup: lookup}
 }
 
@@ -621,6 +631,7 @@ var stateHydrateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		session, _ := cmd.Flags().GetString(resumeFlagSession)
 		file, _ := cmd.Flags().GetString(hydrateFlagFile)
+		lazy, _ := cmd.Flags().GetBool(hydrateFlagLazy)
 
 		// A nil store degrades the hook lookup to a bare shell, which beats
 		// failing the per-session helper closed.
@@ -630,6 +641,7 @@ var stateHydrateCmd = &cobra.Command{
 			Session:           session,
 			Current:           currentName(),
 			File:              file,
+			Lazy:              lazy,
 			Stdout:            cmd.OutOrStdout(),
 			Logger:            hydrateLogger,
 			HookStore:         store,
@@ -644,6 +656,7 @@ func init() {
 	stateHydrateCmd.Flags().String(resumeFlagSession, "", "The restored zmx session's name, which keys its hook, its flags and its index entry")
 	// Optional: a session that saved no transcript is restored with none.
 	stateHydrateCmd.Flags().String(hydrateFlagFile, "", "Absolute path to the session's saved scrollback")
+	stateHydrateCmd.Flags().Bool(hydrateFlagLazy, false, "Resume the session lazily, whatever mode its hook registers")
 	_ = stateHydrateCmd.MarkFlagRequired(resumeFlagSession)
 
 	stateCmd.AddCommand(stateHydrateCmd)

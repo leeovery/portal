@@ -78,6 +78,12 @@ func runningLatch() (state.Latch, error) {
 // and every restored session run bootstrapExe, which restore refuses unless
 // it is named portal.
 func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
+	return p.runnerTelling(nil)
+}
+
+// runnerTelling is the bootstrap, telling restored the result of the restore
+// it runs, if it runs one; a nil restored hears nothing.
+func (p *productionBootstrap) runnerTelling(restored func(restore.Result)) (bootstrap.Runner, error) {
 	exe, err := bootstrapExe()
 	if err != nil {
 		return nil, fmt.Errorf("find Portal's own executable: %w", err)
@@ -85,6 +91,10 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 	restorer, err := restore.New(restore.Config{Backend: p.backend, StateDir: p.dir, Exe: exe, Logger: restoreLogger})
 	if err != nil {
 		return nil, err
+	}
+	var restoring bootstrap.Restorer = restorer
+	if restored != nil {
+		restoring = toldRestorer{Restorer: restorer, told: restored}
 	}
 	ensurer, err := p.host.Ensurer(saverhost.Daemon{Exe: exe, Version: Version()})
 	if err != nil {
@@ -106,10 +116,23 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 		FlagSweeper: &bootstrap.FlagSweepCore{Dir: p.dir, List: p.backend.List, RunsHelper: restorer.RunsHelper, Logger: bootstrapLogger},
 		Saver:       bootSaver{Ensurer: ensurer, host: p.host, saverDaemon: newSaverDaemon()},
 		Protocol:    zmx.ProtocolVersion,
-		Restore:     restorer,
+		Restore:     restoring,
 		Logger:      bootstrapLogger,
 	}
 	return bootstrap.Locked{Lock: bootstrapLock(p.dir), Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
+}
+
+// toldRestorer is a restore whose result it tells, as it returns it. Its
+// progress sink is the restore's own.
+type toldRestorer struct {
+	*restore.Restorer
+	told func(restore.Result)
+}
+
+func (r toldRestorer) Restore(ctx context.Context) restore.Result {
+	res := r.Restorer.Restore(ctx)
+	r.told(res)
+	return res
 }
 
 // holdBootstrapLock takes bootstrap.lock in the state directory dir alone, as
@@ -168,6 +191,8 @@ func (dir restoringFlag) Lower() (bool, error) { return state.Restoring.Clear(st
 var (
 	_ bootstrap.Restorer            = (*restore.Restorer)(nil)
 	_ bootstrap.RestoreProgressSink = (*restore.Restorer)(nil)
+	_ bootstrap.Restorer            = toldRestorer{}
+	_ bootstrap.RestoreProgressSink = toldRestorer{}
 )
 
 // bootSaver is the saver's lifecycle as the bootstrap's saver step asks for

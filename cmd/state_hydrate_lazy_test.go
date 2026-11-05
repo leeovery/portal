@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -167,6 +168,80 @@ func TestHydrateLazy_PinnedLazyBeatsAnEagerInstall(t *testing.T) {
 	}
 	if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
 		t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
+	}
+}
+
+// decision 6: a session portal migrate made waits on its panel at its first
+// restore whatever its hook's mode, since the tmux session it came from may
+// still run the program its hook resumes.
+func TestHydrateLazy_ARestoreAskingLazyParksWhateverTheMode(t *testing.T) {
+	cases := []struct {
+		name         string
+		registration resumemode.Mode
+		install      string
+	}{
+		{name: "pinned eager", registration: resumemode.Eager, install: ""},
+		{name: "naming no mode under an eager install", registration: resumemode.Unset, install: "eager"},
+		{name: "pinned lazy", registration: resumemode.Lazy, install: "eager"},
+	}
+	for _, tc := range cases {
+		for _, tail := range hydrateTails() {
+			t.Run(tc.name+"/"+tail.name, func(t *testing.T) {
+				exec := &stubExecShell{}
+				cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", tc.registration), lazyPrefs(t, tc.install), exec)
+				cfg.Lazy = true
+
+				lazyRun(t, tail, cfg)
+
+				if exec.target != "/bin/sh" {
+					t.Fatalf("exec target = %q, want /bin/sh", exec.target)
+				}
+				if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
+					t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
+				}
+				if !flagRaisedAt(t, lazyFlag(t)) {
+					t.Error("the parked session's flag is not raised")
+				}
+			})
+		}
+	}
+}
+
+func TestHydrateLazy_ARestoreAskingLazyWithNoHookRestoresAsToday(t *testing.T) {
+	exec := &stubExecShell{}
+	cfg := lazyConfig(t, emptyHookStore(t), lazyPrefs(t, ""), exec)
+	cfg.Lazy = true
+
+	lazyRun(t, hydrateTails()[0], cfg)
+
+	if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"-zsh"}) {
+		t.Errorf("exec = %q %v, want the login shell -zsh: there is nothing to wait for", exec.target, exec.args)
+	}
+	assertNoFlag(t)
+}
+
+func TestHydrateLazy_TheLazyFlagReachesTheHelper(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{args: []string{"--session", hydrateSession}, want: false},
+		{args: []string{"--session", hydrateSession, "--lazy"}, want: true},
+		{args: []string{"--session", hydrateSession, "--lazy", "--file", "/tmp/s.bin"}, want: true},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			newHydrateWorld(t)
+			var got hydrateConfig
+			withFuncSeam(t, &hydrateRunFunc, func(_ context.Context, cfg hydrateConfig) { got = cfg })
+
+			if _, _, err := runRootCmd(t, append([]string{"state", "hydrate"}, tc.args...)...); err != nil {
+				t.Fatalf("state hydrate: %v", err)
+			}
+
+			if got.Lazy != tc.want {
+				t.Errorf("Lazy = %v, want %v", got.Lazy, tc.want)
+			}
+		})
 	}
 }
 

@@ -26,6 +26,7 @@ func seamStagingCases() []seamStagingCase {
 		{"bootstrapDeps", func(t *testing.T) { withBootstrapDeps(t, BootstrapDeps{}) }, func() bool { return bootstrapDeps != nil }},
 		{"doctorDeps", func(t *testing.T) { withDoctorDeps(t, DoctorDeps{}) }, func() bool { return doctorDeps != nil }},
 		{"listDeps", func(t *testing.T) { withListDeps(t, ListDeps{}) }, func() bool { return listDeps != nil }},
+		{"migrateDeps", func(t *testing.T) { withMigrateDeps(t, MigrateDeps{}) }, func() bool { return migrateDeps != nil }},
 		{"openBurstDeps", func(t *testing.T) { withOpenBurstDeps(t, OpenBurstDeps{}) }, func() bool { return openBurstDeps != nil }},
 		{"openDeps", func(t *testing.T) { withOpenDeps(t, OpenDeps{}) }, func() bool { return openDeps != nil }},
 		{"uninstallDeps", func(t *testing.T) { withUninstallDeps(t, UninstallDeps{}) }, func() bool { return uninstallDeps != nil }},
