@@ -111,8 +111,11 @@ func digest(data []byte) string {
 // hooks.json since. It decodes hooks.json through the hooks codec first, as
 // strictly as the tmux version read it, so a file that doesn't parse is
 // malformedHooks, matching ErrMalformed, before anything is written, and it copies
-// the bytes it decoded. It reports whether it wrote a backup: no hooks.json
-// writes none.
+// the bytes it decoded. A fresh backup starts a fresh rewrite record: any
+// record already there belongs to a backup moved aside, and its digests must
+// not vouch for hooks.json against this one. The record goes first, so a run
+// that dies between the two leaves no backup beside a stale record. It
+// reports whether it wrote a backup: no hooks.json writes none.
 func backUpHooks(live, backup string) (bool, error) {
 	switch _, err := os.Lstat(backup); {
 	case err == nil:
@@ -129,6 +132,9 @@ func backUpHooks(live, backup string) (bool, error) {
 	}
 	if _, err := decodeHooks(data, live); err != nil {
 		return false, err
+	}
+	if err := os.Remove(hooksRewrites(backup)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("remove the rewrite record of an earlier backup: %w", err)
 	}
 	if err := fileutil.AtomicWrite0600(backup, data); err != nil {
 		return false, fmt.Errorf("back up hooks.json: %w", err)
