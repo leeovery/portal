@@ -6,6 +6,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/spf13/cobra"
@@ -43,7 +44,7 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 			return nil
 		})
 
-		deps, err := buildOpenBurstDeps(cmd)
+		deps, err := buildOpenBurstDeps(cmd, &resolver.SessionResult{Name: "api"})
 		if err != nil {
 			t.Fatalf("buildOpenBurstDeps: %v", err)
 		}
@@ -108,7 +109,7 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 			return nil
 		})
 
-		deps, err := buildOpenBurstDeps(cmd)
+		deps, err := buildOpenBurstDeps(cmd, &resolver.SessionResult{Name: "api"})
 		if err != nil {
 			t.Fatalf("buildOpenBurstDeps: %v", err)
 		}

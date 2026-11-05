@@ -11,8 +11,10 @@ import (
 
 var runOpenBurstFunc = runOpenBurst
 
-func runOpenBurst(cmd *cobra.Command, surfaces []spawn.Surface, command []string) error {
-	deps, err := buildOpenBurstDeps(cmd)
+// runOpenBurst opens surfaces, trigger being what the pre-flight resolved the
+// first of them, the trigger, to.
+func runOpenBurst(cmd *cobra.Command, surfaces []spawn.Surface, trigger resolver.QueryResult, command []string) error {
+	deps, err := buildOpenBurstDeps(cmd, trigger)
 	if err != nil {
 		return err
 	}
@@ -97,5 +99,5 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 		return openResolved(cmd, results[0], command)
 	}
 
-	return runOpenBurstFunc(cmd, surfaces, command)
+	return runOpenBurstFunc(cmd, surfaces, results[0], command)
 }

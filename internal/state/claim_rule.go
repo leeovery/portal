@@ -50,25 +50,39 @@ var warnedNoBootTime atomic.Bool
 // every claim adopts, losing nothing; it reads the flags and the names all
 // the same.
 func ClaimRule(dir string, names func(name string) error) sessionindex.Rule {
+	return claimRule(dir, names, warnNoBootTime)
+}
+
+// SilentClaimRule is ClaimRule for a reader that claims nothing and reports
+// what it finds, as doctor does: a boot time it can't read goes unlogged.
+func SilentClaimRule(dir string, names func(name string) error) sessionindex.Rule {
+	return claimRule(dir, names, func(error) {})
+}
+
+func claimRule(dir string, names func(name string) error, noBootTime func(error)) sessionindex.Rule {
 	if names == nil {
 		names = refuseEveryName
 	}
-	return judgedByBoot(dir).
+	return judgedByBoot(dir, noBootTime).
 		ReadingHydrating(func(name string) bool { return Hydrating.Raised(dir, name) }).
 		RefusingNames(names)
 }
 
 // judgedByBoot is the rule's judgement of entries by the boot: the zero Rule
-// when the boot time can't be read.
-func judgedByBoot(dir string) sessionindex.Rule {
+// when the boot time can't be read, which it hands noBootTime.
+func judgedByBoot(dir string, noBootTime func(error)) sessionindex.Rule {
 	booted, err := bootTime()
 	if err != nil {
-		if !warnedNoBootTime.Swap(true) {
-			sessionsLogger.Warn("claim-rule", "op", "claim-rule", "detail", "no boot time to judge entries by, so every claim adopts", "error", err)
-		}
+		noBootTime(err)
 		return sessionindex.Rule{}
 	}
 	return sessionindex.NewRule(booted.Add(bootTolerance), func(name string) bool { return Flagged(dir, name) })
+}
+
+func warnNoBootTime(err error) {
+	if !warnedNoBootTime.Swap(true) {
+		sessionsLogger.Warn("claim-rule", "op", "claim-rule", "detail", "no boot time to judge entries by, so every claim adopts", "error", err)
+	}
 }
 
 var errNoNameRule = errors.New("no name rule to judge it by")

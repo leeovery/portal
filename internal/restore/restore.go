@@ -136,7 +136,7 @@ func (r *Restorer) MarkOwed(ctx context.Context) error {
 	listed := names(live)
 	_, err = sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
 		for _, e := range idx.Entries() {
-			if !listed[e.Name] && !backend.IsPortalOwned(e.Name) {
+			if owedWithNoSaver(e, listed) {
 				idx.Owe(e.Name)
 			}
 		}
@@ -145,17 +145,24 @@ func (r *Restorer) MarkOwed(ctx context.Context) error {
 	return err
 }
 
+// owedWithNoSaver reports whether a bootstrap that finds no saver running
+// marks e owed, as MarkOwed does: no session in listed holds its name, and it
+// isn't one of Portal's own.
+func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
+	return !listed[e.Name] && !backend.IsPortalOwned(e.Name)
+}
+
 // Restore makes again, in index order, the session of every saved entry the
-// backend doesn't list, Portal's own aside, that is owed a restore or may
-// predate this boot. It skips any other entry from this boot, whose session
-// ended while a saver watched and is the saver's to drop; with no boot time
-// to judge by, every entry may predate the boot. A session it couldn't make
-// for a reason that may pass it tries again, within RetryBudget, once every
-// other has had its first try. A session it can't make keeps its entry for
-// the next bootstrap. It asks the backend nothing when sessions.json can't be
-// read, makes nothing when the backend can't be listed, and makes no further
-// session once ctx ends or the backend refuses one it made as speaking a
-// protocol Portal doesn't support.
+// backend doesn't hold, under its name or another spelling of it, Portal's own
+// aside, that is owed a restore or may predate this boot. It skips any other
+// entry from this boot, whose session ended while a saver watched and is the
+// saver's to drop; with no boot time to judge by, every entry may predate the
+// boot. A session it couldn't make for a reason that may pass it tries again,
+// within RetryBudget, once every other has had its first try. A session it
+// can't make keeps its entry for the next bootstrap. It asks the backend
+// nothing when sessions.json can't be read, makes nothing when the backend
+// can't be listed, and makes no further session once ctx ends or the backend
+// refuses one it made as speaking a protocol Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r, raised: map[string]bool{}}
@@ -211,10 +218,10 @@ func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
 		r.logger.Warn("list sessions failed", "error", err)
 		return 0, fmt.Errorf("list sessions: %w", err)
 	}
-	listed := names(live)
-	if why := notKept(e, listed, r.claimRule(r.dir), r.backend.ValidateName); why != "" {
+	j := r.judging(live)
+	if why := j.notKept(ctx, e); why != "" {
 		r.logger.Debug("session skipped", "session", name, "reason", why)
-		if listed[name] {
+		if j.listed[name] {
 			return AlreadyLive, nil
 		}
 		return NoLongerKept, nil
@@ -257,7 +264,7 @@ func (r *run) restore(ctx context.Context) {
 		r.res.ListErr = err
 		return
 	}
-	due := r.due(idx.Entries(), live)
+	due := r.due(ctx, idx.Entries(), live)
 	var again []sessionindex.Entry
 	for i, e := range due {
 		if ctx.Err() != nil {
@@ -398,18 +405,22 @@ func (r *run) cancelled(ctx context.Context, detail string) {
 }
 
 // due is the entries to restore.
-func (r *run) due(entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
-	listed := names(live)
-	rule := r.claimRule(r.dir)
+func (r *run) due(ctx context.Context, entries []sessionindex.Entry, live []backend.Session) []sessionindex.Entry {
+	j := r.judging(live)
 	var due []sessionindex.Entry
 	for _, e := range entries {
-		if why := skipped(e, listed, rule); why != "" {
+		if why := j.skips(ctx, e); why != "" {
 			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
 			continue
 		}
 		due = append(due, e)
 	}
 	return due
+}
+
+// judging is restore's rule over the sessions live lists.
+func (r *Restorer) judging(live []backend.Session) judging {
+	return judging{listed: names(live), rule: r.claimRule(r.dir), names: r.backend}
 }
 
 // names is the set of the sessions' names.
@@ -449,30 +460,81 @@ func unmakeable(e sessionindex.Entry, validName func(name string) error) error {
 	return nil
 }
 
-// notKept says why the entry isn't kept, and is empty when it is: kept is an
-// entry a restore would make again now, one skipped passes under a name
-// unmakeable passes. Restore counts a due entry under a name Create refuses
-// as failed, so such an entry is due but not kept.
-func notKept(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule, validName func(name string) error) string {
-	if why := skipped(e, listed, rule); why != "" {
+// Names is the backend as restore asks it about a saved session's name:
+// whether its Create accepts the name, and the live session holding it, a
+// *backend.HeldAsError when one holds it only under another spelling.
+type Names interface {
+	ValidateName(name string) error
+	Session(ctx context.Context, name string) (backend.Session, error)
+}
+
+// judging is restore's one rule over a listing of the live sessions: which
+// saved entries it makes again.
+type judging struct {
+	listed map[string]bool
+	rule   sessionindex.Rule
+	names  Names
+}
+
+// heldElsewhere is why restore skips an entry whose name a live session holds
+// only under another spelling, as a folding filesystem holds foo's socket as
+// Foo's: Create refuses the name while that session lives.
+const heldElsewhere = "another spelling of its name is live"
+
+// skips says why restore skips the entry now, and is empty when it doesn't:
+// why skipped says, or a live session holding its name under another
+// spelling, as the backend finds it. Such an entry stays as it is, made again
+// once that session ends.
+func (j judging) skips(ctx context.Context, e sessionindex.Entry) string {
+	if why := skipped(e, j.listed, j.rule); why != "" {
 		return why
 	}
-	if unmakeable(e, validName) != nil {
+	if _, err := j.names.Session(ctx, e.Name); heldAs(err) {
+		return heldElsewhere
+	}
+	return ""
+}
+
+// notKept says why the entry isn't kept, and is empty when it is: kept is an
+// entry a restore would make again now, one skips passes under a name
+// unmakeable passes. Restore counts a due entry under a name Create refuses
+// as failed, so such an entry is due but not kept.
+func (j judging) notKept(ctx context.Context, e sessionindex.Entry) string {
+	if why := j.skips(ctx, e); why != "" {
+		return why
+	}
+	if unmakeable(e, j.names.ValidateName) != nil {
 		return refusedName
 	}
 	return ""
 }
 
+// Keeping is what Kept judges the saved entries by, besides the live
+// sessions.
+type Keeping struct {
+	// Rule is the claim rule, judging which entries may predate this boot.
+	Rule sessionindex.Rule
+	// Names is the backend.
+	Names Names
+	// NoSaver judges as the next bootstrap does when it finds no saver
+	// running: every entry it marks owed counts as owed.
+	NoSaver bool
+}
+
 // Kept is the entries, in their order, a restore would make again now: a
-// saved session no session in live holds, not one of Portal's own, owed a
-// restore or one rule judges may predate this boot, under a name validName,
-// the backend's Create rule, accepts. x <name> brings back such a session on
-// demand, and doctor names them.
-func Kept(entries []sessionindex.Entry, live []backend.Session, rule sessionindex.Rule, validName func(name string) error) []sessionindex.Entry {
-	listed := names(live)
+// saved session no session in live holds, under its name or another spelling
+// of it, not one of Portal's own, owed a restore or one the rule judges may
+// predate this boot, under a name the backend's Create accepts. x <name>
+// brings back such a session on demand, and doctor names them.
+func Kept(ctx context.Context, entries []sessionindex.Entry, live []backend.Session, k Keeping) []sessionindex.Entry {
+	j := judging{listed: names(live), rule: k.Rule, names: k.Names}
 	var kept []sessionindex.Entry
 	for _, e := range entries {
-		if notKept(e, listed, rule, validName) == "" {
+		judged := e
+		if k.NoSaver && owedWithNoSaver(e, j.listed) {
+			judged.Owed = true
+		}
+		if j.notKept(ctx, judged) == "" {
 			kept = append(kept, e)
 		}
 	}

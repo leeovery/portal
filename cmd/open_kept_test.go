@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -148,6 +149,22 @@ func TestOpen_KeptSession(t *testing.T) {
 		})
 	}
 
+	// Create accepts ?, [ and a * anywhere but the end, so a kept name can
+	// read as a glob, which expands over live sessions alone.
+	for form, target := range map[string][]string{"bare": {"a?b"}, "pinned": {"-s", "a?b"}} {
+		t.Run(form+": a kept name with glob characters is brought back, not expanded", func(t *testing.T) {
+			o := stageKeptOpen(t, []string{"axb"}, []string{"a?b"}, nil, answer(restore.BroughtBack, nil))
+			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, target...) })
+
+			if err := runOpen(target...); err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if !slices.Equal(o.brought, []string{"a?b"}) || !slices.Equal(o.attached, []string{"a?b"}) {
+				t.Errorf("brought %q, attached %q; want a?b brought back, then attached", o.brought, o.attached)
+			}
+		})
+	}
+
 	t.Run("a live session of the name is attached, nothing brought back", func(t *testing.T) {
 		o := stageKeptOpen(t, []string{"work"}, []string{"work"}, nil, answer(restore.BroughtBack, nil))
 
@@ -226,12 +243,13 @@ func TestOpen_KeptSession(t *testing.T) {
 // decision 78: a kept name among several targets opens in a window of its
 // own, whose open --session brings it back, as the trigger's connect does.
 func TestOpenBurst_KeptSession(t *testing.T) {
-	t.Run("pre-flight brings nothing back, giving a kept name an attach surface", func(t *testing.T) {
+	t.Run("pre-flight brings nothing back, giving a kept name an attach surface, and the trigger's verdict", func(t *testing.T) {
 		o := stageKeptOpen(t, []string{"api"}, []string{"work"}, nil, answer(restore.BroughtBack, nil))
 		withFuncSeam(t, &openRawArgs, func() []string { return []string{"portal", "open", "work", "-s", "api"} })
 		var surfaces []spawn.Surface
-		withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, s []spawn.Surface, _ []string) error {
-			surfaces = s
+		var trigger resolver.QueryResult
+		withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, s []spawn.Surface, tr resolver.QueryResult, _ []string) error {
+			surfaces, trigger = s, tr
 			return nil
 		})
 
@@ -242,6 +260,9 @@ func TestOpenBurst_KeptSession(t *testing.T) {
 		if !slices.Equal(surfaces, want) {
 			t.Errorf("surfaces = %+v, want %+v", surfaces, want)
 		}
+		if kept, ok := trigger.(*resolver.KeptResult); !ok || kept.Name != "work" {
+			t.Errorf("trigger = %#v, want work judged kept", trigger)
+		}
 		if len(o.brought) > 0 {
 			t.Errorf("brought %q back during pre-flight, want nothing", o.brought)
 		}
@@ -251,7 +272,7 @@ func TestOpenBurst_KeptSession(t *testing.T) {
 		stageKeptOpen(t, []string{"api"}, []string{"work"}, nil, answer(restore.BroughtBack, nil))
 		withFuncSeam(t, &openRawArgs, func() []string { return []string{"portal", "open", "-s", "work", "api"} })
 		var surfaces []spawn.Surface
-		withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, s []spawn.Surface, _ []string) error {
+		withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, s []spawn.Surface, _ resolver.QueryResult, _ []string) error {
 			surfaces = s
 			return nil
 		})
@@ -266,21 +287,40 @@ func TestOpenBurst_KeptSession(t *testing.T) {
 
 	t.Run("the trigger's connect brings a kept session back, then attaches it", func(t *testing.T) {
 		o := stageKeptOpen(t, nil, []string{"work"}, nil, answer(restore.BroughtBack, nil))
-		isolateTerminalsFile(t)
-		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
-		withOpenBurstDeps(t, OpenBurstDeps{Logger: log.Discard()})
 
-		deps, err := buildOpenBurstDeps(contextCommand())
-		if err != nil {
-			t.Fatalf("buildOpenBurstDeps: %v", err)
-		}
-		if err := deps.Connector.Connect("work"); err != nil {
-			t.Fatalf("Connect: %v", err)
-		}
+		connectTriggerJudged(t, &resolver.KeptResult{Name: "work"}, "work")
+
 		if !slices.Equal(o.brought, []string{"work"}) || !slices.Equal(o.attached, []string{"work"}) {
 			t.Errorf("brought %q, attached %q; want work brought back, then attached", o.brought, o.attached)
 		}
 	})
+
+	t.Run("the trigger's connect attaches a live session as it is, resolving nothing again", func(t *testing.T) {
+		o := stageKeptOpen(t, nil, nil, nil, answer(restore.BroughtBack, nil))
+		withOpenDeps(t, OpenDeps{SessionLister: &testSessionLister{err: errors.New("list: refused")}, Kept: o.kept})
+
+		connectTriggerJudged(t, &resolver.SessionResult{Name: "api", Domain: resolver.DomainSession}, "api")
+
+		if !slices.Equal(o.attached, []string{"api"}) || len(o.brought) > 0 || len(o.kept.asked) > 0 {
+			t.Errorf("attached %q, brought %q, asked whether kept %q; want api attached, nothing more", o.attached, o.brought, o.kept.asked)
+		}
+	})
+}
+
+// connectTriggerJudged connects the burst's trigger, name, as the pre-flight
+// judged it, trigger.
+func connectTriggerJudged(t *testing.T, trigger resolver.QueryResult, name string) {
+	t.Helper()
+	isolateTerminalsFile(t)
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+	withOpenBurstDeps(t, OpenBurstDeps{Logger: log.Discard()})
+	deps, err := buildOpenBurstDeps(contextCommand(), trigger)
+	if err != nil {
+		t.Fatalf("buildOpenBurstDeps: %v", err)
+	}
+	if err := deps.Connector.Connect(name); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 }
 
 // saveIndex writes sessions.json holding entries in the state directory dir.
@@ -292,7 +332,7 @@ func saveIndex(t *testing.T, dir string, entries ...sessionindex.Entry) {
 func TestKeptSessions(t *testing.T) {
 	t.Run("it judges by restore's own rule", func(t *testing.T) {
 		dir := isolateStateDir(t)
-		fake := backendtest.New(backend.Session{Name: "live"})
+		fake := backendtest.New(backend.Session{Name: "live"}, backend.Session{Name: "Spelt"})
 		withBackendDeps(t, BackendDeps{Backend: fake})
 		thisBoot := testBoot.Add(time.Hour)
 		saveIndex(t, dir,
@@ -300,11 +340,12 @@ func TestKeptSessions(t *testing.T) {
 			sessionindex.Entry{Name: "owed", CreatedAt: thisBoot, Owed: true},
 			sessionindex.Entry{Name: "ended", CreatedAt: thisBoot},
 			sessionindex.Entry{Name: "live", CreatedAt: savedBeforeBoot},
+			sessionindex.Entry{Name: "spelt", CreatedAt: savedBeforeBoot},
 			sessionindex.Entry{Name: "_portal-saver", CreatedAt: savedBeforeBoot},
 			sessionindex.Entry{Name: "logs", CreatedAt: savedBeforeBoot},
 		)
 
-		for name, want := range map[string]bool{"saved": true, "owed": true, "ended": false, "live": false, "_portal-saver": false, "logs": false, "never-saved": false} {
+		for name, want := range map[string]bool{"saved": true, "owed": true, "ended": false, "live": false, "spelt": false, "_portal-saver": false, "logs": false, "never-saved": false} {
 			if got, err := (keptSessions{ctx: t.Context()}).IsKept(name); got != want || err != nil {
 				t.Errorf("IsKept(%s) = %v, %v; want %v", name, got, err, want)
 			}
@@ -319,6 +360,25 @@ func TestKeptSessions(t *testing.T) {
 
 		if kept, err := (keptSessions{ctx: t.Context()}).IsKept("work"); kept || err != nil {
 			t.Errorf("IsKept(work) = %v, %v; want false", kept, err)
+		}
+		if calls := fake.Calls(); len(calls) != 0 {
+			t.Errorf("backend calls = %+v, want none", calls)
+		}
+	})
+
+	t.Run("a name Create refuses costs no read: an index it can't read goes unlogged", func(t *testing.T) {
+		blockStateDir(t)
+		fake := backendtest.New()
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		sink := logtest.Install(t)
+
+		for _, name := range []string{"~/code", "logs"} {
+			if kept, err := (keptSessions{ctx: t.Context()}).IsKept(name); kept || err != nil {
+				t.Errorf("IsKept(%s) = %v, %v; want false", name, kept, err)
+			}
+		}
+		if recs := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(recs) != 0 {
+			t.Errorf("warnings = %v, want none", recs)
 		}
 		if calls := fake.Calls(); len(calls) != 0 {
 			t.Errorf("backend calls = %+v, want none", calls)
@@ -430,6 +490,26 @@ func (w *keptWorld) assertKeptAsSaved(t *testing.T) {
 	}
 }
 
+// lockCheckedBackend is a backend whose Create fails the test unless
+// bootstrap.lock in dir is held as it runs.
+type lockCheckedBackend struct {
+	backend.Backend
+	t   *testing.T
+	dir string
+}
+
+func (b lockCheckedBackend) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+	release, err := state.AcquireBootstrapLock(ctx, b.dir, 0)
+	switch {
+	case err == nil:
+		release()
+		b.t.Errorf("Create(%s) ran with bootstrap.lock free, want it held", name)
+	case !errors.Is(err, state.ErrBootstrapLockHeld):
+		b.t.Errorf("take bootstrap.lock during Create(%s): %v", name, err)
+	}
+	return b.Backend.Create(ctx, name, dir, command)
+}
+
 // syncBuffer is a buffer a command writes from one goroutine while the test
 // reads it from another.
 type syncBuffer struct {
@@ -450,8 +530,9 @@ func (b *syncBuffer) String() string {
 }
 
 func TestBringBack_UnderTheLock(t *testing.T) {
-	t.Run("it makes the session through restore's own path, then attaches it", func(t *testing.T) {
+	t.Run("it makes the session through restore's own path, holding bootstrap.lock, then attaches it", func(t *testing.T) {
 		w := newKeptWorld(t)
+		withBackendDeps(t, BackendDeps{Backend: lockCheckedBackend{Backend: envBackend{Fake: w.fake, env: attachEnv}, t: t, dir: w.dir}})
 
 		if err := runOpen("work"); err != nil {
 			t.Fatalf("open: %v", err)

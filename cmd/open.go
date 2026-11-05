@@ -101,7 +101,8 @@ running, which the next restore would bring back, brings it back and attaches it
 a path, alias, or zoxide match mints a new session there.
 
 Domain pins skip the precedence chain and force a single domain:
-  -s, --session   attach the named session or session glob (never mints)
+  -s, --session   attach the named session or session glob, bringing back a
+                  kept saved session first (never mints)
   -p, --path      mint a new session at the given directory (must exist)
   -a, --alias     mint a new session at the given alias key or key glob
   -z, --zoxide    mint a new session at zoxide's best match
@@ -261,9 +262,28 @@ func openPinned(cmd *cobra.Command, resolve func(*resolver.QueryResolver, string
 	if err != nil {
 		return err
 	}
-	result, err = settleKept(cmd, result, command, func() (resolver.QueryResult, error) {
+	return openSettled(cmd, result, command, func() (resolver.QueryResult, error) {
 		return resolve(qr.WithKept(nil), val)
 	})
+}
+
+// openKept opens the kept session named name, as a pre-flight judged it:
+// brought back, or, kept no longer under bootstrap.lock, the live session of
+// that name the session pin finds, if any.
+func openKept(cmd *cobra.Command, name string, command []string) error {
+	return openSettled(cmd, &resolver.KeptResult{Name: name}, command, func() (resolver.QueryResult, error) {
+		qr, err := buildQueryResolver(cmd)
+		if err != nil {
+			return nil, err
+		}
+		return qr.WithKept(nil).ResolveSessionPin(name)
+	})
+}
+
+// openSettled opens result once settleKept has settled it, again resolving
+// for a kept session that is kept no longer.
+func openSettled(cmd *cobra.Command, result resolver.QueryResult, command []string, again func() (resolver.QueryResult, error)) error {
+	result, err := settleKept(cmd, result, command, again)
 	if err != nil {
 		return err
 	}
@@ -271,10 +291,9 @@ func openPinned(cmd *cobra.Command, resolve func(*resolver.QueryResolver, string
 }
 
 // openResolved handles no MissResult — the bare-positional path renders its own
-// message and pins never miss — nor a KeptResult, which settleKept settles
-// first, so any other result type is a defensive error. A command (-e/--) is
-// mint-scoped: an attach target is already running its own program, so there
-// is nothing safe to inject it into.
+// message and pins never miss — so any other result type is a defensive error.
+// A command (-e/--) is mint-scoped: an attach target is already running its
+// own program, so there is nothing safe to inject it into.
 func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
@@ -282,6 +301,8 @@ func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []str
 			return NewUsageError(commandAttachOnlyMessage)
 		}
 		return openSessionFunc(cmd, r.Name)
+	case *resolver.KeptResult:
+		return openKept(cmd, r.Name, command)
 	case *resolver.PathResult:
 		return openPathFunc(cmd, r.Path, command)
 	default:
@@ -705,16 +726,25 @@ func resolverKept(cmd *cobra.Command) resolver.KeptLookup {
 	return keptSessions{ctx: cmd.Context()}
 }
 
-// keptSessions judges a saved session kept by restore's own rule. It reads
-// sessions.json without its lock, and lists the sessions only for a name the
-// index holds, so a target no session was saved under costs one file read. A
-// read that fails is logged here; the resolver then keeps nothing, as a
-// listing that fails lists no session.
+// keptSessions judges a saved session kept by restore's own rule. A name the
+// backend's Create refuses is never kept, so it costs no read. Any other is
+// looked up in sessions.json, read without its lock, and the sessions are
+// listed only for a name the index holds, so a target no session was saved
+// under costs one file read. A read that fails is logged here; the resolver
+// then keeps nothing, as a listing that fails lists no session.
 type keptSessions struct {
 	ctx context.Context
 }
 
 func (k keptSessions) IsKept(name string) (bool, error) {
+	b, err := sessionBackend()
+	if err != nil {
+		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
+		return false, err
+	}
+	if b.ValidateName(name) != nil {
+		return false, nil
+	}
 	dir, e, saved, err := savedEntry(name)
 	if err != nil {
 		restoreLogger.Warn("sessions.json unreadable", "session", name, "error", err)
@@ -723,12 +753,12 @@ func (k keptSessions) IsKept(name string) (bool, error) {
 	if !saved {
 		return false, nil
 	}
-	b, live, err := listedSessions(k.ctx)
+	live, err := b.List(k.ctx)
 	if err != nil {
 		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
 		return false, err
 	}
-	kept := restore.Kept([]sessionindex.Entry{e}, live, claimRule(dir, b.ValidateName), b.ValidateName)
+	kept := restore.Kept(k.ctx, []sessionindex.Entry{e}, live, restore.Keeping{Rule: claimRule(dir, b.ValidateName), Names: b})
 	return len(kept) == 1, nil
 }
 
@@ -744,17 +774,6 @@ func savedEntry(name string) (dir string, e sessionindex.Entry, saved bool, err 
 	}
 	e, saved = idx.Lookup(name)
 	return dir, e, saved, nil
-}
-
-// listedSessions is the session backend and every session it lists, Portal's
-// own included.
-func listedSessions(ctx context.Context) (backend.Backend, []backend.Session, error) {
-	b, err := sessionBackend()
-	if err != nil {
-		return nil, nil, err
-	}
-	live, err := b.List(ctx)
-	return b, live, err
 }
 
 // backendSessionNames lists the names of the backend's user sessions, the ones
@@ -774,7 +793,7 @@ func (l backendSessionNames) ListSessionNames() ([]string, error) {
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
-	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
+	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob, bringing back a kept saved session first (session-domain; never mints)")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")

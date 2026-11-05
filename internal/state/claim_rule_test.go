@@ -162,6 +162,38 @@ func TestClaimRule(t *testing.T) {
 	})
 }
 
+// decision 78: doctor reads the claim rule only to report what it finds.
+func TestSilentClaimRule(t *testing.T) {
+	saved, since := ruleBooted.Add(-time.Hour), ruleBooted.Add(time.Hour)
+	entry := func(at time.Time) sessionindex.Entry { return sessionindex.Entry{Name: forgotten, CreatedAt: at} }
+
+	t.Run("it judges entries by the boot as ClaimRule does", func(t *testing.T) {
+		state.SetBootTimeForTest(t, bootedAt(ruleBooted))
+		dir := t.TempDir()
+		silent, loud := state.SilentClaimRule(dir, anyName), state.ClaimRule(dir, anyName)
+
+		for _, at := range []time.Time{saved, since} {
+			if got, want := silent.MayPredateBoot(entry(at)), loud.MayPredateBoot(entry(at)); got != want {
+				t.Errorf("an entry created at %v may predate the boot = %v, want %v as ClaimRule judges it", at, got, want)
+			}
+		}
+	})
+
+	t.Run("a boot time it can't read judges no boot, unlogged, leaving ClaimRule's warning to give", func(t *testing.T) {
+		state.SetBootTimeForTest(t, func() (time.Time, error) { return time.Time{}, errors.New("no sysctl") })
+		sink := logtest.Install(t)
+
+		if !state.SilentClaimRule(t.TempDir(), anyName).MayPredateBoot(entry(since)) {
+			t.Error("an entry of this boot can't predate it, want every entry judged as one that may")
+		}
+		if recs := sink.Records().Matching("sessions", "claim-rule"); len(recs) != 0 {
+			t.Errorf("records = %v, want none", recs)
+		}
+		state.ClaimRule(t.TempDir(), anyName)
+		sink.Records().Matching("sessions", "claim-rule").AtExactLevel(slog.LevelWarn).Only(t, "ClaimRule's own warning")
+	})
+}
+
 // decision 72: a restore completes at its helper's claim, so a session whose
 // hydrating flag is up has a restore no claim but the helper's finishes.
 func TestClaimRule_ReadsTheHydratingFlag(t *testing.T) {

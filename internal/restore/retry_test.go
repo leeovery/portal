@@ -42,7 +42,7 @@ func TestRestore_UnconfirmedCreate(t *testing.T) {
 		if want := (restore.Result{Failed: 1}); res != want {
 			t.Errorf("Restore = %+v, want %+v", res, want)
 		}
-		if asks, tries := len(w.fake.CallsTo(backendtest.OpSession)), len(w.created()); asks != 2*tries-1 || len(w.slept) == 0 || w.slept[0] != time.Second {
+		if asks, tries := w.asks(), len(w.created()); asks != 2*tries-1 || len(w.slept) == 0 || w.slept[0] != time.Second {
 			t.Errorf("asked %d times in %d tries, waiting %v; want each try to ask once a probe's ceiling on, each retry asking first besides", asks, tries, w.slept)
 		}
 		if w.hydrating(t, "work") {

@@ -17,8 +17,15 @@ import (
 )
 
 // keptNames is the names of the entries Kept finds in the world's index, judged
-// by booted, as its restorer judges them.
+// by booted, as its restorer judges them, with a saver running.
 func (w *world) keptNames(t *testing.T) []string {
+	t.Helper()
+	return w.keptJudging(t, false)
+}
+
+// keptJudging is the names of the entries Kept finds in the world's index,
+// judged by booted, with no saver running when noSaver is set.
+func (w *world) keptJudging(t *testing.T, noSaver bool) []string {
 	t.Helper()
 	idx, err := sessionindex.Read(w.dir)
 	if err != nil {
@@ -29,7 +36,8 @@ func (w *world) keptNames(t *testing.T) []string {
 		t.Fatalf("list: %v", err)
 	}
 	var names []string
-	for _, e := range restore.Kept(idx.Entries(), live, sessionindex.NewRule(booted, nil), w.fake.ValidateName) {
+	keeping := restore.Keeping{Rule: sessionindex.NewRule(booted, nil), Names: w.fake, NoSaver: noSaver}
+	for _, e := range restore.Kept(t.Context(), idx.Entries(), live, keeping) {
 		names = append(names, e.Name)
 	}
 	return names
@@ -38,13 +46,14 @@ func (w *world) keptNames(t *testing.T) []string {
 // decision 78: a kept entry is exactly what the next restore makes again, so
 // x <name> and doctor see what a bootstrap would bring back.
 func TestKept_IsWhatRestoreMakes(t *testing.T) {
-	w := newWorld(t, backend.Session{Name: "live"}, backend.Session{Name: "silent"})
+	w := newWorld(t, backend.Session{Name: "live"}, backend.Session{Name: "silent"}, backend.Session{Name: "Spelt"})
 	w.fake.StopAnswering("silent")
 	unrecorded := entry(t, "unrecorded")
 	unrecorded.CreatedAt, unrecorded.PID = time.Time{}, 0
 	w.save(t,
 		entry(t, "live"),
 		entry(t, "silent"),
+		entry(t, "spelt"),
 		entry(t, "_portal-saver"),
 		thisBoot(t, "ended"),
 		owing(thisBoot(t, "owed")),
@@ -58,10 +67,40 @@ func TestKept_IsWhatRestoreMakes(t *testing.T) {
 
 	want := []string{"owed", "saved", "unrecorded"}
 	if !slices.Equal(kept, want) {
-		t.Errorf("Kept = %q, want %q: owed or from before the boot, not live, not Portal's own, under a name Create takes", kept, want)
+		t.Errorf("Kept = %q, want %q: owed or from before the boot, not live under its name or another spelling, not Portal's own, under a name Create takes", kept, want)
 	}
 	if made := w.created(); !slices.Equal(kept, made) {
 		t.Errorf("Kept = %q, but Restore made %q; want the same sessions", kept, made)
+	}
+}
+
+// decision 58: with no saver running, the next bootstrap marks owed every
+// saved session no session holds, so all of them are kept.
+func TestKept_WithNoSaverIsWhatTheBootstrapMakes(t *testing.T) {
+	w := newWorld(t, backend.Session{Name: "live"}, backend.Session{Name: "Spelt"})
+	w.save(t,
+		thisBoot(t, "live"),
+		entry(t, "spelt"),
+		thisBoot(t, "_portal-saver"),
+		thisBoot(t, "ended"),
+		entry(t, "saved"),
+		thisBoot(t, "logs"),
+	)
+
+	running, gone := w.keptNames(t), w.keptJudging(t, true)
+	if err := w.r.MarkOwed(t.Context()); err != nil {
+		t.Fatalf("MarkOwed: %v", err)
+	}
+	w.r.Restore(t.Context())
+
+	if want := []string{"saved"}; !slices.Equal(running, want) {
+		t.Errorf("Kept with a saver running = %q, want %q: the ended entry is the saver's to drop", running, want)
+	}
+	if want := []string{"ended", "saved"}; !slices.Equal(gone, want) {
+		t.Errorf("Kept with no saver = %q, want %q: every entry not live under any spelling, not Portal's own, under a name Create takes", gone, want)
+	}
+	if made := w.created(); !slices.Equal(gone, made) {
+		t.Errorf("Kept with no saver = %q, but the bootstrap's MarkOwed and Restore made %q; want the same sessions", gone, made)
 	}
 }
 
@@ -117,6 +156,10 @@ func TestBringBack(t *testing.T) {
 		{"an entry of this boot owed nothing", "it ended this boot", func(t *testing.T, w *world) { w.save(t, thisBoot(t, "work")) }},
 		{"an entry under a name Create refuses", "its name is one the backend can never create", func(t *testing.T, w *world) {
 			w.fake.Validate = func(string) error { return backend.ErrInvalidName }
+			w.save(t, entry(t, "work"))
+		}},
+		{"an entry another spelling of whose name is live", "another spelling of its name is live", func(t *testing.T, w *world) {
+			w.fake.Add(backend.Session{Name: "WORK"})
 			w.save(t, entry(t, "work"))
 		}},
 	} {
@@ -180,8 +223,8 @@ func TestBringBack(t *testing.T) {
 		if err == nil || brought != 0 {
 			t.Fatalf("BringBack = %v, %v; want the session that never answered failed", brought, err)
 		}
-		if calls := w.fake.CallsTo(backendtest.OpSession); len(calls) != 1 || len(w.slept) != 1 {
-			t.Errorf("asked again %d times after %v; want once, a probe's ceiling on", len(calls), w.slept)
+		if asks := w.asks(); asks != 1 || len(w.slept) != 1 {
+			t.Errorf("asked again %d times after %v; want once, a probe's ceiling on", asks, w.slept)
 		}
 		if w.hydrating(t, "work") {
 			t.Error("the hydrating flag it raised is still up, with no session to lower it")

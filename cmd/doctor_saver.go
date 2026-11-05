@@ -224,19 +224,21 @@ func checkPendingResumes(dir string, dirErr error, sessions []backend.Session, l
 // restore brings back, and how to bring one back now.
 const keptSessionsDetail = "%s — saved but not running, back at the next restore; x <name> brings one back now"
 
-// checkKeptSessions names the kept sessions, judged by restore's own rule. It
-// states, never judges, and is absent when there are none, and when the
-// state directory, the sessions, sessions.json or the name rule can't be
-// read, which their own checks report.
-func checkKeptSessions(dir string, dirErr error, sessions []backend.Session, listErr error, validName func(string) error) []checkResult {
-	if dirErr != nil || listErr != nil || validName == nil {
+// checkKeptSessions names the kept sessions in the state directory dir,
+// judged by restore's own rule, as the next bootstrap judges them when no
+// saver runs. It states, never judges, and is absent when there are none, and
+// when the sessions, sessions.json or the backend can't be read, which their
+// own checks report.
+func checkKeptSessions(ctx context.Context, dir string, sessions []backend.Session, listErr error, b restore.Names, s doctorSaver) []checkResult {
+	if listErr != nil || b == nil {
 		return nil
 	}
 	idx, err := sessionindex.Read(dir)
 	if err != nil {
 		return nil
 	}
-	kept := restore.Kept(idx.Entries(), sessions, claimRule(dir, validName), validName)
+	keeping := restore.Keeping{Rule: silentClaimRule(dir, b.ValidateName), Names: b, NoSaver: runsNoSaver(ctx, s)}
+	kept := restore.Kept(ctx, idx.Entries(), sessions, keeping)
 	if len(kept) == 0 {
 		return nil
 	}
@@ -245,6 +247,17 @@ func checkKeptSessions(dir string, dirErr error, sessions []backend.Session, lis
 		names[i] = e.Name
 	}
 	return []checkResult{{name: "kept sessions", status: checkInfo, detail: fmt.Sprintf(keptSessionsDetail, strings.Join(names, ", "))}}
+}
+
+// runsNoSaver reports whether s reads no saver session running. One it can't
+// read counts as running, so the kept sessions named are those kept either
+// way.
+func runsNoSaver(ctx context.Context, s doctorSaver) bool {
+	if s == nil {
+		return false
+	}
+	present, err := s.Present(ctx)
+	return err == nil && !present
 }
 
 // waitingSessions counts the sessions listed in sessions whose resume panel

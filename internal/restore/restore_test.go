@@ -141,6 +141,27 @@ func TestRestore_Skips(t *testing.T) {
 			t.Errorf("entry = %+v, %v; want it left for the saver to drop, %+v", got, ok, e)
 		}
 	})
+
+	// zmx finds a session by statting its socket, so on a filesystem that
+	// folds case the live Work holds work's name: Create refuses it.
+	t.Run("a session another spelling of its name holds, its entry left to be made once that ends", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		e := owing(entry(t, "work"))
+		w.save(t, e)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
+			t.Errorf("entry = %+v, %v; want it as saved, %+v", got, ok, e)
+		}
+
+		w.fake.Remove("Work")
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore once Work ended = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once Work ended", got)
+		}
+	})
 }
 
 // thisBoot is a saved session's entry created after booted.
@@ -506,9 +527,11 @@ func TestRestore_FailedCreate(t *testing.T) {
 		// zmx finds a session by statting its socket, so on a filesystem that
 		// folds case one held as WORK answers for work.
 		{
-			name:  "a session held under another spelling fails",
-			stage: func(w *world) { w.fake.Add(backend.Session{Name: "WORK"}) },
-			want:  other,
+			name: "a session made since the listing under another spelling fails",
+			stage: func(w *world) {
+				first(w, func(context.Context, string, string, []string) { w.fake.Add(backend.Session{Name: "WORK"}) })
+			},
+			want: other,
 		},
 		{
 			name:  "a refusal leaving no session fails",
@@ -645,10 +668,8 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 		w.r.Restore(t.Context())
 
 		var asks []string
-		for _, call := range w.fake.Calls() {
-			if call.Op == backendtest.OpCreate || call.Op == backendtest.OpSession {
-				asks = append(asks, string(call.Op))
-			}
+		for _, op := range w.witness.judging {
+			asks = append(asks, string(op))
 		}
 		create, ask := string(backendtest.OpCreate), string(backendtest.OpSession)
 		tries := len(w.created())
@@ -694,11 +715,14 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 	t.Run("a holder found on the first ask is not asked for again", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "work"))
-		w.fake.Add(backend.Session{Name: "WORK"})
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.fake.Add(backend.Session{Name: "WORK"})
+			return w.fake.Create(ctx, name, dir, command)
+		})
 
 		w.r.Restore(t.Context())
 
-		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) > 0 {
+		if asks := w.asks(); asks != 1 || len(w.slept) > 0 {
 			t.Errorf("asked %d times, waiting %v; want once, with no wait", asks, w.slept)
 		}
 	})

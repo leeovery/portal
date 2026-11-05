@@ -1621,7 +1621,7 @@ func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
 		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	})
 
-	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ []string) error { return nil })
+	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ resolver.QueryResult, _ []string) error { return nil })
 
 	withFuncSeam(t, &openRawArgs, func() []string { return []string{"portal", "open", "dev*"} })
 

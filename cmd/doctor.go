@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -71,9 +72,10 @@ type DoctorDeps struct {
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
 	ProtocolVersion func(ctx context.Context, name string) (int, error)
-	// ValidateName is the backend's Create rule, bound on ZmxDir. Nil when
-	// that dir can't be bound, which leaves the kept sessions unjudged.
-	ValidateName func(name string) error
+	// Names is the backend as restore asks it about a saved session's name,
+	// bound on ZmxDir. Nil when that dir can't be bound, which leaves the kept
+	// sessions unjudged.
+	Names        restore.Names
 	HookStore    *hooks.Store
 	ProjectStore *project.Store
 	PrefsStore   *prefs.Store
@@ -135,8 +137,8 @@ func resolveDoctorDeps() *DoctorDeps {
 			deps.Resolve = seams.Resolve
 		}
 	}
-	if bindErr == nil && deps.ValidateName == nil {
-		deps.ValidateName = driver.ValidateName
+	if bindErr == nil && deps.Names == nil {
+		deps.Names = driver
 	}
 
 	if deps.Saver == nil {
@@ -405,6 +407,8 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	listed := func(context.Context) ([]backend.Session, error) { return sessions, listErr }
 	idle := nothingToSave(sessions, listErr, dir, dirErr)
 
+	stateZmxDir := checkStateZmxDir(dir, dirErr, deps.ZmxDir)
+
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
@@ -412,13 +416,17 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkSaver(ctx, deps.Saver, idle),
 		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
-		checkStateZmxDir(dir, dirErr, deps.ZmxDir),
+		stateZmxDir,
 		checkSessionsJSON(dir, dirErr),
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
 		checkPendingResumes(dir, dirErr, sessions, listErr),
 	}
-	results = append(results, checkKeptSessions(dir, dirErr, sessions, listErr, deps.ValidateName)...)
+	// The sessions were listed in the zmx dir doctor binds, which a failed
+	// check says is not the state dir's, or can't say is.
+	if stateZmxDir.status != checkFail {
+		results = append(results, checkKeptSessions(ctx, dir, sessions, listErr, deps.Names, deps.Saver)...)
+	}
 	results = append(results, checkKeyConfig(deps.PrefsStore))
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))

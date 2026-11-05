@@ -133,7 +133,7 @@ func TestMain(m *testing.M) {
 	// same on every machine, whenever it booted. It reads the hydrating flag
 	// and the names as state.ClaimRule does; that rule's own suite pins the
 	// adoption by flags this one leaves out.
-	claimRule = testClaimRule
+	claimRule, silentClaimRule = testClaimRule, testClaimRule
 	// A test reaching the exit seam unfaked would end the whole test binary, its
 	// cleanups unrun; it panics here instead.
 	osExit = func(code int) {

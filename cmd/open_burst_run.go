@@ -30,8 +30,9 @@ type OpenBurstDeps struct {
 
 // The shared seam bundle, which binds the backend and loads terminals.json,
 // is built only when a seam it fills is left unset, so a fully-injected caller
-// does neither.
-func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
+// does neither. trigger is what the pre-flight resolved the trigger surface
+// to.
+func buildOpenBurstDeps(cmd *cobra.Command, trigger resolver.QueryResult) (*OpenBurstDeps, error) {
 	deps := &OpenBurstDeps{}
 	if openBurstDeps != nil {
 		*deps = *openBurstDeps
@@ -45,11 +46,7 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 		fillOpenBurstSeams(deps, buildProductionSpawnSeams(cmd.Context(), b, stateRunners{}))
 	}
 	if deps.Connector == nil {
-		// The path each external window's open --session takes, so a kept
-		// trigger is brought back as theirs are.
-		deps.Connector = connectorFunc(func(name string) error {
-			return openPinned(cmd, (*resolver.QueryResolver).ResolveSessionPin, name, nil)
-		})
+		deps.Connector = triggerConnector(cmd, trigger)
 	}
 	if deps.NewBurster == nil {
 		// Reads the defaulted seams at burst time rather than here.
@@ -63,6 +60,16 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 		}
 	}
 	return deps, nil
+}
+
+// triggerConnector connects the trigger's session as the pre-flight judged
+// it: a kept one is brought back first, as the open --session of each
+// external window brings back its own, and any other is attached as it is.
+func triggerConnector(cmd *cobra.Command, trigger resolver.QueryResult) SessionConnector {
+	if _, kept := trigger.(*resolver.KeptResult); kept {
+		return connectorFunc(func(name string) error { return openKept(cmd, name, nil) })
+	}
+	return connectorFunc(func(name string) error { return openSessionFunc(cmd, name) })
 }
 
 // missesSharedSeam reports whether a seam the shared bundle fills is unset.

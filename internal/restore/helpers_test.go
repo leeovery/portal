@@ -83,13 +83,25 @@ type flagWitness struct {
 	dir    string
 	asked  []string
 	raised map[string]bool
+	// judging is the Create and Session calls from the first Create on: the
+	// lookups that judge what a Create made, not the Session call due makes
+	// of each entry first, asking whether another spelling of its name is live.
+	judging []backendtest.Op
 }
 
 func (f *flagWitness) Create(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
 	up, err := state.Hydrating.Exists(f.dir, name)
 	f.asked = append(f.asked, name)
 	f.raised[name] = up && err == nil
+	f.judging = append(f.judging, backendtest.OpCreate)
 	return f.Backend.Create(ctx, name, dir, command)
+}
+
+func (f *flagWitness) Session(ctx context.Context, name string) (backend.Session, error) {
+	if len(f.asked) > 0 {
+		f.judging = append(f.judging, backendtest.OpSession)
+	}
+	return f.Backend.Session(ctx, name)
 }
 
 // createFunc is the Fake with Create replaced by create.
@@ -201,6 +213,18 @@ func (w *world) warnings() logtest.Records { return w.sink.Records().AtOrAboveLe
 
 // created is the names Create was asked to make, in order.
 func (w *world) created() []string { return w.witness.asked }
+
+// asks counts the Session calls restore made from its first Create on: the
+// lookups that judge what a Create made.
+func (w *world) asks() int {
+	asks := 0
+	for _, op := range w.witness.judging {
+		if op == backendtest.OpSession {
+			asks++
+		}
+	}
+	return asks
+}
 
 // onlyCreate is the one Create call restore made.
 func (w *world) onlyCreate(t *testing.T) backendtest.Call {

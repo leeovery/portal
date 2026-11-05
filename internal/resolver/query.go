@@ -140,13 +140,29 @@ func (qr *QueryResolver) exactName(query string) QueryResult {
 	return nil
 }
 
+// keptBare reports whether a bare query is the name of a kept saved session.
+// A path-shaped query is never looked up: one no live session holds is a
+// path.
+func (qr *QueryResolver) keptBare(query string) bool {
+	return !IsPathArgument(query) && qr.isKept(query)
+}
+
+// keptAll is the one result of a target read as a kept saved session's exact
+// name.
+func keptAll(name string) []QueryResult {
+	return []QueryResult{&KeptResult{Name: name}}
+}
+
 // Resolve applies the single-target chain: exact session name → kept saved
-// session → path → alias → zoxide → miss. It does not expand globs — a glob
-// matches nothing in the chain and falls through to a miss rather than
-// silently taking a first match.
+// session → path → alias → zoxide → miss. A path-shaped query is never looked
+// up as kept. It does not expand globs — a glob matches nothing in the chain
+// and falls through to a miss rather than silently taking a first match.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
-	if r := qr.exactName(query); r != nil {
-		return r, nil
+	switch {
+	case qr.isExactSession(query):
+		return &SessionResult{Name: query, Domain: DomainSession}, nil
+	case qr.keptBare(query):
+		return &KeptResult{Name: query}, nil
 	}
 
 	if IsPathArgument(query) {
@@ -184,9 +200,14 @@ func expandSessionGlobAll(pattern string, names []string) []QueryResult {
 
 // ResolveBareAll is the multi-target Resolve: a glob expands to one result per
 // matching live session and every failure is collected as a *MissResult so
-// pre-flight reports all of them at once. The returned error is always nil.
+// pre-flight reports all of them at once. A glob that is itself a kept saved
+// session's exact name, which Create accepts, is that session: a glob never
+// expands over kept names. The returned error is always nil.
 func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 	if HasGlobMeta(query) {
+		if qr.keptBare(query) {
+			return keptAll(query), nil
+		}
 		names, _ := qr.sessions.ListSessionNames()
 		return expandSessionGlobAll(query, names), nil
 	}
@@ -200,9 +221,13 @@ func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 
 // ResolveSessionPinAll is the multi-target ResolveSessionPin: a glob expands over
 // the live session set alone and a miss is collected as a *MissResult instead of
-// erroring. The returned error is always nil.
+// erroring. A glob that is itself a kept saved session's exact name is that
+// session, as in ResolveBareAll. The returned error is always nil.
 func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, error) {
 	if HasGlobMeta(query) {
+		if qr.isKept(query) {
+			return keptAll(query), nil
+		}
 		names, _ := qr.sessions.ListSessionNames()
 		return expandSessionGlobAll(query, names), nil
 	}

@@ -2,6 +2,8 @@ package resolver_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -77,10 +79,22 @@ func TestResolve_KeptSavedSession(t *testing.T) {
 		assertKept(t, got, err, "work")
 	})
 
-	t.Run("a kept name resolves before a path", func(t *testing.T) {
-		got, err := keptResolver(nil, &mockKeptLookup{kept: []string{".notes"}}).Resolve(".notes")
+	t.Run("a path-shaped target is a path, never looked up as kept", func(t *testing.T) {
+		kept := &mockKeptLookup{kept: []string{".notes"}}
+		cwd := t.TempDir()
+		if err := os.Mkdir(filepath.Join(cwd, ".notes"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(cwd)
 
-		assertKept(t, got, err, ".notes")
+		got, err := keptResolver(nil, kept).Resolve(".notes")
+
+		if p, ok := got.(*resolver.PathResult); err != nil || !ok || p.Domain != resolver.DomainPath {
+			t.Errorf("Resolve = %#v, %v; want the path", got, err)
+		}
+		if len(kept.asked) != 0 {
+			t.Errorf("asked about %q, want a path-shaped target never asked about", kept.asked)
+		}
 	})
 
 	t.Run("a name not kept falls through to the alias", func(t *testing.T) {
@@ -141,6 +155,12 @@ func TestResolveSessionPin_KeptSavedSession(t *testing.T) {
 			t.Errorf("ResolveSessionPin = %#v, %v; want No session found: work", got, err)
 		}
 	})
+
+	t.Run("a pinned name that looks like a path is still looked up as kept", func(t *testing.T) {
+		got, err := keptResolver(nil, &mockKeptLookup{kept: []string{".notes"}}).ResolveSessionPin(".notes")
+
+		assertKept(t, got, err, ".notes")
+	})
 }
 
 func TestResolveAll_KeptSavedSession(t *testing.T) {
@@ -175,9 +195,19 @@ func TestResolveAll_KeptSavedSession(t *testing.T) {
 				t.Fatalf("%s glob = %#v, want the live session alone", name, got)
 			}
 			assertSessionGlob(t, got[0], "wiki")
-			if len(kept.asked) != 0 {
-				t.Errorf("asked about %q, want a glob never to ask", kept.asked)
+			if !slices.Equal(kept.asked, []string{"w*"}) {
+				t.Errorf("asked about %q, want the target alone asked about, never a name it might match", kept.asked)
 			}
+		})
+
+		// Create accepts ?, [ and a * anywhere but the end.
+		t.Run("a "+name+" target that is a kept name with glob characters is that session, not expanded", func(t *testing.T) {
+			got, _ := resolve(keptResolver([]string{"axb"}, &mockKeptLookup{kept: []string{"a?b"}}), "a?b")
+
+			if len(got) != 1 {
+				t.Fatalf("%s target = %#v, want the kept session alone", name, got)
+			}
+			assertKept(t, got[0], nil, "a?b")
 		})
 
 		t.Run("a "+name+" glob matching only kept names misses", func(t *testing.T) {
