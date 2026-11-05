@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/spf13/cobra"
 )
@@ -44,8 +45,10 @@ func buildOpenBurstDeps(cmd *cobra.Command) (*OpenBurstDeps, error) {
 		fillOpenBurstSeams(deps, buildProductionSpawnSeams(cmd.Context(), b, stateRunners{}))
 	}
 	if deps.Connector == nil {
+		// The path each external window's open --session takes, so a kept
+		// trigger is brought back as theirs are.
 		deps.Connector = connectorFunc(func(name string) error {
-			return openSessionFunc(cmd, name)
+			return openPinned(cmd, (*resolver.QueryResolver).ResolveSessionPin, name, nil)
 		})
 	}
 	if deps.NewBurster == nil {

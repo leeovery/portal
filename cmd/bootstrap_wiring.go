@@ -109,13 +109,15 @@ func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
 		Restore:     restorer,
 		Logger:      bootstrapLogger,
 	}
-	return bootstrap.Locked{Lock: p.lock, Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
+	return bootstrap.Locked{Lock: bootstrapLock(p.dir), Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
 }
 
-// lock takes bootstrap.lock, bounded by the run of a bootstrap restoring
-// every entry sessions.json holds now.
-func (p *productionBootstrap) lock(ctx context.Context) (func(), error) {
-	return state.AcquireBootstrapLock(ctx, p.dir, bootstrap.LockWait(savedEntries(p.dir)))
+// bootstrapLock takes bootstrap.lock in the state directory dir, bounded by
+// the run of a bootstrap restoring every entry sessions.json holds now.
+func bootstrapLock(dir string) func(ctx context.Context) (func(), error) {
+	return func(ctx context.Context) (func(), error) {
+		return state.AcquireBootstrapLock(ctx, dir, bootstrap.LockWait(savedEntries(dir)))
+	}
 }
 
 // savedEntries counts the entries in dir's sessions.json, none when it can't

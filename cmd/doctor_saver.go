@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/devversion"
+	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -216,6 +218,33 @@ func checkPendingResumes(dir string, dirErr error, sessions []backend.Session, l
 		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read the resume-pending flags"}
 	}
 	return checkResult{name: name, status: checkInfo, detail: pluralCount(waiting, "session waiting to resume", "sessions waiting to resume")}
+}
+
+// keptSessionsDetail names the saved sessions no session holds that the next
+// restore brings back, and how to bring one back now.
+const keptSessionsDetail = "%s — saved but not running, back at the next restore; x <name> brings one back now"
+
+// checkKeptSessions names the kept sessions, judged by restore's own rule. It
+// states, never judges, and is absent when there are none, and when the
+// state directory, the sessions, sessions.json or the name rule can't be
+// read, which their own checks report.
+func checkKeptSessions(dir string, dirErr error, sessions []backend.Session, listErr error, validName func(string) error) []checkResult {
+	if dirErr != nil || listErr != nil || validName == nil {
+		return nil
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return nil
+	}
+	kept := restore.Kept(idx.Entries(), sessions, claimRule(dir, validName), validName)
+	if len(kept) == 0 {
+		return nil
+	}
+	names := make([]string, len(kept))
+	for i, e := range kept {
+		names[i] = e.Name
+	}
+	return []checkResult{{name: "kept sessions", status: checkInfo, detail: fmt.Sprintf(keptSessionsDetail, strings.Join(names, ", "))}}
 }
 
 // waitingSessions counts the sessions listed in sessions whose resume panel

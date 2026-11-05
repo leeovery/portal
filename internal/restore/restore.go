@@ -1,7 +1,8 @@
-// Package restore brings back, once a bootstrap, the saved sessions the
-// backend no longer holds. Each is made again under its own name, running the
-// hydrate helper, which replays the session's saved transcript and hands the
-// session to its resume hook, its resume panel or its shell.
+// Package restore brings back the saved sessions the backend no longer holds:
+// all of them once a bootstrap, and one on demand. Each is made again under
+// its own name, running the hydrate helper, which replays the session's saved
+// transcript and hands the session to its resume hook, its resume panel or
+// its shell.
 package restore
 
 import (
@@ -161,6 +162,69 @@ func (r *Restorer) Restore(ctx context.Context) Result {
 	pass.restore(ctx)
 	r.logger.Info("restore complete", "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
 	return pass.res
+}
+
+// Brought is what BringBack found of a kept session under the lock.
+type Brought int
+
+const (
+	// BroughtBack is a session made again, its helper replaying its
+	// transcript, as Restore makes one: attach it.
+	BroughtBack Brought = iota + 1
+	// AlreadyLive is a session that holds the name by now, as a bootstrap's
+	// restore made while the caller waited for the lock: attach it.
+	AlreadyLive
+	// NoLongerKept is an entry gone, or no longer one a restore would make
+	// again: the name resolves as if it had never been kept.
+	NoLongerKept
+)
+
+// BringBack makes again the session of the entry named name, as Restore makes
+// each of the sessions it restores, when the entry is still kept as Kept
+// judges it, the index read and the sessions listed afresh. The caller holds
+// bootstrap.lock, so no bootstrap's restore runs meanwhile. It is one try,
+// with no retry: a failure is returned, the entry left kept, as is a refusal
+// of a session made by a zmx Portal can't talk to, wrapping
+// backend.ErrUnsupportedProtocol. sessions.json unread, or the sessions
+// unlisted, is a failure too: it can't judge the entry.
+func (r *Restorer) BringBack(ctx context.Context, name string) (Brought, error) {
+	start := time.Now()
+	pass := &run{Restorer: r, raised: map[string]bool{}}
+	brought, err := pass.bringBack(ctx, name)
+	r.logger.Info("restore complete", "session", name, "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
+	return brought, err
+}
+
+func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		r.logger.Warn("sessions.json unreadable", "error", err)
+		return 0, err
+	}
+	e, ok := idx.Lookup(name)
+	if !ok {
+		r.logger.Debug("session skipped", "session", name, "reason", "its entry is gone")
+		return NoLongerKept, nil
+	}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		r.logger.Warn("list sessions failed", "error", err)
+		return 0, fmt.Errorf("list sessions: %w", err)
+	}
+	listed := names(live)
+	if why := notKept(e, listed, r.claimRule(r.dir), r.backend.ValidateName); why != "" {
+		r.logger.Debug("session skipped", "session", name, "reason", why)
+		if listed[name] {
+			return AlreadyLive, nil
+		}
+		return NoLongerKept, nil
+	}
+	if err := r.restoreOne(ctx, e); err != nil {
+		r.res.Failed++
+		r.warn("restore session failed", name, "error", err)
+		return 0, err
+	}
+	return BroughtBack, nil
 }
 
 // run is one Restore: what it did, how many warnings its sessions drew, and
@@ -371,14 +435,57 @@ func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rul
 	return ""
 }
 
+// refusedName is why restore never tries an entry under a name the backend's
+// Create refuses.
+const refusedName = "its name is one the backend can never create"
+
+// unmakeable is restoreOne's refusal of an entry whose name the backend's
+// Create, validName, refuses: a failure no retry can clear, never tried.
+func unmakeable(e sessionindex.Entry, validName func(name string) error) error {
+	if err := validName(e.Name); err != nil {
+		return forGood(fmt.Errorf("%s: %w", refusedName, err))
+	}
+	return nil
+}
+
+// notKept says why the entry isn't kept, and is empty when it is: kept is an
+// entry a restore would make again now, one skipped passes under a name
+// unmakeable passes. Restore counts a due entry under a name Create refuses
+// as failed, so such an entry is due but not kept.
+func notKept(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule, validName func(name string) error) string {
+	if why := skipped(e, listed, rule); why != "" {
+		return why
+	}
+	if unmakeable(e, validName) != nil {
+		return refusedName
+	}
+	return ""
+}
+
+// Kept is the entries, in their order, a restore would make again now: a
+// saved session no session in live holds, not one of Portal's own, owed a
+// restore or one rule judges may predate this boot, under a name validName,
+// the backend's Create rule, accepts. x <name> brings back such a session on
+// demand, and doctor names them.
+func Kept(entries []sessionindex.Entry, live []backend.Session, rule sessionindex.Rule, validName func(name string) error) []sessionindex.Entry {
+	listed := names(live)
+	var kept []sessionindex.Entry
+	for _, e := range entries {
+		if notKept(e, listed, rule, validName) == "" {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
 // restoreOne makes the entry's session again, and says why it couldn't,
 // marked forGood when no retry can help. A name Create refuses is never
 // tried. The session's hydrating flag goes up first, keeping the saver off it
 // until the helper has replayed its transcript, and a session whose flag can't
 // be looked for or raised is not made.
 func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) error {
-	if err := r.backend.ValidateName(e.Name); err != nil {
-		return forGood(fmt.Errorf("its name is one the backend can never create: %w", err))
+	if err := unmakeable(e, r.backend.ValidateName); err != nil {
+		return err
 	}
 	if err := r.raise(e.Name); err != nil {
 		return fmt.Errorf("raise its hydrating flag: %w", err)

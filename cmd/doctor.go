@@ -71,11 +71,14 @@ type DoctorDeps struct {
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
 	ProtocolVersion func(ctx context.Context, name string) (int, error)
-	HookStore       *hooks.Store
-	ProjectStore    *project.Store
-	PrefsStore      *prefs.Store
-	Detector        TerminalDetector
-	Resolve         spawn.AdapterResolver
+	// ValidateName is the backend's Create rule, bound on ZmxDir. Nil when
+	// that dir can't be bound, which leaves the kept sessions unjudged.
+	ValidateName func(name string) error
+	HookStore    *hooks.Store
+	ProjectStore *project.Store
+	PrefsStore   *prefs.Store
+	Detector     TerminalDetector
+	Resolve      spawn.AdapterResolver
 	// Saver reads the saver session and its daemon. Unset, it is read over
 	// the driver bound on ZmxDir, through a host that signals nothing.
 	Saver doctorSaver
@@ -117,10 +120,11 @@ func resolveDoctorDeps() *DoctorDeps {
 			deps.ProtocolVersion = protocolVersion
 		}
 	}
-	// Detection runs through the driver bound on the dir doctor judges. A dir
-	// it refuses to bind leaves the host-terminal check out; the dir check
-	// reports why.
-	if driver, err := bindZmxAt(zmxProgram, deps.ZmxDir); err == nil && (deps.Detector == nil || deps.Resolve == nil) {
+	// Detection and the name rule run through the driver bound on the dir
+	// doctor judges. A dir it refuses to bind leaves the host-terminal check
+	// and the kept sessions out; the dir check reports why.
+	driver, bindErr := bindZmxAt(zmxProgram, deps.ZmxDir)
+	if bindErr == nil && (deps.Detector == nil || deps.Resolve == nil) {
 		// Read-only: detection asks the runner registry, which otherwise
 		// removes the entry of a runner it proves dead.
 		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
@@ -130,6 +134,9 @@ func resolveDoctorDeps() *DoctorDeps {
 		if deps.Resolve == nil {
 			deps.Resolve = seams.Resolve
 		}
+	}
+	if bindErr == nil && deps.ValidateName == nil {
+		deps.ValidateName = driver.ValidateName
 	}
 
 	if deps.Saver == nil {
@@ -410,8 +417,9 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
 		checkPendingResumes(dir, dirErr, sessions, listErr),
-		checkKeyConfig(deps.PrefsStore),
 	}
+	results = append(results, checkKeptSessions(dir, dirErr, sessions, listErr, deps.ValidateName)...)
+	results = append(results, checkKeyConfig(deps.PrefsStore))
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
 	}

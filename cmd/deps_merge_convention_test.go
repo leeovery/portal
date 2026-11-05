@@ -142,6 +142,9 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
+// errInjectedNameRule is the refusal of the name rule a seam case injects.
+var errInjectedNameRule = errors.New("the injected name rule")
+
 func doctorSeamCases() []seamCase {
 	sentinelHookStore := hooks.NewStore("/sentinel/hooks.json")
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
@@ -208,6 +211,17 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if got, err := resolveDoctorDeps().ProtocolVersion(t.Context(), "s"); err != nil || got != 7 {
 					t.Errorf("ProtocolVersion() = (%d, %v); want the injected seam's 7", got, err)
+				}
+			},
+		},
+		{
+			field: "ValidateName",
+			inject: func(t *testing.T) {
+				withDoctorDeps(t, DoctorDeps{ValidateName: func(string) error { return errInjectedNameRule }})
+			},
+			assert: func(t *testing.T) {
+				if err := resolveDoctorDeps().ValidateName("work"); !errors.Is(err, errInjectedNameRule) {
+					t.Errorf("ValidateName(work) = %v; want the injected seam's %v", err, errInjectedNameRule)
 				}
 			},
 		},

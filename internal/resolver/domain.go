@@ -11,6 +11,7 @@ const (
 	DomainPath    Domain = "path"
 	DomainAlias   Domain = "alias"
 	DomainZoxide  Domain = "zoxide"
+	DomainKept    Domain = "kept"
 	DomainGlob    Domain = "glob"
 	DomainMiss    Domain = "miss"
 )

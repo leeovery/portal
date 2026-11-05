@@ -13,6 +13,13 @@ type SessionLister interface {
 	ListSessionNames() ([]string, error)
 }
 
+// KeptLookup reports whether the saved session of a name no live session
+// holds is kept: one the next restore would bring back. An error is treated
+// as "not kept".
+type KeptLookup interface {
+	IsKept(name string) (bool, error)
+}
+
 type AliasLookup interface {
 	Get(name string) (string, bool)
 	Keys() []string
@@ -44,6 +51,14 @@ type SessionResult struct {
 
 func (*SessionResult) queryResult() {}
 
+// KeptResult is an exact name whose saved session is kept and not live: the
+// caller brings it back, then attaches it as it does a SessionResult.
+type KeptResult struct {
+	Name string
+}
+
+func (*KeptResult) queryResult() {}
+
 // MissResult is a total miss: the caller hard-fails on it, with no implicit
 // picker fallback.
 type MissResult struct {
@@ -72,11 +87,14 @@ func (v *OSDirValidator) Exists(path string) bool {
 
 type QueryResolver struct {
 	sessions     SessionLister
+	kept         KeptLookup
 	aliases      AliasLookup
 	zoxide       ZoxideQuerier
 	dirValidator DirValidator
 }
 
+// NewQueryResolver returns a resolver that keeps no saved session: WithKept
+// gives one that does.
 func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide ZoxideQuerier, dirValidator DirValidator) *QueryResolver {
 	return &QueryResolver{
 		sessions:     sessions,
@@ -84,6 +102,14 @@ func NewQueryResolver(sessions SessionLister, aliases AliasLookup, zoxide Zoxide
 		zoxide:       zoxide,
 		dirValidator: dirValidator,
 	}
+}
+
+// WithKept is a copy of qr that resolves an exact name with a kept saved
+// session, as kept judges it, to a *KeptResult; nil keeps none.
+func (qr *QueryResolver) WithKept(kept KeptLookup) *QueryResolver {
+	c := *qr
+	c.kept = kept
+	return &c
 }
 
 func (qr *QueryResolver) isExactSession(query string) bool {
@@ -94,12 +120,33 @@ func (qr *QueryResolver) isExactSession(query string) bool {
 	return slices.Contains(names, query)
 }
 
-// Resolve applies the single-target chain: exact session name → path → alias →
-// zoxide → miss. It does not expand globs — a glob matches nothing in the chain
-// and falls through to a miss rather than silently taking a first match.
+func (qr *QueryResolver) isKept(query string) bool {
+	if qr.kept == nil {
+		return false
+	}
+	kept, err := qr.kept.IsKept(query)
+	return err == nil && kept
+}
+
+// exactName resolves query as an exact name: a live session's, then a kept
+// saved session's. It is nil for neither.
+func (qr *QueryResolver) exactName(query string) QueryResult {
+	switch {
+	case qr.isExactSession(query):
+		return &SessionResult{Name: query, Domain: DomainSession}
+	case qr.isKept(query):
+		return &KeptResult{Name: query}
+	}
+	return nil
+}
+
+// Resolve applies the single-target chain: exact session name → kept saved
+// session → path → alias → zoxide → miss. It does not expand globs — a glob
+// matches nothing in the chain and falls through to a miss rather than
+// silently taking a first match.
 func (qr *QueryResolver) Resolve(query string) (QueryResult, error) {
-	if qr.isExactSession(query) {
-		return &SessionResult{Name: query, Domain: DomainSession}, nil
+	if r := qr.exactName(query); r != nil {
+		return r, nil
 	}
 
 	if IsPathArgument(query) {
@@ -136,8 +183,8 @@ func expandSessionGlobAll(pattern string, names []string) []QueryResult {
 }
 
 // ResolveBareAll is the multi-target Resolve: a glob expands to one result per
-// matching session and every failure is collected as a *MissResult so pre-flight
-// reports all of them at once. The returned error is always nil.
+// matching live session and every failure is collected as a *MissResult so
+// pre-flight reports all of them at once. The returned error is always nil.
 func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 	if HasGlobMeta(query) {
 		names, _ := qr.sessions.ListSessionNames()
@@ -152,16 +199,16 @@ func (qr *QueryResolver) ResolveBareAll(query string) ([]QueryResult, error) {
 }
 
 // ResolveSessionPinAll is the multi-target ResolveSessionPin: a glob expands over
-// the session set and a miss is collected as a *MissResult instead of erroring.
-// The returned error is always nil.
+// the live session set alone and a miss is collected as a *MissResult instead of
+// erroring. The returned error is always nil.
 func (qr *QueryResolver) ResolveSessionPinAll(query string) ([]QueryResult, error) {
 	if HasGlobMeta(query) {
 		names, _ := qr.sessions.ListSessionNames()
 		return expandSessionGlobAll(query, names), nil
 	}
 
-	if qr.isExactSession(query) {
-		return []QueryResult{&SessionResult{Name: query, Domain: DomainSession}}, nil
+	if r := qr.exactName(query); r != nil {
+		return []QueryResult{r}, nil
 	}
 	return []QueryResult{&MissResult{Target: query}}, nil
 }
@@ -200,12 +247,13 @@ func (qr *QueryResolver) ResolveAliasPinAll(value string) ([]QueryResult, error)
 	return []QueryResult{r}, nil
 }
 
-// ResolveSessionPin resolves query by exact session name only — no other domain,
-// no minting, no picker fallback. It does not expand globs, so a glob hard-fails
-// rather than taking a first match.
+// ResolveSessionPin resolves query by exact session name only, a live session's
+// or a kept saved session's — no other domain, no minting, no picker fallback.
+// It does not expand globs, so a glob hard-fails rather than taking a first
+// match.
 func (qr *QueryResolver) ResolveSessionPin(query string) (QueryResult, error) {
-	if qr.isExactSession(query) {
-		return &SessionResult{Name: query, Domain: DomainSession}, nil
+	if r := qr.exactName(query); r != nil {
+		return r, nil
 	}
 
 	return nil, fmt.Errorf("No session found: %s", query) //nolint:staticcheck // user-facing message per spec

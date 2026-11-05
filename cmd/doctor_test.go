@@ -78,7 +78,8 @@ func writeSessionsJSON(t *testing.T, dir string, data []byte) {
 }
 
 // withHealthyRuntime fills every unset runtime seam with a healthy answer: a
-// Fake holding one answering session, zmx on PATH, a protocol 1 daemon, and a
+// Fake holding one answering session, the one seedValidSessionsJSON saves
+// first, so nothing saved is kept, zmx on PATH, a protocol 1 daemon, and a
 // saver whose daemon, of this Portal's version, records itself in the state
 // dir when that dir is there. It also stubs the host-terminal seams so no
 // doctor test invokes a real detector, which would read the process tree.
@@ -94,7 +95,7 @@ func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 		deps.DaemonSettle = testDaemonSettle
 	}
 	if deps.ListSessions == nil {
-		deps.ListSessions = backendtest.New(backend.Session{Name: "api-x7Kd9a"}).List
+		deps.ListSessions = backendtest.New(backend.Session{Name: "s0"}).List
 	}
 	if deps.ZmxDir == "" {
 		deps.ZmxDir = t.TempDir()

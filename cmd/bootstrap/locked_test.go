@@ -169,6 +169,58 @@ func TestLocked(t *testing.T) {
 	})
 }
 
+// decision 78: x <name> brings a kept session back under bootstrap.lock, so
+// it never races a bootstrap's restore; it takes the lock as a bootstrap does.
+func TestLocked_Hold(t *testing.T) {
+	t.Run("it holds the lock until its release, reading nothing but the lock", func(t *testing.T) {
+		dir := t.TempDir()
+
+		release, err := Locked{Lock: lockIn(dir, time.Second)}.Hold(t.Context())
+
+		if err != nil {
+			t.Fatalf("Hold = %v", err)
+		}
+		if _, err := state.AcquireBootstrapLock(t.Context(), dir, 0); !errors.Is(err, state.ErrBootstrapLockHeld) {
+			t.Errorf("the lock while held = %v, want it held", err)
+		}
+		release()
+		if _, err := state.AcquireBootstrapLock(t.Context(), dir, 0); err != nil {
+			t.Errorf("the lock after its release = %v, want it free", err)
+		}
+	})
+
+	t.Run("a wait past its notice is told to the progress emitter once", func(t *testing.T) {
+		dir := t.TempDir()
+		time.AfterFunc(300*time.Millisecond, holdLock(t, dir))
+		var events []StepEvent
+		ctx := WithProgressEmitter(t.Context(), func(ev StepEvent) { events = append(events, ev) })
+
+		release, err := Locked{Lock: lockIn(dir, 5*time.Second), Notice: 50 * time.Millisecond}.Hold(ctx)
+
+		if err != nil {
+			t.Fatalf("Hold = %v", err)
+		}
+		release()
+		if want := []StepEvent{{Waiting: true}}; !slices.Equal(events, want) {
+			t.Errorf("events = %+v, want %+v", events, want)
+		}
+	})
+
+	t.Run("a lock held past its bound is the fatal a bootstrap's wait gives", func(t *testing.T) {
+		dir := t.TempDir()
+		holdLock(t, dir)
+		sink := &logtest.Sink{}
+
+		release, err := Locked{Lock: lockIn(dir, 100*time.Millisecond), Logger: slog.New(sink)}.Hold(t.Context())
+
+		fatal, ok := errors.AsType[*FatalError](err)
+		if !ok || release != nil || !strings.HasPrefix(fatal.UserMessage, "Portal gave up waiting for another Portal to finish starting: ") {
+			t.Errorf("Hold = %v, want the held lock's fatal and no release", err)
+		}
+		sink.Records().WithMessage("bootstrap.lock unavailable").AtExactLevel(slog.LevelError).Only(t, "the held lock")
+	})
+}
+
 func TestLockWait(t *testing.T) {
 	t.Run("it outlasts the saver step's own wait and run", func(t *testing.T) {
 		if bound, saver := LockWait(0), 2*saverhost.LockWait; bound <= saver {

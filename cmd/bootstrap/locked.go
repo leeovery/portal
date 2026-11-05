@@ -65,7 +65,9 @@ const LockNotice = time.Second
 // Locked runs a bootstrap one at a time on its state directory, under
 // bootstrap.lock, so two windows opening at once never restore a session
 // twice. One that waited out another runs only if a bootstrap is still owed
-// once it holds the lock.
+// once it holds the lock. Hold takes the lock alone, as Run does, for other
+// work that must not race a bootstrap's restore, reading only Lock, Notice
+// and Logger.
 type Locked struct {
 	// Lock takes bootstrap.lock, waiting within its bound, and returns its
 	// release.
@@ -86,21 +88,32 @@ var _ Runner = Locked{}
 // it can't take, another bootstrap holding it past its bound included, is
 // fatal, and nothing runs.
 func (l Locked) Run(ctx context.Context) ([]Warning, error) {
-	logger := log.OrDiscard(l.Logger)
 	start := time.Now()
-	stop := l.noticeWait(progressEmitterFromContext(ctx))
-	release, err := l.Lock(ctx)
-	stop()
+	release, err := l.Hold(ctx)
 	if err != nil {
-		logger.Error("bootstrap.lock unavailable", "error", err, log.Took(start))
-		return nil, lockFatal(err)
+		return nil, err
 	}
 	defer release()
 	if !l.Owed(ctx) {
-		logger.Info("bootstrap skipped", "detail", "another bootstrap ran while this one waited", log.Took(start))
+		log.OrDiscard(l.Logger).Info("bootstrap skipped", "detail", "another bootstrap ran while this one waited", log.Took(start))
 		return nil, nil
 	}
 	return l.Bootstrap.Run(ctx)
+}
+
+// Hold takes the lock and returns its release. A wait for it past its notice
+// is told to ctx's progress emitter, once. A lock it can't take, another
+// holder keeping it past its bound included, is fatal.
+func (l Locked) Hold(ctx context.Context) (release func(), err error) {
+	start := time.Now()
+	stop := l.noticeWait(progressEmitterFromContext(ctx))
+	release, err = l.Lock(ctx)
+	stop()
+	if err != nil {
+		log.OrDiscard(l.Logger).Error("bootstrap.lock unavailable", "error", err, log.Took(start))
+		return nil, lockFatal(err)
+	}
+	return release, nil
 }
 
 // noticeWait tells emit, once the notice has passed, that this bootstrap

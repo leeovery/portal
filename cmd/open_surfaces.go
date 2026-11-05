@@ -19,6 +19,11 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 			case *resolver.SessionResult:
 				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceAttach, Value: res.Name})
 				results = append(results, res)
+			case *resolver.KeptResult:
+				// Its window runs open --session, which brings it back, as the
+				// trigger's connect does.
+				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceAttach, Value: res.Name})
+				results = append(results, res)
 			case *resolver.PathResult:
 				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceMint, Value: res.Path})
 				results = append(results, res)
