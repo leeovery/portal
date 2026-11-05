@@ -680,6 +680,34 @@ func TestDoctorFixUnderAnotherZmxDir(t *testing.T) {
 	})
 }
 
+// A saver proved another state directory's says this state is paired with
+// another's sessions, a scratch state beside the shared hooks.json, so --fix
+// repairs nothing, saying why.
+func TestDoctorFixBesideAnotherStateDirsSaver(t *testing.T) {
+	staleProject := filepath.Join(t.TempDir(), "gone")
+	in := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+	projects, projectsFile := seedProjectsJSON(t, staleProject)
+	in.deps.ProjectStore = projects
+	saver := runningSaver(t, in.deps.StateDir, doctorVersion)
+	saver.theirs = "/srv/portal/state"
+	in.deps.Saver = saver
+	hooksBefore, projectsBefore := readFileBytes(t, in.hooksPath), readFileBytes(t, projectsFile)
+
+	outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+	if !errors.Is(err, ErrDoctorUnhealthy) {
+		t.Errorf("Execute err = %v, want ErrDoctorUnhealthy", err)
+	}
+	want := "\nSkipped every repair: _portal-saver saves the state in /srv/portal/state, not this one\n"
+	if out := outBuf.String(); !strings.HasSuffix(out, want) || strings.Count(out, "Portal doctor:") != 1 {
+		t.Errorf("output = %q, want one diagnosis, then %q", out, want)
+	}
+	assertHooksFileUnchanged(t, in.hooksPath, hooksBefore)
+	if got := readFileBytes(t, projectsFile); !bytes.Equal(got, projectsBefore) {
+		t.Errorf("projects.json = %s, want %s untouched", got, projectsBefore)
+	}
+}
+
 func TestDoctorIsBootstrapExempt(t *testing.T) {
 	if !bootstrapExempt["doctor"] {
 		t.Error("bootstrapExempt[\"doctor\"] = false; want true: doctor must run no bootstrap")

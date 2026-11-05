@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 // Test seams; production never reassigns them.
@@ -20,6 +21,11 @@ var (
 )
 
 func main() {
+	// Before anything resolves a path, so every process this one starts
+	// inherits the meaning a relative one has here. Its error is resolution's
+	// own, which every later resolution of that variable reports.
+	_ = xdg.AbsoluteEnv()
+
 	// Must run before any other portal code so every logger routes through the
 	// configured handler. Both errors are tolerated: logging must never block
 	// startup, and an empty stateDir degrades Init to a stderr handler.

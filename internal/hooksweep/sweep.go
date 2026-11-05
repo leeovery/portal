@@ -161,6 +161,25 @@ func tmuxKeysStandDown(dir string, stale []string) StandDown {
 	return StandDown{}
 }
 
+// massReapAt is the fewest keys whose removal in one sweep can be a mass
+// reap, held when they are at least half of hooks.json besides.
+const massReapAt = 3
+
+// massReapStandDown stands the judgement down rather than remove at once
+// massReapAt or more stale keys that are at least half of the persisted
+// entries. A hook goes with its session's entry, so a sweep in ordinary use
+// removes none or one; most of the file judged stale is the file judged
+// against a state dir or a zmx dir it doesn't belong to, such as a scratch
+// state or ZMX_DIR beside the shared hooks.json, which would lose every hook
+// it removed. Like the saver's hold on sessions vanishing at once, it holds
+// them all.
+func massReapStandDown(stale []string, persisted int) StandDown {
+	if n := len(stale); n >= massReapAt && 2*n >= persisted {
+		return decline(ReasonMassReap, "entries", n)
+	}
+	return StandDown{}
+}
+
 // tmuxStateMigrated reports whether the tmux version's state has been
 // migrated beside dir: state.TmuxStateDir exists, a directory. A stat that
 // fails, however it fails, counts as not migrated, so the guard holds.
@@ -192,10 +211,20 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 		return nil, d
 	}
 	stale := hooks.StaleKeys(persisted, listed, indexed)
-	if d := tmuxKeysStandDown(src.StateDir, stale); d.Declined() {
+	if d := staleStandDown(src.StateDir, stale, len(persisted)); d.Declined() {
 		return nil, d
 	}
 	return stale, StandDown{}
+}
+
+// staleStandDown is the stand-down the stale keys of persisted entries
+// themselves call for: the tmux version's keys not yet migrated, or a mass
+// reap.
+func staleStandDown(dir string, stale []string, persisted int) StandDown {
+	if d := tmuxKeysStandDown(dir, stale); d.Declined() {
+		return d
+	}
+	return massReapStandDown(stale, persisted)
 }
 
 // A store holding nothing to sweep is an answer, not a failure: it aborts the
@@ -243,7 +272,7 @@ func (c *clean) indexing() ([]string, error) {
 		d = nothingProtects(c.listed, indexed)
 	}
 	if !d.Declined() {
-		d = tmuxKeysStandDown(c.src.StateDir, hooks.StaleKeys(c.snapshot, c.listed, indexed))
+		d = staleStandDown(c.src.StateDir, hooks.StaleKeys(c.snapshot, c.listed, indexed), len(c.snapshot))
 	}
 	if d.Declined() {
 		return nil, declinedError{d}

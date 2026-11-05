@@ -26,6 +26,7 @@ const (
 	ReasonNoSessions          Reason = "no-sessions"
 	ReasonLockTimeout         Reason = "lock-timeout"
 	ReasonTmuxKeys            Reason = "tmux-keys"
+	ReasonMassReap            Reason = "mass-reap"
 )
 
 // Reasons makes the reasons above enumerable, so anything that must cover
@@ -45,4 +46,5 @@ var Reasons = []Reason{
 	ReasonNoSessions,
 	ReasonLockTimeout,
 	ReasonTmuxKeys,
+	ReasonMassReap,
 }

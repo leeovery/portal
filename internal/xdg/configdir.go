@@ -25,17 +25,17 @@ var (
 )
 
 // ConfigDirPath declares Portal's config-directory precedence, once and for
-// every reader of it: the directory's own environment variable, else
-// <config base>/portal/<dirname>, resolved through the same config base as a
-// config file.
+// every reader of it: the directory's own environment variable, made
+// Absolute, else <config base>/portal/<dirname>, resolved through the same
+// config base as a config file.
 //
 // It returns a bare path where ConfigFilePath returns a ConfigFile: there is no
 // old location for a directory to have come from, so no caller has a migration
 // to gate on where the path was resolved from. It resolves and nothing more —
 // creating nothing and stat-ing nothing.
 func ConfigDirPath(lookup Lookup, id ConfigDirID) (string, error) {
-	if dir := lookup(id.EnvVar); dir != "" {
-		return dir, nil
+	if dir, err := fromEnv(lookup, id.EnvVar); dir != "" || err != nil {
+		return dir, err
 	}
 
 	portal, err := PortalDir(lookup)
