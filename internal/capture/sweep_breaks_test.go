@@ -82,6 +82,10 @@ func designedBreaks() []knownBreak {
 			why: "the loading page has no header: it centres its block, which reaches the header's row once the terminal is shorter than it",
 		},
 		{
+			fixture: "projects", rule: ruleChrome, class: byDesign, sizes: sizesOf(sweptWidths, 12),
+			why: "below 13 rows the Projects page can't hold one two-line project row, its pagination dots and its footer; a project row is two lines by design",
+		},
+		{
 			fixture: "loading-error", rule: ruleChrome, class: byDesign, sizes: []string{"138x15"},
 			why: "the loading page has no header: it centres its error block, which reaches the header's row once the terminal is shorter than it",
 		},
