@@ -79,7 +79,13 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 	if err != nil {
 		return err
 	}
+	return openBurstBy(cmd, qr, ordered, command)
+}
 
+// openBurstBy is dispatchOpenBurst over qr. A single surface that is a kept
+// session is brought back, or, kept no longer under bootstrap.lock, the set is
+// resolved again as if it had never been kept.
+func openBurstBy(cmd *cobra.Command, qr *resolver.QueryResolver, ordered []Target, command []string) error {
 	surfaces, results, misses, err := resolveOpenSurfaces(qr, ordered)
 	if err != nil {
 		return err
@@ -96,7 +102,9 @@ func dispatchOpenBurst(cmd *cobra.Command, ordered []Target, command []string) e
 	if len(surfaces) == 1 {
 		// results[0] is threaded through rather than a domain reconstructed from
 		// the lossy Surface, so the real provenance survives the degenerate case.
-		return openResolved(cmd, results[0], command)
+		return openOr(cmd, results[0], command, func() error {
+			return openBurstBy(cmd, qr.WithKept(nil), ordered, command)
+		})
 	}
 
 	return runOpenBurstFunc(cmd, surfaces, results[0], command)

@@ -162,6 +162,69 @@ func TestRestore_Skips(t *testing.T) {
 			t.Errorf("created %q, want work made once Work ended", got)
 		}
 	})
+
+	for name, answer := range otherSpellingAnswers {
+		t.Run("a lookup that "+name+" skips nothing", func(t *testing.T) {
+			w := newWorld(t, backend.Session{Name: "WORK"})
+			w.save(t, entry(t, "work"))
+			w.answerSession("work", answer)
+
+			w.r.Restore(t.Context())
+
+			w.assertTried(t, "work")
+		})
+	}
+
+	t.Run("an entry no listed session spells another way costs no lookup", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "api"})
+		w.save(t, entry(t, "work"))
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if asks := w.fake.CallsTo(backendtest.OpSession); len(asks) != 0 {
+			t.Errorf("Session calls = %+v, want none", asks)
+		}
+	})
+}
+
+// otherSpellingAnswers are the answers to a lookup of work, a listed session
+// spelling it WORK, that are no live session holding it under another
+// spelling: a failure that may pass, and the spelling of a stale socket, which
+// no listing holds.
+var otherSpellingAnswers = map[string]error{
+	"fails":                             fmt.Errorf("read session %q: %w", "work", backend.ErrTimeout),
+	"finds a spelling no listing holds": fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "Work"}),
+}
+
+// sessionAnswer is the Fake with Session answering name with err.
+type sessionAnswer struct {
+	*backendtest.Fake
+	name string
+	err  error
+}
+
+func (s sessionAnswer) Session(ctx context.Context, name string) (backend.Session, error) {
+	if name == s.name {
+		return backend.Session{}, s.err
+	}
+	return s.Fake.Session(ctx, name)
+}
+
+// answerSession has the world's backend answer a lookup of name with err.
+func (w *world) answerSession(name string, err error) {
+	w.witness.Backend = sessionAnswer{Fake: w.fake, name: name, err: err}
+}
+
+// assertTried checks restore tried to make name, skipping nothing.
+func (w *world) assertTried(t *testing.T, name string) {
+	t.Helper()
+	if created := w.created(); !slices.Contains(created, name) {
+		t.Errorf("created %q, want %s tried", created, name)
+	}
+	if skips := w.sink.Records().WithMessage("session skipped"); len(skips) != 0 {
+		t.Errorf("skips = %v, want none", skips)
+	}
 }
 
 // thisBoot is a saved session's entry created after booted.
@@ -668,8 +731,10 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 		w.r.Restore(t.Context())
 
 		var asks []string
-		for _, op := range w.witness.judging {
-			asks = append(asks, string(op))
+		for _, call := range w.fake.Calls() {
+			if call.Op == backendtest.OpCreate || call.Op == backendtest.OpSession {
+				asks = append(asks, string(call.Op))
+			}
 		}
 		create, ask := string(backendtest.OpCreate), string(backendtest.OpSession)
 		tries := len(w.created())
@@ -722,7 +787,7 @@ func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
 
 		w.r.Restore(t.Context())
 
-		if asks := w.asks(); asks != 1 || len(w.slept) > 0 {
+		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) > 0 {
 			t.Errorf("asked %d times, waiting %v; want once, with no wait", asks, w.slept)
 		}
 	})

@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
@@ -101,8 +102,8 @@ running, which the next restore would bring back, brings it back and attaches it
 a path, alias, or zoxide match mints a new session there.
 
 Domain pins skip the precedence chain and force a single domain:
-  -s, --session   attach the named session or session glob, bringing back a
-                  kept saved session first (never mints)
+  -s, --session   attach the named session or session glob (never mints); an
+                  exact name that is a kept saved session is brought back first
   -p, --path      mint a new session at the given directory (must exist)
   -a, --alias     mint a new session at the given alias key or key glob
   -z, --zoxide    mint a new session at zoxide's best match
@@ -164,9 +165,11 @@ in host-terminal windows.`,
 		// Raw argv because cobra collapses repeated same-flag values and splits
 		// positionals from flags, losing the order and repeats the burst needs. Must
 		// precede the single-pin blocks so a two-pin set bursts rather than hitting
-		// the single -s arm.
+		// the single -s arm. A window a burst spawned names its one surface
+		// exactly, so it never bursts again: a name with glob characters would
+		// expand, opening more windows than were asked for.
 		ordered := orderedOpenTargets(openOwnArgs())
-		if isMultiTarget(ordered) {
+		if !cmd.Flags().Changed("ack") && isMultiTarget(ordered) {
 			return dispatchOpenBurst(cmd, ordered, command)
 		}
 
@@ -182,40 +185,28 @@ in host-terminal windows.`,
 			return openTUIFunc(cmd, pickerLanding{}, command)
 		}
 
-		query := destination
-
 		qr, err := buildQueryResolver(cmd)
 		if err != nil {
 			return err
 		}
-
-		result, err := resolveBare(qr, query)
-		if err != nil {
-			return err
-		}
-		result, err = settleKept(cmd, result, command, func() (resolver.QueryResult, error) {
-			return resolveBare(qr.WithKept(nil), query)
-		})
-		if err != nil {
-			return err
-		}
-
-		if miss, ok := result.(*resolver.MissResult); ok {
-			return singleMissError(miss.Target)
-		}
-		return openResolved(cmd, result, command)
+		return openBare(cmd, qr, destination, command)
 	},
 }
 
-// resolveBare resolves a bare positional through the chain and logs the
-// decision.
-func resolveBare(qr *resolver.QueryResolver, query string) (resolver.QueryResult, error) {
+// openBare opens what qr resolves the bare positional query to, logging the
+// decision, a kept session brought back first.
+func openBare(cmd *cobra.Command, qr *resolver.QueryResolver, query string, command []string) error {
 	result, err := qr.Resolve(query)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	emitResolveDecision(query, result)
-	return result, nil
+	if miss, ok := result.(*resolver.MissResult); ok {
+		return singleMissError(miss.Target)
+	}
+	return openOr(cmd, result, command, func() error {
+		return openBare(cmd, qr.WithKept(nil), query, command)
+	})
 }
 
 // validateFilterFlag refuses the lines -f cannot open a picker for: it is the
@@ -258,36 +249,18 @@ func openPinned(cmd *cobra.Command, resolve func(*resolver.QueryResolver, string
 	if err != nil {
 		return err
 	}
+	return openPinnedBy(cmd, qr, resolve, val, command)
+}
+
+// openPinnedBy is openPinned over qr.
+func openPinnedBy(cmd *cobra.Command, qr *resolver.QueryResolver, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), val string, command []string) error {
 	result, err := resolve(qr, val)
 	if err != nil {
 		return err
 	}
-	return openSettled(cmd, result, command, func() (resolver.QueryResult, error) {
-		return resolve(qr.WithKept(nil), val)
+	return openOr(cmd, result, command, func() error {
+		return openPinnedBy(cmd, qr.WithKept(nil), resolve, val, command)
 	})
-}
-
-// openKept opens the kept session named name, as a pre-flight judged it:
-// brought back, or, kept no longer under bootstrap.lock, the live session of
-// that name the session pin finds, if any.
-func openKept(cmd *cobra.Command, name string, command []string) error {
-	return openSettled(cmd, &resolver.KeptResult{Name: name}, command, func() (resolver.QueryResult, error) {
-		qr, err := buildQueryResolver(cmd)
-		if err != nil {
-			return nil, err
-		}
-		return qr.WithKept(nil).ResolveSessionPin(name)
-	})
-}
-
-// openSettled opens result once settleKept has settled it, again resolving
-// for a kept session that is kept no longer.
-func openSettled(cmd *cobra.Command, result resolver.QueryResult, command []string, again func() (resolver.QueryResult, error)) error {
-	result, err := settleKept(cmd, result, command, again)
-	if err != nil {
-		return err
-	}
-	return openResolved(cmd, result, command)
 }
 
 // openResolved handles no MissResult — the bare-positional path renders its own
@@ -726,24 +699,24 @@ func resolverKept(cmd *cobra.Command) resolver.KeptLookup {
 	return keptSessions{ctx: cmd.Context()}
 }
 
-// keptSessions judges a saved session kept by restore's own rule. A name the
-// backend's Create refuses is never kept, so it costs no read. Any other is
-// looked up in sessions.json, read without its lock, and the sessions are
-// listed only for a name the index holds, so a target no session was saved
-// under costs one file read. A read that fails is logged here; the resolver
-// then keeps nothing, as a listing that fails lists no session.
+// keptSessions judges a saved session kept by restore's own rule. A name
+// zmx's Create refuses, its length aside, is never kept, so it costs nothing.
+// Any other is looked up in sessions.json, read without its lock, and the
+// sessions are listed only for a name the index holds, so a target no session
+// was saved under costs one file read. A read that fails is logged here; the
+// resolver then keeps nothing, as a listing that fails lists no session.
 type keptSessions struct {
 	ctx context.Context
 }
 
 func (k keptSessions) IsKept(name string) (bool, error) {
+	if zmx.CheckName(name) != nil {
+		return false, nil
+	}
 	b, err := sessionBackend()
 	if err != nil {
 		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
 		return false, err
-	}
-	if b.ValidateName(name) != nil {
-		return false, nil
 	}
 	dir, e, saved, err := savedEntry(name)
 	if err != nil {
@@ -793,7 +766,7 @@ func (l backendSessionNames) ListSessionNames() ([]string, error) {
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
-	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob, bringing back a kept saved session first (session-domain; never mints)")
+	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints); an exact name that is a kept saved session is brought back first")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")

@@ -152,17 +152,17 @@ func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
 	return !listed[e.Name] && !backend.IsPortalOwned(e.Name)
 }
 
-// Restore makes again, in index order, the session of every saved entry the
-// backend doesn't hold, under its name or another spelling of it, Portal's own
-// aside, that is owed a restore or may predate this boot. It skips any other
-// entry from this boot, whose session ended while a saver watched and is the
-// saver's to drop; with no boot time to judge by, every entry may predate the
-// boot. A session it couldn't make for a reason that may pass it tries again,
-// within RetryBudget, once every other has had its first try. A session it
-// can't make keeps its entry for the next bootstrap. It asks the backend
-// nothing when sessions.json can't be read, makes nothing when the backend
-// can't be listed, and makes no further session once ctx ends or the backend
-// refuses one it made as speaking a protocol Portal doesn't support.
+// Restore makes again, in index order, the session of every saved entry no
+// session the backend lists holds, under its name or another spelling of it,
+// Portal's own aside, that is owed a restore or may predate this boot. It
+// skips any other entry from this boot, whose session ended while a saver
+// watched and is the saver's to drop; with no boot time to judge by, every
+// entry may predate the boot. A session it couldn't make for a reason that may
+// pass it tries again, within RetryBudget, once every other has had its first
+// try. A session it can't make keeps its entry for the next bootstrap. It asks
+// the backend nothing when sessions.json can't be read, makes nothing when the
+// backend can't be listed, and makes no further session once ctx ends or the
+// backend refuses one it made as speaking a protocol Portal doesn't support.
 func (r *Restorer) Restore(ctx context.Context) Result {
 	start := time.Now()
 	pass := &run{Restorer: r, raised: map[string]bool{}}
@@ -482,17 +482,41 @@ type judging struct {
 const heldElsewhere = "another spelling of its name is live"
 
 // skips says why restore skips the entry now, and is empty when it doesn't:
-// why skipped says, or a live session holding its name under another
-// spelling, as the backend finds it. Such an entry stays as it is, made again
-// once that session ends.
+// why skipped says, or a session the listing holds having its name under
+// another spelling. Such an entry stays as it is, made again once that
+// session ends.
 func (j judging) skips(ctx context.Context, e sessionindex.Entry) string {
 	if why := skipped(e, j.listed, j.rule); why != "" {
 		return why
 	}
-	if _, err := j.names.Session(ctx, e.Name); heldAs(err) {
+	if j.heldElsewhere(ctx, e.Name) {
 		return heldElsewhere
 	}
 	return ""
+}
+
+// heldElsewhere reports whether a session the listing holds has name under
+// another spelling, as the backend finds it. A spelling no listing holds is a
+// stale socket, which Create replaces, so only a name the listing holds under
+// another case is asked about, and only a listed holder counts. A pair the
+// filesystem folds that case-folding doesn't is tried, and fails as held.
+func (j judging) heldElsewhere(ctx context.Context, name string) bool {
+	if !j.listsAnotherCase(name) {
+		return false
+	}
+	_, err := j.names.Session(ctx, name)
+	held, ok := errors.AsType[*backend.HeldAsError](err)
+	return ok && j.listed[held.Held]
+}
+
+// listsAnotherCase reports whether the listing holds name under another case.
+func (j judging) listsAnotherCase(name string) bool {
+	for listed := range j.listed {
+		if listed != name && strings.EqualFold(listed, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // notKept says why the entry isn't kept, and is empty when it is: kept is an

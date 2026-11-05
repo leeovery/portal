@@ -408,12 +408,13 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	idle := nothingToSave(sessions, listErr, dir, dirErr)
 
 	stateZmxDir := checkStateZmxDir(dir, dirErr, deps.ZmxDir)
+	saverRead := readSaverPresence(ctx, deps.Saver)
 
 	results := []checkResult{
 		checkZmxBinary(deps.LookPath),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
-		checkSaver(ctx, deps.Saver, idle),
+		checkSaver(saverRead, idle),
 		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
 		stateZmxDir,
@@ -425,7 +426,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	// The sessions were listed in the zmx dir doctor binds, which a failed
 	// check says is not the state dir's, or can't say is.
 	if stateZmxDir.status != checkFail {
-		results = append(results, checkKeptSessions(ctx, dir, sessions, listErr, deps.Names, deps.Saver)...)
+		results = append(results, checkKeptSessions(ctx, dir, sessions, listErr, deps.Names, saverRead)...)
 	}
 	results = append(results, checkKeyConfig(deps.PrefsStore))
 	if deps.Detector != nil && deps.Resolve != nil {

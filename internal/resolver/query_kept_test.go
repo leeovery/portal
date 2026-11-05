@@ -79,22 +79,16 @@ func TestResolve_KeptSavedSession(t *testing.T) {
 		assertKept(t, got, err, "work")
 	})
 
-	t.Run("a path-shaped target is a path, never looked up as kept", func(t *testing.T) {
-		kept := &mockKeptLookup{kept: []string{".notes"}}
+	t.Run("a kept name resolves before a path, as a live one does", func(t *testing.T) {
 		cwd := t.TempDir()
 		if err := os.Mkdir(filepath.Join(cwd, ".notes"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		t.Chdir(cwd)
 
-		got, err := keptResolver(nil, kept).Resolve(".notes")
+		got, err := keptResolver(nil, &mockKeptLookup{kept: []string{".notes"}}).Resolve(".notes")
 
-		if p, ok := got.(*resolver.PathResult); err != nil || !ok || p.Domain != resolver.DomainPath {
-			t.Errorf("Resolve = %#v, %v; want the path", got, err)
-		}
-		if len(kept.asked) != 0 {
-			t.Errorf("asked about %q, want a path-shaped target never asked about", kept.asked)
-		}
+		assertKept(t, got, err, ".notes")
 	})
 
 	t.Run("a name not kept falls through to the alias", func(t *testing.T) {

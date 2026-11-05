@@ -17,28 +17,46 @@ const keptRestoreFailedCopy = "Portal couldn't restore %s — kept for the next 
 
 var bringBackFunc = bringBack
 
-// settleKept is what to open for result: a kept session is brought back
-// first and opened as the session it then is, or, when it is kept no longer,
-// judged again under bootstrap.lock, what again resolves as if it had never
-// been kept. A kept session is an attach target, so a command, which is
-// mint-scoped, is refused before anything is brought back. Any other result is
-// opened as it is.
-func settleKept(cmd *cobra.Command, result resolver.QueryResult, command []string, again func() (resolver.QueryResult, error)) (resolver.QueryResult, error) {
-	kept, ok := result.(*resolver.KeptResult)
-	if !ok {
-		return result, nil
+// openOr opens result as openResolved does, but for a kept session, which is
+// brought back first, or, judged again under bootstrap.lock and kept no
+// longer, left for instead, which opens the target as if it had never been
+// kept.
+func openOr(cmd *cobra.Command, result resolver.QueryResult, command []string, instead func() error) error {
+	if kept, ok := result.(*resolver.KeptResult); ok {
+		return openKeptOr(cmd, kept.Name, command, instead)
 	}
+	return openResolved(cmd, result, command)
+}
+
+// openKept opens the kept session named name, as a pre-flight judged it:
+// brought back, or, kept no longer under bootstrap.lock, the live session of
+// that name the session pin finds, if any.
+func openKept(cmd *cobra.Command, name string, command []string) error {
+	return openKeptOr(cmd, name, command, func() error {
+		qr, err := buildQueryResolver(cmd)
+		if err != nil {
+			return err
+		}
+		return openPinnedBy(cmd, qr.WithKept(nil), (*resolver.QueryResolver).ResolveSessionPin, name, command)
+	})
+}
+
+// openKeptOr brings back the kept session named name and attaches it, or,
+// when it is kept no longer, runs instead. A kept session is an attach
+// target, so a command, which is mint-scoped, is refused before anything is
+// brought back.
+func openKeptOr(cmd *cobra.Command, name string, command []string, instead func() error) error {
 	if len(command) > 0 {
-		return nil, NewUsageError(commandAttachOnlyMessage)
+		return NewUsageError(commandAttachOnlyMessage)
 	}
-	brought, err := bringBackFunc(cmd, kept.Name)
+	brought, err := bringBackFunc(cmd, name)
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf(keptRestoreFailedCopy, kept.Name, err) //nolint:staticcheck // user-facing message per spec
+		return fmt.Errorf(keptRestoreFailedCopy, name, err) //nolint:staticcheck // user-facing message per spec
 	case brought == restore.NoLongerKept:
-		return again()
+		return instead()
 	}
-	return &resolver.SessionResult{Name: kept.Name, Domain: resolver.DomainKept}, nil
+	return openSessionFunc(cmd, name)
 }
 
 // bringBack brings back the kept session named name through restore's own

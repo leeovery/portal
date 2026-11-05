@@ -40,6 +40,17 @@ func hasCheck(results []checkResult, name string) bool {
 	return false
 }
 
+// countedPresence counts the asks whether the saver runs.
+type countedPresence struct {
+	*saverAnswers
+	asked int
+}
+
+func (c *countedPresence) Present(ctx context.Context) (bool, error) {
+	c.asked++
+	return c.saverAnswers.Present(ctx)
+}
+
 func assertNoKeptLine(t *testing.T, deps *DoctorDeps) {
 	t.Helper()
 	if results := diagnose(t, deps); hasCheck(results, keptSessionsCheck) {
@@ -89,6 +100,19 @@ func TestDoctorKeptSessions(t *testing.T) {
 		got := findCheck(t, diagnose(t, deps), keptSessionsCheck)
 
 		assertCheck(t, got, checkInfo, "notes, ended — saved but not running, back at the next restore; x <name> brings one back now")
+	})
+
+	t.Run("it reads the saver check's own answer, asking the saver nothing more", func(t *testing.T) {
+		deps := keptDoctorDeps(t, nil, sessionindex.Entry{Name: "ended", CreatedAt: testBoot.Add(time.Hour)})
+		saver := &countedPresence{saverAnswers: &saverAnswers{present: false}}
+		deps.Saver = saver
+
+		got := findCheck(t, diagnose(t, deps), keptSessionsCheck)
+
+		assertCheck(t, got, checkInfo, "ended — saved but not running, back at the next restore; x <name> brings one back now")
+		if saver.asked != 1 {
+			t.Errorf("asked whether the saver runs %d times, want once", saver.asked)
+		}
 	})
 
 	t.Run("a saver it can't read counts as running, naming only what is kept either way", func(t *testing.T) {

@@ -163,7 +163,60 @@ func TestOpen_KeptSession(t *testing.T) {
 				t.Errorf("brought %q, attached %q; want a?b brought back, then attached", o.brought, o.attached)
 			}
 		})
+
+		t.Run(form+": a name with glob characters kept no longer is read as the glob", func(t *testing.T) {
+			o := stageKeptOpen(t, []string{"axb"}, []string{"a?b"}, nil, answer(restore.NoLongerKept, nil))
+			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, target...) })
+
+			if err := runOpen(target...); err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			if !slices.Equal(o.attached, []string{"axb"}) {
+				t.Errorf("attached %q, want axb, the glob's one live match", o.attached)
+			}
+		})
+
+		t.Run(form+": a name with glob characters kept no longer, matching nothing live, misses as the glob", func(t *testing.T) {
+			stageKeptOpen(t, nil, []string{"a?b"}, nil, answer(restore.NoLongerKept, nil))
+			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, target...) })
+
+			if err := runOpen(target...); err == nil || err.Error() != singleMissError("a?b").Error() {
+				t.Errorf("open = %v, want the glob's miss", err)
+			}
+		})
 	}
+
+	// A burst's window runs open --session <name> --ack <batch>:<token>, one
+	// surface named exactly: read as a glob, the name could burst again.
+	t.Run("a spawned window's name with glob characters is that session alone, never a glob", func(t *testing.T) {
+		args := []string{"--session", "a?b", "--ack", "b1:t1"}
+		o := stageKeptOpen(t, []string{"a?b", "axb"}, nil, nil, answer(restore.BroughtBack, nil))
+		withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, args...) })
+		withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, resolver.QueryResult, []string) error {
+			t.Error("a spawned window burst again")
+			return nil
+		})
+
+		if err := runOpen(args...); err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if !slices.Equal(o.attached, []string{"a?b"}) {
+			t.Errorf("attached %q, want a?b alone", o.attached)
+		}
+	})
+
+	t.Run("a spawned window's kept name, kept no longer, is no session, never the glob", func(t *testing.T) {
+		args := []string{"--session", "a?b", "--ack", "b1:t1"}
+		o := stageKeptOpen(t, []string{"axb"}, []string{"a?b"}, nil, answer(restore.NoLongerKept, nil))
+		withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, args...) })
+
+		if err := runOpen(args...); err == nil || err.Error() != "No session found: a?b" {
+			t.Errorf("open = %v, want No session found: a?b", err)
+		}
+		if len(o.attached) > 0 {
+			t.Errorf("attached %q, want nothing", o.attached)
+		}
+	})
 
 	t.Run("a live session of the name is attached, nothing brought back", func(t *testing.T) {
 		o := stageKeptOpen(t, []string{"work"}, []string{"work"}, nil, answer(restore.BroughtBack, nil))
@@ -366,10 +419,9 @@ func TestKeptSessions(t *testing.T) {
 		}
 	})
 
-	t.Run("a name Create refuses costs no read: an index it can't read goes unlogged", func(t *testing.T) {
+	t.Run("a name Create refuses costs nothing: the backend unasked, and an index it can't read unlogged", func(t *testing.T) {
 		blockStateDir(t)
-		fake := backendtest.New()
-		withBackendDeps(t, BackendDeps{Backend: fake})
+		withBackendDeps(t, BackendDeps{Backend: untouchedBackend{t: t}})
 		sink := logtest.Install(t)
 
 		for _, name := range []string{"~/code", "logs"} {
@@ -379,9 +431,6 @@ func TestKeptSessions(t *testing.T) {
 		}
 		if recs := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(recs) != 0 {
 			t.Errorf("warnings = %v, want none", recs)
-		}
-		if calls := fake.Calls(); len(calls) != 0 {
-			t.Errorf("backend calls = %+v, want none", calls)
 		}
 	})
 
@@ -488,6 +537,22 @@ func (w *keptWorld) assertKeptAsSaved(t *testing.T) {
 	if kept, err := (keptSessions{ctx: t.Context()}).IsKept("work"); !kept || err != nil {
 		t.Errorf("IsKept(work) = %v, %v; want it still kept", kept, err)
 	}
+}
+
+// untouchedBackend fails the test on any ask a kept lookup makes of it.
+type untouchedBackend struct {
+	backend.Backend
+	t *testing.T
+}
+
+func (b untouchedBackend) ValidateName(name string) error {
+	b.t.Errorf("ValidateName(%s) asked of the backend", name)
+	return nil
+}
+
+func (b untouchedBackend) List(context.Context) ([]backend.Session, error) {
+	b.t.Error("List asked of the backend")
+	return nil, nil
 }
 
 // lockCheckedBackend is a backend whose Create fails the test unless

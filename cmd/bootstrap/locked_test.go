@@ -237,9 +237,11 @@ func TestLockWait(t *testing.T) {
 	askAgain := 2*saverhost.ReadCeiling + backend.RecheckAfter
 	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()
 
-	t.Run("it grows by a session's longest restore for each saved entry", func(t *testing.T) {
-		if got := LockWait(20) - LockWait(0); got != 20*each {
-			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, each)
+	// Before its first session, restore may read, for each entry, whether a
+	// listed session holds its name under another spelling.
+	t.Run("it grows by a lookup and a session's longest restore for each saved entry", func(t *testing.T) {
+		if got, per := LockWait(20)-LockWait(0), saverhost.ReadCeiling+each; got != 20*per {
+			t.Errorf("LockWait(20) - LockWait(0) = %s, want 20 × %s", got, per)
 		}
 	})
 

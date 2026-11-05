@@ -36,7 +36,7 @@ func (w *world) keptJudging(t *testing.T, noSaver bool) []string {
 		t.Fatalf("list: %v", err)
 	}
 	var names []string
-	keeping := restore.Keeping{Rule: sessionindex.NewRule(booted, nil), Names: w.fake, NoSaver: noSaver}
+	keeping := restore.Keeping{Rule: sessionindex.NewRule(booted, nil), Names: w.witness, NoSaver: noSaver}
 	for _, e := range restore.Kept(t.Context(), idx.Entries(), live, keeping) {
 		names = append(names, e.Name)
 	}
@@ -72,6 +72,41 @@ func TestKept_IsWhatRestoreMakes(t *testing.T) {
 	if made := w.created(); !slices.Equal(kept, made) {
 		t.Errorf("Kept = %q, but Restore made %q; want the same sessions", kept, made)
 	}
+}
+
+func TestKept_AnotherSpelling(t *testing.T) {
+	t.Run("a listed session holding the name under another spelling keeps it from being kept", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "WORK"})
+		w.save(t, entry(t, "work"))
+
+		if kept := w.keptNames(t); len(kept) != 0 {
+			t.Errorf("Kept = %q, want nothing", kept)
+		}
+	})
+
+	for name, answer := range otherSpellingAnswers {
+		t.Run("a lookup that "+name+" keeps the entry kept", func(t *testing.T) {
+			w := newWorld(t, backend.Session{Name: "WORK"})
+			w.save(t, entry(t, "work"))
+			w.answerSession("work", answer)
+
+			if kept := w.keptNames(t); !slices.Equal(kept, []string{"work"}) {
+				t.Errorf("Kept = %q, want work", kept)
+			}
+		})
+	}
+
+	t.Run("an entry no listed session spells another way costs no lookup", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "api"})
+		w.save(t, entry(t, "work"))
+
+		if kept := w.keptNames(t); !slices.Equal(kept, []string{"work"}) {
+			t.Errorf("Kept = %q, want work", kept)
+		}
+		if asks := w.fake.CallsTo(backendtest.OpSession); len(asks) != 0 {
+			t.Errorf("Session calls = %+v, want none", asks)
+		}
+	})
 }
 
 // decision 58: with no saver running, the next bootstrap marks owed every
@@ -176,6 +211,19 @@ func TestBringBack(t *testing.T) {
 		})
 	}
 
+	for name, answer := range otherSpellingAnswers {
+		t.Run("a lookup that "+name+" leaves it kept, and tried", func(t *testing.T) {
+			w := newWorld(t, backend.Session{Name: "WORK"})
+			w.save(t, entry(t, "work"))
+			w.answerSession("work", answer)
+
+			if brought, _ := w.r.BringBack(t.Context(), "work"); brought == restore.NoLongerKept {
+				t.Error("BringBack = kept no longer, want it tried")
+			}
+			w.assertTried(t, "work")
+		})
+	}
+
 	t.Run("one of Portal's own is kept no longer", func(t *testing.T) {
 		w := newWorld(t)
 		w.save(t, entry(t, "_portal-saver"))
@@ -223,7 +271,7 @@ func TestBringBack(t *testing.T) {
 		if err == nil || brought != 0 {
 			t.Fatalf("BringBack = %v, %v; want the session that never answered failed", brought, err)
 		}
-		if asks := w.asks(); asks != 1 || len(w.slept) != 1 {
+		if asks := len(w.fake.CallsTo(backendtest.OpSession)); asks != 1 || len(w.slept) != 1 {
 			t.Errorf("asked again %d times after %v; want once, a probe's ceiling on", asks, w.slept)
 		}
 		if w.hydrating(t, "work") {
