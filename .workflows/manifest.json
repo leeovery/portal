@@ -265,7 +265,24 @@
         ],
         "kind": "idea"
       }
-    }
+    },
+    "imports": [
+      {
+        "path": "imports/portal-control-plane-plan.md",
+        "imported_at": "2026-11-06T12:42:16Z",
+        "origin": "roadmap"
+      },
+      {
+        "path": "imports/001-herdr-prior-art-detection-layers-state-model-agent-shaped-api.md",
+        "imported_at": "2026-11-06T12:42:16Z",
+        "origin": "roadmap"
+      },
+      {
+        "path": "imports/001-herdr-prior-art-sidebar-needs-attention-blocked-notifications.md",
+        "imported_at": "2026-11-06T12:42:16Z",
+        "origin": "roadmap"
+      }
+    ]
   },
   "walkthrough": {
     "status": "skipped"
