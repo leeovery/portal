@@ -45,7 +45,7 @@ Coming from the tmux version of Portal? Install this one, then run `portal migra
 
 ### Requirements
 
-- **[zmx](https://github.com/neurosnap/zmx)** `<zmx release with protocol 1>`, the release Portal supports: the first to speak zmx's socket protocol 1, which is how Portal talks to zmx. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
+- **[zmx](https://github.com/neurosnap/zmx)** 1.0.0 or later: the first release to speak zmx's socket protocol 1, which is how Portal talks to zmx. Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
 - **macOS**, and **Go** 1.26+ to build from source.
 
 **Homebrew**

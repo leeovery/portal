@@ -40,16 +40,9 @@ jobs:
         env:
           LEG: ${{ matrix.leg }}
         run: |
-          pin=$(tr -d '[:space:]' < scripts/zmx-commit)
           ref=main
           if [ "$LEG" = release ]; then
             ref=$(gh api repos/neurosnap/zmx/releases/latest --jq .tag_name)
-            status=$(gh api "repos/neurosnap/zmx/compare/$pin...$ref" --jq .status)
-            if [ "$status" = behind ] || [ "$status" = identical ]; then
-              echo "::notice title=zmx release not tested::zmx $ref is no newer than the pinned commit $pin ($status), so it cannot speak socket protocol 1"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
           fi
           commit=$(gh api "repos/neurosnap/zmx/commits/$ref" --jq .sha)
           zig=$(gh api "repos/neurosnap/zmx/contents/build.zig.zon?ref=$commit" -H 'Accept: application/vnd.github.raw' \
@@ -64,7 +57,6 @@ jobs:
 
       - name: Resolve zmx 0.8.1
         id: older
-        if: steps.zmx.outputs.skip != 'true'
         run: |
           zig=$(gh api "repos/neurosnap/zmx/contents/build.zig.zon?ref=$OLDER_ZMX" -H 'Accept: application/vnd.github.raw' \
             | sed -n 's/.*\.minimum_zig_version *= *"\([^"]*\)".*/\1/p')
@@ -76,32 +68,27 @@ jobs:
           echo "zig=$zig" >> "$GITHUB_OUTPUT"
 
       - name: Setup Zig for zmx 0.8.1
-        if: steps.zmx.outputs.skip != 'true'
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.older.outputs.zig }}
           use-cache: false
 
       - name: Build zmx 0.8.1
-        if: steps.zmx.outputs.skip != 'true'
         run: |
           binary=$(scripts/zmx-build "$OLDER_ZMX")
           echo "PORTAL_TEST_ZMX_OLDER_BINARY=$binary" >> "$GITHUB_ENV"
 
       - name: Setup Zig
-        if: steps.zmx.outputs.skip != 'true'
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.zmx.outputs.zig }}
 
       - name: Setup Go
-        if: steps.zmx.outputs.skip != 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
       - name: Build zmx
-        if: steps.zmx.outputs.skip != 'true'
         env:
           COMMIT: ${{ steps.zmx.outputs.commit }}
         run: |
@@ -109,7 +96,6 @@ jobs:
           echo "PORTAL_TEST_ZMX_BINARY=$binary" >> "$GITHUB_ENV"
 
       - name: Test
-        if: steps.zmx.outputs.skip != 'true'
         run: |
           go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/runner/... ./internal/saverhost/... ./internal/spawn/... ./internal/zmxtest/...
           go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd ./internal/portaltest ./internal/restore ./internal/vtcapture
