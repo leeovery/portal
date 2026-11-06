@@ -52,7 +52,7 @@ func OtherStateDir(err error) *FatalError {
 // OlderZmxMessage is the fatal of a zmx that speaks zmx 0.8.1's protocol: a
 // saver judged so, or a session any create just made, which the backend
 // refuses with backend.ErrUnsupportedProtocol.
-const OlderZmxMessage = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install a zmx build newer than 0.8.1."
+const OlderZmxMessage = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.0 or later."
 
 // UnsupportedCreate is err as the older-zmx fatal when it carries a create's
 // refusal of a session made by a zmx Portal can't talk to, and nil otherwise,
