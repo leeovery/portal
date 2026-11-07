@@ -174,6 +174,26 @@ func topRow(m Model) string {
 	return previewBody(m.preview)[0]
 }
 
+func TestAnchoredOffset(t *testing.T) {
+	t.Run("rows found as far above as below are taken from above, as a history at its cap loses rows from its top", func(t *testing.T) {
+		prev := []string{"p0", "p1", "p2", "a", "b", "c", "p6"}
+		next := []string{"n0", "a", "b", "c", "n4", "a", "b", "c", "n8"}
+
+		if got := anchoredOffset(prev, next, 3); got != 1 {
+			t.Errorf("anchoredOffset = %d, want 1, the rows above", got)
+		}
+	})
+
+	t.Run("rows showing nothing, blank or styling alone, anchor nothing", func(t *testing.T) {
+		prev := []string{"a", "", "\x1b[0m", " ", "b"}
+		next := []string{"", "\x1b[0m", " ", "c", "d", "e"}
+
+		if got := anchoredOffset(prev, next, 1); got != 1 {
+			t.Errorf("anchoredOffset = %d, want the row it was, 1", got)
+		}
+	})
+}
+
 func TestPreviewRefresh_HoldsTheScroll(t *testing.T) {
 	t.Run("a preview scrolled up stays on the rows the user moved to", func(t *testing.T) {
 		m, history, tick := refreshingPreview(t, numbered(1, 200))

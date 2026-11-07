@@ -180,6 +180,26 @@ func TestPortalOpenTakesTheSessionAgainstZmx(t *testing.T) {
 		p.echoes(t, 6, 7)
 	})
 
+	t.Run("a Portal attach zmx switched onto the session from another is detached by the take, though no runner's entry or client's arguments name it", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		first, alpha := w.openProject(t)
+		w.create(t, "beta")
+		first.zmxTyped(t, "attach beta")
+		w.awaitClients(t, "beta", 1)
+		w.awaitClients(t, alpha, 0)
+
+		second := w.portal(t, "open", "beta")
+
+		// Switched by zmx, the first runner is unsure of its session, so can't
+		// judge the drop, and exits to the shell.
+		if code := first.exitCode(t); code != 0 {
+			t.Errorf("the switched Portal exited %d, want 0", code)
+		}
+		second.awaitLeading(t, "beta")
+		w.awaitClients(t, "beta", 1)
+		second.echoes(t, 6, 7)
+	})
+
 	t.Run("a runner that won't let go, as another version's, is detached by the backend, and its screen says where from the take's record", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		first, name := w.openProject(t)

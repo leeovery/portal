@@ -29,9 +29,9 @@ type runnerRegistry interface {
 	// TakenBy is where the last take of session recorded no earlier than
 	// since says it went: empty when there is none.
 	TakenBy(session string, since time.Time) string
-	// LockTake takes the lock takes hold, waiting up to wait, and returns its
-	// release.
-	LockTake(ctx context.Context, wait time.Duration) (release func(), err error)
+	// LockTake takes the lock takes of session hold, waiting up to wait, and
+	// returns its release.
+	LockTake(ctx context.Context, session string, wait time.Duration) (release func(), err error)
 }
 
 // runnerListing is runnerreg.Listing's surface.
@@ -97,12 +97,12 @@ func (stateRunners) TakenBy(session string, since time.Time) string {
 	return r.TakenBy(session, since)
 }
 
-func (stateRunners) LockTake(ctx context.Context, wait time.Duration) (func(), error) {
+func (stateRunners) LockTake(ctx context.Context, session string, wait time.Duration) (func(), error) {
 	r, err := inStateDir(runnerreg.New)
 	if err != nil {
 		return nil, err
 	}
-	return r.LockTake(ctx, wait)
+	return r.LockTake(ctx, session, wait)
 }
 
 func (stateRunners) DetachToPicker(ctx context.Context, session string) (int, error) {

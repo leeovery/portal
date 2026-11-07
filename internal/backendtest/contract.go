@@ -608,6 +608,20 @@ func leaderContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 	})
 
+	t.Run("a detach leaves no client leading", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		s.Lead(t, "work", "PORTAL_ATTACH", "tok123")
+
+		if err := s.Backend().Detach(t.Context(), "work"); err != nil {
+			t.Fatalf("Detach = %v", err)
+		}
+
+		if env, err := s.Backend().LeaderEnv(t.Context(), "work"); err != nil || len(env) != 0 {
+			t.Errorf("LeaderEnv = %+v, %v; want none once every client is detached", env, err)
+		}
+	})
+
 	t.Run("it answers the variable Track marked the leading client with", func(t *testing.T) {
 		s := newSubject(t)
 		s.Hold(t, "work", Answering)

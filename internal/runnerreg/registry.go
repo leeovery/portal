@@ -276,10 +276,11 @@ func (r Registry) on(session string) ([]registered, error) {
 }
 
 // sweep removes what scan proves stale, so runners that ended without
-// unregistering, killed or with the machine, leave nothing behind for long.
-// What it can't read it leaves.
+// unregistering, killed or with the machine, leave nothing behind for long,
+// and the take files past their life. What it can't read it leaves.
 func (r Registry) sweep() {
 	_, _ = r.scan()
+	r.sweepTakes()
 }
 
 // scan reads the directory for the runners registered in it that may be

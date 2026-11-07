@@ -9,6 +9,8 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -20,10 +22,22 @@ import (
 // first keystroke.
 const takeWait = 2 * time.Second
 
-// takeLockWait bounds the wait for another take's hold on the take lock:
-// its asks of the runners (2.5 s at most), its wait for the session to be
-// alone and its attach's wait to lead (takeWait each), with time over.
-const takeLockWait = 10 * time.Second
+// takeLockWait bounds the wait for another take's hold on its session's
+// lock: that take's longest hold, each wait at its bound and each backend
+// call at its ceiling, zmx's pinned within saverhost's. Its asks of the
+// session's runners, all at once; its first read of what holds the session,
+// the leader and then its Info; its detach; its wait for the session to be
+// alone, whose reads and detaches that wait's bound cuts short; and its
+// attach's wait to lead, whose reads it cuts short too; with takeLockSlack
+// over. A holder still holding past it is stuck, and the take goes on
+// without the lock rather than queue behind it.
+func takeLockWait() time.Duration {
+	return runnerreg.AskBound() + 2*saverhost.ReadCeiling + saverhost.DetachCeiling + 2*takeWait + takeLockSlack
+}
+
+// takeLockSlack covers what no bound does: the registry's scan, the process
+// table's, the record's write and the attach's start.
+const takeLockSlack = 5 * time.Second
 
 // takePoll spaces the reads of the take's waits.
 const takePoll = 20 * time.Millisecond
@@ -38,16 +52,17 @@ var (
 
 // take takes name from every other terminal holding it, before this one
 // attaches it, so this one is its only terminal and leads it from its first
-// frame, and returns the release of the take lock, which the caller hands to
-// awaitLead once the attach has begun. Under the lock, every other Portal
+// frame, and returns the release of name's take lock, which the caller hands
+// to awaitLead once the attach has begun. Under the lock, every other Portal
 // runner on the session is asked to let it go, saying where it went; then,
-// while a terminal still holds it (a raw zmx client, or a runner that didn't
-// let go or whose client lingers), where it went is recorded for them and
-// every client is detached through the backend, again on each read of the
-// wait that finds one still there, until none holds it, within takeWait. It
-// never kills and sends the session's program nothing. Portal's own sessions
-// are never taken. A take that fails is logged and the attach goes ahead,
-// drawn for another terminal at worst.
+// while a terminal still holds it (a raw zmx client, a runner that didn't let
+// go or whose client lingers, or a client zmx switched onto it from another
+// session, which no runner's entry names), where it went is recorded for
+// them and every client is detached through the backend, again on each read
+// of the wait that finds one still there, until none holds it, within
+// takeWait. It never kills and sends the session's program nothing. Portal's
+// own sessions are never taken. A take that fails is logged and the attach
+// goes ahead, drawn for another terminal at worst.
 func (c attachConnector) take(ctx context.Context, name string) (release func()) {
 	if backend.IsPortalOwned(name) {
 		return func() {}
@@ -79,10 +94,10 @@ func (c attachConnector) take(ctx context.Context, name string) (release func())
 	return release
 }
 
-// lockTake takes the take lock, within takeLockWait. A lock that can't be
+// lockTake takes name's take lock, within takeLockWait. A lock that can't be
 // had is logged, and the take goes ahead without it.
 func (c attachConnector) lockTake(ctx context.Context, name string) (release func()) {
-	release, err := c.runners.LockTake(ctx, takeLockWait)
+	release, err := c.runners.LockTake(ctx, name, takeLockWait())
 	if err != nil {
 		attachLogger.Warn("take failed", "session", name, "detail", "lock", "error", err)
 		return func() {}
@@ -90,14 +105,32 @@ func (c attachConnector) lockTake(ctx context.Context, name string) (release fun
 	return release
 }
 
-// held reports whether a terminal holds name: a zmx attach on a terminal,
-// as the process table shows it, while the session counts a client. Readers
-// (the saver's capture, a preview's read, a listing's probe, a zmx run) are
-// never such a process, so none holds a session, and a process the table
-// still shows on it after zmx switched it to another session holds it only
-// while something else is connected. A table that can't be read is an error:
-// what holds the session can't be told, so nothing is detached on it.
+// held reports whether a terminal holds name: zmx answers the environment of
+// a client leading it, or the process table shows a zmx attach on a terminal
+// on it while the session counts a client. Only a zmx attach sends zmx its
+// environment: a reader (the saver's capture, a preview's read, a listing's
+// probe, a zmx run) sends none, so even one zmx makes the leader, as a zmx
+// run's resize can, answers none, and no reader shows in the table, so none
+// holds a session. The leader counts a client zmx switched onto name from
+// another session, whose process still names the one it left; and that
+// process holds the session it left only while something else is connected
+// there. Either way of holding it is enough; what neither read can tell is an
+// error, so nothing is detached on it.
 func (c attachConnector) held(ctx context.Context, name string) (bool, error) {
+	leader, leaderErr := c.backend.LeaderEnv(ctx, name)
+	if len(leader) > 0 {
+		return true, nil
+	}
+	attached, err := c.attachedTerminal(ctx, name)
+	if attached {
+		return true, nil
+	}
+	return false, errors.Join(leaderErr, err)
+}
+
+// attachedTerminal reports whether the process table shows a zmx attach on
+// a terminal on name while the session counts a client.
+func (c attachConnector) attachedTerminal(ctx context.Context, name string) (bool, error) {
 	terminals, err := c.backend.AttachClients(name)
 	if err != nil || len(terminals) == 0 {
 		return false, err

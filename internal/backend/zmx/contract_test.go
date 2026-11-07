@@ -42,7 +42,7 @@ func (s *daemonSubject) Backend() backend.Backend {
 func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	switch state {
 	case backendtest.Answering:
-		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }))
+		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }, func() { s.unlead(name) }))
 	case backendtest.Historyless:
 		serve(t, s.dir, name, anyRequest(s.info, nil))
 	case backendtest.Silent:
@@ -69,6 +69,14 @@ func (s *daemonSubject) Lead(_ *testing.T, session, variable, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.leaders[session] = []byte("-DISPLAY\n" + variable + "=" + value + "\n")
+}
+
+// unlead has the session's daemon answer EnvGet as zmx does once its
+// clients are detached: with no environment.
+func (s *daemonSubject) unlead(session string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.leaders, session)
 }
 
 func (s *daemonSubject) leader(session string) []byte {

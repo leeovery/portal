@@ -52,6 +52,11 @@ var timeout = 2 * time.Second
 // answers at once, so the caller hears of every request a runner took.
 const answerGrace = 500 * time.Millisecond
 
+// AskBound is the longest a request keeps its caller: its deadline, then the
+// grace its answer has. A request asked of every runner on a session asks
+// them all at once, so it keeps its caller as long.
+func AskBound() time.Duration { return timeout + answerGrace }
+
 // errOtherPID is an answer from a process other than the runner registered.
 var errOtherPID = errors.New("answered as another process")
 

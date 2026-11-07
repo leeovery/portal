@@ -128,8 +128,12 @@ func TestOpenSession_InsideASessionSwitchesThroughTheRegistry(t *testing.T) {
 			t.Fatalf("openSession: %v", err)
 		}
 		assertAttached(t, rec, "api-x7Kd9a")
-		if len(rec.runners.switches) != 0 || len(fake.CallsTo(backendtest.OpLeaderEnv)) != 0 {
-			t.Errorf("switches = %+v, leader reads = %+v; want neither", rec.runners.switches, fake.CallsTo(backendtest.OpLeaderEnv))
+		// The take reads the leader of the session it attaches; a switch would
+		// read the leader of a session typed in.
+		reads := fake.CallsTo(backendtest.OpLeaderEnv)
+		typedIn := slices.ContainsFunc(reads, func(c backendtest.Call) bool { return c.Name != "api-x7Kd9a" })
+		if len(rec.runners.switches) != 0 || typedIn {
+			t.Errorf("switches = %+v, leader reads = %+v; want neither but the take's", rec.runners.switches, reads)
 		}
 	})
 

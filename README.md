@@ -497,8 +497,10 @@ the session is sized and drawn for the terminal you opened it in from its first 
 attach Portal makes does it: `x <name>`, a pick in the picker, a switch typed inside a Portal
 attach, and going back in from the kill prompt or the screen below. Nothing is killed and
 nothing is typed into the session; Portal's own `_` sessions are never taken. Only terminals
-are taken: what reads a session without one, such as Portal's saver or a preview, is never cut
-off. Two terminals opening one session at once end with the later one attached.
+are taken: what reads a session without one, such as Portal's saver or a preview, never makes
+Portal take it, though a take does close a read under way at that moment, which then reads
+again (a preview keeps what it shows meanwhile). Two terminals opening one session at once end
+with the later one attached.
 
 A plain `zmx attach` on the session is detached to its shell. A Portal attached there lands on
 a screen saying where the session went:
@@ -649,7 +651,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits; and `keys`, the [keys in a session](#keys-in-a-session) | `PORTAL_PREFS_FILE` |
 | `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `themes/` | Drop-in theme files (`<slug>.theme`); see [docs/theming.md](docs/theming.md). Portal never creates it — no directory simply means no drop-ins. | `PORTAL_THEMES_DIR` |
-| `state/` | Saved sessions + scrollback for automatic restoration on reboot. Contains: `sessions.json` (the session index: each session's label, directories and creation), `scrollback/*.bin` (each session's saved scrollback, a file per creation), `daemon.pid` + `daemon.version` (liveness markers), `bootstrapped` (the record that the last bootstrap finished), `zmx-dir` (the zmx directory this state belongs to; see [The zmx directory](#the-zmx-directory)), `restoring`, `hydrating/` and `resume-pending/` (flags), the `*.lock` files, `runners/` (an entry and a control socket per attached Portal, for switching and new windows, and the last take's record and lock; see [One terminal at a time](#one-terminal-at-a-time)), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
+| `state/` | Saved sessions + scrollback for automatic restoration on reboot. Contains: `sessions.json` (the session index: each session's label, directories and creation), `scrollback/*.bin` (each session's saved scrollback, a file per creation), `daemon.pid` + `daemon.version` (liveness markers), `bootstrapped` (the record that the last bootstrap finished), `zmx-dir` (the zmx directory this state belongs to; see [The zmx directory](#the-zmx-directory)), `restoring`, `hydrating/` and `resume-pending/` (flags), the `*.lock` files, `runners/` (an entry and a control socket per attached Portal, for switching and new windows, and `takes/`, each session's last take's record and the lock its takes hold; see [One terminal at a time](#one-terminal-at-a-time)), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 

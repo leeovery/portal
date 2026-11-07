@@ -120,7 +120,7 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 }
 
 // attach runs one attach, once the take has left no other terminal on the
-// session, holding the take lock until the attach leads it. An exec returns
+// session, holding the session's take lock until the attach leads it. An exec returns
 // only if it fails, so beside its error the outcome is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()

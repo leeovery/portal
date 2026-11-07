@@ -29,6 +29,11 @@ const (
 	RunGrace      = time.Second
 )
 
+// DetachCeiling is the ceiling a take's lock allows the backend's detach of
+// a session's clients, pinned beside the others so every lock's bound reads
+// zmx's ceilings from one place.
+const DetachCeiling = 5 * time.Second
+
 // JudgeRun bounds a judgement of the saver's protocol: a read in Portal's
 // protocol, a read in an older zmx's, and the end of a saver judged
 // unusable, zmx kill, a run of the binary, then the wait for a proved

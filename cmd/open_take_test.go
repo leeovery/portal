@@ -14,6 +14,8 @@ import (
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/runnerreg"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -25,6 +27,11 @@ const takeAt = "SSH from 192.0.2.20"
 
 // aTerminal is a zmx attach on a terminal, as the process table shows one.
 var aTerminal = []backend.ClientProcess{{PID: 4242, Env: []string{"ZMX_DIR=/tmp/zx-open-test"}}}
+
+// aLeader is the tracked environment zmx answers for a client leading a
+// session: never empty, since it names each variable it tracks that the
+// client's environment lacks.
+var aLeader = backend.ClientEnv{{Name: "SSH_CONNECTION", Unset: true}}
 
 // terminalOn is a Fake holding name with a terminal attached: the process
 // table shows its zmx attach, and the session counts it among its clients.
@@ -144,14 +151,61 @@ func TestTake(t *testing.T) {
 		})
 	}
 
+	t.Run("a client zmx switched onto the session holds the one it leads, and not the one its process still names", func(t *testing.T) {
+		pinWhere(t)
+		const left = "blog-c3d4"
+		fake := backendtest.New(backend.Session{Name: left}, backend.Session{Name: takenSession, Clients: 1})
+		fake.SetAttachClients(left, aTerminal)
+		fake.SetLeaderEnv(takenSession, aLeader)
+		runners := &runnersFake{}
+		c := takingConnector(fake, runners, takeWait)
+
+		c.take(context.Background(), left)
+		if n := detaches(fake); n != 0 || len(runners.records) != 0 {
+			t.Errorf("taking %s, the session it left: detached %d times, recorded %v; want nothing done", left, n, runners.records)
+		}
+
+		c.take(context.Background(), takenSession)
+		if want := []takeCall{{takenSession, takeAt}}; !slices.Equal(runners.records, want) || detaches(fake) != 1 {
+			t.Errorf("taking %s, which it leads: recorded %v, detached %d times; want %v and one detach", takenSession, runners.records, detaches(fake), want)
+		}
+	})
+
+	t.Run("a leader it can't read leaves the judgement to the process table", func(t *testing.T) {
+		fake := terminalOn(takenSession)
+		fake.Fail(backendtest.OpLeaderEnv, backend.ErrTimeout)
+
+		takingConnector(fake, &runnersFake{}, takeWait).take(context.Background(), takenSession)
+
+		if n := detaches(fake); n != 1 {
+			t.Errorf("detached %d times, want once for the terminal the table shows", n)
+		}
+	})
+
+	t.Run("a leader it can't read, and no terminal the table shows, detaches nothing, saying so", func(t *testing.T) {
+		sink := logtest.Install(t)
+		fake := backendtest.New(backend.Session{Name: takenSession, Clients: 1})
+		fake.Fail(backendtest.OpLeaderEnv, backend.ErrTimeout)
+
+		takingConnector(fake, &runnersFake{}, takeWait).take(context.Background(), takenSession)
+
+		if n := detaches(fake); n != 0 {
+			t.Errorf("detached %d times, want nothing done on what it can't tell", n)
+		}
+		rec := sink.Records().Matching("attach", "take failed").AtExactLevel(slog.LevelWarn).Only(t, "the read's warning")
+		if detail := rec.AttrString(t, "detail"); detail != "read" {
+			t.Errorf("detail = %q, want read", detail)
+		}
+	})
+
 	t.Run("Portal's own session is never taken", func(t *testing.T) {
 		fake := terminalOn("_portal-saver")
 		runners := &runnersFake{}
 
 		takingConnector(fake, runners, takeWait).take(context.Background(), "_portal-saver")
 
-		if len(runners.takes) != 0 || runners.locks != 0 || len(fake.Calls()) != 0 {
-			t.Errorf("takes %v, locks %d, backend calls %v; want the session untouched", runners.takes, runners.locks, fake.Calls())
+		if len(runners.takes) != 0 || len(runners.locked) != 0 || len(fake.Calls()) != 0 {
+			t.Errorf("takes %v, locked %v, backend calls %v; want the session untouched", runners.takes, runners.locked, fake.Calls())
 		}
 	})
 
@@ -275,16 +329,16 @@ func TestTake_BeforeEveryAttach(t *testing.T) {
 // Two takes at once must leave the later one's attach alone on the session,
 // so each holds the take lock from its first ask until its attach leads.
 func TestTake_Lock(t *testing.T) {
-	t.Run("it is taken before the take's first ask", func(t *testing.T) {
+	t.Run("the session's own is taken before the take's first ask", func(t *testing.T) {
 		_, rec := stageAttach(t, takenSession)
-		asked := -1
-		rec.runners.onTake = func(string) (int, error) { asked = rec.runners.locks; return 0, nil }
+		var asked []string
+		rec.runners.onTake = func(string) (int, error) { asked = slices.Clone(rec.runners.locked); return 0, nil }
 
 		if err := openSession(contextCommand(), takenSession); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		if asked != 1 {
-			t.Errorf("the take asked with %d locks taken, want the lock held first", asked)
+		if want := []string{takenSession}; !slices.Equal(asked, want) {
+			t.Errorf("the take asked with locks %v held, want %v's held first", asked, want)
 		}
 	})
 
@@ -320,8 +374,27 @@ func TestTake_Lock(t *testing.T) {
 		if err := openSession(contextCommand(), takenSession); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		if n := rec.runners.unlocks.Load(); rec.runners.locks != 1 || n != 1 {
-			t.Errorf("held %d times, released %d; want once each", rec.runners.locks, n)
+		if n := rec.runners.unlocks.Load(); len(rec.runners.locked) != 1 || n != 1 {
+			t.Errorf("held %v, released %d; want once each", rec.runners.locked, n)
+		}
+	})
+
+	t.Run("it is released before an exec takes the attach's place", func(t *testing.T) {
+		_, rec := stageAttach(t, takenSession)
+		rec.answer(runResult{err: runner.ErrNoTerminal})
+
+		if err := openSession(contextCommand(), takenSession); err != nil {
+			t.Fatalf("openSession: %v", err)
+		}
+		if len(rec.execs) != 1 || rec.releasedAtExec != 1 {
+			t.Errorf("execs %d, with %d locks released as it ran; want the lock let go first, since an exec never returns to release it", len(rec.execs), rec.releasedAtExec)
+		}
+	})
+
+	t.Run("its wait outlasts another take's longest hold", func(t *testing.T) {
+		hold := runnerreg.AskBound() + 2*saverhost.ReadCeiling + saverhost.DetachCeiling + 2*takeWait
+		if got := takeLockWait(); got <= hold {
+			t.Errorf("takeLockWait() = %s, want past the %s a take holds its lock for at most: its asks, its first reads, its detach, and its two waits", got, hold)
 		}
 	})
 
@@ -383,23 +456,34 @@ func TestTake_Landing(t *testing.T) {
 		assertDropJudged(t, sink, "taken", dropRecorded)
 	})
 
-	t.Run("a drop with no record lands on the screen, saying no more, while another terminal holds the session", func(t *testing.T) {
-		sink := logtest.Install(t)
-		fake, rec := stageAttach(t, takenSession)
-		rec.answer(runResult{out: runner.Outcome{Dropped: true}, ended: func() {
-			fake.Add(backend.Session{Name: takenSession, Clients: 1})
-			fake.SetAttachClients(takenSession, aTerminal)
-		}})
-		picker := stagePicker(t)
+	for _, tc := range []struct {
+		name string
+		// after runs as the attach ends.
+		after func(*backendtest.Fake)
+	}{
+		{"another terminal holds the session", func(f *backendtest.Fake) {
+			f.Add(backend.Session{Name: takenSession, Clients: 1})
+			f.SetAttachClients(takenSession, aTerminal)
+		}},
+		{"a client zmx switched onto the session from another leads it", func(f *backendtest.Fake) {
+			f.SetLeaderEnv(takenSession, aLeader)
+		}},
+	} {
+		t.Run("a drop with no record lands on the screen, saying no more, while "+tc.name, func(t *testing.T) {
+			sink := logtest.Install(t)
+			fake, rec := stageAttach(t, takenSession)
+			rec.answer(runResult{out: runner.Outcome{Dropped: true}, ended: func() { tc.after(fake) }})
+			picker := stagePicker(t)
 
-		if err := openSession(contextCommand(), takenSession); err != nil {
-			t.Fatalf("openSession: %v", err)
-		}
-		if want := []tui.Taken{{Session: takenSession}}; !slices.Equal(picker.taken, want) {
-			t.Errorf("picker landings = %+v, want %+v", picker.taken, want)
-		}
-		assertDropJudged(t, sink, "taken", dropHeld)
-	})
+			if err := openSession(contextCommand(), takenSession); err != nil {
+				t.Fatalf("openSession: %v", err)
+			}
+			if want := []tui.Taken{{Session: takenSession}}; !slices.Equal(picker.taken, want) {
+				t.Errorf("picker landings = %+v, want %+v", picker.taken, want)
+			}
+			assertDropJudged(t, sink, "taken", dropHeld)
+		})
+	}
 
 	for _, tc := range []struct {
 		name string

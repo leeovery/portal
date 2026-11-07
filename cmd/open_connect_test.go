@@ -44,7 +44,10 @@ type attachRecorder struct {
 	results    []runResult
 	execs      []execCall
 	markerSeen bool
-	runners    runnersFake
+	// releasedAtExec is how many take locks had been released as the last
+	// exec ran.
+	releasedAtExec int32
+	runners        runnersFake
 }
 
 type runResult struct {
@@ -79,6 +82,7 @@ func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outco
 
 func (r *attachRecorder) Exec(argv0 string, argv, env []string) error {
 	r.execs = append(r.execs, execCall{argv0: argv0, argv: argv, env: env})
+	r.releasedAtExec = r.runners.unlocks.Load()
 	if r.sink != nil && len(r.sink.Records().Matching("process", "exec")) > 0 {
 		r.markerSeen = true
 	}
@@ -176,13 +180,12 @@ type runnersFake struct {
 	// takenBy answers every TakenBy, which takenSince records.
 	takenBy    string
 	takenSince []time.Time
-	// locks counts the take lock's holds and unlocks their releases, which
-	// may come from the goroutine awaiting the attach's lead; lockErr fails
-	// each hold, and onLock, if set, runs as each is taken.
-	locks   int
+	// locked is the session of each take lock held, in turn, and unlocks
+	// counts their releases, which may come from the goroutine awaiting the
+	// attach's lead; lockErr fails each hold.
+	locked  []string
 	unlocks atomic.Int32
 	lockErr error
-	onLock  func()
 	// confirm, if set, is each attach's Confirm.
 	confirm func(context.Context) error
 }
@@ -225,14 +228,11 @@ func (f *runnersFake) TakenBy(_ string, since time.Time) string {
 	return f.takenBy
 }
 
-func (f *runnersFake) LockTake(context.Context, time.Duration) (func(), error) {
+func (f *runnersFake) LockTake(_ context.Context, session string, _ time.Duration) (func(), error) {
 	if f.lockErr != nil {
 		return nil, f.lockErr
 	}
-	f.locks++
-	if f.onLock != nil {
-		f.onLock()
-	}
+	f.locked = append(f.locked, session)
 	return sync.OnceFunc(func() { f.unlocks.Add(1) }), nil
 }
 

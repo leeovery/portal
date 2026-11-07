@@ -33,11 +33,18 @@ func SetSelf(t testing.TB, pid int) {
 	t.Cleanup(func() { selfPID = old })
 }
 
-// TakePath is where the last take's record lives.
-func (r Registry) TakePath() string { return r.takePath() }
+// TakePath is where the record of session's last take lives, and
+// TakeLockPath the file of the lock its takes hold.
+func (r Registry) TakePath(session string) string     { return r.mustTakeFile(session, takeRecordExt) }
+func (r Registry) TakeLockPath(session string) string { return r.mustTakeFile(session, takeLockExt) }
 
-// TakeLockPath is the lock takes hold.
-func (r Registry) TakeLockPath() string { return r.takeLockPath() }
+func (r Registry) mustTakeFile(session, ext string) string {
+	path, err := r.takeFile(session, ext)
+	if err != nil {
+		panic(err)
+	}
+	return path
+}
 
 // SetBootID has the registry read the current boot's id through read for the
 // rest of t.
