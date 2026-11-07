@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+#
+# Builds a release's binaries on this Mac before mint tags it: mint's pre_tag
+# runs it, with the version about to be tagged in MINT_NEW_VERSION. It builds
+# HEAD in a checkout of its own outside the repository, portal for arm64 and
+# amd64, checks each is built from that commit, unmodified and with no build
+# tags, and reports the version, then archives and sums them under the names
+# the Homebrew formula reads, and keeps them, with the commit built, in
+# ~/Library/Caches/portal/release/<version>/, in place of any other
+# version's, for scripts/release-upload once the release is made. Any failure
+# exits non-zero, so mint stops before the tag. It runs each binary to check
+# its version, so it needs an Apple-silicon Mac with Rosetta. Nothing is
+# signed beyond the ad-hoc signature Go's linker gives a darwin/arm64 binary:
+# Homebrew installs portal, and nothing quarantines it.
+#
+# By hand it builds the version given, as scripts/release-build 0.0.0-check,
+# which checks the build without releasing anything; a ref after the version
+# builds that ref, as scripts/release-upload builds a tag's tree. Each run
+# logs to ~/Library/Logs/portal/release-<version>.log.
+set -euo pipefail
+
+scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=scripts/release-common
+. "$scripts/release-common"
+
+work=
+
+usage() {
+	release_fail "Usage: scripts/release-build [<version> [<ref>]]"
+}
+
+check_platform() {
+	[[ $(uname -s) == Darwin ]] || release_fail "release-build runs each darwin binary it builds to check its version: run it on a Mac."
+}
+
+check_version() {
+	[[ -n $1 ]] || release_fail "No version to build: mint gives it as MINT_NEW_VERSION; by hand, give it, as scripts/release-build 0.0.0-check."
+	release_valid_version "$1" || release_fail "$1 isn't a version, as 1.2.3 or 1.2.3-check."
+}
+
+# check_head checks that HEAD is what mint is about to tag $1 on: tracked
+# files with nothing uncommitted, as untracked ones never reach a build of
+# the commit, and no tag $1 yet.
+check_head() {
+	[[ -z $(git status --porcelain --untracked-files=no) ]] || release_fail "The checkout has changes: release-build builds HEAD, so commit or remove them."
+	if git rev-parse -q --verify "refs/tags/$1" >/dev/null; then
+		release_fail "$1 is tagged already, so HEAD isn't what's to be tagged: build the tag, as scripts/release-build ${1#v} $1."
+	fi
+}
+
+# commit_of is the commit ref $1 names.
+commit_of() {
+	git rev-parse -q --verify "$1^{commit}" || release_fail "$1 names no commit to build."
+}
+
+# arch_flag is arch(1)'s name for Go's arch $1.
+arch_flag() {
+	case $1 in
+	amd64) echo x86_64 ;;
+	*) echo "$1" ;;
+	esac
+}
+
+# build builds version $2 from the checkout $1 for arch $3 into $4. What
+# decides what's compiled comes from this command alone, never the caller's
+# Go environment or go env file: an inherited GOFLAGS=-tags=integration would
+# compile the test sandboxes into the release.
+build() {
+	(cd "$1" && env -u GOFLAGS -u GOEXPERIMENT -u GOAMD64 -u GOARM64 GOENV=off GOWORK=off \
+		CGO_ENABLED=0 GOOS=darwin GOARCH="$3" go build -trimpath \
+		-ldflags "-s -w -X github.com/leeovery/portal/cmd.version=$2" -o "$4" .)
+}
+
+# check_build_info checks from the build info Go stamps in the binary $1 that
+# it was built with no build tags, from the commit $2, with nothing modified.
+check_build_info() {
+	local info
+	info=$(go version -m "$1") || release_fail "go version -m can't read $1's build info."
+	if grep -q $'^\tbuild\t-tags=' <<<"$info" ||
+		! grep -qx $'\tbuild\tvcs.revision='"$2" <<<"$info" ||
+		! grep -qx $'\tbuild\tvcs.modified=false' <<<"$info"; then
+		echo "$info"
+		release_fail "$1 isn't built from $2 alone with no build tags, as its build info above says."
+	fi
+	echo "$1 is built from $2, unmodified, with no build tags"
+}
+
+# cant_run says why the binary $1, built for arch $2, doesn't run here, and
+# what puts that right, and stops.
+cant_run() {
+	if [[ $(sysctl -in hw.optional.arm64) != 1 ]]; then
+		release_fail "$1 doesn't run on this Intel Mac, so its version can't be checked: a release needs an Apple-silicon Mac with Rosetta."
+	fi
+	if [[ $2 == amd64 ]] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+		release_fail "$1 needs Rosetta to run, so its version can't be checked: install it with softwareupdate --install-rosetta --agree-to-license."
+	fi
+	release_fail "$1 doesn't run here, so its version can't be checked."
+}
+
+# check_binary checks that the binary $1, built for arch $2, reports version
+# $3, run with a HOME of its own in $4: every portal logs to its state dir as
+# it starts, and the check must leave the developer's untouched.
+check_binary() {
+	local reported
+	mkdir -p "$4"
+	reported=$(env -i HOME="$4" PATH=/usr/bin:/bin /usr/bin/arch "-$(arch_flag "$2")" "$1" version) || cant_run "$1" "$2"
+	[[ $reported == "portal version $3" ]] || release_fail "$1 reports \"$reported\", not portal version $3."
+	echo "$1 reports $reported"
+}
+
+# archive archives the binary $1 alone, named portal, into $2.
+archive() {
+	COPYFILE_DISABLE=1 tar --create --gzip --file "$2" --format ustar \
+		--no-mac-metadata --no-xattrs --no-acls --no-fflags \
+		--uid 0 --gid 0 --uname root --gname wheel \
+		--directory "$(dirname "$1")" portal
+}
+
+# sum writes the checksums file of version $1's archives in the folder $2.
+sum() {
+	local names=() arch
+	for arch in "${release_arches[@]}"; do
+		names+=("$(release_archive "$1" "$arch")")
+	done
+	(cd "$2" && shasum -a 256 "${names[@]}" | LC_ALL=C sort -k 2) >"$2/$(release_checksums "$1")"
+}
+
+# keep keeps the folder $1 as version $2's, in place of what's kept for any
+# version: one release is made at a time, and an upload of another that
+# finds nothing kept builds it again from its tag.
+keep() {
+	local kept
+	kept=$(release_kept "$2")
+	rm -rf "$(dirname "$kept")"
+	mkdir -p "$(dirname "$kept")"
+	mv "$1" "$kept"
+	echo "Kept in $kept:"
+	ls -l "$kept"
+}
+
+# clean_up removes the checkout built from, and the rest of $work.
+clean_up() {
+	git worktree remove --force "$work/tree" 2>/dev/null || true
+	rm -rf "$work"
+}
+
+main() {
+	[[ $# -le 2 ]] || usage
+	check_platform
+	local version ref=${2:-} tag
+	if [[ $# -ge 1 ]]; then
+		version=$1
+		tag=v$version
+	else
+		version=${MINT_NEW_VERSION:-}
+		tag=${MINT_VERSION_TAG:-v$version}
+	fi
+	check_version "$version"
+	cd "$scripts/.."
+	release_log release-build "$version"
+	if [[ -z $ref ]]; then
+		check_head "$tag"
+		ref=HEAD
+	fi
+	local commit
+	commit=$(commit_of "$ref")
+
+	work=$(mktemp -d)
+	trap clean_up EXIT
+	git worktree add --quiet --detach "$work/tree" "$commit"
+	echo "Building portal $version from $commit"
+
+	local arch bin out=$work/out
+	mkdir "$work/bin" "$out"
+	for arch in "${release_arches[@]}"; do
+		bin=$work/bin/darwin_$arch/portal
+		build "$work/tree" "$version" "$arch" "$bin"
+		check_build_info "$bin" "$commit"
+		check_binary "$bin" "$arch" "$version" "$work/home"
+	done
+	for arch in "${release_arches[@]}"; do
+		archive "$work/bin/darwin_$arch/portal" "$out/$(release_archive "$version" "$arch")"
+	done
+	sum "$version" "$out"
+	echo "$commit" >"$out/commit"
+	keep "$out" "$version"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi
