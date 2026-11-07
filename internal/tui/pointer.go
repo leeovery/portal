@@ -142,7 +142,9 @@ func (m Model) filterFocused() bool {
 // surface is dropped until it stops; the first step after wheelSettle of quiet
 // begins a new gesture on whatever surface is up then. Once a step is dropped
 // the gesture is lost, so a stream that leaves its surface and comes back to it
-// still reaches nothing.
+// still reaches nothing. A model starts lost, as of its construction: a
+// stream already running as the picker opens, such as one scrolling the
+// session a detach just left, reaches nothing until it has gone quiet.
 type wheelGesture struct {
 	owner wheelSurface
 	lost  bool
@@ -151,12 +153,19 @@ type wheelGesture struct {
 	now func() time.Time
 }
 
-func (g *wheelGesture) admit(surface wheelSurface) bool {
-	now := time.Now
+func (g *wheelGesture) clock() time.Time {
 	if g.now != nil {
-		now = g.now
+		return g.now()
 	}
-	at := now()
+	return time.Now()
+}
+
+func (g *wheelGesture) startLost() {
+	g.lost, g.last = true, g.clock()
+}
+
+func (g *wheelGesture) admit(surface wheelSurface) bool {
+	at := g.clock()
 	if at.Sub(g.last) >= wheelSettle {
 		g.owner, g.lost = surface, false
 	}

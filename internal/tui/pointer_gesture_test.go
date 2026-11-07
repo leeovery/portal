@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 )
 
@@ -20,6 +22,7 @@ func (c *wheelClock) now() time.Time { return c.at }
 func stageWheelClock(m *Model) *wheelClock {
 	clock := &wheelClock{at: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 	m.wheel.now = clock.now
+	openedASettleAgo(m)
 	return clock
 }
 
@@ -348,8 +351,8 @@ func TestWheelGestureBegunUnderTheBurstLockNeverMovesTheList(t *testing.T) {
 }
 
 // typeAmidSwipes types each letter with a wheel step before it, and fails if any
-// letter ran as a command rather than reaching the filter.
-func typeAmidSwipes(t *testing.T, m Model, clock *wheelClock, letters string) Model {
+// letter ran as a command rather than reaching the page's filter.
+func typeAmidSwipes(t *testing.T, m Model, clock *wheelClock, page filterPage, letters string) Model {
 	t.Helper()
 	for _, r := range letters {
 		m = swipe(t, m, clock, 1)
@@ -358,53 +361,159 @@ func typeAmidSwipes(t *testing.T, m Model, clock *wheelClock, letters string) Mo
 		if isQuitCmd(cmd) {
 			t.Fatalf("%q after a wheel step quit the picker", r)
 		}
-		if !m.sessionList.SettingFilter() {
-			t.Fatalf("%q after a wheel step left the filter input unfocused", r)
+		if m.activePage != page.page || !page.list(m).SettingFilter() {
+			t.Fatalf("%q after a wheel step left the filter input unfocused (page %v)", r, m.activePage)
 		}
 	}
 	return m
 }
 
+// A filtering page, with letters each of which is one of its commands.
+type filterPage struct {
+	name    string
+	page    page
+	model   func(t *testing.T) Model
+	list    func(Model) list.Model
+	letters string
+}
+
+var filterPages = []filterPage{
+	{
+		name: "sessions",
+		page: PageSessions,
+		model: func(t *testing.T) Model {
+			return pointerSessionsModel(t, pointerTermH, pointerSessions("alpha", "bravo", "charlie"))
+		},
+		list:    func(m Model) list.Model { return m.sessionList },
+		letters: "anqs",
+	},
+	{
+		name: "projects",
+		page: PageProjects,
+		model: func(t *testing.T) Model {
+			projects := []project.Project{
+				{Path: "/work/orion", Name: "Orion"},
+				{Path: "/work/vega", Name: "Vega"},
+				{Path: "/work/lyra", Name: "Lyra"},
+			}
+			return pointerProjectsModel(t, projects, &recordingCreator{})
+		},
+		list:    func(m Model) list.Model { return m.projectList },
+		letters: "oxeq",
+	},
+}
+
 func TestWheelStepsNeverReachTheListWhileItsFilterIsFocused(t *testing.T) {
-	focused := func(t *testing.T) (Model, *wheelClock) {
-		t.Helper()
+	slash := tea.KeyPressMsg{Code: '/', Text: "/"}
+	for _, fp := range filterPages {
+		t.Run(fp.name+": momentum from the list while typing", func(t *testing.T) {
+			m := fp.model(t)
+			clock := stageWheelClock(&m)
+			m = swipe(t, m, clock, 2)
+			m, _ = pointerUpdate(t, m, slash)
+			m = typeAmidSwipes(t, m, clock, fp, fp.letters)
+			if got := fp.list(m).FilterValue(); got != fp.letters {
+				t.Fatalf("the filter holds %q, want every letter typed", got)
+			}
+		})
+
+		t.Run(fp.name+": a fresh swipe while typing", func(t *testing.T) {
+			m := fp.model(t)
+			clock := stageWheelClock(&m)
+			m, _ = pointerUpdate(t, m, slash)
+			clock.at = clock.at.Add(wheelSettle)
+			m = typeAmidSwipes(t, m, clock, fp, fp.letters[:1])
+			clock.at = clock.at.Add(wheelSettle)
+			m = typeAmidSwipes(t, m, clock, fp, fp.letters[1:])
+			if got := fp.list(m).FilterValue(); got != fp.letters {
+				t.Fatalf("the filter holds %q, want every letter typed", got)
+			}
+		})
+
+		t.Run(fp.name+": a swipe begun in the filter, which then closes", func(t *testing.T) {
+			m := fp.model(t)
+			clock := stageWheelClock(&m)
+			m, _ = pointerUpdate(t, m, slash)
+			m = swipe(t, m, clock, 3)
+			m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			if fp.list(m).SettingFilter() {
+				t.Fatal("fixture: Esc left the filter focused")
+			}
+			m = swipe(t, m, clock, 4)
+			if got := fp.list(m).Index(); got != 0 {
+				t.Fatalf("momentum begun in the filter moved the cursor to %d", got)
+			}
+		})
+	}
+}
+
+func TestWheelGestureBegunOnAnotherPageNeverMovesThisOne(t *testing.T) {
+	t.Run("sessions to projects with x", func(t *testing.T) {
+		m := filterPages[1].model(t)
+		m.activePage = PageSessions
+		clock := stageWheelClock(&m)
+		m = swipe(t, m, clock, 2)
+		m = applyKey(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+		if m.activePage != PageProjects {
+			t.Fatalf("fixture: x left page %v, want projects", m.activePage)
+		}
+		before := m.projectList.Index()
+		m = swipe(t, m, clock, 4)
+		if got := m.projectList.Index(); got != before {
+			t.Fatalf("momentum from the sessions page moved the project cursor from %d to %d", before, got)
+		}
+	})
+
+	t.Run("loading to sessions", func(t *testing.T) {
 		m := pointerSessionsModel(t, pointerTermH, pointerSessions("alpha", "bravo", "charlie"))
 		clock := stageWheelClock(&m)
+		m.activePage = PageLoading
+		m = swipe(t, m, clock, 5)
+		m.activePage = PageSessions
+		m = swipe(t, m, clock, 4)
+		requireSessionIndex(t, m, 0, "momentum begun on the loading page")
+	})
+}
+
+func TestWheelStreamRunningAsThePickerOpensNeverReachesIt(t *testing.T) {
+	open := func(t *testing.T) (Model, *wheelClock) {
+		t.Helper()
+		clock := &wheelClock{at: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
+		m := New(fakeLister{}, WithClock(clock.now))
+		m.termWidth, m.termHeight = pointerTermW, pointerTermH
+		m.applySessions(pointerSessions("alpha", "bravo", "charlie"), nil)
+		m.resyncPageLayouts()
+		if m.activePage != PageSessions {
+			t.Fatalf("fixture: the picker opened on page %v, want sessions", m.activePage)
+		}
 		return m, clock
 	}
-	slash := tea.KeyPressMsg{Code: '/', Text: "/"}
 
-	t.Run("momentum from the list while typing", func(t *testing.T) {
-		m, clock := focused(t)
-		m = swipe(t, m, clock, 2)
-		m, _ = pointerUpdate(t, m, slash)
-		m = typeAmidSwipes(t, m, clock, "anqs")
-		if got := m.sessionList.FilterValue(); got != "anqs" {
-			t.Fatalf("the filter holds %q, want every letter typed", got)
-		}
-	})
-
-	t.Run("a fresh swipe while typing", func(t *testing.T) {
-		m, clock := focused(t)
-		m, _ = pointerUpdate(t, m, slash)
-		clock.at = clock.at.Add(wheelSettle)
-		m = typeAmidSwipes(t, m, clock, "a")
-		clock.at = clock.at.Add(wheelSettle)
-		m = typeAmidSwipes(t, m, clock, "nqs")
-		if got := m.sessionList.FilterValue(); got != "anqs" {
-			t.Fatalf("the filter holds %q, want every letter typed", got)
-		}
-	})
-
-	t.Run("a swipe begun in the filter, which then closes", func(t *testing.T) {
-		m, clock := focused(t)
-		m, _ = pointerUpdate(t, m, slash)
-		m = swipe(t, m, clock, 3)
-		m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
-		if m.sessionList.SettingFilter() {
-			t.Fatal("fixture: Esc left the filter focused")
-		}
+	t.Run("a stream from the moment it opens is dropped", func(t *testing.T) {
+		m, clock := open(t)
 		m = swipe(t, m, clock, 4)
-		requireSessionIndex(t, m, 0, "momentum begun in the filter")
+		requireSessionIndex(t, m, 0, "a stream running as the picker opened")
+	})
+
+	t.Run("a stream outlasting the settle stays dropped until it stops", func(t *testing.T) {
+		m, clock := open(t)
+		m = swipe(t, m, clock, int(3*wheelSettle/momentumGap)+1)
+		requireSessionIndex(t, m, 0, "a stream running on past the settle")
+		clock.at = clock.at.Add(wheelSettle)
+		m, _ = pointerUpdate(t, m, fingerDown)
+		requireSessionIndex(t, m, 1, "the first step after the stream stopped")
+	})
+
+	t.Run("a first swipe a settle after it opens moves the list", func(t *testing.T) {
+		m, clock := open(t)
+		clock.at = clock.at.Add(wheelSettle)
+		m, _ = pointerUpdate(t, m, fingerDown)
+		requireSessionIndex(t, m, 1, "a fresh swipe once the picker had been quiet")
+	})
+
+	t.Run("a key at once acts", func(t *testing.T) {
+		m, _ := open(t)
+		m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+		requireSessionIndex(t, m, 1, "Down as the picker opened")
 	})
 }

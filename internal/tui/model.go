@@ -585,6 +585,13 @@ func (m Model) WithCurrentSession(currentSession string) Model {
 
 type Option func(*Model)
 
+// WithClock replaces the wall clock the model reads.
+func WithClock(now func() time.Time) Option {
+	return func(m *Model) {
+		m.wheel.now = now
+	}
+}
+
 func WithKiller(k SessionKiller) Option {
 	return func(m *Model) {
 		m.sessionKiller = k
@@ -996,6 +1003,7 @@ func New(lister SessionLister, opts ...Option) Model {
 	}
 	m.syncResolvedMode()
 	m.installSearchFilter()
+	m.wheel.startLost()
 	return m
 }
 
@@ -1180,6 +1188,7 @@ func NewModelWithSessions(sessions []Session) Model {
 	}
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
+	m.wheel.startLost()
 	return m
 }
 
