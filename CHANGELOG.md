@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-07
+
+💥 Breaking
+- On the kill-from-inside prompt, `Esc` now keeps the session and attaches it again and `d` keeps it and stays in the picker — `Enter` no longer attaches, so use `Esc` instead.
+
+✨ Added
+- Previewing a session waiting on its resume panel now shows the transcript it was restored from — instead of the panel alone.
+
 ## [1.0.0] - 2026-11-07
 
 Portal now runs on zmx instead of tmux, so sessions persist and restore without a tmux server.
