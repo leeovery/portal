@@ -1111,7 +1111,7 @@ func TestBootstrapRefusesOlderZmxAgainstZmx(t *testing.T) {
 }
 
 // olderZmxFatal is the bootstrap's fatal for a saver on zmx 0.8.1.
-const olderZmxFatal = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.0 or later."
+const olderZmxFatal = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.1 or later."
 
 // awaitNoSessions waits for the zmx directory to hold no session.
 func (w *bootWorld) awaitNoSessions(t *testing.T) {

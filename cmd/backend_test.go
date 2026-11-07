@@ -49,7 +49,7 @@ func TestAttachingBackend(t *testing.T) {
 		pathWithoutZmx(t)
 
 		_, err := attachingBackend()
-		if err == nil || err.Error() != "zmx not found on PATH; Portal needs zmx 1.0.0 or later" {
+		if err == nil || err.Error() != "zmx not found on PATH; Portal needs zmx 1.0.1 or later" {
 			t.Errorf("error = %v, want the zmx-missing line", err)
 		}
 	})

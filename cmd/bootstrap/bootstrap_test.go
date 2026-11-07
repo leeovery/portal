@@ -475,7 +475,7 @@ var theirs = &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other
 const theirsMessage = "The _portal-saver running in this zmx directory saves Portal's state in /srv/portal/state, not this Portal's state in /tmp/scratch/state. Run it with PORTAL_STATE_DIR=/srv/portal/state, or give it a zmx directory of its own with ZMX_DIR. If the state in /srv/portal/state is gone, end its saver with zmx kill _portal-saver."
 
 // olderZmx is the fatal of a saver answering zmx 0.8.1's framing.
-const olderZmx = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.0 or later."
+const olderZmx = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.1 or later."
 
 // anotherProtocol is the fatal of a saver speaking protocol 2.
 const anotherProtocol = "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports."

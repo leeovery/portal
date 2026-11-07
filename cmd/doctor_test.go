@@ -275,7 +275,7 @@ func TestDoctorZmxBinaryCheck(t *testing.T) {
 
 	t.Run("it fails naming the zmx it needs when zmx is not on PATH", func(t *testing.T) {
 		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing})), "zmx")
-		assertCheck(t, got, checkFail, "zmx not found on PATH; Portal needs zmx 1.0.0 or later")
+		assertCheck(t, got, checkFail, "zmx not found on PATH; Portal needs zmx 1.0.1 or later")
 	})
 
 	t.Run("it looks up the zmx program", func(t *testing.T) {

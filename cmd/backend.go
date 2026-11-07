@@ -21,7 +21,7 @@ type BackendDeps struct {
 
 const zmxProgram = "zmx"
 
-var errZmxMissing = errors.New("zmx not found on PATH; Portal needs zmx 1.0.0 or later")
+var errZmxMissing = errors.New("zmx not found on PATH; Portal needs zmx 1.0.1 or later")
 
 // sessionBackend is the backend for everything but creating and attaching:
 // listing, kill, detach, history and the current session reach zmx over its
