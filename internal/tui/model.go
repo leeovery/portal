@@ -417,6 +417,8 @@ type Model struct {
 	// The row a pointer press landed on, awaiting its release (pointer.go).
 	tapPress   tapTarget
 	tapPressed bool
+	// The wheel gesture under way and the surface it began on (pointer.go).
+	wheel wheelGesture
 
 	// A non-blanking overlay, unlike the modals above. While closed, the composed
 	// frame is byte-identical to a model with no panel at all.
@@ -596,6 +598,13 @@ func (m Model) WithCurrentSession(currentSession string) Model {
 }
 
 type Option func(*Model)
+
+// WithClock replaces the wall clock the model reads.
+func WithClock(now func() time.Time) Option {
+	return func(m *Model) {
+		m.wheel.now = now
+	}
+}
 
 func WithKiller(k SessionKiller) Option {
 	return func(m *Model) {
@@ -1024,6 +1033,7 @@ func New(lister SessionLister, opts ...Option) Model {
 	}
 	m.syncResolvedMode()
 	m.installSearchFilter()
+	m.wheel.startLost()
 	return m
 }
 
@@ -1208,6 +1218,7 @@ func NewModelWithSessions(sessions []Session) Model {
 	}
 	m.applySessionListSize(m.contentWidth(), m.contentHeight())
 	m.applyProjectListSize(m.contentWidth(), m.contentHeight())
+	m.wheel.startLost()
 	return m
 }
 
