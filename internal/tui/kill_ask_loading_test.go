@@ -38,7 +38,7 @@ func TestKillAsk_PostRestoreListingOpensThePromptPastTheLoadingPage(t *testing.T
 	if m.killAsk != "" || m.modal != modalKillConfirm || m.pendingKill.Name != "bravo-d4e5f6" {
 		t.Fatalf("ask pending %q, modal %v, pending kill %q; want the prompt open on the asked session", m.killAsk, m.modal, m.pendingKill.Name)
 	}
-	if m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape}); m.modal != modalNone || cmd != nil {
-		t.Errorf("Esc left modal %v, cmd %v; want the prompt to take the key", m.modal, cmd != nil)
+	if m, cmd := pressKeys(m, tea.KeyPressMsg{Code: 'd', Text: "d"}); m.modal != modalNone || cmd != nil {
+		t.Errorf("d left modal %v, cmd %v; want the prompt to take the key", m.modal, cmd != nil)
 	}
 }

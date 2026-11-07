@@ -437,8 +437,8 @@ reaches the session untouched.
 | `Alt+Shift+D` | Detach, straight to the shell |
 | `Alt+Q` | Ask to kill the session: the picker opens on its kill prompt |
 
-On that prompt `y` kills the session and stays in the picker, `Esc` keeps it and stays in the
-picker, and `Enter` keeps it and attaches it again, so a stray `Alt+Q` costs a key, never a
+On that prompt `y` kills the session and stays in the picker, `d` keeps it and stays in the
+picker, and `Esc` keeps it and goes back into it, so a stray `Alt+Q` costs a key, never a
 session. When Portal can't be sure the terminal still shows the session (a `zmx attach` typed
 inside it switched it), the picker opens without the prompt and says why.
 

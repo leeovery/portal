@@ -45,8 +45,8 @@ func renderHelpModalOnClearedCanvas(entries []keymapEntry, legend []helpLegendEn
 	return placeModal(layout, offset, width, height, th, colourless)
 }
 
-func renderKillModalOnClearedCanvas(name string, offersAttach bool, width, height int, th theme.Theme, colourless bool) string {
-	return placeModal(destructiveConfirmLayout(killModalSpec(name, offersAttach), th, colourless), 0, width, height, th, colourless)
+func renderKillModalOnClearedCanvas(name string, fromInside bool, width, height int, th theme.Theme, colourless bool) string {
+	return placeModal(destructiveConfirmLayout(killModalSpec(name, fromInside), th, colourless), 0, width, height, th, colourless)
 }
 
 func renderDeleteModalOnClearedCanvas(name, path string, width, height int, th theme.Theme, colourless bool) string {
