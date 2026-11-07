@@ -19,5 +19,17 @@ diff_exclude = [
     'demo/**',        # demo tapes and their recording scripts: vhs runs capturetool, which plays each scenario in-process
 ]
 
+[release.hooks]
+# No CI job builds a release: it happens on this Mac, before the irreversible
+# tag + push. scripts/release-build builds the binaries and keeps them, so a
+# failure about the build or the binary stops the release before its tag,
+# with nothing public yet.
+pre_tag = ['scripts/release-build']
+# Once the tag and the release are up: scripts/release-upload uploads the
+# kept binaries to the release and moves the Homebrew formula on to them.
+# mint only warns when it fails, so scripts/release-upload <version>, run by
+# hand, finishes the release.
+post_release = ['scripts/release-upload']
+
 [release]
-diff_exclude = ["internal/capture/fixtures.go", ".github/workflows/", "CLAUDE.md", "docs/design/", "internal/backend/zmx/testdata/", "internal/backendtest/", "internal/capture/", "cmd/capturetool/", "internal/commandertest/", "internal/commitlock/commitlocktest.go", "internal/devversion/testdata/", "internal/fileutil/synctest.go", "internal/harnesstest/", "internal/hookstest/", "internal/portalbintest/", "internal/portaltest/", "internal/proctest/", "internal/restoretest/", "internal/sourceguardtest/", "internal/spawntest/", "internal/statetest/", "internal/state/commitlocktest.go", "internal/tmuxtest/", "internal/transienttest/", "internal/zmxtest/", "main_test.go", "scripts/zmx-build", "scripts/zmx-commit", ".gitignore", "go.sum"]
+diff_exclude = ["internal/capture/fixtures.go", ".github/workflows/", "CLAUDE.md", "docs/design/", "internal/backend/zmx/testdata/", "internal/backendtest/", "internal/capture/", "cmd/capturetool/", "internal/commandertest/", "internal/commitlock/commitlocktest.go", "internal/devversion/testdata/", "internal/fileutil/synctest.go", "internal/harnesstest/", "internal/hookstest/", "internal/portalbintest/", "internal/portaltest/", "internal/proctest/", "internal/restoretest/", "internal/sourceguardtest/", "internal/spawntest/", "internal/statetest/", "internal/state/commitlocktest.go", "internal/tmuxtest/", "internal/transienttest/", "internal/zmxtest/", "main_test.go", "scripts/release-build", "scripts/release-common", "scripts/release-upload", "scripts/zmx-build", "scripts/zmx-commit", ".gitignore", ".goreleaser.yaml", "go.sum"]
