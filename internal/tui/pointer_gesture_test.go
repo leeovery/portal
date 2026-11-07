@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/theme"
 )
 
 // A trackpad's momentum steps arrive about this far apart.
@@ -131,7 +132,9 @@ func TestWheelMomentumAfterThePreviewClosesNeverReachesTheList(t *testing.T) {
 			m, clock := scrolledThenClosed(t, closer.key)
 			m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 			requireSessionIndex(t, m, 1, "Down right after the close")
-			m = swipe(t, m, clock, 3)
+			// Not a multiple of the three rows, so momentum that got through
+			// would show even on the wrapping list.
+			m = swipe(t, m, clock, 4)
 			m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 			requireSessionIndex(t, m, 2, "Down amid the dropped momentum")
 		})
@@ -250,4 +253,158 @@ func TestWheelMomentumAfterThePanelOpensNeverMovesItsCursor(t *testing.T) {
 	if arrowPanelIndex(m) == before {
 		t.Fatal("a fresh swipe after the quiet did not move the panel cursor")
 	}
+}
+
+func requirePreviewOffset(t *testing.T, m Model, want int, why string) {
+	t.Helper()
+	if got := m.preview.viewport.YOffset(); got != want {
+		t.Fatalf("%s: the preview is at offset %d, want %d", why, got, want)
+	}
+}
+
+func TestWheelMomentumNeverReachesAnotherSessionsPreview(t *testing.T) {
+	t.Run("stepped to with Down", func(t *testing.T) {
+		m, clock := gesturePreviewModel(t)
+		m = swipe(t, m, clock, 5)
+		m = pressPreviewStep(t, m, tea.KeyDown)
+		if m.preview.session != "bravo" {
+			t.Fatalf("fixture: Down previewed %q, want bravo", m.preview.session)
+		}
+		tail := m.preview.viewport.YOffset()
+		m = swipe(t, m, clock, 10)
+		requirePreviewOffset(t, m, tail, "momentum from alpha's preview")
+	})
+
+	t.Run("reopened with Esc then Space", func(t *testing.T) {
+		m, clock := gesturePreviewModel(t)
+		m = swipe(t, m, clock, 5)
+		m = applyKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+		m = openPreviewOn(t, m)
+		tail := m.preview.viewport.YOffset()
+		m = swipe(t, m, clock, 10)
+		requirePreviewOffset(t, m, tail, "momentum from the preview before")
+	})
+}
+
+func TestWheelGestureThatLeavesItsSurfaceNeverReachesItAgain(t *testing.T) {
+	m, clock := gesturePreviewModel(t)
+	m = applyKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	clock.at = clock.at.Add(wheelSettle)
+	m = swipe(t, m, clock, 1)
+	requireSessionIndex(t, m, 1, "fixture: the swipe onto bravo")
+
+	m = openPreviewOn(t, m)
+	m = swipe(t, m, clock, 2)
+	m = applyKey(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = swipe(t, m, clock, 4)
+	requireSessionIndex(t, m, 1, "momentum back on the list it began on")
+}
+
+func TestWheelGestureBegunOverThePreviewsHelpNeverScrollsThePreview(t *testing.T) {
+	m, clock := gesturePreviewModel(t)
+	help := tea.KeyPressMsg{Code: '?', Text: "?"}
+	m = applyKey(t, m, help)
+	if !m.preview.helpOpen {
+		t.Fatal("fixture: ? did not open the preview's help")
+	}
+	tail := m.preview.viewport.YOffset()
+	m = swipe(t, m, clock, 5)
+	m = applyKey(t, m, help)
+	if m.preview.helpOpen {
+		t.Fatal("fixture: ? did not close the preview's help")
+	}
+	m = swipe(t, m, clock, 10)
+	requirePreviewOffset(t, m, tail, "momentum begun over the help")
+}
+
+func TestWheelGestureBegunOverTheThemeConfirmNeverMovesThePanel(t *testing.T) {
+	m, _ := newSlotConfirmModel(t)
+	clock := stageWheelClock(&m)
+	m = raiseSlotConfirmForTest(t, m, slotLightPress, theme.MemberLight)
+	m = swipe(t, m, clock, 5)
+	m, _ = pressConfirmKey(t, m, confirmNo)
+	if !m.themePanel.open || m.themePanel.confirming() {
+		t.Fatal("fixture: n did not resolve the confirm with the panel left open")
+	}
+	before := arrowPanelIndex(m)
+	m = swipe(t, m, clock, 10)
+	if got := arrowPanelIndex(m); got != before {
+		t.Fatalf("momentum begun over the confirm moved the panel cursor from %d to %d", before, got)
+	}
+}
+
+func TestWheelGestureBegunUnderTheBurstLockNeverMovesTheList(t *testing.T) {
+	m := pointerSessionsModel(t, pointerTermH, pointerSessions("alpha", "bravo", "charlie"))
+	clock := stageWheelClock(&m)
+	m.burstPending = true
+	m = swipe(t, m, clock, 5)
+	m.burstPending = false
+	m = swipe(t, m, clock, 10)
+	requireSessionIndex(t, m, 0, "momentum begun under the burst lock")
+
+	clock.at = clock.at.Add(wheelSettle)
+	m = swipe(t, m, clock, 1)
+	requireSessionIndex(t, m, 1, "a fresh swipe once the lock lifted")
+}
+
+// typeAmidSwipes types each letter with a wheel step before it, and fails if any
+// letter ran as a command rather than reaching the filter.
+func typeAmidSwipes(t *testing.T, m Model, clock *wheelClock, letters string) Model {
+	t.Helper()
+	for _, r := range letters {
+		m = swipe(t, m, clock, 1)
+		var cmd tea.Cmd
+		m, cmd = pointerUpdate(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+		if isQuitCmd(cmd) {
+			t.Fatalf("%q after a wheel step quit the picker", r)
+		}
+		if !m.sessionList.SettingFilter() {
+			t.Fatalf("%q after a wheel step left the filter input unfocused", r)
+		}
+	}
+	return m
+}
+
+func TestWheelStepsNeverReachTheListWhileItsFilterIsFocused(t *testing.T) {
+	focused := func(t *testing.T) (Model, *wheelClock) {
+		t.Helper()
+		m := pointerSessionsModel(t, pointerTermH, pointerSessions("alpha", "bravo", "charlie"))
+		clock := stageWheelClock(&m)
+		return m, clock
+	}
+	slash := tea.KeyPressMsg{Code: '/', Text: "/"}
+
+	t.Run("momentum from the list while typing", func(t *testing.T) {
+		m, clock := focused(t)
+		m = swipe(t, m, clock, 2)
+		m, _ = pointerUpdate(t, m, slash)
+		m = typeAmidSwipes(t, m, clock, "anqs")
+		if got := m.sessionList.FilterValue(); got != "anqs" {
+			t.Fatalf("the filter holds %q, want every letter typed", got)
+		}
+	})
+
+	t.Run("a fresh swipe while typing", func(t *testing.T) {
+		m, clock := focused(t)
+		m, _ = pointerUpdate(t, m, slash)
+		clock.at = clock.at.Add(wheelSettle)
+		m = typeAmidSwipes(t, m, clock, "a")
+		clock.at = clock.at.Add(wheelSettle)
+		m = typeAmidSwipes(t, m, clock, "nqs")
+		if got := m.sessionList.FilterValue(); got != "anqs" {
+			t.Fatalf("the filter holds %q, want every letter typed", got)
+		}
+	})
+
+	t.Run("a swipe begun in the filter, which then closes", func(t *testing.T) {
+		m, clock := focused(t)
+		m, _ = pointerUpdate(t, m, slash)
+		m = swipe(t, m, clock, 3)
+		m, _ = pointerUpdate(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+		if m.sessionList.SettingFilter() {
+			t.Fatal("fixture: Esc left the filter focused")
+		}
+		m = swipe(t, m, clock, 4)
+		requireSessionIndex(t, m, 0, "momentum begun in the filter")
+	})
 }
