@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+#
+# Uploads a release's binaries, which scripts/release-build built and kept
+# before the tag, to the GitHub release mint made, and moves the Homebrew
+# formula in leeovery/homebrew-tools on to them: mint's post_release runs it,
+# with the version in MINT_NEW_VERSION and its tag in MINT_VERSION_TAG.
+# What's kept is uploaded only where the commit built lies under the tag with
+# nothing a build reads changed since, as mint's own commits, its changelog
+# and its answers in .mint.toml, change nothing; otherwise the tag's tree is
+# built again first. The formula follows the latest release alone, never a
+# pre-release.
+#
+# mint only warns when a post_release hook fails, so by hand,
+# scripts/release-upload <version> finishes the release of v<version>,
+# replacing what's uploaded already. Each run logs to
+# ~/Library/Logs/portal/release-<version>.log.
+set -euo pipefail
+
+scripts=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=scripts/release-common
+. "$scripts/release-common"
+
+# The paths mint's own commits for a release touch, between the commit built
+# and the tag: CHANGELOG.md, and .mint.toml for the release notes' path
+# answers. No build reads either.
+bookkeeping=(CHANGELOG.md .mint.toml)
+
+tap=leeovery/homebrew-tools
+# The dispatch that tells the tap a version, and the command that sends it
+# again, which prepare_dispatch makes.
+dispatch=()
+resend=
+# GitHub's answer to which release is the latest can lag the release's
+# creation, so under mint it's asked this many times, this many seconds
+# apart.
+latest_asks=5
+latest_pause=3
+# The tap's run is looked for every 2 seconds for a minute, then watched
+# every 10 seconds, for 15 minutes in all from its dispatch, as one queued
+# behind another tool's update holds post_release; gh failing to read it
+# for a minute ends the watch too. In seconds.
+tap_wait=900
+find_wait=60
+unread_wait=60
+find_pause=2
+watch_pause=10
+
+usage() {
+	release_fail "Usage: scripts/release-upload [<version>]"
+}
+
+# kept_fits reports whether what's kept in the folder $1 for version $2 is
+# whole, and was built from what tag $3 holds, saying why not in $why.
+kept_fits() {
+	local name arch commit
+	for name in commit "$(release_checksums "$2")"; do
+		[[ -f $1/$name ]] || {
+			why="$1 has no $name"
+			return 1
+		}
+	done
+	for arch in "${release_arches[@]}"; do
+		name=$(release_archive "$2" "$arch")
+		grep -q "  $name\$" "$1/$(release_checksums "$2")" || {
+			why="$1's checksums don't list $name"
+			return 1
+		}
+	done
+	(cd "$1" && shasum -a 256 --check --status "$(release_checksums "$2")") || {
+		why="$1's archives don't match their checksums"
+		return 1
+	}
+	commit=$(<"$1/commit")
+	[[ $commit =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || {
+		why="$1/commit holds no commit"
+		return 1
+	}
+	git merge-base --is-ancestor "$commit" "$3" 2>/dev/null || {
+		why="$commit, the commit built, isn't under $3"
+		return 1
+	}
+	git diff --quiet "$commit" "$3" -- . "${bookkeeping[@]/#/:(top,exclude)}" || {
+		why="$3 changes more than mint's bookkeeping since $commit, the commit built"
+		return 1
+	}
+}
+
+# sha_of is the sha256 the checksums file $1 lists for the archive $2.
+sha_of() {
+	awk -v name="$2" '$2 == name { print $1 }' "$1"
+}
+
+# prepare_dispatch makes the dispatch that tells the tap version $1, with the
+# archives' sums from the checksums file $2, and the command that sends it.
+prepare_dispatch() {
+	local arm64 amd64
+	arm64=$(sha_of "$2" "$(release_archive "$1" arm64)")
+	amd64=$(sha_of "$2" "$(release_archive "$1" amd64)")
+	dispatch=(gh api "repos/$tap/dispatches" --silent
+		-f event_type=update-formula -f "client_payload[tool]=portal" -f "client_payload[version]=$1"
+		-f "client_payload[sha256_arm64]=$arm64" -f "client_payload[sha256_amd64]=$amd64")
+	printf -v resend '%q ' "${dispatch[@]}"
+	resend=${resend% }
+}
+
+# tap_failed says what failed of telling the tap, $1, and how to send it
+# again, and stops.
+tap_failed() {
+	echo "$1; the binaries are uploaded. Send it again with"
+	echo "$resend"
+	exit 1
+}
+
+# is_latest reports whether tag $1 is the latest release, the only one the
+# formula follows, as brew takes any other version as an upgrade. Under mint,
+# as $2 says, it's the release just made, so any other answer, asked again
+# a few times, fails.
+is_latest() {
+	local latest asks=1 ask
+	[[ -z $2 ]] || asks=$latest_asks
+	for ((ask = 1; ask <= asks; ask++)); do
+		latest=$(gh release view --json tagName --jq .tagName) || latest=
+		[[ $latest != "$1" ]] || return 0
+		((ask == asks)) || sleep "$latest_pause"
+	done
+	[[ -n $latest ]] || tap_failed "Finding the latest release failed, so the tap wasn't told"
+	[[ -z $2 ]] || tap_failed "GitHub names $latest the latest release, not $1, just made, so the tap wasn't told"
+	echo "$1 isn't the latest release, as GitHub's latest is $latest, so the formula isn't moved."
+	return 1
+}
+
+# tell_tap sends the tap version $1 and waits on its update of the formula.
+tell_tap() {
+	# GitHub accepts a dispatch before any run starts, so the run it starts is
+	# found by its id, the first newer than the last before it, and by the
+	# workflow's run-name, for portal and this version, so another tool's
+	# run started beside it isn't taken for it.
+	local title="Update portal to v$1"
+	local runs=(gh run list -R "$tap" --workflow update-formula.yml --event repository_dispatch --limit 20 --json "databaseId,displayTitle")
+	local before run="" sent
+	before=$("${runs[@]}" --jq '[.[].databaseId] | max // 0') || tap_failed "Listing $tap's update-formula runs failed"
+	"${dispatch[@]}" || tap_failed "Sending $tap version $1 failed"
+	sent=$(release_now)
+	while (($(release_now) - sent < find_wait)); do
+		run=$("${runs[@]}" --jq "[.[] | select(.databaseId > $before and .displayTitle == \"$title\") | .databaseId] | min // empty" || true)
+		[[ -z $run ]] || break
+		sleep "$find_pause"
+	done
+	[[ -n $run ]] || tap_failed "$tap started no update-formula run within a minute of being sent version $1"
+	local url="https://github.com/$tap/actions/runs/$run"
+	echo "Sent $tap version $1; its update is $url"
+	watch_run "$run" "$url" $((sent + tap_wait))
+	echo "The formula is on $1: $url"
+}
+
+# watch_run waits on the tap's run $1, at the URL $2, until it ends, or until
+# release_now reaches $3, reading it once more at the end.
+watch_run() {
+	local state unread=
+	while :; do
+		if state=$(gh run view "$1" -R "$tap" --json "status,conclusion" --jq '.status + " " + .conclusion'); then
+			unread=
+			case $state in
+			"completed success") return ;;
+			completed\ *) tap_failed "$tap's update of the formula failed (${state#completed }), at $2" ;;
+			esac
+		else
+			unread=${unread:-$(release_now)}
+			(($(release_now) - unread < unread_wait)) || tap_failed "gh can't read $tap's update of the formula, as it says above, at $2"
+		fi
+		(($(release_now) < $3)) || break
+		sleep "$watch_pause"
+	done
+	[[ -z $unread ]] || tap_failed "gh can't read $tap's update of the formula after 15 minutes, as it says above, at $2"
+	tap_failed "$tap's update of the formula is still going after 15 minutes, at $2, and the formula moves once it ends there"
+}
+
+main() {
+	[[ $# -le 1 ]] || usage
+	local version tag
+	if [[ $# -eq 1 ]]; then
+		version=$1
+		tag=v$version
+	else
+		version=${MINT_NEW_VERSION:-}
+		tag=${MINT_VERSION_TAG:-v$version}
+	fi
+	[[ -n $version ]] || release_fail "No version to upload: mint gives it as MINT_NEW_VERSION; by hand, give it, as scripts/release-upload 1.2.3."
+	release_valid_version "$version" || release_fail "$version isn't a version, as 1.2.3."
+	cd "$scripts/.."
+	# The build's own output goes to the stderr mint reads, as it logs itself.
+	exec 3>&2
+	release_log release-upload "$version"
+	local finish="scripts/release-upload $version, run again, finishes it."
+
+	git rev-parse -q --verify "refs/tags/$tag" >/dev/null || release_fail "No tag $tag: release-upload uploads to a tagged release."
+	gh release view "$tag" >/dev/null || release_fail "gh finds no GitHub release $tag, as it says above, as when mint's publish fails: it must be made, as gh release create $tag --verify-tag, before scripts/release-upload $version can finish."
+
+	local kept why
+	kept=$(release_kept "$version")
+	if ! kept_fits "$kept" "$version" "$tag"; then
+		echo "Building $tag again, as $why."
+		"$scripts/release-build" "$version" "$tag" >&3 2>&3 3>&- || release_fail "Building $tag failed: $finish"
+	fi
+	exec 3>&-
+
+	local files=("$kept/$(release_checksums "$version")") arch
+	for arch in "${release_arches[@]}"; do
+		files+=("$kept/$(release_archive "$version" "$arch")")
+	done
+	gh release upload "$tag" "${files[@]}" --clobber || release_fail "Uploading to $tag failed: $finish"
+	echo "Uploaded $(release_checksums "$version") and the archives to $tag"
+
+	# mint marks no GitHub release a pre-release, so GitHub would name one
+	# the latest.
+	if release_prerelease "$version"; then
+		echo "$version is a pre-release, so Homebrew isn't told: the formula stays on the latest release."
+		return
+	fi
+	prepare_dispatch "$version" "${files[0]}"
+	is_latest "$tag" "${MINT_NEW_VERSION:+mint}" || return 0
+	tell_tap "$version"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi
