@@ -23,7 +23,7 @@ import (
 func TestOpenExecPath_DoesNoThemeWork(t *testing.T) {
 	t.Run("no theme call site sits outside TUI construction", func(t *testing.T) {
 		allowed := map[string]bool{
-			"openTUI":          true,
+			"runPicker":        true,
 			"themeResolution":  true,
 			"buildThemeLoader": true,
 			"newThemeLoader":   true,
@@ -73,8 +73,8 @@ func TestOpenExecPath_DoesNoThemeWork(t *testing.T) {
 	})
 }
 
-// Every tmux-touching seam is injected, so the body runs its production
-// resolution without reaching a server.
+// Every backend-touching seam is injected, so the body runs its production
+// resolution without reaching a zmx session.
 func execOpenSession(t *testing.T, name string) string {
 	t.Helper()
 

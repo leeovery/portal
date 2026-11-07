@@ -7,6 +7,18 @@ import (
 
 const defaultRotateSize int64 = 500 * 1024 * 1024
 
+// The environment variables logging is configured by.
+const (
+	levelVar         = "PORTAL_LOG_LEVEL"
+	rotateSizeVar    = "PORTAL_LOG_ROTATE_SIZE"
+	retentionDaysVar = "PORTAL_LOG_RETENTION_DAYS"
+)
+
+// Variables names every environment variable logging is configured by.
+func Variables() []string {
+	return []string{levelVar, rotateSizeVar, retentionDaysVar}
+}
+
 const (
 	suffixK int64 = 1024
 	suffixM int64 = 1024 * 1024

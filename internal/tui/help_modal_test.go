@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func helpModelSessions(t *testing.T, appearance theme.Member) Model {
@@ -15,9 +14,9 @@ func helpModelSessions(t *testing.T, appearance theme.Member) Model {
 	m := New(fakeLister{}, WithThemeNomination(testBuiltinPair(t)), WithCanvasMode(appearance))
 	m.termWidth = 90
 	m.termHeight = 30
-	m.applySessions([]tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
+	m.applySessions([]Session{
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
 	}, nil)
 	return m
 }
@@ -301,7 +300,7 @@ func TestHelpModalColourRoles(t *testing.T) {
 			}
 		}
 
-		header := helpModalHeader(60, th, false)
+		header := helpModalHeader(60, false, th, false)
 		if seq := tokenFgSeq(t, th.TextPrimary); !strings.Contains(header, seq) {
 			t.Errorf("help header must render '? Keybindings' in text.primary SGR core %q; missing in:\n%s", seq, header)
 		}

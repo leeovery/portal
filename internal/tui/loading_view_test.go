@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func midRestoreProgress() LoadingProgress {
@@ -16,13 +15,21 @@ func midRestoreProgress() LoadingProgress {
 	p = p.Apply(BootstrapProgressMsg{Index: 2})
 	p = p.Apply(BootstrapProgressMsg{Index: 3})
 	p = p.Apply(BootstrapProgressMsg{Index: 4})
-	p = p.Apply(BootstrapProgressMsg{Index: 5})
 	p = p.Apply(BootstrapProgressMsg{Index: restoreStep, RestoreN: 8, RestoreM: 12})
 	return p
 }
 
+// The one frame carrying all three glyphs: Restoring sessions, the last label,
+// is still pending only while an earlier label is active.
+func startingSaverProgress() LoadingProgress {
+	var p LoadingProgress
+	p = p.Apply(BootstrapProgressMsg{Index: 1})
+	p = p.Apply(BootstrapProgressMsg{Index: 2})
+	return p
+}
+
 func TestLoadingScreen_RendersBlockBannerCaretBarAndList(t *testing.T) {
-	view := midRestoreProgress().View()
+	view := startingSaverProgress().View()
 	out := renderLoadingScreen(view, 80, 24, testDarkTheme(t), false)
 	visible := ansi.Strip(out)
 
@@ -108,7 +115,7 @@ func TestLoadingScreen_BlockColumnIsCentered(t *testing.T) {
 
 	wordmarkLine := firstLineContaining(lines, strings.TrimRight(loadingWordmark[0], " "))
 	barLine := firstBarLine(lines)
-	listLine := firstLineContaining(lines, LabelStartedTmuxServer)
+	listLine := firstLineContaining(lines, LabelRestoringSessions)
 	if wordmarkLine == "" || barLine == "" || listLine == "" {
 		t.Fatalf("could not locate all three elements in the block:\n%s", ansi.Strip(block))
 	}
@@ -120,7 +127,7 @@ func TestLoadingScreen_BlockColumnIsCentered(t *testing.T) {
 		t.Errorf("bar line is not flush at the block left edge: leading pad = %d", pad)
 	}
 
-	listWidth := lipgloss.Width(ansi.Strip(strings.TrimRight(listLine, " ")))
+	listWidth := lipgloss.Width(strings.TrimSpace(ansi.Strip(listLine)))
 	wantPad := (blockWidth - listWidth) / 2
 	gotPad := blockLeadingPad(listLine)
 	if gotPad == 0 {
@@ -158,7 +165,7 @@ func TestLoadingScreen_SectionGapsAreTwoRows(t *testing.T) {
 		if barIdx == -1 && isBarRow(line) {
 			barIdx = i
 		}
-		if listIdx == -1 && strings.Contains(stripped, LabelStartedTmuxServer) {
+		if listIdx == -1 && strings.Contains(stripped, LabelCheckingZmx) {
 			listIdx = i
 		}
 	}
@@ -187,7 +194,7 @@ func TestLoadingScreen_TickRowsLeftAlignedWithinList(t *testing.T) {
 func errorFrameView() LoadingProgressView {
 	var p LoadingProgress
 	p = p.Apply(BootstrapProgressMsg{Index: 1})
-	return p.FailedView(3, "Portal failed to set @portal-restoring marker: permission denied")
+	return p.FailedView(2, "Portal failed to remove the bootstrapped latch: permission denied")
 }
 
 func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
@@ -196,7 +203,7 @@ func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
 	lines := strings.Split(block, "\n")
 	blockWidth := lipgloss.Width(block)
 
-	msgLine := firstLineContaining(lines, "Portal failed to set")
+	msgLine := firstLineContaining(lines, "Portal failed to remove")
 	if msgLine == "" {
 		t.Fatalf("error block missing the fatal message:\n%s", ansi.Strip(block))
 	}
@@ -204,7 +211,7 @@ func TestLoadingScreen_ErrorFrameCentredComposition(t *testing.T) {
 		t.Errorf("message caption is not flush at the block left edge: leading pad = %d", pad)
 	}
 
-	listLine := firstLineContaining(lines, LabelStartedTmuxServer)
+	listLine := firstLineContaining(lines, LabelCheckingZmx)
 	if listLine == "" {
 		t.Fatalf("error block missing the step-list:\n%s", ansi.Strip(block))
 	}
@@ -315,11 +322,9 @@ func TestLoadingScreen_TickStatesUseSpecdTokens(t *testing.T) {
 	view := midRestoreProgress().View()
 
 	wantStates := map[string]LabelState{
-		LabelStartedTmuxServer:     LabelDone,
-		LabelRegisteredHooks:       LabelDone,
-		LabelRestoringSessions:     LabelActive,
-		LabelReplayingScrollback:   LabelPending,
-		LabelRunningResumeCommands: LabelPending,
+		LabelCheckingZmx:       LabelDone,
+		LabelStartingTheSaver:  LabelDone,
+		LabelRestoringSessions: LabelActive,
 	}
 	for _, l := range view.Labels {
 		if got := wantStates[l.Text]; got != l.State {
@@ -327,7 +332,7 @@ func TestLoadingScreen_TickStatesUseSpecdTokens(t *testing.T) {
 		}
 	}
 
-	doneRow := renderTickRow(LoadingLabel{Text: LabelStartedTmuxServer, State: LabelDone}, testDarkTheme(t), false)
+	doneRow := renderTickRow(LoadingLabel{Text: LabelCheckingZmx, State: LabelDone}, testDarkTheme(t), false)
 	if !strings.Contains(ansi.Strip(doneRow), loadingGlyphDone) {
 		t.Errorf("done row missing %q glyph: %q", loadingGlyphDone, ansi.Strip(doneRow))
 	}
@@ -349,7 +354,7 @@ func TestLoadingScreen_TickStatesUseSpecdTokens(t *testing.T) {
 		t.Error("active label not painted text.primary")
 	}
 
-	pendingRow := renderTickRow(LoadingLabel{Text: LabelReplayingScrollback, State: LabelPending}, testDarkTheme(t), false)
+	pendingRow := renderTickRow(LoadingLabel{Text: LabelStartingTheSaver, State: LabelPending}, testDarkTheme(t), false)
 	if !strings.Contains(ansi.Strip(pendingRow), loadingGlyphPending) {
 		t.Errorf("pending row missing %q glyph: %q", loadingGlyphPending, ansi.Strip(pendingRow))
 	}
@@ -417,7 +422,7 @@ func TestLoadingScreen_IsRealListNotInPlaceSwap(t *testing.T) {
 }
 
 func TestViewLoading_PaintsCanvasFromFrameOneGated(t *testing.T) {
-	m := New(fakeLister{}, WithServerStarted(true), WithThemeNomination(testBuiltinPair(t)))
+	m := New(fakeLister{}, WithBootstrapping(idleBootstrap), WithThemeNomination(testBuiltinPair(t)))
 	m.armAppearanceDetection()
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -442,7 +447,7 @@ func TestViewLoading_PaintsCanvasFromFrameOneGated(t *testing.T) {
 
 func TestLoading_TransitionDualGated(t *testing.T) {
 	t.Run("complete-then-elapsed", func(t *testing.T) {
-		m := New(fakeLister{}, WithServerStarted(true))
+		m := New(fakeLister{}, WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -456,7 +461,7 @@ func TestLoading_TransitionDualGated(t *testing.T) {
 		}
 	})
 	t.Run("elapsed-then-complete", func(t *testing.T) {
-		m := New(fakeLister{}, WithServerStarted(true))
+		m := New(fakeLister{}, WithBootstrapping(idleBootstrap))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -530,7 +535,7 @@ func TestLoadingScreen_ShortNoOverflow(t *testing.T) {
 }
 
 func TestLoadingScreen_ColourlessNoCanvasGlyphDistinct(t *testing.T) {
-	view := midRestoreProgress().View()
+	view := startingSaverProgress().View()
 	out := renderLoadingScreen(view, 80, 24, testDarkTheme(t), true)
 
 	if strings.Contains(out, tokenBgSeq(t, testDarkTheme(t).Canvas)) {
@@ -558,7 +563,7 @@ func TestWarmPath_NoLoadingScreen(t *testing.T) {
 	}
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(SessionsMsg{Sessions: []tmux.Session{{Name: "a"}}})
+	model, _ = model.Update(SessionsMsg{Sessions: []Session{{Name: "a"}}})
 	if model.(Model).ActivePage() == PageLoading {
 		t.Error("warm path transitioned onto PageLoading; want never")
 	}

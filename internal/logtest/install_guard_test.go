@@ -35,7 +35,6 @@ const logOwnerPackage = "log"
 // so one route to a captured record exists rather than two.
 var sanctionedHandlerInstalls = map[string]string{
 	handlerSite(filepath.Join("internal", "logtest", "install.go"), "Install"):                    "the route itself",
-	handlerSite(filepath.Join("cmd", "logging_capture_test.go"), "initTestLogToStateDirAs"):       "a discard silencing the pre-Init window, whose records nothing reads back",
 	handlerSite(filepath.Join("cmd", "open_test.go"), "TestExecMarker_VisibleAtWARN"):             "the production level gate, which a Sink admitting every level cannot model",
 	handlerSite(filepath.Join("internal", "hooks", "store_test.go"), "TestSetEmitsOpAsJSONField"): "the JSON rendering of an emission, which a Sink does not produce",
 }

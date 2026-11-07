@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
@@ -106,6 +107,7 @@ type burstRunner struct {
 	trigger       string
 	identity      spawn.Identity
 	resolution    spawn.Resolution
+	logger        *slog.Logger
 }
 
 func (r burstRunner) run(ctx context.Context, emit func(burstProgress)) {
@@ -117,7 +119,9 @@ func (r burstRunner) run(ctx context.Context, emit func(burstProgress)) {
 	batch, results, err := r.burster.Run(ctx, spawn.AttachSurfaces(r.external), nil, func(done, total int) {
 		emit(burstProgress{DoneCount: done, Total: total})
 	})
-	_ = r.ackChannel.Clean(batch)
+	if err := r.ackChannel.Clean(batch); err != nil {
+		spawn.LogAckCleanFailed(r.logger, batch, err)
+	}
 	emit(burstProgress{
 		Done:       true,
 		Batch:      batch,
@@ -140,8 +144,8 @@ func WithSpawnExe(exe spawn.ExecutableResolver) Option {
 	return func(m *Model) { m.spawnExe = exe }
 }
 
-func WithSpawnGetenv(fn func(string) string) Option {
-	return func(m *Model) { m.spawnGetenv = fn }
+func WithSpawnEnv(env spawn.WindowEnv) Option {
+	return func(m *Model) { m.spawnEnv = env }
 }
 
 func (m Model) burstAllConfirmed(msg spawnCompleteMsg) bool {
@@ -270,7 +274,7 @@ func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
 		m.setFlash(unsupportedFlashText(m.detectIdentity))
 		return m, nil
 	}
-	burster := spawn.NewBurster(adapter, m.ackChannel, m.spawnExe, m.spawnGetenv)
+	burster := spawn.NewBurster(adapter, m.ackChannel, m.spawnExe, m.spawnEnv)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	pipe := newBurstProgressPipe()
@@ -292,6 +296,7 @@ func (m Model) dispatchBurst(ordered []string) (Model, tea.Cmd) {
 		trigger:       trigger,
 		identity:      m.detectIdentity,
 		resolution:    resolution,
+		logger:        m.spawnLogger,
 	}
 	pipe.start(ctx, runner.run)
 	return m, pipe.receiver()

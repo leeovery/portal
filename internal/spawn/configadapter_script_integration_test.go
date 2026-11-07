@@ -11,6 +11,7 @@ import (
 )
 
 func TestScriptRecipeAdapterOpenWindow_RealExec(t *testing.T) {
+	realAdapterExec(t)
 	const key = "com.example.MyTerm"
 	command := []string{"/abs/portal", "attach", "proj-abc123"}
 	wantArg := shellquote.Join(command)

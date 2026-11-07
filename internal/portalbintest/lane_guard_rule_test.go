@@ -24,7 +24,7 @@ package cmd
 import "testing"
 
 func TestX(t *testing.T) {
-	binDir := restoretest.BuildPortalBinaryDir(t)
+	binDir := portalbintest.StagePortalBinary(t)
 	_ = binDir
 }
 `

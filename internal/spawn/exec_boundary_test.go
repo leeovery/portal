@@ -7,6 +7,19 @@ import (
 )
 
 func TestRunArgvCombined(t *testing.T) {
+	t.Run("it runs without ZMX_SESSION, TMUX or TMUX_PANE, and with the rest of Portal's environment", func(t *testing.T) {
+		t.Setenv("ZMX_SESSION", "dev")
+		t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+		t.Setenv("TMUX_PANE", "%1")
+		t.Setenv("PORTAL_SPAWN_PROBE", "kept")
+
+		out, _, err := runArgvCombined([]string{"sh", "-c", `echo "${ZMX_SESSION-unset} ${TMUX-unset} ${TMUX_PANE-unset} $PORTAL_SPAWN_PROBE"`})
+
+		if err != nil || strings.TrimSpace(out) != "unset unset unset kept" {
+			t.Errorf("the command saw %q, %v; want the three unset and the rest kept", out, err)
+		}
+	})
+
 	t.Run("clean exit returns the stdout, a zero code, and a nil err", func(t *testing.T) {
 		out, code, err := runArgvCombined([]string{"sh", "-c", "echo ok"})
 

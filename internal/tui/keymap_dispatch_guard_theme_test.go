@@ -431,8 +431,6 @@ func TestKeymapGuard_PageDescriptorsUnchanged(t *testing.T) {
 			"^↑/↓ core=false right=false destructive=false",
 			"Home/End core=false right=false destructive=false",
 			"↑↓ core=true right=false destructive=false",
-			"←→ core=true right=false destructive=false",
-			"⇥ core=true right=false destructive=false",
 			"⏎ core=true right=false destructive=false",
 			"␣ core=true right=false destructive=false",
 		}},

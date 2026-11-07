@@ -5,12 +5,11 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	reissued := make(chan struct{}, 1)
 	receiver := tea.Cmd(func() tea.Msg {
 		select {
@@ -19,7 +18,7 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 		}
 		return tui.BootstrapProgressMsg{Index: 2}
 	})
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -43,9 +42,9 @@ func TestBootstrapProgressMsg_ReIssuesReceiver(t *testing.T) {
 }
 
 func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
@@ -64,9 +63,9 @@ func TestBootstrapComplete_TransitionGatedOnTerminalEvent(t *testing.T) {
 }
 
 func TestConcurrentInit_DoesNotSynthesizeBootstrapComplete(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned nil")
@@ -93,13 +92,13 @@ func TestConcurrentInit_DoesNotSynthesizeBootstrapComplete(t *testing.T) {
 }
 
 func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	hit := make(chan struct{}, 1)
 	receiver := tea.Cmd(func() tea.Msg {
 		hit <- struct{}{}
 		return tui.BootstrapProgressMsg{Index: 1}
 	})
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned nil")
@@ -134,13 +133,13 @@ func TestConcurrentInit_IncludesProgressReceiver(t *testing.T) {
 }
 
 func TestLoadingInert_NoEnumerationBeforeComplete(t *testing.T) {
-	lister := &mockSessionLister{sessions: []tmux.Session{{Name: "a"}}}
+	lister := &mockSessionLister{sessions: []tui.Session{{Name: "a"}}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "a"}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "a"}}})
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
 	if model.(tui.Model).ActivePage() != tui.PageLoading {
 		t.Error("model left PageLoading before terminal complete (not inert)")

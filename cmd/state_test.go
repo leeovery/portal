@@ -75,7 +75,7 @@ func TestStateCommandRegistration(t *testing.T) {
 				t.Errorf("portal state --help must not list removed subcommand %q; got %v", removed, listed)
 			}
 		}
-		hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+		hidden := []string{"hydrate", "resume-draw", "resume-wait", "resume-recover"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal state --help must not list hidden subcommand %q; got %v", h, listed)
@@ -100,7 +100,7 @@ func TestStateCommandRegistration(t *testing.T) {
 		}
 		listed := availableCommandNames(buf.String())
 
-		hidden := []string{"signal-hydrate", "hydrate", "notify"}
+		hidden := []string{"hydrate", "resume-draw"}
 		for _, h := range hidden {
 			if listed[h] {
 				t.Errorf("portal --help must not list hidden subcommand %q; got %v", h, listed)
@@ -129,28 +129,19 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "daemon with no args", args: []string{"state", "daemon"}},
-		{name: "notify with no args", args: []string{"state", "notify"}},
-		{name: "signal-hydrate with session name", args: []string{"state", "signal-hydrate", "foo"}},
-		{name: "hydrate with all flags", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s", "--hook-key", "paneTokenA"}},
-		{name: "it accepts a hydrate invocation with no hook-key flag", args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--file", "/tmp/s"}},
+		{name: "hydrate with all flags", args: []string{"state", "hydrate", "--session", "proj-a1b2", "--file", "/tmp/s"}},
+		{name: "it accepts a hydrate invocation for a session that saved no scrollback", args: []string{"state", "hydrate", "--session", "proj-a1b2"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// A fresh per-subtest state dir so notify / signal-hydrate / hydrate
-			// never touch the developer's real state.
+			// A fresh per-subtest state dir so hydrate never touches the
+			// developer's real state.
 			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "daemon" {
-				withFuncSeam(t, &daemonRunFunc, func(_ context.Context, _ *daemonDeps) error { return nil })
-				withDaemonLockFileReset(t)
-			}
 
-			// state hydrate's RunE blocks on a real FIFO; stub it out for the
+			// state hydrate's body ends in an exec; stub it out for the
 			// argv-only assertions.
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "hydrate" {
-				withFuncSeam(t, &hydrateRunFunc, func(_ hydrateConfig) error { return nil })
-			}
+			withFuncSeam(t, &hydrateRunFunc, func(context.Context, hydrateConfig) {})
 
 			outBuf := new(bytes.Buffer)
 			errBuf := new(bytes.Buffer)
@@ -168,29 +159,14 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 	}
 }
 
-func TestStateSignalHydrateRequiresSessionName(t *testing.T) {
-	resetRootCmd()
-	rootCmd.SetOut(new(bytes.Buffer))
-	rootCmd.SetErr(new(bytes.Buffer))
-	rootCmd.SetArgs([]string{"state", "signal-hydrate"})
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Fatal("expected validation error for missing session name, got nil")
-	}
-}
-
-func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
+func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 	}{
 		{
-			name: "missing --fifo",
-			args: []string{"state", "hydrate", "--file", "/tmp/s", "--hook-key", "paneTokenA"},
-		},
-		{
-			name: "missing --file",
-			args: []string{"state", "hydrate", "--fifo", "/tmp/f", "--hook-key", "paneTokenA"},
+			name: "missing --session",
+			args: []string{"state", "hydrate", "--file", "/tmp/s"},
 		},
 		{
 			name: "missing all flags",
@@ -200,6 +176,8 @@ func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ran := false
+			withFuncSeam(t, &hydrateRunFunc, func(context.Context, hydrateConfig) { ran = true })
 			resetRootCmd()
 			rootCmd.SetOut(new(bytes.Buffer))
 			rootCmd.SetErr(new(bytes.Buffer))
@@ -208,22 +186,22 @@ func TestStateHydrateRequiresFIFOAndFile(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected validation error for %s, got nil", tt.name)
 			}
+			if ran {
+				t.Error("the helper's body ran on an argv it refuses")
+			}
 		})
 	}
 }
 
 // Referenced by their package-level command vars so a rename or a dropped
 // registration is a compile error rather than a silent miss.
-var stateChildCommands = []*cobra.Command{
+var stateChildCommands = append([]*cobra.Command{
 	stateDaemonCmd,
 	stateHydrateCmd,
-	stateSignalHydrateCmd,
-	stateNotifyCmd,
-	stateCommitNowCmd,
 	stateResumeDrawCmd,
 	stateResumeWaitCmd,
 	stateResumeRecoverCmd,
-}
+}, stateUpgradeHookCmds...)
 
 func TestStateParentIsHidden(t *testing.T) {
 	if !stateCmd.Hidden {
@@ -260,7 +238,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"daemon", "hydrate", "signal-hydrate", "notify", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover", "notify", "commit-now", "signal-hydrate"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()
@@ -286,7 +264,7 @@ func TestStateMigrateRenameIsRetired(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {
-	hidden := []string{"daemon", "notify", "signal-hydrate", "hydrate", "commit-now", "resume-draw", "resume-wait", "resume-recover"}
+	hidden := []string{"hydrate", "resume-draw", "resume-wait", "resume-recover"}
 	// The completion boilerplate contains the word "statement(s)", so a bare
 	// substring check for "state" false-positives; \bstate\b matches only a
 	// standalone command entry.

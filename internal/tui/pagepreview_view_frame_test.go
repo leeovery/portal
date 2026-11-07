@@ -6,11 +6,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestPreviewView_FrameContainsAllFourRoundedCorners(t *testing.T) {
-	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
+	m := newFramePreviewModel(t, "\x1b[41mhello\nworld\n")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	out := m.View()
@@ -23,7 +22,7 @@ func TestPreviewView_FrameContainsAllFourRoundedCorners(t *testing.T) {
 }
 
 func TestPreviewView_TopRowWidthEqualsOuterTerminalWidth(t *testing.T) {
-	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
+	m := newFramePreviewModel(t, "\x1b[41mhello\nworld\n")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	out := m.View()
@@ -34,37 +33,34 @@ func TestPreviewView_TopRowWidthEqualsOuterTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestPreviewView_HeaderContainsMarkerSessionCounters_FooterContainsHints(t *testing.T) {
+func TestPreviewView_HeaderContainsMarkerSession_FooterContainsHints(t *testing.T) {
 	const wideWidth = 120
-	m := newFramePreviewModelAt(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"), wideWidth, 24)
+	m := newTestPreview(t, "\x1b[41mhello\nworld\n", wideWidth, 24)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: wideWidth, Height: 24})
 
 	out := stripANSI(m.View())
 
-	if !strings.Contains(out, "◉ preview work Window 1/1 · Pane 1/1") {
-		t.Errorf("View() missing tier-1 header content; got:\n%s", out)
+	if !strings.Contains(out, "◉ preview work ") || strings.Contains(out, "Window") || strings.Contains(out, "Pane") {
+		t.Errorf("View() header want the marker and session, no counters; got:\n%s", out)
 	}
-	if !strings.Contains(out, "←→ window  ⇥ pane  ⏎ attach  ␣ back") {
+	if !strings.Contains(out, "↑↓ session  ⏎ attach  ␣ back") {
 		t.Errorf("View() missing footer nav hints; got:\n%s", out)
 	}
 }
 
 func TestPreviewView_HeaderSegmentsCarryRoleForegrounds(t *testing.T) {
 	const wideWidth = 120
-	m := newFramePreviewModelAt(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"), wideWidth, 24)
+	m := newTestPreview(t, "\x1b[41mhello\nworld\n", wideWidth, 24)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: wideWidth, Height: 24})
 
 	header := headerLine(m.View())
-	if !segmentCarriesForeground(header, "Window 1/1 · Pane 1/1", testDarkTheme(t).TextMuted.Color()) {
-		t.Errorf("counters segment lacks text.muted foreground SGR; row=%q", header)
-	}
 	if !segmentCarriesForeground(header, "work", testDarkTheme(t).TextPrimary.Color()) {
 		t.Errorf("session segment lacks text.primary foreground SGR; row=%q", header)
 	}
 }
 
 func TestPreviewView_AllFourCornerGlyphsPrecededByForegroundSGR(t *testing.T) {
-	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
+	m := newFramePreviewModel(t, "\x1b[41mhello\nworld\n")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	out := m.View()
@@ -84,7 +80,7 @@ func TestPreviewView_AllFourCornerGlyphsPrecededByForegroundSGR(t *testing.T) {
 }
 
 func TestPreviewView_AppliesSGRResetToEveryNonEmptyViewportRow(t *testing.T) {
-	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
+	m := newFramePreviewModel(t, "\x1b[41mhello\nworld\n")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	out := m.View()
@@ -113,7 +109,7 @@ func TestPreviewView_AppliesSGRResetToEveryNonEmptyViewportRow(t *testing.T) {
 }
 
 func TestPreviewView_FirstFrameCorrectnessAtConstruction(t *testing.T) {
-	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
+	m := newFramePreviewModel(t, "\x1b[41mhello\nworld\n")
 
 	out := m.View()
 	topRow := firstLine(out)
@@ -130,44 +126,9 @@ func TestPreviewView_AtDegenerateWidth2Height4RendersWithoutPanic(t *testing.T) 
 		}
 	}()
 
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "nvim-editor", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hello\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 2, 4)
-	if !ok {
-		t.Fatalf("expected ok=true from NewPreviewModel, got false")
-	}
+	m := newTestPreview(t, "hello", 2, 4)
 	_ = m.View()
 
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 2, Height: 4})
 	_ = m.View()
-}
-
-func TestPreviewView_RecomputesChromeEveryTickNoCachedField(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "alpha", Panes: []tmux.WindowPane{{Index: 0}}},
-			{WindowIndex: 1, WindowName: "beta", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("content\n")}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("expected ok=true, got false")
-	}
-
-	first := stripANSI(m.View())
-	if !strings.Contains(first, "Window 1/2") {
-		t.Fatalf("first View() missing 'Window 1/2'; got:\n%s", first)
-	}
-
-	m.windowIdx = 1
-
-	second := stripANSI(m.View())
-	if !strings.Contains(second, "Window 2/2") {
-		t.Errorf("second View() after windowIdx mutation missing 'Window 2/2'; chrome may be cached. got:\n%s", second)
-	}
 }

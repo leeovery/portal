@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"image/color"
@@ -22,7 +23,6 @@ import (
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type page int
@@ -38,13 +38,7 @@ const (
 const paginationDotGlyph = "•"
 
 type SessionLister interface {
-	ListSessions() ([]tmux.Session, error)
-}
-
-// Run's tea.Cmd emits a previewAttachSelectedMsg or previewAttachBailMsg; the
-// connector handoff happens post-TUI, not here.
-type PreviewAttacher interface {
-	Run(session string, window, pane int) tea.Cmd
+	ListSessions() ([]Session, error)
 }
 
 type ProjectStore interface {
@@ -53,6 +47,7 @@ type ProjectStore interface {
 	Remove(path, via string) error
 }
 
+// SessionKiller kills the session named name. Its error is the user's to read.
 type SessionKiller interface {
 	KillSession(name string) error
 }
@@ -61,8 +56,10 @@ type SessionCreator interface {
 	CreateFromDir(dir string, command []string) (string, error)
 }
 
-type SessionRenamer interface {
-	RenameSession(oldName, newName string) error
+// SessionLabeller sets the label of the session named name. Empty text, or the
+// name itself, resets the label to the name. Its error is the user's to read.
+type SessionLabeller interface {
+	SetLabel(name, label string) error
 }
 
 type ModePersister interface {
@@ -112,11 +109,13 @@ const (
 // Pending is the pending-resume set read with Sessions. Err never carries the
 // pending read's failure, so a failed pending read never quits the picker.
 type SessionsMsg struct {
-	Sessions []tmux.Session
+	Sessions []Session
 	Pending  map[string]struct{}
 	Err      error
 
 	afterRestore bool
+	// actionErr is the failure of the row action this listing follows.
+	actionErr error
 }
 
 // The loading page is padded to this duration when bootstrap is faster, so it
@@ -135,10 +134,13 @@ type BootstrapCompleteMsg struct {
 // Index is the 1-based canonical bootstrap step number. No friendly label rides
 // here — that would be a second, drift-prone encoding of loading_progress.go's
 // mapping. RestoreN/RestoreM are the restore counter, both zero meaning none.
+// Waiting marks the one message, before any step, saying the bootstrap waits
+// for another Portal's to finish.
 type BootstrapProgressMsg struct {
 	Index    int
 	RestoreN int
 	RestoreM int
+	Waiting  bool
 }
 
 // Drives the in-TUI error state instead of dismissing the loading page.
@@ -165,29 +167,33 @@ type ProjectsLoadedMsg struct {
 
 type Model struct {
 	sessionList list.Model
-	sessions    []tmux.Session
+	sessions    []Session
 	projects    []project.Project
 	// projectIndex is a derived cache: it must be rebuilt whenever projects
 	// changes, so always mutate both via setProjects.
 	projectIndex    project.Index
+	dirKey          func(string) string
 	sessionListMode prefs.SessionListMode
 	modePersister   ModePersister
 	// colourless is the NO_COLOR carve-out; canvas-dependent surfaces read it
 	// rather than re-deriving NO_COLOR. No canvas is painted and detection skips.
-	colourless     bool
-	selected       string
-	sessionLister  SessionLister
-	pendingReader  PendingResumeReader
-	sessionKiller  SessionKiller
-	sessionRenamer SessionRenamer
-	projectStore   ProjectStore
-	projectEditor  ProjectEditor
-	aliasEditor    AliasEditor
-	sessionCreator SessionCreator
-	cwd            string
-	activePage     page
-	projectList    list.Model
-	initialFilter  string
+	colourless      bool
+	selected        string
+	sessionLister   SessionLister
+	pendingReader   PendingResumeReader
+	sessionKiller   SessionKiller
+	sessionLabeller SessionLabeller
+	projectStore    ProjectStore
+	projectEditor   ProjectEditor
+	aliasEditor     AliasEditor
+	sessionCreator  SessionCreator
+	// createFatal is the fatal a mint's failure is, nil for one that is none.
+	createFatal   func(error) error
+	cwd           string
+	home          string
+	activePage    page
+	projectList   list.Model
+	initialFilter string
 	// initialCursor is the capture-only cursor anchor, applied and cleared in
 	// evaluateDefaultPage after items ingest. Empty is a no-op.
 	initialCursor string
@@ -206,20 +212,32 @@ type Model struct {
 	searchErr            error
 	// searchItems holds the session fields the containment filter ranks its
 	// targets by; nil for every picker a search term did not open.
-	searchItems        *searchItemSource
-	insideTmux         bool
-	currentSession     string
-	modal              modalState
-	pendingKillName    string
-	pendingKillWindows int
-	renameInput        textinput.Model
-	renameTarget       string
-	pendingDeletePath  string
-	pendingDeleteName  string
-	command            []string
-	commandPending     bool
+	searchItems *searchItemSource
+	// listed is set once a session listing has answered; until then a failed
+	// one ends the picker with listErr, since there are no rows to keep.
+	listed  bool
+	listErr error
+	// currentSession is the session the picker runs inside, empty outside one.
+	currentSession string
+	modal          modalState
+	// helpScroll is how far the help modal's keys are scrolled, from the top.
+	helpScroll  int
+	pendingKill Session
+	// killOffersAttach is set while the kill prompt is the one the kill key
+	// asked for from inside the session, which Enter attaches again.
+	killOffersAttach bool
+	// killAsk is the session the kill key asked to kill, whose prompt opens
+	// as the first listing lands; empty once it has.
+	killAsk string
+	// askedKiller kills on y at the prompt the kill key asked for.
+	askedKiller       SessionKiller
+	renameInput       textinput.Model
+	renameTarget      Session
+	pendingDeletePath string
+	pendingDeleteName string
+	command           []string
+	commandPending    bool
 
-	serverStarted     bool
 	minElapsed        bool
 	bootstrapComplete bool
 
@@ -238,9 +256,9 @@ type Model struct {
 	stagedMint    bool
 	stagedMintDir string
 
-	// One blocking receive re-issued per event, which preserves exact event order
-	// even under command batching. When set, the channel owns the terminal
-	// BootstrapCompleteMsg; when nil, Init synthesizes it.
+	// The bootstrap running behind the picker, nil when none runs: one blocking
+	// receive re-issued per event, which preserves exact event order even under
+	// command batching, ending in the terminal BootstrapCompleteMsg or a fatal.
 	progressReceiver tea.Cmd
 
 	// Zero value renders the all-pending loading screen.
@@ -259,19 +277,23 @@ type Model struct {
 	// it back. Async and non-gating; empty if no response arrived.
 	originalBg string
 
-	enumerator      TmuxEnumerator
-	reader          ScrollbackReader
-	previewAttacher PreviewAttacher
-	preview         previewModel
+	history previewHistory
+	preview previewModel
+	// previewGen counts preview opens, so a read that lands after its preview
+	// has stepped on or closed is told apart from the one now showing.
+	previewGen uint64
+	// endPreviewRead ends the current open's read, so a superseded one neither
+	// dials nor draws; nil when no read is under way.
+	endPreviewRead context.CancelFunc
 
-	// The derived directory is never stamped back to tmux — a pane's cwd can drift
-	// from the origin dir, and freezing that drift would permanently mis-group the
-	// session. Either seam nil skips the pass.
-	dirReader session.PaneCurrentPathReader
+	// dirRunner resolves the git root grouping falls back to. The derived
+	// directory is never written anywhere — a session's cwd can drift from the
+	// origin dir, and freezing that drift would permanently mis-group the
+	// session. Nil skips the pass.
 	dirRunner resolver.CommandRunner
 
 	// derivedDirs is the grouping-only companion to the recorded Session.Dir,
-	// keyed on session name: a guess derived from the pane's cwd, canonicalised,
+	// keyed on session name: a guess derived from the session's cwd, canonicalised,
 	// and read by the grouped arms alone. It must never land in Session.Dir —
 	// a regroup would then make a session findable by a path it was not findable
 	// by a moment earlier. Cleared on every session-list refresh.
@@ -290,6 +312,9 @@ type Model struct {
 	// setSuccessFlash delegates to — and stamped only by setThemeFlash, so an
 	// unrelated message cannot inherit it.
 	flashOrigin flashOrigin
+	// openingFlashTicks arms the opening flash's clear in Init, where its tick
+	// can first be scheduled.
+	openingFlashTicks bool
 	// byTagSignpost is the "No tags yet" flag: By Tag active with zero tags
 	// anywhere. Derived — recomputed on every rebuild, never set directly.
 	byTagSignpost bool
@@ -324,7 +349,7 @@ type Model struct {
 	sessionExists func(string) bool
 	ackChannel    spawn.AckChannelFull
 	spawnExe      spawn.ExecutableResolver
-	spawnGetenv   func(string) string
+	spawnEnv      spawn.WindowEnv
 	// Wrapped in log.OrDiscard at emit time, so nil never panics.
 	spawnLogger *slog.Logger
 
@@ -431,8 +456,7 @@ func (m Model) SelectedSessionCount() int {
 }
 
 func (m *Model) SetSessionListFilter(text string) {
-	m.sessionList.SetFilterText(text)
-	m.sessionList.SetFilterState(list.FilterApplied)
+	filterList(&m.sessionList, text, list.FilterApplied)
 }
 
 func (m Model) ProjectListFilterValue() string {
@@ -456,16 +480,15 @@ func (m Model) ProjectListVisibleItems() []list.Item {
 }
 
 func (m *Model) SetProjectListFilter(text string) {
-	m.projectList.SetFilterText(text)
-	m.projectList.SetFilterState(list.FilterApplied)
+	filterList(&m.projectList, text, list.FilterApplied)
 }
 
 func (m Model) ActivePage() page {
 	return m.activePage
 }
 
-func (m Model) ServerStarted() bool {
-	return m.serverStarted
+func (m Model) Bootstrapping() bool {
+	return m.progressReceiver != nil
 }
 
 func (m Model) MinElapsed() bool {
@@ -516,10 +539,6 @@ func (m Model) Command() []string {
 	return m.command
 }
 
-func (m Model) InsideTmux() bool {
-	return m.insideTmux
-}
-
 func (m Model) CurrentSession() string {
 	return m.currentSession
 }
@@ -549,9 +568,9 @@ func (m Model) WithCommand(command []string) Model {
 	return m
 }
 
-// The current session is excluded from the session list and named in the title.
-func (m Model) WithInsideTmux(currentSession string) Model {
-	m.insideTmux = true
+// WithCurrentSession names the session the picker runs inside, which the list
+// leaves out and the title names; empty, outside a session, does neither.
+func (m Model) WithCurrentSession(currentSession string) Model {
 	m.currentSession = currentSession
 	// Routed through rebuildSessionList so exclusion composes with grouping. The
 	// cmd is discarded: m.sessions is empty here, so SetItems yields no real cmd.
@@ -567,9 +586,17 @@ func WithKiller(k SessionKiller) Option {
 	}
 }
 
-func WithRenamer(r SessionRenamer) Option {
+// WithAskedKiller kills the session the kill key asked about, on y at its
+// prompt.
+func WithAskedKiller(k SessionKiller) Option {
 	return func(m *Model) {
-		m.sessionRenamer = r
+		m.askedKiller = k
+	}
+}
+
+func WithLabeller(l SessionLabeller) Option {
+	return func(m *Model) {
+		m.sessionLabeller = l
 	}
 }
 
@@ -654,9 +681,25 @@ func WithSessionCreator(c SessionCreator) Option {
 	}
 }
 
+// WithCreateFatal maps a mint's failure to the fatal it is, nil for one that
+// is none; nil maps none, so every failure flashes.
+func WithCreateFatal(fatal func(error) error) Option {
+	return func(m *Model) {
+		m.createFatal = fatal
+	}
+}
+
 func WithCWD(path string) Option {
 	return func(m *Model) {
 		m.cwd = path
+	}
+}
+
+// WithHome sets the home directory session directories are abbreviated against
+// in place of the process's; empty abbreviates nothing.
+func WithHome(home string) Option {
+	return func(m *Model) {
+		m.home = home
 	}
 }
 
@@ -672,43 +715,40 @@ func WithAliasEditor(a AliasEditor) Option {
 	}
 }
 
-func WithServerStarted(started bool) Option {
+// WithBootstrapping opens the picker on its loading page while the bootstrap
+// whose events receiver delivers runs behind it. A nil receiver is no
+// bootstrap, so the loading page never runs without one to dismiss it.
+func WithBootstrapping(receiver tea.Cmd) Option {
 	return func(m *Model) {
-		m.serverStarted = started
-		if started {
-			m.activePage = PageLoading
+		if receiver == nil {
+			return
 		}
-	}
-}
-
-func WithProgressReceiver(receiver tea.Cmd) Option {
-	return func(m *Model) {
 		m.progressReceiver = receiver
+		m.activePage = PageLoading
 	}
 }
 
-func WithEnumerator(e TmuxEnumerator) Option {
+// WithHistory is where the preview reads a session's screen and scrollback.
+// Without it, Space opens no preview.
+func WithHistory(r HistoryReader) Option {
 	return func(m *Model) {
-		m.enumerator = e
+		m.history = newPreviewHistory(r)
 	}
 }
 
-func WithScrollbackReader(r ScrollbackReader) Option {
+// WithDirRunner resolves the git root of a session's cwd, which grouping falls
+// back to for a session with no recorded directory.
+func WithDirRunner(runner resolver.CommandRunner) Option {
 	return func(m *Model) {
-		m.reader = r
-	}
-}
-
-func WithPreviewAttachPipeline(p PreviewAttacher) Option {
-	return func(m *Model) {
-		m.previewAttacher = p
-	}
-}
-
-func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.CommandRunner) Option {
-	return func(m *Model) {
-		m.dirReader = reader
 		m.dirRunner = runner
+	}
+}
+
+// WithDirKey reduces directories to the key sessions are matched to projects by,
+// in place of project.CanonicalDirKey.
+func WithDirKey(key func(string) string) Option {
+	return func(m *Model) {
+		m.dirKey = key
 	}
 }
 
@@ -721,6 +761,23 @@ func WithInitialFlash(text string) Option {
 		}
 		m.flashText = text
 		m.flashKind = flashWarning
+	}
+}
+
+// WithKillAsk opens the picker on the kill prompt for the session the kill
+// key asked to kill from inside it, once its row is listed.
+func WithKillAsk(name string) Option {
+	return func(m *Model) {
+		m.killAsk = name
+	}
+}
+
+// WithOpeningFlash opens the picker on a warning flash, which clears as a
+// raised one does: on its tick, or on the next actionable key.
+func WithOpeningFlash(text string) Option {
+	return func(m *Model) {
+		WithInitialFlash(text)(m)
+		m.openingFlashTicks = text != ""
 	}
 }
 
@@ -820,7 +877,16 @@ func centrePaginationRow(l *list.Model, base lipgloss.Style) {
 	l.Styles.PaginationStyle = base.Width(l.Width()).Align(lipgloss.Center)
 }
 
-func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, currentSession string) string {
+const (
+	currentSessionOpen  = " (current: "
+	currentSessionClose = ")"
+)
+
+// sessionListTitleForMode names the mode and the session the picker runs
+// inside. A label is any text, so it is cut as the rows cut theirs to keep the
+// title within width cells, and left out when not one cell of it fits; a
+// width of zero or less bounds nothing.
+func sessionListTitleForMode(mode prefs.SessionListMode, currentSession string, width int) string {
 	var base string
 	switch mode {
 	case prefs.ModeByProject:
@@ -830,10 +896,21 @@ func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, curren
 	default:
 		base = "Sessions"
 	}
-	if insideTmux && currentSession != "" {
-		return fmt.Sprintf("%s (current: %s)", base, currentSession)
+	if currentSession == "" {
+		return base
 	}
-	return base
+	shown := currentSession
+	if width > 0 {
+		shown = truncateToCells(currentSession, width-lipgloss.Width(base+currentSessionOpen+currentSessionClose))
+	}
+	if shown == "" {
+		return base
+	}
+	return base + currentSessionOpen + shown + currentSessionClose
+}
+
+func (m *Model) setSessionListTitle() {
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.currentSessionShown(), m.sessionList.Width())
 }
 
 // The built-in help renderer is disabled — Portal renders its own footer.
@@ -889,13 +966,20 @@ func New(lister SessionLister, opts ...Option) Model {
 		// still themed — an empty Theme renders silently colourless. An injected
 		// nomination overwrites it in syncResolvedMode below.
 		themeState: themeState{active: defaultDarkTheme()},
+		// Resolved once, here, and overwritten by WithHome: nothing downstream
+		// reads the environment's home.
+		home:   resolver.ProcessHome(),
+		dirKey: project.CanonicalDirKey,
 	}
 	for _, opt := range opts {
 		opt(&m)
 	}
-	// Recompute now that mode / inside-tmux are known (newSessionList set the Flat
+	// Sessions grouped before projects load match through the index too, so it
+	// is built once the options have given it its key.
+	m.setProjects(nil)
+	// Recompute now that mode / current session are known (newSessionList set the Flat
 	// default), so the first frame paints the correct mode heading.
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+	m.setSessionListTitle()
 	// The NO_COLOR carve-out wins over every nomination shape: no canvas to
 	// select, so the gate is colourless and detection is skipped.
 	if m.colourless {
@@ -953,6 +1037,7 @@ func (m *Model) sessionDelegate() SessionDelegate {
 		Selected:    m.selectedSessions,
 		GoneFlagged: m.goneFlagged,
 		Pending:     m.pendingSessions,
+		Home:        m.home,
 	}
 }
 
@@ -1075,7 +1160,7 @@ func (m *Model) styleListFilterInput(l *list.Model) {
 	l.FilterInput.SetStyles(styles)
 }
 
-func NewModelWithSessions(sessions []tmux.Session) Model {
+func NewModelWithSessions(sessions []Session) Model {
 	items := ToListItems(sessions)
 	l := newSessionList(items)
 	pl := newProjectList()
@@ -1097,12 +1182,49 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 // an explicit Width, so it must track every resize. Callers use a per-page
 // wrapper, which owns the reserved-height computation.
 func (m *Model) applyListSize(l *list.Model, width, height, reserved int) {
-	l.SetSize(width, height-reserved)
+	sizeList(l, width, height-reserved)
 	if m.colourless {
 		centrePaginationRow(l, lipgloss.NewStyle())
 		return
 	}
 	centrePaginationRow(l, lipgloss.NewStyle().Background(m.themeState.active.Canvas.Color()))
+}
+
+// sizeList sizes l so its page count, and with it whether the pagination row
+// shows, follows from its items and size alone, as a fresh draw's does.
+// bubbles/list budgets that row by the page count it had before the size: one
+// page budgets none, so a resize into paging would keep a row too many and
+// push whatever is under the list off the foot. Sized as one page, then again
+// by the page count that gives, the budget holds the row exactly when it shows.
+func sizeList(l *list.Model, width, height int) {
+	l.Paginator.TotalPages = 1
+	l.SetSize(width, height)
+	l.SetSize(width, height)
+}
+
+// syncPagination re-runs l's pagination at the size it has, so it follows
+// the items l now shows, as a fresh sizeList's would. bubbles/list counts a
+// change of items against the page count it had before, and takes a
+// filter's matches without counting them at all.
+func syncPagination(l *list.Model) {
+	sizeList(l, l.Width(), l.Height())
+}
+
+// filterList filters l to text in the state given, its pagination following
+// the matches.
+func filterList(l *list.Model, text string, state list.FilterState) {
+	l.SetFilterText(text)
+	l.SetFilterState(state)
+	syncPagination(l)
+}
+
+// updateList hands msg to l, its pagination following the items it shows
+// after: a filter keystroke, a filter's matches or a cleared filter.
+func updateList(l *list.Model, msg tea.Msg) tea.Cmd {
+	updated, cmd := l.Update(msg)
+	*l = updated
+	syncPagination(l)
+	return cmd
 }
 
 // Owns the Sessions height budget: header, footer and any active notice band are
@@ -1111,6 +1233,7 @@ func (m *Model) applyListSize(l *list.Model, width, height, reserved int) {
 func (m *Model) applySessionListSize(width, height int) {
 	reserved := m.sessionBandHeight() + m.headerHeight(width) + m.sessionFooterHeight(width)
 	m.applyListSize(&m.sessionList, width, height, reserved)
+	m.setSessionListTitle()
 }
 
 // Measured against the same entries, width and mode the render uses, so budget
@@ -1152,14 +1275,22 @@ func (m Model) projectBandHeight() int {
 	return lipgloss.Height(slot)
 }
 
-func (m Model) filteredSessions() []tmux.Session {
-	if !m.insideTmux {
-		return m.sessions
+// currentSessionShown is what the title names the session the picker runs
+// inside by: its row's text, though the list leaves the row out, or its name
+// until the listing holds it.
+func (m Model) currentSessionShown() string {
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == m.currentSession })
+	if i < 0 {
+		return m.currentSession
 	}
+	return m.sessions[i].DisplayName()
+}
+
+func (m Model) filteredSessions() []Session {
 	return PickerSessions(m.sessions, m.currentSession)
 }
 
-func (m *Model) applySessions(sessions []tmux.Session, pending map[string]struct{}) tea.Cmd {
+func (m *Model) applySessions(sessions []Session, pending map[string]struct{}) tea.Cmd {
 	m.sessions = sessions
 	// A guess derived for the previous list must not outlive it.
 	m.derivedDirs = nil
@@ -1220,14 +1351,14 @@ func anyTagsExist(projects []project.Project) bool {
 // Always mutate projects through this, or the derived index goes stale.
 func (m *Model) setProjects(projects []project.Project) {
 	m.projects = projects
-	m.projectIndex = project.NewIndex(projects)
+	m.projectIndex = project.NewIndexBy(projects, m.dirKey)
 }
 
 // Best-effort: an unresolvable session is not negative-cached — nothing is
 // stored and the next grouped rebuild tries again. Call it only from the grouped
-// arms — Flat must pay zero pane reads.
-func (m *Model) resolveDerivedDirs(sessions []tmux.Session) map[string]string {
-	if m.dirReader == nil || m.dirRunner == nil {
+// arms — Flat must pay zero git-root resolutions.
+func (m *Model) resolveDerivedDirs(sessions []Session) map[string]string {
+	if m.dirRunner == nil {
 		return m.derivedDirs
 	}
 
@@ -1238,8 +1369,8 @@ func (m *Model) resolveDerivedDirs(sessions []tmux.Session) map[string]string {
 		if _, cached := m.derivedDirs[s.Name]; cached {
 			continue
 		}
-		dir, ok, err := session.ResolveSessionDir(s.Name, m.dirReader, m.dirRunner)
-		if !ok || err != nil || dir == "" {
+		dir, ok := session.GroupingDir(s.Cwd, m.dirRunner)
+		if !ok {
 			continue
 		}
 		if m.derivedDirs == nil {
@@ -1258,15 +1389,14 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 
 	var items []list.Item
 	switch {
-	case m.byTagSignpost:
-		items = ToListItems(filtered)
 	case m.sessionListMode == prefs.ModeByProject:
 		items = buildByProject(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
-	case m.sessionListMode == prefs.ModeByTag:
+	case m.sessionListMode == prefs.ModeByTag && !m.byTagSignpost:
 		items = buildByTag(filtered, m.projectIndex, m.resolveDerivedDirs(filtered))
 	default:
-		items = ToListItems(filtered)
+		items = buildFlat(filtered)
 	}
+	items = withHome(items, m.home)
 
 	// Recorded before the items are handed over, so the filter pass SetItems
 	// defers into a tea.Cmd can resolve the targets it is given.
@@ -1275,7 +1405,7 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	}
 	cmd := m.sessionList.SetItems(items)
 
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+	m.setSessionListTitle()
 
 	// Without this re-apply the list keeps sizing against pre-load defaults
 	// and overflows under the footer once items populate.
@@ -1351,8 +1481,7 @@ func (m *Model) applySearchLanding() {
 	// Setting the text is what runs the filter pass, so it must precede the state
 	// flip: the list serves its filtered set in every state but Unfiltered, and an
 	// unpopulated one would hide every session.
-	m.sessionList.SetFilterText(m.searchTerm)
-	m.sessionList.SetFilterState(state)
+	filterList(&m.sessionList, m.searchTerm, state)
 	m.ensureSessionRowSelected()
 }
 
@@ -1361,11 +1490,9 @@ func (m *Model) applyInitialFilter() {
 		return
 	}
 	if m.activePage == PageSessions && !m.commandPending {
-		m.sessionList.SetFilterText(m.initialFilter)
-		m.sessionList.SetFilterState(list.FilterApplied)
+		filterList(&m.sessionList, m.initialFilter, list.FilterApplied)
 	} else {
-		m.projectList.SetFilterText(m.initialFilter)
-		m.projectList.SetFilterState(list.FilterApplied)
+		filterList(&m.projectList, m.initialFilter, list.FilterApplied)
 	}
 	m.initialFilter = ""
 }
@@ -1380,6 +1507,23 @@ func (m *Model) applyInitialCursor() {
 		m.reanchorSessionCursor(m.initialCursor)
 	}
 	m.initialCursor = ""
+}
+
+// Runs as the first listing lands, not once the page is decided, so no key
+// waits on the projects: the asked session's row takes the cursor and the
+// prompt opens at once. A session no longer listed is gone, and nothing is
+// asked about it; nor is anything asked with nothing to kill it.
+func (m *Model) applyKillAsk() {
+	name := m.killAsk
+	m.killAsk = ""
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
+	if i < 0 || m.activePage != PageSessions || m.askedKiller == nil {
+		return
+	}
+	m.reanchorSessionCursor(name)
+	m.modal = modalKillConfirm
+	m.pendingKill = m.sessions[i]
+	m.killOffersAttach = true
 }
 
 // Re-fetched on preview dismissal so an externally killed session disappears.
@@ -1399,22 +1543,35 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	}
 }
 
-func (m Model) newSessionPreview(session string) (previewModel, bool) {
-	pmodel, ok := NewPreviewModel(session, m.enumerator, m.reader, m.previewAttacher, m.contentWidth(), m.contentHeight())
-	if !ok {
-		return previewModel{}, false
+// openSessionPreview opens the preview on s with its body still to come, and
+// returns the read that brings it. A session the listing already found not
+// answering says so at once, with nothing dialled. ok is false, and nothing
+// opens, when no history is wired.
+func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
+	if m.history.reader == nil {
+		return nil, false
 	}
-	pmodel.th = m.themeState.active
-	pmodel.colourless = m.colourless
-	return pmodel, true
+	m.endRead()
+	m.previewGen++
+	body := previewLoading
+	if s.NotAnswering {
+		body = previewNotAnswering
+	} else {
+		var open context.Context
+		open, m.endPreviewRead = context.WithCancel(context.Background())
+		cmd = m.history.read(open, s.Name, m.previewGen)
+	}
+	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
+	m.preview.th = m.themeState.active
+	m.preview.colourless = m.colourless
+	return cmd, true
 }
 
 // Steps the preview to the next session in the list's visible order, wrapping as
 // the list's arrows do and skipping group headings. The list cursor moves with
 // it, so a dismiss lands on the session last previewed and the filter is never
-// touched. A session that no longer enumerates is passed over, as Space passes
-// over it; with no other session to open, the preview stays where it is.
-func (m *Model) stepPreviewSession(delta int) {
+// touched. With no other session to open, the preview stays where it is.
+func (m *Model) stepPreviewSession(delta int) tea.Cmd {
 	visible := m.sessionList.VisibleItems()
 	n := len(visible)
 	start := m.sessionList.Index()
@@ -1433,22 +1590,28 @@ func (m *Model) stepPreviewSession(delta int) {
 		if !ok {
 			continue
 		}
-		pmodel, ok := m.newSessionPreview(si.Session.Name)
-		if !ok {
-			continue
-		}
 		m.sessionList.Select(i)
-		m.preview = pmodel
-		return
+		cmd, _ := m.openSessionPreview(si.Session)
+		return cmd
 	}
+	return nil
 }
 
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
 // m.preview.session afterwards yields an empty string.
 func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
+	m.endRead()
 	m.activePage = PageSessions
 	m.preview = previewModel{}
 	return m.refreshSessionsAfterPreviewCmd(preserveName)
+}
+
+// endRead ends the preview's read under way, if any.
+func (m *Model) endRead() {
+	if m.endPreviewRead != nil {
+		m.endPreviewRead()
+		m.endPreviewRead = nil
+	}
 }
 
 // Clamps to the last index when the name is gone, and operates on filtered
@@ -1536,7 +1699,7 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
-// A pure read — it never mutates tmux or state.
+// A pure read — it never mutates state.
 func (m Model) fetchSessionsCmd() tea.Cmd {
 	return func() tea.Msg {
 		sessions, pending, err := m.readSessionList()
@@ -1544,29 +1707,65 @@ func (m Model) fetchSessionsCmd() tea.Cmd {
 	}
 }
 
-// The cold-boot route's snapshot is stale: the orchestrator runs in a goroutine,
-// so Init's frame-one enumeration happened before Restore created the sessions.
-// The warm route returns nil — its snapshot is already post-restore.
-func (m Model) refetchSessionsAfterRestore() tea.Cmd {
-	if m.progressReceiver == nil {
-		return nil
+// ListError is the failed session listing that ended the picker before any
+// listing answered, nil otherwise. It is not a bootstrap fatal and takes no
+// error frame.
+func (m Model) ListError() error {
+	return m.listErr
+}
+
+// applySessionsMsg takes in a listing. One that fails before any answered ends
+// the picker; once one has, a failed one keeps the rows it gave and settles the
+// page as a success would. A row action's failure flashes over the listing's,
+// being the more useful of the two.
+func (m Model) applySessionsMsg(msg SessionsMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil && !m.listed {
+		m.listErr = msg.Err
+		return m, tea.Quit
 	}
+	var cmd tea.Cmd
+	if msg.Err == nil {
+		m.listed = true
+		cmd = m.applySessions(msg.Sessions, msg.Pending)
+	}
+	if failure := cmp.Or(msg.actionErr, msg.Err); failure != nil {
+		(&m).setFlash(failure.Error())
+		cmd = tea.Batch(cmd, flashTickCmd(m.flashGen))
+	}
+
+	// While loading, ingest but leave sessionsLoaded alone —
+	// transitionFromLoading owns the flip.
+	if m.activePage == PageLoading {
+		return m, cmd
+	}
+
+	m.sessionsLoaded = true
+	m.evaluateDefaultPage()
+	m.applyKillAsk()
+	detectCmd := m.maybeDispatchDetectionCmd()
+	var settleCmd tea.Cmd
+	if msg.afterRestore {
+		settleCmd = m.startPendingSettle()
+	}
+	return m, tea.Batch(cmd, detectCmd, settleCmd)
+}
+
+// The loading page's listing is stale: the bootstrap runs in a goroutine, so
+// Init's frame-one enumeration happened before restore created the sessions.
+func (m Model) refetchSessionsAfterRestore() tea.Cmd {
 	return func() tea.Msg {
 		sessions, pending, err := m.readSessionList()
 		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err, afterRestore: true}
 	}
 }
 
-// On the cold concurrent route it deliberately leaves sessionsLoaded false:
-// deciding the landing page here would latch defaultPageEvaluated against the
-// stale pre-restore list, and the post-restore refetch could never re-decide.
+// It deliberately leaves sessionsLoaded false: the loading page runs only
+// behind a bootstrap's receiver, so its listing predates the restore, and
+// deciding the landing page here would latch defaultPageEvaluated against it,
+// where the post-restore refetch could never re-decide. That refetch's
+// landing opens a pending kill prompt.
 func (m *Model) transitionFromLoading() {
 	m.activePage = PageSessions
-	if m.progressReceiver != nil {
-		return
-	}
-	m.sessionsLoaded = true
-	m.evaluateDefaultPage()
 }
 
 // Both loading gates dismiss through here, so the sequence holds whichever of
@@ -1616,6 +1815,9 @@ func (m Model) Init() tea.Cmd {
 	detectTimeout := m.themeState.gate.timeoutCmd()
 
 	cmds := []tea.Cmd{requestBg, detectTimeout}
+	if m.openingFlashTicks {
+		cmds = append(cmds, flashTickCmd(m.flashGen))
+	}
 
 	switch {
 	case m.commandPending:
@@ -1625,24 +1827,14 @@ func (m Model) Init() tea.Cmd {
 			return LoadingMinElapsedMsg{}
 		})
 		cmds = append(cmds, m.fetchSessionsCmd(), loadingPadTick, m.loadProjects())
-		if m.progressReceiver == nil {
-			// Warm route: the orchestrator already ran before this Init, so
-			// satisfy the bootstrapComplete gate from the first tick. On the cold
-			// route the channel owns the terminal BootstrapCompleteMsg, and
-			// synthesizing one here would dismiss the loading page before the
-			// orchestrator finished.
-			// Carries no warnings: the message's field is the orchestrator's set
-			// alone, and the staged set reaches the gate off the model.
-			cmds = append(cmds, func() tea.Msg { return BootstrapCompleteMsg{} })
-		}
 	default:
 		cmds = append(cmds, m.fetchSessionsCmd(), m.loadProjects())
 	}
 
 	// Every branch subscribes from here, so a branch added later cannot silently
-	// drop the orchestrator's warnings and its fatal by omitting the rule. A nil
-	// receiver — a warm route, which has no bootstrap running behind this model —
-	// is dropped by Batch along with any other nil above it.
+	// drop the bootstrap's warnings and its fatal by omitting the rule. A nil
+	// receiver — a picker with no bootstrap behind it, so no loading page — is
+	// dropped by Batch along with any other nil above it.
 	cmds = append(cmds, m.progressReceiver)
 	return tea.Batch(cmds...)
 }
@@ -1685,29 +1877,12 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 	case SessionsMsg:
-		if msg.Err != nil {
-			return m, tea.Quit
-		}
-		cmd := m.applySessions(msg.Sessions, msg.Pending)
-
-		// While loading, ingest but leave sessionsLoaded alone —
-		// transitionFromLoading owns the flip.
-		if m.activePage == PageLoading {
-			return m, cmd
-		}
-
-		m.sessionsLoaded = true
-		m.evaluateDefaultPage()
-		detectCmd := m.maybeDispatchDetectionCmd()
-		var settleCmd tea.Cmd
-		if msg.afterRestore {
-			settleCmd = m.startPendingSettle()
-		}
-		return m, tea.Batch(cmd, detectCmd, settleCmd)
+		return m.applySessionsMsg(msg)
 	case pendingSettleTickMsg:
 		return m, m.pendingSettleTick()
 	case pendingSettleReadMsg:
-		return m, m.applyPendingSettleRead(msg)
+		cmd := m.applyPendingSettleRead(msg)
+		return m, cmd
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		// A fatal parks the model in the error state — never dismiss into the
@@ -1775,17 +1950,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case BootstrapFatalMsg:
 		// The loading page must stay on PageLoading — never a half-restored picker
 		// — and this is a terminal event, so the receiver is not re-issued.
-		m.fatalActive = true
-		m.fatalStep = msg.FailedStep
-		m.fatalMessage = msg.Message
-		m.fatalErr = msg.Err
-		// A command-pending picker has no loading page to render the error frame
-		// on, and nothing it can do against a half-bootstrapped server, so it ends
-		// the run instead: the teardown reports the fatal and exits non-zero.
-		if m.commandPending {
-			return m, tea.Quit
-		}
-		return m, nil
+		return m.enterFatal(msg.FailedStep, msg.Message, msg.Err)
 	case ProjectsLoadedMsg:
 		var setItemsCmd tea.Cmd
 		if msg.Err == nil {
@@ -1810,7 +1975,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		m.selected = msg.SessionName
 		return m, tea.Quit
 	case sessionCreateErrMsg:
-		return m, nil
+		return m.mintFailed(msg.Err)
 	case previewDismissedMsg:
 		// The sessionList is deliberately not mutated: cursor position and filter
 		// state must round-trip byte-identically.
@@ -1822,17 +1987,22 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.activePage != pagePreview {
 			return m, nil
 		}
-		m.stepPreviewSession(msg.delta)
+		cmd := m.stepPreviewSession(msg.delta)
+		return m, cmd
+	case previewBodyMsg:
+		if m.activePage != pagePreview || msg.gen != m.previewGen {
+			return m, nil
+		}
+		m.preview.setBody(msg.body)
 		return m, nil
-	case previewAttachBailMsg:
-		// Batch, not Sequence: the flash must render on the same frame as the
-		// page flip, with list consistency converging a render or two later.
-		refreshCmd := m.exitPreviewToSessions(msg.Session)
-		m.setFlash(formatSessionGoneFlash(msg.Session))
-		return m, tea.Batch(refreshCmd, flashTickCmd(m.flashGen))
-	case previewAttachSelectedMsg:
-		m.selected = msg.Session
-		return m, tea.Quit
+	case previewOpenMsg:
+		if !m.answering(msg.Session) {
+			// The refusal flashes on the list, where it can be read.
+			refresh := m.exitPreviewToSessions(msg.Session)
+			updated, flash := m.openSession(msg.Session)
+			return updated, tea.Batch(refresh, flash)
+		}
+		return m.openSession(msg.Session)
 	case previewSessionsRefreshedMsg:
 		// Lister errors are non-fatal: the pre-refresh snapshot is the best
 		// information left, and the user expects to land on the list.
@@ -1883,6 +2053,16 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
+	// Until the first listing opens the kill key's prompt, or finds its session
+	// gone, a key would act on rows the user hasn't seen, Enter on the wrong
+	// one: typed ahead of the prompt, it is dropped.
+	if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey && m.killAsk != "" {
+		if keyIsCtrlC(keyMsg) {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	// Ahead of the slide-over and page arms: a wheel step re-enters Update as an
 	// arrow press, so it reaches whichever of them owns the keyboard.
 	if pointer, ok := msg.(tea.MouseMsg); ok {
@@ -1925,8 +2105,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 // A picker whose bootstrap runs concurrently with it and has not yet completed.
 // A fatal leaves bootstrapComplete false, so a fatal'd picker reads as in flight
-// too: a caller that must exclude one checks fatalActive itself. The warm route
-// has no receiver: its bootstrap ran before Init.
+// too: a caller that must exclude one checks fatalActive itself. A picker that
+// owed no bootstrap has no receiver.
 func (m Model) bootstrapInFlight() bool {
 	return m.progressReceiver != nil && !m.bootstrapComplete
 }
@@ -1953,6 +2133,42 @@ func (m Model) createSession(dir string) (Model, tea.Cmd) {
 	}
 	return m, m.mintSession(dir)
 }
+
+// enterFatal parks the model in the error state, which ends the run non-zero
+// with message on the loading page's error frame. A command-pending picker
+// has no loading page to render the frame on, and nothing it can do, so it
+// ends the run at once: the teardown reports the fatal.
+func (m Model) enterFatal(step int, message string, err error) (Model, tea.Cmd) {
+	m.fatalActive = true
+	m.fatalStep = step
+	m.fatalMessage = message
+	m.fatalErr = err
+	if m.commandPending {
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// mintFailed answers a mint that failed. A failure that is a fatal, a session
+// the backend made speaking a protocol Portal can't talk to, ends the run on
+// the error frame, as one bootstrap's fatal does: any later mint would fail
+// alike. The frame keeps the steps a loading page ran, and shows the fatal
+// alone where none did. Any other failure is flashed, and the picker stays
+// open.
+func (m Model) mintFailed(err error) (Model, tea.Cmd) {
+	if m.createFatal != nil {
+		if fatal := m.createFatal(err); fatal != nil {
+			m.activePage = PageLoading
+			return m.enterFatal(0, fatal.Error(), fatal)
+		}
+	}
+	m.setFlash(fmt.Sprintf(MintFailedFlash, err))
+	return m, nil
+}
+
+// MintFailedFlash is the flash of a mint that failed for a reason that is no
+// fatal, the failure in place of its verb.
+const MintFailedFlash = "Portal couldn't start that session: %v"
 
 // The mint itself, with no gate: reached from the keypress on every model that
 // is not mid-bootstrap, and from the terminal complete event for a staged pick.
@@ -1997,7 +2213,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Opening our modal also consumes the key, so bubbles/list never toggles
 		// its own help.
 		if isRuneKey(msg, "?") {
-			m.modal = modalHelp
+			m.modal, m.helpScroll = modalHelp, 0
 			return m, nil
 		}
 		switch {
@@ -2037,9 +2253,7 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.projectList, cmd = m.projectList.Update(msg)
-	return m, cmd
+	return m, updateList(&m.projectList, msg)
 }
 
 func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
@@ -2640,7 +2854,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Opening our modal also consumes the key, so bubbles/list never toggles
 		// its own help.
 		if isRuneKey(msg, "?") {
-			m.modal = modalHelp
+			m.modal, m.helpScroll = modalHelp, 0
 			return m, nil
 		}
 		// Bound before the rune handlers so it never collides with them.
@@ -2652,13 +2866,12 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := m.newSessionPreview(si.Session.Name)
+			cmd, ok := m.openSessionPreview(si.Session)
 			if !ok {
 				return m, nil
 			}
-			m.preview = pmodel
 			m.activePage = pagePreview
-			return m, nil
+			return m, cmd
 		}
 		switch {
 		case keyIsCode(msg, tea.KeyEscape):
@@ -2713,8 +2926,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.sessionList, cmd = m.sessionList.Update(msg)
+	cmd := updateList(&m.sessionList, msg)
 	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		m.skipHeaderRow(keyMsg)
 	}
@@ -2739,12 +2951,16 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 // block attempts nothing. It names neither the identity nor "see docs": on a named
 // terminal it co-renders with the banner, which supplies both.
 const (
+	multiSelectBlockedUnsureFlash = "multi-select isn't available: " + spawn.UnsureTerminal
 	multiSelectBlockedRemoteFlash = "multi-select isn't available over a remote connection"
 	multiSelectBlockedNamedFlash  = "multi-select isn't available on this terminal"
 )
 
 func multiSelectBlockedFlashText(id spawn.Identity) string {
-	if id.IsNull() {
+	switch {
+	case id.Unsure:
+		return multiSelectBlockedUnsureFlash
+	case id.IsNull():
 		return multiSelectBlockedRemoteFlash
 	}
 	return multiSelectBlockedNamedFlash
@@ -2805,8 +3021,7 @@ func (m Model) handleMultiSelectEnter() (tea.Model, tea.Cmd) {
 		// len == 1, so this ranges once, binding the sole key.
 		for name = range m.selectedSessions {
 		}
-		m.selected = name
-		return m, tea.Quit
+		return m.openSession(name)
 	default:
 		return m.beginBurst(m.orderedMarkedSessions())
 	}
@@ -2821,8 +3036,7 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.modal = modalKillConfirm
-	m.pendingKillName = si.Session.Name
-	m.pendingKillWindows = si.Session.Windows
+	m.pendingKill = si.Session
 	return m, nil
 }
 
@@ -2854,11 +3068,38 @@ func (m Model) updateHelpModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if isRuneKey(keyMsg, "?") || keyIsCode(keyMsg, tea.KeyEscape) {
+	switch {
+	case isRuneKey(keyMsg, "?") || keyIsCode(keyMsg, tea.KeyEscape):
 		m.modal = modalNone
-		return m, nil
+	case keyIsCode(keyMsg, tea.KeyUp):
+		m.helpScroll = m.helpScrolledBy(-1)
+	case keyIsCode(keyMsg, tea.KeyDown):
+		m.helpScroll = m.helpScrolledBy(+1)
 	}
 	return m, nil
+}
+
+// helpScrolledBy is the help modal's scroll moved delta rows, held within
+// what the room the modal has lets it scroll, from where it's drawn.
+func (m Model) helpScrolledBy(delta int) int {
+	entries, legend := m.helpModalEntries()
+	furthest := helpModalLayout(entries, legend, false, m.themeState.active, m.colourless).maxOffset(modalRoom(m.contentHeight()))
+	return min(max(min(m.helpScroll, furthest)+delta, 0), furthest)
+}
+
+// helpModalEntries are the keys and legend the help modal lists over the
+// active page: filtered through the same slice the footer renders from, so a
+// blocked key leaves both surfaces in lockstep.
+func (m Model) helpModalEntries() ([]keymapEntry, []helpLegendEntry) {
+	if m.activePage == PageProjects {
+		return m.projectsHelpKeymap(), nil
+	}
+	return m.sessionsHelpKeymap(), sessionsIndicatorLegend(m.themeState.active, m.colourless)
+}
+
+func (m Model) viewHelpModal() string {
+	entries, legend := m.helpModalEntries()
+	return renderHelpModalOnClearedCanvas(entries, legend, m.helpScroll, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 }
 
 func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -2867,31 +3108,45 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	name, offersAttach := m.pendingKill.Name, m.killOffersAttach
 	switch {
 	case isRuneKey(keyMsg, "y"):
-		name := m.pendingKillName
-		m.modal = modalNone
-		m.pendingKillName = ""
-		m.pendingKillWindows = 0
-		return m, m.killAndRefresh(name)
+		killer := m.sessionKiller
+		if offersAttach {
+			killer = m.askedKiller
+		}
+		m = m.closeKillConfirm()
+		return m, m.actAndRefresh(func() error { return killer.KillSession(name) })
 	case keyIsCode(keyMsg, tea.KeyEscape):
 		// Cancel is Esc only; `n` falls through to the ignore-all tail.
-		m.modal = modalNone
-		m.pendingKillName = ""
-		m.pendingKillWindows = 0
-		return m, nil
+		return m.closeKillConfirm(), nil
+	case offersAttach && keyIsCode(keyMsg, tea.KeyEnter):
+		return m.closeKillConfirm().openSession(name)
 	}
 	return m, nil
 }
 
-func (m Model) killAndRefresh(name string) tea.Cmd {
+func (m Model) closeKillConfirm() Model {
+	m.modal = modalNone
+	m.pendingKill = Session{}
+	m.killOffersAttach = false
+	return m
+}
+
+// actAndRefresh runs a row action, then re-reads the rows whatever its
+// outcome: a failed kill may still have ended the session, or found it gone.
+func (m Model) actAndRefresh(action func() error) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.sessionKiller.KillSession(name); err != nil {
-			return SessionsMsg{Err: fmt.Errorf("failed to kill session '%s': %w", name, err)}
-		}
+		actionErr := action()
 		sessions, pending, err := m.readSessionList()
-		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
+		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err, actionErr: actionErr}
 	}
+}
+
+// flashError flashes err's own words, which are the user's to read.
+func (m Model) flashError(err error) (tea.Model, tea.Cmd) {
+	(&m).setFlash(err.Error())
+	return m, flashTickCmd(m.flashGen)
 }
 
 func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
@@ -2899,16 +3154,16 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.sessionRenamer == nil {
+	if m.sessionLabeller == nil {
 		return m, nil
 	}
 	m.modal = modalRename
-	m.renameTarget = si.Session.Name
+	m.renameTarget = si.Session
 	ti := textinput.New()
 	// No inline prompt: the modal renders its own labelled input box, so a
 	// prompt here would double up inside it.
 	ti.Prompt = ""
-	ti.SetValue(m.renameTarget)
+	ti.SetValue(m.renameTarget.DisplayName())
 	ti.Focus()
 	m.renameInput = ti
 	return m, nil
@@ -2919,25 +3174,13 @@ func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok {
 		switch keyMsg.Code {
 		case tea.KeyEnter:
-			newName := strings.TrimSpace(m.renameInput.Value())
-			if newName == "" {
-				return m, nil
-			}
-			// Closed, not held open: the modal blanks the page it would be
-			// reported on, so the band can only be read once the modal is gone.
-			if err := tmux.ValidateSessionName(newName); err != nil {
-				m.modal = modalNone
-				m.renameTarget = ""
-				(&m).setFlash(renameRefusalFlash(err))
-				return m, flashTickCmd(m.flashGen)
-			}
-			oldName := m.renameTarget
+			name, label := m.renameTarget.Name, m.renameInput.Value()
 			m.modal = modalNone
-			m.renameTarget = ""
-			return m, m.renameAndRefresh(oldName, newName)
+			m.renameTarget = Session{}
+			return m, m.actAndRefresh(func() error { return m.sessionLabeller.SetLabel(name, label) })
 		case tea.KeyEscape:
 			m.modal = modalNone
-			m.renameTarget = ""
+			m.renameTarget = Session{}
 			return m, nil
 		}
 	}
@@ -2945,16 +3188,6 @@ func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.renameInput, cmd = m.renameInput.Update(msg)
 	return m, cmd
-}
-
-func (m Model) renameAndRefresh(oldName, newName string) tea.Cmd {
-	return func() tea.Msg {
-		if err := m.sessionRenamer.RenameSession(oldName, newName); err != nil {
-			return SessionsMsg{Err: fmt.Errorf("failed to rename session '%s': %w", oldName, err)}
-		}
-		sessions, pending, err := m.readSessionList()
-		return SessionsMsg{Sessions: sessions, Pending: pending, Err: err}
-	}
 }
 
 func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
@@ -2974,8 +3207,24 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	m.selected = si.Session.Name
+	return m.openSession(si.Session.Name)
+}
+
+// openSession picks the session name to attach once the picker ends, refusing
+// one that does not answer. Every open of a listed session comes through here.
+func (m Model) openSession(name string) (tea.Model, tea.Cmd) {
+	if !m.answering(name) {
+		return m.flashError(fmt.Errorf("session %s is not answering; nothing was opened", name))
+	}
+	m.selected = name
 	return m, tea.Quit
+}
+
+// answering reports whether the listed session name answered its listing; one
+// not listed is taken as answering, there being nothing to say otherwise.
+func (m Model) answering(name string) bool {
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
+	return i < 0 || !m.sessions[i].NotAnswering
 }
 
 // Alt-screen is set declaratively here so page composers stay string builders.
@@ -2991,8 +3240,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
 	// Pointer input (pointer.go). Without it a terminal keeps a swipe for its own
-	// scrollback, which the alt screen has none of, and tmux drops the wheel for
-	// a pane that never asked for the mouse.
+	// scrollback, which the alt screen has none of.
 	v.MouseMode = tea.MouseModeCellMotion
 	// Under NO_COLOR the terminal keeps its native bg: leaving BackgroundColor
 	// nil completes the canvas suppression.
@@ -3380,7 +3628,12 @@ func (m Model) viewString() string {
 
 func (m Model) viewLoading() string {
 	view := m.loadingProgress.View()
-	if m.fatalActive {
+	switch {
+	case m.fatalActive && !m.loadingProgress.ranStep() && LabelForStepIndex(m.fatalStep) == "":
+		// No step ran on this process's loading page, and the fatal names
+		// none, so it shows alone.
+		view = LoadingProgressView{Message: m.fatalMessage}
+	case m.fatalActive:
 		// No page transition — the model stays on PageLoading awaiting q/Esc.
 		view = m.loadingProgress.FailedView(m.fatalStep, m.fatalMessage)
 	}
@@ -3402,9 +3655,7 @@ func (m Model) viewProjectList() string {
 	case modalEditProject:
 		return renderEditModalOnClearedCanvas(m, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
-		// Filtered through the same slice the footer renders from, so a
-		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.projectsHelpKeymap(), nil, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return m.viewHelpModal()
 	}
 	listView := m.projectList.View()
 	listView = m.applyProjectsSectionHeader(listView)
@@ -3485,13 +3736,11 @@ func (m Model) renderProjectsFooterForFilterState() string {
 func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
-		return renderKillModalOnClearedCanvas(m.pendingKillName, m.pendingKillWindows, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.killOffersAttach, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
-		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:
-		// Filtered through the same slice the footer renders from, so a
-		// blocked key leaves both surfaces in lockstep.
-		return renderHelpModalOnClearedCanvas(m.sessionsHelpKeymap(), sessionsIndicatorLegend(m.themeState.active, m.colourless), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return m.viewHelpModal()
 	}
 	listView := m.sessionList.View()
 	listView = m.applySectionHeader(listView)
@@ -3662,8 +3911,7 @@ func (m Model) applySectionHeader(listView string) string {
 	}
 	return replaceHeaderLine(listView, renderSectionHeader(
 		m.sessionListMode,
-		m.insideTmux,
-		m.currentSession,
+		m.currentSessionShown(),
 		m.visibleSessionRowCount(),
 		m.contentWidth(),
 		m.themeState.active,
@@ -3671,7 +3919,7 @@ func (m Model) applySectionHeader(listView string) string {
 	))
 }
 
-// Excludes group headers, so the count tracks the inside-tmux exclusion, an
+// Excludes group headers, so the count tracks the current-session exclusion, an
 // applied filter, and By-Tag's per-tag row repeats alike.
 func (m Model) visibleSessionRowCount() int {
 	count := 0

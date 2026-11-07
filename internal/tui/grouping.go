@@ -6,14 +6,13 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-// effectiveDir is the directory grouping matches on: the recorded @portal-dir
-// stamp when present, else the grouping-only derived guess. The item a builder
-// emits keeps the recorded value untouched — the two are not interchangeable
-// (the derived one is canonicalised, the recorded one is the raw stamp).
-func effectiveDir(s tmux.Session, derived map[string]string) string {
+// effectiveDir is the directory grouping matches on: the index's recorded dir
+// when present, else the grouping-only derived guess. The item a builder emits
+// keeps the recorded value untouched — the two are not interchangeable (the
+// derived one is canonicalised, the recorded one is raw).
+func effectiveDir(s Session, derived map[string]string) string {
 	if s.Dir != "" {
 		return s.Dir
 	}
@@ -24,9 +23,14 @@ const unknownHeading = "Unknown"
 
 const untaggedHeading = "Untagged"
 
+// buildFlat lists the sessions ungrouped, in the order their rows read.
+func buildFlat(sessions []Session) []list.Item {
+	return ToListItems(slices.SortedFunc(slices.Values(sessions), compareShown))
+}
+
 // The group key is the canonical path, not the heading name, so two distinct
 // directories sharing a project name form two distinct groups.
-func buildByProject(sessions []tmux.Session, idx project.Index, derived map[string]string) []list.Item {
+func buildByProject(sessions []Session, idx project.Index, derived map[string]string) []list.Item {
 	var known []SessionItem
 	var unknown []SessionItem
 
@@ -53,7 +57,7 @@ func buildByProject(sessions []tmux.Session, idx project.Index, derived map[stri
 	return assembleGroups(known, unknown, unknownHeading)
 }
 
-func buildByTag(sessions []tmux.Session, idx project.Index, derived map[string]string) []list.Item {
+func buildByTag(sessions []Session, idx project.Index, derived map[string]string) []list.Item {
 	var tagged []SessionItem
 	var untagged []SessionItem
 
@@ -75,7 +79,7 @@ func buildByTag(sessions []tmux.Session, idx project.Index, derived map[string]s
 	return assembleGroups(tagged, untagged, untaggedHeading)
 }
 
-func resolveSessionTags(s tmux.Session, idx project.Index, derived map[string]string) []string {
+func resolveSessionTags(s Session, idx project.Index, derived map[string]string) []string {
 	dir := effectiveDir(s, derived)
 	if dir == "" {
 		return nil
@@ -95,7 +99,7 @@ func resolveSessionTags(s tmux.Session, idx project.Index, derived map[string]st
 	return tags
 }
 
-func untaggedItem(s tmux.Session) SessionItem {
+func untaggedItem(s Session) SessionItem {
 	return SessionItem{
 		Session:      s,
 		GroupHeading: untaggedHeading,
@@ -103,7 +107,7 @@ func untaggedItem(s tmux.Session) SessionItem {
 	}
 }
 
-func unknownItem(s tmux.Session) SessionItem {
+func unknownItem(s Session) SessionItem {
 	return SessionItem{
 		Session:      s,
 		GroupHeading: unknownHeading,
@@ -115,10 +119,7 @@ func unknownItem(s tmux.Session) SessionItem {
 // stamping GroupKey = heading makes injectGroupHeaders treat it as one group.
 func orderedSessionItems(resolved, catchAll []SessionItem, heading string) []SessionItem {
 	slices.SortFunc(resolved, func(a, b SessionItem) int {
-		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Session.Name, b.Session.Name)
+		return cmp.Or(cmp.Compare(a.GroupKey, b.GroupKey), compareShown(a.Session, b.Session))
 	})
 
 	out := make([]SessionItem, 0, len(resolved)+len(catchAll))
@@ -131,7 +132,7 @@ func orderedSessionItems(resolved, catchAll []SessionItem, heading string) []Ses
 			stamped = append(stamped, si)
 		}
 		slices.SortFunc(stamped, func(a, b SessionItem) int {
-			return cmp.Compare(a.Session.Name, b.Session.Name)
+			return compareShown(a.Session, b.Session)
 		})
 		out = append(out, stamped...)
 	}

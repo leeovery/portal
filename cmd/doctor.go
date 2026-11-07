@@ -1,33 +1,39 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"sort"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/attachkeys"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
 // ErrDoctorUnhealthy drives a non-zero exit and is deliberately silent on
 // stderr — the rendered report is already on stdout.
 var ErrDoctorUnhealthy = errors.New("doctor unhealthy")
-
-const doctorRuntimeNotRunning = "Portal runtime not running — run portal open to start"
-
-func runtimeDownResult(name string) checkResult {
-	return checkResult{name: name, status: checkFail, detail: doctorRuntimeNotRunning}
-}
 
 type checkStatus int
 
@@ -57,18 +63,34 @@ type advisory struct {
 // production default in resolveDoctorDeps, and nothing left nil aborts
 // diagnosis.
 type DoctorDeps struct {
-	StateDir       string
-	ThemesDir      string
-	ServerRunning  func() bool
-	SaverPresent   func() (present bool, err error)
-	HookCounts     func() (map[string]int, error)
-	PendingResumes func() (tmux.PendingResumeView, error)
-	HookLister     hooksweep.Reader
-	HookStore      *hooks.Store
-	ProjectStore   *project.Store
-	PrefsStore     *prefs.Store
-	Detector       TerminalDetector
-	Resolve        spawn.AdapterResolver
+	StateDir  string
+	ThemesDir string
+	// ZmxDir is the zmx dir the dir check judges and, unless a test injects
+	// its own, the one the sessions are listed and probed in.
+	ZmxDir       string
+	LookPath     func(file string) (string, error)
+	ListSessions func(ctx context.Context) ([]backend.Session, error)
+	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
+	// zmx driver's own, on no backend interface.
+	ProtocolVersion func(ctx context.Context, name string) (int, error)
+	// Names is the backend as restore asks it about a saved session's name,
+	// bound on ZmxDir. Nil when that dir can't be bound, which leaves the kept
+	// sessions unjudged.
+	Names        restore.Names
+	HookStore    *hooks.Store
+	ProjectStore *project.Store
+	PrefsStore   *prefs.Store
+	Detector     TerminalDetector
+	Resolve      spawn.AdapterResolver
+	// Saver reads the saver session and its daemon. Unset, it is read over
+	// the driver bound on ZmxDir, through a host that signals nothing.
+	Saver doctorSaver
+	// Version is the version a daemon of this Portal records; empty is this
+	// binary's.
+	Version string
+	// DaemonSettle is how long a daemon still starting is waited for; zero is
+	// saverhost.ReadyWait, the wait the saver's own ensure gives it.
+	DaemonSettle time.Duration
 }
 
 var doctorDeps *DoctorDeps
@@ -83,35 +105,48 @@ func resolveDoctorDeps() *DoctorDeps {
 		*deps = *doctorDeps
 	}
 
-	client := tmux.DefaultClient()
-	if deps.ServerRunning == nil {
-		deps.ServerRunning = client.ServerRunning
+	if deps.ZmxDir == "" {
+		deps.ZmxDir = zmx.DirFor(os.Environ())
 	}
-	if deps.SaverPresent == nil {
-		deps.SaverPresent = func() (bool, error) {
-			_, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
-			return present, err
+	if deps.LookPath == nil {
+		deps.LookPath = exec.LookPath
+	}
+	if deps.Version == "" {
+		deps.Version = Version()
+	}
+	if deps.ListSessions == nil || deps.ProtocolVersion == nil {
+		list, protocolVersion := zmxSessionReads(deps.ZmxDir)
+		if deps.ListSessions == nil {
+			deps.ListSessions = list
+		}
+		if deps.ProtocolVersion == nil {
+			deps.ProtocolVersion = protocolVersion
 		}
 	}
-	if deps.HookCounts == nil {
-		deps.HookCounts = func() (map[string]int, error) {
-			return tmux.PortalHookCountsByEvent(client)
-		}
-	}
-	if deps.PendingResumes == nil {
-		deps.PendingResumes = client.ListPendingResumePanes
-	}
-	if deps.HookLister == nil {
-		deps.HookLister = client
-	}
-	if deps.Detector == nil || deps.Resolve == nil {
-		seams := buildProductionSpawnSeams(client)
+	// Detection and the name rule run through the driver bound on the dir
+	// doctor judges. A dir it refuses to bind leaves the host-terminal check
+	// and the kept sessions out; the dir check reports why.
+	driver, bindErr := bindZmxAt(zmxProgram, deps.ZmxDir)
+	if bindErr == nil && (deps.Detector == nil || deps.Resolve == nil) {
+		// Read-only: detection asks the runner registry, which otherwise
+		// removes the entry of a runner it proves dead.
+		seams := buildProductionSpawnSeams(context.Background(), driver, readOnlyRunners{})
 		if deps.Detector == nil {
 			deps.Detector = seams.Detector
 		}
 		if deps.Resolve == nil {
 			deps.Resolve = seams.Resolve
 		}
+	}
+	if bindErr == nil && deps.Names == nil {
+		deps.Names = driver
+	}
+
+	if deps.Saver == nil {
+		deps.Saver = readOnlySaver(deps)
+	}
+	if deps.DaemonSettle == 0 {
+		deps.DaemonSettle = saverhost.ReadyWait
 	}
 
 	// Each best-effort load is constructed only for a seam left unset, so an
@@ -143,15 +178,26 @@ func resolveDoctorDeps() *DoctorDeps {
 	return deps
 }
 
+// zmxSessionReads are the driver's listing and protocol read, both bound on
+// dir. A dir the driver refuses to bind answers every read with that refusal.
+func zmxSessionReads(dir string) (func(context.Context) ([]backend.Session, error), func(context.Context, string) (int, error)) {
+	driver, err := bindZmxAt(zmxProgram, dir)
+	if err != nil {
+		return func(context.Context) ([]backend.Session, error) { return nil, err },
+			func(context.Context, string) (int, error) { return 0, err }
+	}
+	return driver.List, driver.ProtocolVersion
+}
+
 var doctorCmd = &cobra.Command{
 	Use:           "doctor",
-	Short:         "Diagnose Portal's health across the resurrection machinery",
+	Short:         "Diagnose Portal's health",
 	Args:          cobra.NoArgs,
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		deps := resolveDoctorDeps()
-		results, err := runDoctorDiagnosis(deps)
+		results, err := runDoctorDiagnosis(cmd.Context(), deps)
 		if err != nil {
 			return err
 		}
@@ -165,10 +211,14 @@ var doctorCmd = &cobra.Command{
 			return nil
 		}
 
+		if line := fixRefusal(cmd.Context(), deps); line != "" {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
+			return ErrDoctorUnhealthy
+		}
 		// The exit is driven solely by the post-repair re-diagnosis below; the
 		// repairs never touch it directly.
 		runDoctorFix(cmd, deps)
-		postResults, err := runDoctorDiagnosis(deps)
+		postResults, err := runDoctorDiagnosis(cmd.Context(), deps)
 		if err != nil {
 			return err
 		}
@@ -182,6 +232,44 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
+// The lines of a --fix that repaired nothing: the state's zmx dir check
+// failed, the saver saves another state, or a migration is cut short, or may
+// be.
+const (
+	fixRefusedLine        = "Skipped every repair: state's zmx dir failed"
+	fixOtherStateDirLine  = "Skipped every repair: " + saver.SessionName + " saves the state in %s, not this one"
+	fixCutShortLine       = "Skipped every repair: a migration was cut short; run portal migrate to finish it"
+	fixCutShortUnreadLine = "Skipped every repair: can't tell whether a migration was cut short"
+)
+
+// fixRefusal is why --fix makes no repair, empty when it may make them. The
+// repairs write state, so a state directory that belongs to another zmx
+// directory gets none, nor one beside a saver proved another state
+// directory's, which says this state is a scratch one paired with another's
+// sessions, nor one a migration cut short left holding no index of the
+// migrated sessions; a prune in any of them would reap hooks that are
+// another's. The diagnosis names why. A state directory that can't be
+// resolved is the repairs' own to skip.
+func fixRefusal(ctx context.Context, deps *DoctorDeps) string {
+	dir, err := doctorStateDir(deps)
+	if err != nil {
+		return ""
+	}
+	if zmxDirOwner(dir, deps.ZmxDir).Refusal() != nil {
+		return fixRefusedLine
+	}
+	if other := otherStateDir(ctx, deps.Saver); other != nil {
+		return fmt.Sprintf(fixOtherStateDirLine, other.Other)
+	}
+	switch cut, err := state.MigrationCutShort(dir); {
+	case err != nil:
+		return fixCutShortUnreadLine
+	case cut:
+		return fixCutShortLine
+	}
+	return ""
+}
+
 // runDoctorFix applies only repairs that are reversible by reconstruction, each
 // best-effort so a failure is left for the re-diagnosis to report. Themes get no
 // repair step at all: rewriting a broken theme file would destroy user-authored
@@ -189,97 +277,125 @@ var doctorCmd = &cobra.Command{
 // never does — diagnosed or not.
 func runDoctorFix(cmd *cobra.Command, deps *DoctorDeps) {
 	w := cmd.OutOrStdout()
-	pruneDoctorStaleHooks(w, deps)
+	pruneDoctorStaleHooks(cmd.Context(), w, deps)
 	pruneDoctorStaleProjects(w, deps)
 	sweepDoctorLogs(deps)
 }
 
-// The sweep's own mass-deletion hazard guard is the down-server protection
-// here — do not add a second guard. A cycle that removed nothing for a reason
-// renders that reason — why it declined, or that it failed — so a prune that
-// could not run never looks like one that ran and found nothing. A store that
-// could not be opened is one such reason: to a user it is the file that could
-// not be read, which is the words the diagnosis already uses for it.
-func pruneDoctorStaleHooks(w io.Writer, deps *DoctorDeps) {
+// pruneDoctorStaleHooks runs the daemon's sweep once. A sweep that removed
+// nothing for a reason renders that reason — why it declined, or that it
+// failed — so a prune that could not run never looks like one that ran and
+// found nothing.
+func pruneDoctorStaleHooks(ctx context.Context, w io.Writer, deps *DoctorDeps) {
 	if deps.HookStore == nil {
-		reportSkippedPrune(w, hooksweep.ReasonStoreReadFailed)
+		reportFailedPrune(w, storeReadPhrase)
 		return
 	}
-	outcome, err := hooksweep.Run(deps.HookLister, deps.HookStore)
-	if err != nil {
-		reportFailedPrune(w)
-		return
-	}
-	for _, key := range outcome.Removed {
-		_, _ = fmt.Fprintf(w, "Pruned stale hook: %s\n", key)
-	}
-	if outcome.DeclineReason != "" {
+	dir, _ := doctorStateDir(deps)
+	outcome, err := hooksweep.Run(ctx, hooksweep.Sources{List: deps.ListSessions, StateDir: dir}, deps.HookStore)
+	switch {
+	case err != nil:
+		reportFailedPrune(w, sweepFailurePhrase(err))
+	case outcome.DeclineReason != "":
 		reportSkippedPrune(w, outcome.DeclineReason)
+	case len(outcome.Removed) > 0:
+		reportPrunedHooks(w, outcome.Removed)
+	}
+}
+
+// reportPrunedHooks names each removed key on a line of its own, in the
+// sweep's sorted order: a first prune can remove many.
+func reportPrunedHooks(w io.Writer, removed []string) {
+	_, _ = fmt.Fprintf(w, "Pruned %s:\n", pluralCount(len(removed), "stale hook", "stale hooks"))
+	for _, key := range removed {
+		_, _ = fmt.Fprintf(w, "  %s\n", key)
 	}
 }
 
 // The phrases both surface vocabularies share are written once here, so
-// re-wording one moves every line that prints it. A restore that is running and
-// a marker that could not be read stand the cycle down alike, but they are
-// different conditions: the server is routinely down when a user reaches for a
-// diagnosis, and reporting that as a restore would assert something that is not
-// happening.
+// re-wording one moves every line that prints it.
 const (
-	restoreStandDownPhrase    = "restore in progress"
-	markerReadStandDownPhrase = "could not read the restore marker"
-	storeReadStandDownPhrase  = "could not read hooks.json"
-	paneReadStandDownPhrase   = "could not enumerate live panes"
-	lockStandDownPhrase       = "hooks.json is locked"
+	restoreStandDownPhrase       = "restore in progress"
+	restoringReadStandDownPhrase = "could not read the restoring flag"
+	stateDirStandDownPhrase      = "could not resolve the state directory"
+	listStandDownPhrase          = "could not list sessions"
+	indexStandDownPhrase         = "could not read sessions.json"
+	noSessionsStandDownPhrase    = "no sessions listed or saved"
+	lockStandDownPhrase          = "hooks.json is locked"
+	tmuxKeysStandDownPhrase      = "hooks.json holds keys in the tmux version's shape"
+	massReapStandDownPhrase      = "half or more of hooks.json's keys name no session listed or saved"
 )
 
-// sweepFailedStandDownPhrase words a sweep that ran and failed. It reads
-// alongside the stand-down phrases above and is deliberately not one of them:
-// no reason names it, because the cycle declined nothing.
-const sweepFailedStandDownPhrase = "the sweep could not complete"
+// The phrases of a hook store or sweep that failed. They read alongside the
+// stand-down phrases above and are deliberately not among them: no reason
+// names them, because the cycle declined nothing.
+const (
+	storeReadPhrase      = "could not read hooks.json"
+	storeMalformedPhrase = "hooks.json holds malformed JSON"
+	sweepFailedPhrase    = "the sweep could not complete"
+)
+
+// storeFailurePhrase words a hooks.json that could not be read or parsed.
+func storeFailurePhrase(err error) string {
+	if errors.Is(err, hooks.ErrMalformed) {
+		return storeMalformedPhrase
+	}
+	return storeReadPhrase
+}
+
+// sweepFailurePhrase words a sweep that ran and failed, naming the store when
+// the store is what failed it.
+func sweepFailurePhrase(err error) string {
+	if errors.Is(err, hooks.ErrStoreRead) {
+		return storeFailurePhrase(err)
+	}
+	return sweepFailedPhrase
+}
 
 // skippedPrunePhrases completes "Skipped stale hook prune: …" for a user who
-// asked for a repair. A failed enumeration and a successful one that answered
-// nothing are separate conditions, so neither borrows the other's words.
+// asked for a repair.
 var skippedPrunePhrases = map[hooksweep.Reason]string{
-	hooksweep.ReasonRestoring:        restoreStandDownPhrase,
-	hooksweep.ReasonMarkerReadFailed: markerReadStandDownPhrase,
-	hooksweep.ReasonStoreReadFailed:  storeReadStandDownPhrase,
-	hooksweep.ReasonPaneReadFailed:   paneReadStandDownPhrase,
-	hooksweep.ReasonEmptyPaneRead:    "live pane list came back empty",
-	hooksweep.ReasonLockTimeout:      lockStandDownPhrase,
+	hooksweep.ReasonRestoring:           restoreStandDownPhrase,
+	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
+	hooksweep.ReasonStateDirUnresolved:  stateDirStandDownPhrase,
+	hooksweep.ReasonListFailed:          listStandDownPhrase,
+	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
+	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase,
+	hooksweep.ReasonLockTimeout:         lockStandDownPhrase,
+	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase,
+	hooksweep.ReasonMassReap:            massReapStandDownPhrase,
 }
 
-// notEvaluableDetails renders a stand-down reason as the reason the count cannot
-// be taken, so the diagnostic reports exactly what the reaper declined to judge.
+// notEvaluableDetails renders a stand-down reason as the reason the count
+// cannot be taken, so the diagnosis reports exactly what the reaper declined
+// to judge. A restore, an install with no sessions, a held lock, the tmux
+// version's keys and a mass reap held are states, so they say the count waits
+// on them; the rest name the read that failed.
 var notEvaluableDetails = map[hooksweep.Reason]string{
-	hooksweep.ReasonRestoring:        restoreStandDownPhrase + " (not evaluable)",
-	hooksweep.ReasonMarkerReadFailed: markerReadStandDownPhrase,
-	hooksweep.ReasonStoreReadFailed:  storeReadStandDownPhrase,
-	hooksweep.ReasonPaneReadFailed:   paneReadStandDownPhrase,
-	hooksweep.ReasonEmptyPaneRead:    "zero live panes with hooks present (not evaluable)",
-	hooksweep.ReasonLockTimeout:      lockStandDownPhrase + " (not evaluable)",
-}
-
-// phraseFor renders a stand-down reason through one of the surface vocabularies
-// above. A reason no vocabulary words renders nothing rather than its own slug:
-// exhaustiveness is a test's to enforce, and a runtime fall-through would only
-// make internal words look like copy on the command that explains what happened.
-func phraseFor(m map[hooksweep.Reason]string, reason hooksweep.Reason) string {
-	return m[reason]
+	hooksweep.ReasonRestoring:           restoreStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
+	hooksweep.ReasonStateDirUnresolved:  stateDirStandDownPhrase,
+	hooksweep.ReasonListFailed:          listStandDownPhrase,
+	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
+	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonLockTimeout:         lockStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase + " (not evaluable)",
+	hooksweep.ReasonMassReap:            massReapStandDownPhrase + " (not evaluable)",
 }
 
 // reportSkippedPrune renders a prune that removed nothing from the shared
-// reason vocabulary, so no branch can reach for words of its own.
+// reason vocabulary, so no branch can reach for words of its own. A reason no
+// vocabulary words renders nothing rather than its own slug: exhaustiveness is
+// a test's to enforce.
 func reportSkippedPrune(w io.Writer, reason hooksweep.Reason) {
-	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", phraseFor(skippedPrunePhrases, reason))
+	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", skippedPrunePhrases[reason])
 }
 
-// reportFailedPrune renders a prune that ran and failed. It reads as a skipped
-// prune because that is what the user got, but it is no stand-down — the sweep
-// declined nothing — so it names its own phrase rather than drawing one from
-// the stand-down vocabulary.
-func reportFailedPrune(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", sweepFailedStandDownPhrase)
+// reportFailedPrune renders a prune that failed. It reads as a skipped prune
+// because that is what the user got, but it is no stand-down — the sweep
+// declined nothing — so its phrase is a failure's, never a reason's.
+func reportFailedPrune(w io.Writer, phrase string) {
+	_, _ = fmt.Fprintf(w, "Skipped stale hook prune: %s\n", phrase)
 }
 
 func pruneDoctorStaleProjects(w io.Writer, deps *DoctorDeps) {
@@ -299,65 +415,162 @@ func pruneDoctorStaleProjects(w io.Writer, deps *DoctorDeps) {
 // sweepDoctorLogs is unconditional maintenance, not the repair of a diagnosed
 // condition — there is no stale-logs check.
 func sweepDoctorLogs(deps *DoctorDeps) {
-	stateDir := deps.StateDir
-	if stateDir == "" {
-		dir, err := state.Dir()
-		if err != nil {
-			bootstrapLogger.Warn("doctor --fix: state dir unresolvable, skipping log sweep", "error", err)
-			return
-		}
-		stateDir = dir
+	stateDir, err := doctorStateDir(deps)
+	if err != nil {
+		bootstrapLogger.Warn("doctor --fix: state dir unresolvable, skipping log sweep", "error", err)
+		return
 	}
 	if err := log.SweepLogsForClean(stateDir); err != nil {
 		bootstrapLogger.Warn("doctor --fix: log sweep failed", "error", err)
 	}
 }
 
-// runDoctorDiagnosis resolves the state directory read-only — never EnsureDir;
-// doctor creates nothing.
-func runDoctorDiagnosis(deps *DoctorDeps) ([]checkResult, error) {
-	dir := deps.StateDir
-	var dirErr error
-	if dir == "" {
-		dir, dirErr = state.Dir()
+// doctorStateDir resolves the state directory read-only — never EnsureDir;
+// doctor creates nothing. It is empty when it can't be resolved.
+func doctorStateDir(deps *DoctorDeps) (string, error) {
+	if deps.StateDir != "" {
+		return deps.StateDir, nil
 	}
+	dir, err := state.Dir()
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
 
-	serverUp := deps.ServerRunning()
+func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, error) {
+	dir, dirErr := doctorStateDir(deps)
+	// Listed once for every check that judges the sessions, so a session that
+	// doesn't answer costs one listing's bound, not one per check.
+	sessions, listErr := deps.ListSessions(ctx)
+	listed := func(context.Context) ([]backend.Session, error) { return sessions, listErr }
+	idle := nothingToSave(sessions, listErr, dir, dirErr)
+
+	stateZmxDir := checkStateZmxDir(dir, dirErr, deps.ZmxDir)
+	saverRead := readSaverPresence(ctx, deps.Saver)
 
 	results := []checkResult{
-		checkDaemonAlive(serverUp, dir, dirErr),
-		checkSaverUp(serverUp, deps.SaverPresent),
-		checkHooksRegistered(serverUp, deps.HookCounts),
+		checkZmxBinary(deps.LookPath),
+		checkZmxDir(deps.ZmxDir),
+		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
+		checkSaver(saverRead, idle),
+		checkDaemon(ctx, deps.Saver, dir, dirErr, deps.Version, deps.DaemonSettle, idle),
 		checkStateDirSane(dir, dirErr),
+		stateZmxDir,
 		checkSessionsJSON(dir, dirErr),
-		checkStaleHooks(deps.HookLister, deps.HookStore),
+		checkStaleHooks(ctx, deps.HookStore, hooksweep.Sources{List: listed, StateDir: dir}),
 		checkStaleProjects(deps.ProjectStore),
+		checkPendingResumes(dir, dirErr, sessions, listErr),
 	}
+	// The sessions were listed in the zmx dir doctor binds, which a failed
+	// check says is not the state dir's, or can't say is.
+	if stateZmxDir.status != checkFail {
+		results = append(results, checkKeptSessions(ctx, dir, sessions, listErr, deps.Names, saverRead)...)
+	}
+	results = append(results, checkKeyConfig(deps.PrefsStore))
 	if deps.Detector != nil && deps.Resolve != nil {
 		results = append(results, checkHostTerminal(deps.Detector, deps.Resolve))
 	}
-	results = append(results,
-		checkPendingResumes(serverUp, deps.PendingResumes),
-		checkResumeMode(deps.PrefsStore),
-	)
+	results = append(results, checkResumeMode(deps.PrefsStore))
 	return results, nil
 }
 
-// A waiting pane is a decision held for the user, not a fault, so no count
-// fails this line. A down runtime is reported rather than probed — doctor
-// starts nothing — and takes checkNotEvaluable, not the checkFail of
-// runtimeDownResult, which would put this line inside the exit code. A failed
-// read is not evaluable rather than zero: the read established no count.
-func checkPendingResumes(serverUp bool, read func() (tmux.PendingResumeView, error)) checkResult {
-	const name = "pending resumes"
-	if !serverUp {
-		return checkResult{name: name, status: checkNotEvaluable, detail: doctorRuntimeNotRunning}
-	}
-	view, err := read()
+func checkZmxBinary(lookPath func(string) (string, error)) checkResult {
+	const name = "zmx"
+	path, err := lookPath(zmxProgram)
 	if err != nil {
-		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read pending panes (transient tmux error)"}
+		return checkResult{name: name, status: checkFail, detail: errZmxMissing.Error()}
 	}
-	return checkResult{name: name, status: checkInfo, detail: pluralCount(view.Panes, "pane waiting to resume", "panes waiting to resume")}
+	return checkResult{name: name, status: checkPass, detail: path}
+}
+
+// zmx makes its directory with its first session, so one not made yet holds
+// none and is healthy.
+func checkZmxDir(dir string) checkResult {
+	const name = "zmx dir"
+	if !filepath.IsAbs(dir) {
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("%q is not an absolute path", dir)}
+	}
+	return checkDirReadable(name, dir)
+}
+
+// checkSessionsAnswer names every session that did not answer the listing,
+// with what its daemon says when asked for its protocol alone. A session that
+// ended since the listing is no session at all. A failed listing is the zmx
+// dir check's to judge, so it is not evaluable here. Portal's own sessions
+// count: one of them not answering is as much a fault as a user's.
+func checkSessionsAnswer(ctx context.Context, list func(context.Context) ([]backend.Session, error), protocolVersion func(context.Context, string) (int, error)) checkResult {
+	const name = "sessions"
+	sessions, err := list(ctx)
+	if err != nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: listStandDownPhrase + ": " + err.Error()}
+	}
+	var silent []string
+	for _, s := range sessions {
+		if !s.Answered {
+			silent = append(silent, s.Name)
+		}
+	}
+	reasons, ended := unansweredReasons(ctx, protocolVersion, silent)
+	total := len(sessions) - ended
+	switch {
+	case total == 0:
+		return checkResult{name: name, status: checkPass, detail: "no sessions"}
+	case len(reasons) == 0:
+		return checkResult{name: name, status: checkPass, detail: pluralCount(total, "session answering", "sessions answering")}
+	}
+	return checkResult{
+		name:   name,
+		status: checkFail,
+		detail: fmt.Sprintf("%d of %d not answering: %s", len(reasons), total, strings.Join(reasons, ", ")),
+	}
+}
+
+// maxProtocolProbes caps the probes in flight, each holding a socket open, as
+// the listing caps its own.
+const maxProtocolProbes = 64
+
+// unansweredReasons probes the silent sessions at once, up to the cap, so
+// daemons that give no answer cost one probe ceiling between them. An Info
+// request changes nothing on a daemon. It returns the named reasons in the
+// sessions' order, and how many sessions had ended.
+func unansweredReasons(ctx context.Context, protocolVersion func(context.Context, string) (int, error), names []string) (reasons []string, ended int) {
+	answers := make([]string, len(names))
+	slots := make(chan struct{}, maxProtocolProbes)
+	var wg sync.WaitGroup
+	for i, n := range names {
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			answers[i] = unansweredReason(ctx, protocolVersion, n)
+		})
+	}
+	wg.Wait()
+	for i, answer := range answers {
+		if answer == "" {
+			ended++
+			continue
+		}
+		reasons = append(reasons, names[i]+" ("+answer+")")
+	}
+	return reasons, ended
+}
+
+// unansweredReason words why a session did not answer, empty for one that has
+// ended. A daemon whose header reads protocol 1 still failed the listing every
+// command reads, so it is named as not answering too.
+func unansweredReason(ctx context.Context, protocolVersion func(context.Context, string) (int, error), name string) string {
+	version, err := protocolVersion(ctx, name)
+	switch {
+	case errors.Is(err, backend.ErrNoSuchSession):
+		return ""
+	case errors.Is(err, zmx.ErrRefusing):
+		return "refuses connections: " + stillHeld
+	case err != nil || version == zmx.ProtocolVersion:
+		return "no answer"
+	default:
+		return fmt.Sprintf("speaks protocol %d; Portal speaks %d", version, zmx.ProtocolVersion)
+	}
 }
 
 func checkResumeMode(store *prefs.Store) checkResult {
@@ -365,12 +578,47 @@ func checkResumeMode(store *prefs.Store) checkResult {
 	return checkResult{name: name, status: checkInfo, detail: installResumeModeOf(store).String()}
 }
 
-// An unsupported or remote host is an environmental state, not a Portal-health
-// defect, so this line never drives the exit code. A NULL identity short-circuits
-// before Resolve, so a config `*` catch-all cannot reclassify a remote client.
+// prefsReadStandDownPhrase words a prefs.json the key-config check could not
+// read.
+const prefsReadStandDownPhrase = "could not read prefs.json"
+
+// checkKeyConfig reads the attach runner's keys as an attach does. A fallback
+// is reported, never failed: the runner still binds the action, to its default.
+func checkKeyConfig(store *prefs.Store) checkResult {
+	const name = "key config"
+	if store == nil {
+		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
+	}
+	raw, err := store.LoadKeys()
+	switch {
+	case errors.Is(err, prefs.ErrInvalidJSON):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not valid JSON; keys keep their defaults"}
+	case errors.Is(err, prefs.ErrNotObject):
+		return checkResult{name: name, status: checkInfo, detail: "prefs.json is not a JSON object; keys keep their defaults"}
+	case err != nil:
+		return checkResult{name: name, status: checkNotEvaluable, detail: prefsReadStandDownPhrase}
+	}
+	bindings, warnings := attachkeys.Parse(raw)
+	if len(warnings) == 0 {
+		return checkResult{name: name, status: checkPass, detail: bindings.String()}
+	}
+	fallbacks := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		fallbacks = append(fallbacks, w.String())
+	}
+	return checkResult{name: name, status: checkInfo, detail: strings.Join(fallbacks, "; ")}
+}
+
+// An unsupported, remote or unsettled host is an environmental state, not a
+// Portal-health defect, so this line never drives the exit code. A NULL identity
+// short-circuits before Resolve, so a config `*` catch-all cannot reclassify a
+// remote client.
 func checkHostTerminal(detector TerminalDetector, resolve spawn.AdapterResolver) checkResult {
 	const name = "host terminal"
 	id := detector.Detect()
+	if id.Unsure {
+		return checkResult{name: name, status: checkInfo, detail: "unsupported (" + spawn.UnsureTerminal + ")"}
+	}
 	if id.IsNull() {
 		return checkResult{name: name, status: checkInfo, detail: "unsupported (remote session)"}
 	}
@@ -380,61 +628,41 @@ func checkHostTerminal(detector TerminalDetector, resolve spawn.AdapterResolver)
 	return checkResult{name: name, status: checkInfo, detail: fmt.Sprintf("%s (supported)", id.Name)}
 }
 
-// staleHooksNotEvaluable reports a stand-down in the diagnosis's register, so a
-// branch reporting one names its reason and the vocabulary words the copy.
-func staleHooksNotEvaluable(name string, reason hooksweep.Reason) checkResult {
-	return checkResult{name: name, status: checkNotEvaluable, detail: phraseFor(notEvaluableDetails, reason)}
-}
-
-// The check reads its store first and hands the result to the shared ladder,
-// so an unreadable hooks.json is reported as itself rather than as whatever the
-// tmux reads make of it. Past the ladder every judgeable entry is counted: an
-// unreadable pane list, or a server with no panes at all, would otherwise
-// report the lot stale and mislead a --fix into mass-deleting user-authored
-// on-resume commands. A live pane carrying no token is not that case — under
-// lazy stamping it is the ordinary one, and the count proceeds.
-func checkStaleHooks(reader hooksweep.Reader, store *hooks.Store) checkResult {
+// checkStaleHooks counts the keys the daemon's sweep would remove, removing
+// none. The store is read first, and strictly: a hooks.json that can't be read
+// or doesn't parse is a defect, so it fails here as itself rather than reading
+// as no hooks or as whatever the other reads make of it. No other check reads
+// the file. Past it, the sweep's own judgement decides, stand-downs included,
+// so the count and the sweep never disagree on what is stale.
+func checkStaleHooks(ctx context.Context, store *hooks.Store, src hooksweep.Sources) checkResult {
 	const name = "stale hooks"
-	// No store to read and a read that failed are one condition to a user: the
-	// file could not be read, so both render the vocabulary's words for it.
+	// No store to read is, to a user, the file that could not be read.
 	if store == nil {
-		return staleHooksNotEvaluable(name, hooksweep.ReasonStoreReadFailed)
+		return checkResult{name: name, status: checkFail, detail: storeReadPhrase}
 	}
-	persisted, err := store.Load(hooks.ViaDoctor)
+	persisted, err := store.LoadStrict(hooks.ViaDoctor)
 	if err != nil {
-		return staleHooksNotEvaluable(name, hooksweep.ReasonStoreReadFailed)
+		return checkResult{name: name, status: checkFail, detail: storeFailurePhrase(err)}
 	}
-
-	if decline := hooksweep.StalenessStandDown(reader); decline.Declined() {
-		return staleHooksNotEvaluable(name, decline.Reason())
-	}
-
-	view := hooksweep.JudgeAgainstLivePanes(reader, len(persisted))
-	if view.Decline.Declined() {
-		// Nothing persisted is an answer the sweep gives without reading a
-		// pane, so a pane read that failed cannot make it unknowable here
-		// either: with no key to judge, the count is zero whatever tmux said.
-		if len(persisted) == 0 {
-			return checkResult{name: name, status: checkPass, detail: "no hooks"}
-		}
-		return staleHooksNotEvaluable(name, view.Decline.Reason())
-	}
-
-	if view.PaneRows == 0 && len(persisted) == 0 {
+	stale, d := hooksweep.Stale(ctx, src, persisted)
+	switch {
+	case d.Declined():
+		return staleHooksNotEvaluable(name, d.Reason())
+	case len(persisted) == 0:
 		return checkResult{name: name, status: checkPass, detail: "no hooks"}
-	}
-	stale := len(hooks.StaleKeys(persisted, view.LiveTokens))
-	if stale > 0 {
-		return checkResult{name: name, status: checkFail, detail: pluralCount(stale, "stale hook entry", "stale hook entries")}
+	case len(stale) > 0:
+		return checkResult{name: name, status: checkFail, detail: pluralCount(len(stale), "stale hook entry", "stale hook entries")}
 	}
 	return checkResult{name: name, status: checkPass, detail: "no stale hooks"}
 }
 
+func staleHooksNotEvaluable(name string, reason hooksweep.Reason) checkResult {
+	return checkResult{name: name, status: checkNotEvaluable, detail: notEvaluableDetails[reason]}
+}
+
 // projectStoreReadStandDownPhrase words a projects.json the check could not
 // read. It is declared rather than written at each branch that renders it, so
-// a re-wording moves them together. It names no stand-down reason from the
-// hooks vocabulary: that vocabulary words a hook cycle's declines, and this
-// check runs no cycle and has no repair line to word.
+// a re-wording moves them together.
 const projectStoreReadStandDownPhrase = "could not read projects.json"
 
 func checkStaleProjects(store *project.Store) checkResult {
@@ -452,83 +680,6 @@ func checkStaleProjects(store *project.Store) checkResult {
 	return checkResult{name: name, status: checkPass, detail: "no stale projects"}
 }
 
-// checkDaemonAlive is a narrow state-file probe: it deliberately does not walk
-// the state-dir tree or scan portal.log, so a routine doctor run stays cheap.
-func checkDaemonAlive(serverUp bool, dir string, dirErr error) checkResult {
-	const name = "daemon"
-	if !serverUp {
-		return runtimeDownResult(name)
-	}
-	if dirErr != nil {
-		return checkResult{name: name, status: checkFail, detail: "not running"}
-	}
-	pid, err := state.ReadPIDFile(dir)
-	if err != nil || !state.IsProcessAlive(pid) {
-		return checkResult{name: name, status: checkFail, detail: "not running"}
-	}
-	version, _ := state.ReadVersionFile(dir)
-	return checkResult{
-		name:   name,
-		status: checkPass,
-		detail: fmt.Sprintf("running (pid %d, version %s)", pid, doctorDaemonVersion(version)),
-	}
-}
-
-func checkSaverUp(serverUp bool, saverPresent func() (bool, error)) checkResult {
-	const name = "saver"
-	if !serverUp {
-		return runtimeDownResult(name)
-	}
-	present, err := saverPresent()
-	switch {
-	case err != nil:
-		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read saver (transient tmux error)"}
-	case present:
-		return checkResult{name: name, status: checkPass, detail: "_portal-saver up"}
-	default:
-		return checkResult{name: name, status: checkFail, detail: "_portal-saver not running"}
-	}
-}
-
-// Events are reported in sorted order so the message is deterministic, and
-// duplicates ahead of missing entries: a stacked duplicate is the runaway-append
-// failure this check exists to catch.
-func checkHooksRegistered(serverUp bool, hookCounts func() (map[string]int, error)) checkResult {
-	const name = "hooks"
-	if !serverUp {
-		return runtimeDownResult(name)
-	}
-	counts, err := hookCounts()
-	if err != nil {
-		return checkResult{name: name, status: checkNotEvaluable, detail: "could not read hooks (transient tmux error)"}
-	}
-
-	events := make([]string, 0, len(counts))
-	for ev := range counts {
-		events = append(events, ev)
-	}
-	sort.Strings(events)
-
-	for _, ev := range events {
-		if counts[ev] >= 2 {
-			return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("duplicate hook entries on %s (%d)", ev, counts[ev])}
-		}
-	}
-	for _, ev := range events {
-		if counts[ev] == 0 {
-			return checkResult{name: name, status: checkFail, detail: fmt.Sprintf("hooks not registered on %s", ev)}
-		}
-	}
-	return checkResult{name: name, status: checkPass, detail: "hooks registered (one per event)"}
-}
-
-func doctorDaemonVersion(v string) string {
-	if v == "" {
-		return "unknown"
-	}
-	return v
-}
-
 func pluralCount(n int, singular, plural string) string {
 	unit := plural
 	if n == 1 {
@@ -543,39 +694,106 @@ func checkStateDirSane(dir string, dirErr error) checkResult {
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
 	}
+	return checkDirReadable(name, dir)
+}
+
+// The state's zmx dir check's failures.
+const (
+	// otherZmxDirDetail is a state directory that belongs to another zmx
+	// directory: the one it belongs to, the record, and the one this Portal
+	// uses.
+	otherZmxDirDetail = "belongs to the zmx sessions in %[1]s (recorded in %[2]s), but this Portal is using %[3]s; run it with ZMX_DIR=%[1]s, or give it a state of its own with PORTAL_STATE_DIR"
+	// unreadableZmxDirDetail is a record doctor can't read: its path, and why.
+	unreadableZmxDirDetail = "can't read %[1]s: %[2]v; delete it, and Portal records the directory in use at its next start"
+)
+
+// checkStateZmxDir reads, as the bootstrap does but recording nothing, which
+// zmx directory the state directory belongs to. A state directory that
+// records none yet passes: the next bootstrap records this one.
+func checkStateZmxDir(dir string, dirErr error, zmxDir string) checkResult {
+	const name = "state's zmx dir"
+	if dirErr != nil {
+		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
+	}
+	recorded, err := zmxDirOwner(dir, zmxDir).Recorded()
+	other, isOther := errors.AsType[*bootstrap.OtherZmxDirError](err)
+	record, isRecord := errors.AsType[*bootstrap.ZmxDirRecordError](err)
+	switch {
+	case isOther:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(otherZmxDirDetail, other.Recorded, other.Record, other.Using)}
+	case isRecord:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(unreadableZmxDirDetail, record.Path, record.Err)}
+	case recorded == "":
+		return checkResult{name: name, status: checkPass, detail: "not recorded yet"}
+	}
+	return checkResult{name: name, status: checkPass, detail: recorded}
+}
+
+// checkDirReadable passes a directory that can be read, or that is not made
+// yet. Opening it is the read: a stat alone passes a directory that refuses
+// to be listed.
+func checkDirReadable(name, dir string) checkResult {
 	info, err := os.Stat(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return checkResult{name: name, status: checkPass, detail: "not created yet"}
 	case err != nil:
 		return checkResult{name: name, status: checkFail, detail: "unreadable"}
-	case info.IsDir():
-		return checkResult{name: name, status: checkPass, detail: dir}
-	default:
+	case !info.IsDir():
 		return checkResult{name: name, status: checkFail, detail: "not a directory"}
 	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return checkResult{name: name, status: checkFail, detail: "unreadable"}
+	}
+	_ = f.Close()
+	return checkResult{name: name, status: checkPass, detail: dir}
 }
 
-// state.ReadIndex, not the lossy HasLastSave: absent and corrupt must report
-// differently.
+// The sessions.json check's failures while a migration is cut short.
+const (
+	// cutShortDetail is a migration cut short: where the migrated state waits.
+	cutShortDetail = "a migration was cut short, its state waiting in %s; run portal migrate to finish it"
+	// cutShortUnreadDetail is a migration doctor can't rule out: why.
+	cutShortUnreadDetail = "can't tell whether a migration was cut short: %v"
+)
+
+// An absent sessions.json is a fresh install, told apart from an empty index,
+// and from a state dir a migration cut short left without one. Doctor is
+// exempt from the root's stop on an unusable index and on a migration cut
+// short, so it names each itself.
 func checkSessionsJSON(dir string, dirErr error) checkResult {
 	const name = "sessions.json"
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
 	}
-	idx, skip, err := state.ReadIndex(dir)
-	switch {
+	switch cut, err := state.MigrationCutShort(dir); {
 	case err != nil:
-		return checkResult{name: name, status: checkFail, detail: "sessions.json corrupt"}
-	case skip:
-		return checkResult{name: name, status: checkPass, detail: "no sessions saved yet"}
-	default:
-		return checkResult{
-			name:   name,
-			status: checkPass,
-			detail: fmt.Sprintf("%s, %s", pluralCount(len(idx.Sessions), "session", "sessions"), pluralCount(state.CountPanes(idx), "pane", "panes")),
-		}
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortUnreadDetail, err)}
+	case cut:
+		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortDetail, state.MigrationStagingDir(dir))}
 	}
+	if _, err := os.Stat(sessionindex.Path(dir)); errors.Is(err, fs.ErrNotExist) {
+		return checkResult{name: name, status: checkPass, detail: "no sessions indexed yet"}
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return checkResult{name: name, status: checkFail, detail: unusableIndexDetail(err)}
+	}
+	return checkResult{name: name, status: checkPass, detail: pluralCount(idx.Len(), "session indexed", "sessions indexed")}
+}
+
+func unusableIndexDetail(err error) string {
+	if errors.Is(err, sessionindex.ErrLegacyIndex) {
+		return "from the tmux version of Portal; run portal migrate"
+	}
+	if versionErr, ok := errors.AsType[*sessionindex.VersionError](err); ok && versionErr.Found > sessionindex.SchemaVersion {
+		return fmt.Sprintf("version %d, from a newer Portal; this one reads version %d", versionErr.Found, sessionindex.SchemaVersion)
+	}
+	if _, ok := errors.AsType[*fs.PathError](err); ok {
+		return "unreadable"
+	}
+	return "corrupt"
 }
 
 func renderDoctorReport(w io.Writer, results []checkResult, advisories []advisory) {

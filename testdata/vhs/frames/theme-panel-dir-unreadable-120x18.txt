@@ -1,0 +1,18 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                                                                        │
+  Sessions 12                                                                           │ Themes
+                                                                                        │
+  ▌ atelier-web-m4TzpD                                                                  │ ⚠ dir unreadable
+    kiln-aws-migration                                                                  │   nord-wave
+    kiln-relayx-explore                                                                 │   solarized-dusk   ⚠ ● light
+    loom-p84cXa                                                                         │ ▌ tokyo-night
+    lumen webhooks and watchers                                                         │   tokyo-night-day
+    lumen-sync-engine                                                                   │
+    orchard-pipeline-code-based                                                         │              ••
+                                                                                        │ ⏎   set theme
+                                                           ••                           │ d   set as dark
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light
+  ⏎ attach · / filter · ␣ preview · s switch view · x projects · t theme · m multi      │ esc close
+

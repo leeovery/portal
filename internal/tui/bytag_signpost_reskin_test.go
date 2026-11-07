@@ -7,14 +7,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func signpostModel(t *testing.T) Model {
 	t.Helper()
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "portal-abc", Dir: dir},
 		{Name: "portal-def", Dir: dir},
 	}
@@ -88,7 +87,7 @@ func TestSignpostReskin_SpecExactWording(t *testing.T) {
 
 func TestSignpostReskin_OnlyByTagZeroTags(t *testing.T) {
 	dir := t.TempDir()
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	cases := []struct {
 		name     string
@@ -120,20 +119,19 @@ func TestSignpostReskin_OnlyByTagZeroTags(t *testing.T) {
 	}
 }
 
-func TestSignpostReskin_ZeroPaneReads(t *testing.T) {
+func TestSignpostReskin_ZeroDirResolutions(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
-		{Name: "portal-a", Dir: ""},
-		{Name: "portal-b", Dir: ""},
+	sessions := []Session{
+		{Name: "portal-a", Cwd: dir},
+		{Name: "portal-b", Cwd: dir},
 	}
 
-	stamper := &fakeStamper{path: dir}
+	runner := &fakeDirRunner{gitRoot: dir}
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
 	m.termHeight = 24
-	m.dirReader = stamper
-	m.dirRunner = &fakeDirRunner{gitRoot: dir}
+	m.dirRunner = runner
 
 	m.rebuildSessionList()
 	_ = m.View().Content
@@ -141,18 +139,15 @@ func TestSignpostReskin_ZeroPaneReads(t *testing.T) {
 	if !m.byTagSignpost {
 		t.Fatalf("setup invariant: byTagSignpost = false, want true (zero tags anywhere)")
 	}
-	if len(stamper.reads) != 0 {
-		t.Errorf("signpost path performed %d pane reads (reads=%v), want 0", len(stamper.reads), stamper.reads)
-	}
-	if len(stamper.setCalls) != 0 {
-		t.Errorf("signpost path performed %d stamp writes, want 0", len(stamper.setCalls))
+	if len(runner.reads) != 0 {
+		t.Errorf("signpost path performed %d git-root resolutions (reads=%v), want 0", len(runner.reads), runner.reads)
 	}
 }
 
 func TestSignpostReskin_GroupingMachineryUntouched(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "portal-abc", Dir: dir},
 		{Name: "portal-def", Dir: dir},
 	}

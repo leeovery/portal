@@ -4,58 +4,104 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
+
+const (
+	daemonTick = time.Second
+	// pollEvery is how far apart, on the tick, the saver's polls are.
+	pollEvery = 5 * time.Second
+	// selfSupervisionHysteresisTicks is the run of ticks the saver session
+	// must read as gone, or as running another process, before the daemon
+	// self-ejects. TestDaemonSelfSupervisionHysteresisAgainstZmx holds it at
+	// no less than twice the longest run a healthy daemon reads, within
+	// [3, 9].
+	selfSupervisionHysteresisTicks = 3
+	// Gone-dir projects are inert clutter rather than a correctness hazard,
+	// hence the slow cadence.
+	projectCleanupInterval = time.Hour
+	// A hook goes with its session's entry; the sweep is only the backstop
+	// for one left behind, so it shares the projects' cadence.
+	hookSweepInterval = time.Hour
+	// shutdownBound is how long, from the first SIGTERM or SIGHUP, the work
+	// in flight and the final flush have before the daemon exits without
+	// them: a poll held on commit.lock must not keep a successor meeting a
+	// live daemon.pid. A zmx kill grants far less, sending its uncatchable
+	// signal about 0.5 s after the SIGHUP, so Portal's own stops
+	// SIGTERM the daemon and wait saverhost.TermWait, longer than this, for
+	// it to exit, rather than rely on a kill of _portal-saver.
+	shutdownBound = 6 * time.Second
+	// flushNaming is the end of the bound the final flush keeps for naming
+	// what it wrote: it stops asking for histories that long before.
+	flushNaming = time.Second
+)
+
+// daemonSaver is the saver's cycle as the daemon runs it.
+type daemonSaver interface {
+	Poll(ctx context.Context) (saver.Result, error)
+	Flush(ctx context.Context) (saver.Result, error)
+}
 
 type daemonDeps struct {
 	Dir     string
 	Version string
-	Logger  *slog.Logger
-	Client  *tmux.Client
-	// OwnServer is the pid of the tmux server the daemon's _portal-saver pane
-	// runs in, and stays its own server after that pane is destroyed.
-	OwnServer int
+	// Backend holds the saver session the daemon must be running in.
+	Backend backend.Backend
+	Saver   daemonSaver
+	// Projects is the store the idle cleanup prunes; nil prunes nothing.
+	Projects *project.Store
+	// Hooks is the store the idle sweep prunes; nil prunes nothing.
+	Hooks *hooks.Store
+	// Ticks drives the loop, each tick carrying the time it fired.
+	Ticks <-chan time.Time
+	// Signals carries the SIGTERMs and SIGHUPs that end the daemon.
+	Signals <-chan os.Signal
+	// ShutdownBound and FlushNaming bound the shutdown, as shutdownBound and
+	// flushNaming do in production.
+	ShutdownBound, FlushNaming time.Duration
 
-	HookStore   *hooks.Store
-	lastCleanup time.Time
-
-	ProjectStore       *project.Store
+	// absences is the run of ticks the saver session has read as lost.
+	absences           int
+	lastPoll           time.Time
 	lastProjectCleanup time.Time
-
-	HashMap      state.HashMap
-	PrevIndex    *state.Index
-	LastSaveAt   time.Time
-	TickerPeriod time.Duration
-	MaxGap       time.Duration
-
-	shutdownSignal atomic.Pointer[os.Signal]
+	lastHookSweep      time.Time
+	// signalled is the signal that began the shutdown, if one did.
+	signalled atomic.Pointer[shutdownSignal]
+	// ended is set by whichever logs the shutdown first: the loop, its flush
+	// done, or runLoop, its bound passed.
+	ended atomic.Bool
 }
 
-func (d *daemonDeps) recordShutdownSignal(sig os.Signal) {
-	d.shutdownSignal.Store(&sig)
+// shutdownSignal is the first SIGTERM or SIGHUP and when it came.
+type shutdownSignal struct {
+	sig os.Signal
+	at  time.Time
+}
+
+func (d *daemonDeps) recordShutdownSignal(sig os.Signal, at time.Time) {
+	d.signalled.Store(&shutdownSignal{sig: sig, at: at})
 }
 
 func (d *daemonDeps) shutdownReason() string {
-	p := d.shutdownSignal.Load()
-	if p == nil {
+	s := d.signalled.Load()
+	if s == nil {
 		return "exit"
 	}
-	switch *p {
+	switch s.sig {
 	case syscall.SIGHUP:
 		return "sighup"
 	case syscall.SIGTERM:
@@ -65,342 +111,281 @@ func (d *daemonDeps) shutdownReason() string {
 	}
 }
 
-var (
-	daemonRunFunc      = defaultDaemonRun
-	daemonShutdownFunc = defaultShutdownFlush
-)
-
 var daemonTickLoopFunc = defaultDaemonTickLoop
 
 var acquireDaemonLock = state.AcquireDaemonLock
 
-// osExit is the seam over os.Exit; never call os.Exit directly in this package.
-// Every call site must first log.Close(N), or the run leaves an unpaired
-// "process: start" behind.
-var osExit = os.Exit
-
-var saverMembershipProbe = defaultSaverMembershipProbe
-
-func defaultSaverMembershipProbe(c *tmux.Client, selfPID int) bool {
-	if !c.HasSession(tmux.PortalSaverName) {
-		return false
-	}
-	pid, present, err := tmux.SaverPanePIDOrAbsent(c, tmux.PortalSaverName)
-	if err != nil || !present {
-		return false
-	}
-	return pid == selfPID
-}
-
-// daemonLockFile retains the advisory-lock fd for the process lifetime. Never
-// close it or attach a runtime.SetFinalizer: either silently releases the
-// kernel-side flock, which the kernel would otherwise hold until exit.
-var daemonLockFile *os.File
-
-// selfSupervisionHysteresisTicks is the run of failing saver-membership probes
-// required before the daemon self-ejects. Measured against real tmux 3.6b on
-// 2026-05-23: steady state, attach/detach, client-attached hook fires and
-// bootstrap kill-and-recreate all peaked at 0 ticks; a 2x safety factor clamped
-// to the [3, 9] range gives 3.
-const selfSupervisionHysteresisTicks = 3
-
-// Stale hooks are inert, so the prune runs on a slack cadence that leaves the
-// 1s tick free for capture work.
-const hookCleanupInterval = 10 * time.Second
-
-// Gone-dir projects are inert clutter rather than a correctness hazard, hence
-// the far slower cadence.
-const projectCleanupInterval = 1 * time.Hour
+// heldDaemonLock is the daemon's lock from its acquire until the process
+// exits, which releases it. It is never closed, and is held here to stay
+// reachable: a collected *os.File's finalizer would close its fd, releasing
+// the lock while daemon.pid still names this live process.
+var heldDaemonLock *os.File
 
 // The acquire call, its error guard and WritePIDFile must stay immediately
 // consecutive statements: no other work may land between them.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
-	lockFile, err := acquireDaemonLock(deps.Dir)
+	var err error
+	heldDaemonLock, err = acquireDaemonLock(deps.Dir)
 	if err != nil {
 		if errors.Is(err, state.ErrDaemonLockHeld) {
-			deps.Logger.Warn("another daemon holds the lock; exiting")
+			daemonLogger.Warn("another daemon holds the lock; exiting")
 			return nil
 		}
-		deps.Logger.Warn("acquire daemon lock failed", "error", err)
+		daemonLogger.Warn("acquire daemon lock failed", "error", err)
 		return fmt.Errorf("acquire daemon lock: %w", err)
 	}
 	if err := state.WritePIDFile(deps.Dir, os.Getpid()); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
-	if err := state.WriteVersionFile(deps.Dir, deps.Version, deps.Logger); err != nil {
+	if err := state.WriteVersionFile(deps.Dir, deps.Version, daemonLogger); err != nil {
 		return fmt.Errorf("write version file: %w", err)
 	}
-	daemonLockFile = lockFile
 
-	deps.Logger.Info("lock acquired", "tmux_pane", os.Getenv("TMUX_PANE"))
+	daemonLogger.Info("lock acquired", "session", deps.Backend.Current())
 
-	return daemonTickLoopFunc(ctx, deps)
+	return deps.runLoop(ctx, daemonTickLoopFunc)
 }
 
-// The membership self-check sits in the loop rather than inside tick: tick
-// early-returns while @portal-restoring is set, and a divergent daemon must
-// still eject during a restore window.
-func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
-	ticker := time.NewTicker(deps.TickerPeriod)
-	defer ticker.Stop()
-	var consecutiveAbsenceTicks int
-	for {
-		select {
-		case <-ticker.C:
-			if saverMembershipProbe(deps.Client, os.Getpid()) {
-				consecutiveAbsenceTicks = 0
-			} else {
-				consecutiveAbsenceTicks++
-				if consecutiveAbsenceTicks >= selfSupervisionHysteresisTicks {
-					deps.Logger.Info("self-eject", "ticks", consecutiveAbsenceTicks, "threshold", selfSupervisionHysteresisTicks)
-					// Emits the paired "process: exit code=0" marker without
-					// itself exiting. Do not reorder or drop it.
-					log.Close(0)
-					osExit(0)
-					// Unreachable in production; keeps a no-op osExit from
-					// falling into tick.
-					return nil
-				}
-				deps.Logger.Debug("saver-membership probe failed", "ticks", consecutiveAbsenceTicks, "threshold", selfSupervisionHysteresisTicks)
-			}
-			tick(ctx, deps)
-		case <-ctx.Done():
-			return daemonShutdownFunc(deps)
-		}
-	}
-}
+// runLoop runs loop until it returns, or until a SIGTERM or SIGHUP ends the
+// daemon. The first cancels the loop, whose work in flight and final flush
+// then have ShutdownBound; past it, or at a second signal, the daemon ends
+// without them, which their atomic writes and the lock's release at exit
+// make safe.
+func (d *daemonDeps) runLoop(ctx context.Context, loop func(context.Context, *daemonDeps) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- loop(ctx, d) }()
 
-// Order matters: @portal-restoring suppresses the whole tick, including the
-// dirty-flag clear, so a save.requested raised during restore survives it. The
-// throttled prunes sit on the idle branch — behind the capture branch they
-// would never fire on a mostly-idle server.
-func tick(ctx context.Context, deps *daemonDeps) {
-	restoring, err := state.RestoreWindowActive(state.IsRestoringSet(deps.Client))
-	if err != nil {
-		deps.Logger.Warn("read @portal-restoring failed", "error", err)
-	}
-	if restoring {
-		return
-	}
-
-	dirty := fileExists(state.SaveRequested(deps.Dir))
-	gap := time.Since(deps.LastSaveAt) >= deps.MaxGap
-	if !dirty && !gap {
-		maybeRunHookCleanup(deps)
-		maybeRunProjectCleanup(deps)
-		return
-	}
-
-	// The request is consumed before the cycle, not after it: a touch landing
-	// while the cycle runs — a commit-now that timed out on this tick's lock, a
-	// hook set, a notify — asks for a capture taken after it, so it must survive
-	// to the next tick. A cancelled cycle consumes it harmlessly, since the
-	// shutdown flush follows.
-	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		deps.Logger.Warn("remove save.requested failed", "error", err)
-	}
-
-	if err := captureAndCommit(ctx, deps); err != nil {
-		deps.Logger.Warn(cycleFailureMessage("tick", err), "error", err)
-		if err := state.TouchSaveRequested(deps.Dir); err != nil {
-			deps.Logger.Warn("touch save.requested failed", "error", err)
-		}
-		return
-	}
-
-	deps.LastSaveAt = time.Now()
-}
-
-// The throttle anchor is reset after the cleanup body runs, so a failing prune
-// backs off to the next cadence instead of hammering the store every tick.
-func maybeRunHookCleanup(deps *daemonDeps) {
-	if deps.HookStore == nil {
-		return
-	}
-	if time.Since(deps.lastCleanup) < hookCleanupInterval {
-		return
-	}
-	// The failure is the sweep's own to report, under the component that owns
-	// the subsystem it swept; the tick survives it either way.
-	_, _ = hooksweep.Run(deps.Client, deps.HookStore)
-	deps.lastCleanup = time.Now()
-}
-
-// No mass-deletion hazard guard, unlike the hook prune: a gone directory is
-// unambiguously stale regardless of tmux server state.
-func maybeRunProjectCleanup(deps *daemonDeps) {
-	if deps.ProjectStore == nil {
-		return
-	}
-	if time.Since(deps.lastProjectCleanup) < projectCleanupInterval {
-		return
-	}
-	if _, err := deps.ProjectStore.CleanStale(); err != nil {
-		deps.Logger.Warn("projects stale-cleanup failed", "error", err)
-	}
-	deps.lastProjectCleanup = time.Now()
-}
-
-func cycleFailureMessage(stage string, err error) string {
-	if errors.Is(err, state.ErrTmuxStoppedAnswering) {
-		return stage + " backed off: tmux stopped answering"
-	}
-	return stage + " failed"
-}
-
-// errCycleCancelled ends a cycle whose context was cancelled mid-dump, before
-// its commit.
-var errCycleCancelled = errors.New("capture cycle cancelled")
-
-func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
-	// A cancellation returns nil, not an error: tick logs WARN on any non-nil
-	// return, and a cancel must not produce a log line.
 	select {
-	case <-ctx.Done():
-		return nil
-	default:
-	}
-
-	start := time.Now()
-	dump := &scrollbackDump{ctx: ctx, deps: deps}
-
-	capture, err := state.RunCommitCycle(state.CommitCycle{
-		Client:    deps.Client,
-		OwnServer: deps.OwnServer,
-		Dir:       deps.Dir,
-		LoadPrev:  func() *state.Index { return deps.PrevIndex },
-		HashMap:   deps.HashMap,
-		Dump:      dump.run,
-		Logger:    deps.Logger,
-	})
-	if errors.Is(err, errCycleCancelled) {
-		return nil
-	}
-	if err != nil {
+	case err := <-done:
 		return err
+	case sig := <-d.Signals:
+		d.recordShutdownSignal(sig, time.Now())
+		cancel()
 	}
-
-	deps.PrevIndex = &capture.Index
-
-	captureLogger.Info("tick complete",
-		"sessions", len(capture.Index.Sessions),
-		"panes", dump.panes,
-		"natural_churn", dump.naturalChurn,
-		"anomalous", dump.anomalous,
-		log.Took(start),
-	)
+	bound := time.NewTimer(d.ShutdownBound)
+	defer bound.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-bound.C:
+	case <-d.Signals:
+	}
+	d.logShutdown(false)
 	return nil
 }
 
-// scrollbackDump is the daemon's part of a committing cycle, tallied for the
-// cycle summary.
-type scrollbackDump struct {
-	ctx                            context.Context
-	deps                           *daemonDeps
-	panes, naturalChurn, anomalous int
-}
-
-func (d *scrollbackDump) run(capture state.CaptureCycle, writer state.ScrollbackWriter) (bool, error) {
-	if d.ctx.Err() != nil {
-		return false, errCycleCancelled
-	}
-	anyScrollbackChanged := false
-	for _, sess := range capture.Index.Sessions {
-		for _, win := range sess.Windows {
-			for _, pane := range win.Panes {
-				if d.ctx.Err() != nil {
-					return false, errCycleCancelled
-				}
-				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				if capture.SkipsScrollback(paneKey) {
-					continue
-				}
-				if d.dumpPane(writer, sess.Name, win.Index, pane.Index, paneKey) {
-					anyScrollbackChanged = true
-				}
+// The self-check runs on every tick, ahead of the poll, which stands down
+// while a restore runs: a daemon diverged from the saver must eject during
+// one too.
+func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
+	for {
+		select {
+		case at := <-deps.Ticks:
+			if deps.supervise(ctx) {
+				// Unreachable past a real exit; keeps a fake one from falling
+				// into the tick.
+				return nil
 			}
+			deps.tick(ctx, at)
+		case <-ctx.Done():
+			return deps.shutdown()
 		}
 	}
-	return anyScrollbackChanged, nil
 }
 
-func (d *scrollbackDump) dumpPane(writer state.ScrollbackWriter, session string, windowIdx, paneIdx int, paneKey string) bool {
-	d.panes++
-	captureLogger.Debug("pane captured", "pane_key", paneKey, "session", session)
-	target := tmux.PaneTargetExact(session, windowIdx, paneIdx)
-	data, hash, err := state.CaptureAndHashPane(d.deps.Client, target)
-	if err != nil {
-		if isPaneVanishedError(err) {
-			d.naturalChurn++
-			captureLogger.Debug("pane vanished", "pane_key", paneKey, "error_class", "expected")
-			return false
+// membership is what one tick's self-check read of the saver session.
+type membership int
+
+const (
+	// membershipHeld is the saver session answering, running this daemon.
+	membershipHeld membership = iota
+	// membershipLost is the session gone, or running another process.
+	membershipLost
+	// membershipUnknown is the session not answering, or naming no process,
+	// which proves nothing either way.
+	membershipUnknown
+)
+
+func saverMembership(ctx context.Context, b backend.Backend, self int) (membership, error) {
+	s, err := b.Session(ctx, saver.SessionName)
+	switch {
+	case errors.Is(err, backend.ErrNoSuchSession):
+		return membershipLost, err
+	case err != nil:
+		return membershipUnknown, err
+	case s.PID == self:
+		return membershipHeld, nil
+	case s.PID == 0:
+		return membershipUnknown, nil
+	}
+	return membershipLost, nil
+}
+
+// supervise checks the daemon is still the saver session's process, and
+// self-ejects once a run of selfSupervisionHysteresisTicks ticks has read it
+// lost. A tick that reads nothing neither adds to the run nor ends it. It
+// reports whether it ejected, which a real exit never returns to.
+func (d *daemonDeps) supervise(ctx context.Context) bool {
+	m, err := saverMembership(ctx, d.Backend, os.Getpid())
+	switch m {
+	case membershipHeld:
+		d.absences = 0
+	case membershipUnknown:
+		daemonLogger.Debug("saver-membership probe unanswered", "ticks", d.absences, "threshold", selfSupervisionHysteresisTicks, "error", err)
+	case membershipLost:
+		d.absences++
+		if d.absences >= selfSupervisionHysteresisTicks {
+			selfEject(d.absences)
+			return true
 		}
-		d.anomalous++
-		d.deps.Logger.Warn("capture pane failed", "pane_key", paneKey, "error", err)
-		return false
-	}
-	written, err := writer.Write(paneKey, data, hash)
-	if errors.Is(err, state.ErrUnconfirmedEmptyCapture) {
-		d.anomalous++
-		d.deps.Logger.Warn("empty capture not confirmed; saved transcript kept", "pane_key", paneKey, "error", err)
-		return false
-	}
-	if err != nil {
-		d.anomalous++
-		d.deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
-		return false
-	}
-	return written
-}
-
-// tmux does not sentinel-wrap a vanished pane, so the "can't find " stderr
-// phrasing is the load-bearing classifier; ErrNoSuchSession is defensive.
-func isPaneVanishedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, tmux.ErrNoSuchSession) {
-		return true
-	}
-	var cmdErr *tmux.CommandError
-	if errors.As(err, &cmdErr) && strings.Contains(strings.ToLower(cmdErr.Stderr), "can't find ") {
-		return true
+		daemonLogger.Debug("saver-membership probe failed", "ticks", d.absences, "threshold", selfSupervisionHysteresisTicks)
 	}
 	return false
 }
 
-// The flush is skipped for the whole restore window: a half-restored topology
-// must not become the committed snapshot, and a stale snapshot beats a
-// guaranteed-bad one. The failed read the window's rule presumes set is still
-// worth a WARN here — a shutdown flush gets no second attempt.
-func defaultShutdownFlush(deps *daemonDeps) error {
-	restoring, err := state.RestoreWindowActive(state.IsRestoringSet(deps.Client))
-	if restoring {
-		if err != nil {
-			deps.Logger.Warn("read @portal-restoring at shutdown failed; skipping final flush", "error", err)
-		} else {
-			deps.Logger.Debug("skipping final flush: @portal-restoring set")
-		}
-		deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", false)
-		return nil
+// selfEject ends a daemon that is no longer the saver session's process
+// without its shutdown flush, so a diverged daemon commits nothing more. It
+// leaves daemon.pid stale on purpose: the next daemon's lock pre-check reads
+// a dead pid as no daemon, and removing it here would race that check.
+func selfEject(ticks int) {
+	daemonLogger.Info("self-eject", "ticks", ticks, "threshold", selfSupervisionHysteresisTicks)
+	// Emits the paired "process: exit code=0" marker without itself exiting.
+	log.Close(0)
+	osExit(0)
+}
+
+// tick polls every pollEvery, the first tick included, and on the ticks
+// between runs the idle work.
+func (d *daemonDeps) tick(ctx context.Context, at time.Time) {
+	if d.lastPoll.IsZero() || at.Sub(d.lastPoll) >= pollEvery {
+		d.lastPoll = at
+		d.poll(ctx)
+		return
 	}
-	deps.Logger.Debug("final flush")
-	// Non-cancellable: the cancelled context is what triggered this flush.
-	flushErr := captureAndCommit(context.Background(), deps)
-	if flushErr != nil {
-		deps.Logger.Warn(cycleFailureMessage("final flush", flushErr), "error", flushErr)
+	d.maybeCleanProjects(at)
+	d.sweepStaleHooks(ctx, at)
+}
+
+// poll runs one of the saver's polls, summarising in one INFO line one that
+// claimed, dropped, captured or removed anything: a quiet poll, every five
+// seconds, logs nothing at INFO.
+func (d *daemonDeps) poll(ctx context.Context) {
+	start := time.Now()
+	result, err := d.Saver.Poll(ctx)
+	switch {
+	case errors.Is(err, saver.ErrRestoring):
+		daemonLogger.Debug("poll stood down", "error", err)
+	case err != nil && ctx.Err() != nil:
+		// Cut short by the shutdown, whose final flush follows.
+	case err != nil:
+		daemonLogger.Warn("poll failed", "error", err)
+	case !result.Quiet():
+		captureLogger.Info("poll complete",
+			"claimed", result.Claimed,
+			"dropped", result.Dropped,
+			"captured", result.Captured,
+			"reaped", result.Removed,
+			log.Took(start),
+		)
 	}
-	deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", flushErr == nil)
+}
+
+// The throttle anchor is reset after the cleanup runs, so a failing prune
+// backs off to the next cadence instead of hammering the store every tick.
+func (d *daemonDeps) maybeCleanProjects(at time.Time) {
+	if d.Projects == nil || at.Sub(d.lastProjectCleanup) < projectCleanupInterval {
+		return
+	}
+	if _, err := d.Projects.CleanStale(); err != nil {
+		daemonLogger.Warn("projects stale-cleanup failed", "error", err)
+	}
+	d.lastProjectCleanup = at
+}
+
+// sweepStaleHooks reaps, on an idle tick an interval after the last sweep, the
+// hooks no listed session and no index entry names. The sweep logs its own
+// outcome, a stand-down at DEBUG and a failure at WARN, so its error is not
+// logged again here. The anchor moves whatever the outcome, so a failing sweep
+// waits an interval like any other.
+func (d *daemonDeps) sweepStaleHooks(ctx context.Context, at time.Time) {
+	if d.Hooks == nil || at.Sub(d.lastHookSweep) < hookSweepInterval {
+		return
+	}
+	_, _ = hooksweep.Run(ctx, hooksweep.Sources{List: d.Backend.List, StateDir: d.Dir}, d.Hooks)
+	d.lastHookSweep = at
+}
+
+// shutdown takes the final flush and logs the daemon's end. The flush asks
+// for histories until FlushNaming before the shutdown's bound, keeping the
+// rest for naming what it wrote.
+func (d *daemonDeps) shutdown() error {
+	start := time.Now()
+	ctx, cancel := context.WithDeadline(context.Background(), d.shutdownDeadline(start).Add(-d.FlushNaming))
+	defer cancel()
+	result, err := d.Saver.Flush(ctx)
+	switch {
+	case errors.Is(err, saver.ErrRestoring):
+		daemonLogger.Debug("final flush stood down", "error", err)
+	case err != nil:
+		daemonLogger.Warn("final flush failed", "error", err)
+	case !result.Quiet():
+		captureLogger.Info("flush complete", "captured", result.Captured, log.Took(start))
+	}
+	d.logShutdown(err == nil)
 	return nil
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// shutdownDeadline is when the shutdown's bound passes: ShutdownBound after
+// the signal that began it, or after from for a shutdown no signal began.
+func (d *daemonDeps) shutdownDeadline(from time.Time) time.Time {
+	if s := d.signalled.Load(); s != nil {
+		from = s.at
+	}
+	return from.Add(d.ShutdownBound)
 }
 
-// The daemon runs as the pane process of the _portal-saver session, spawned by
-// bootstrap.
+// logShutdown logs the daemon's end, once, whoever reaches it first.
+func (d *daemonDeps) logShutdown(flushCompleted bool) {
+	if d.ended.CompareAndSwap(false, true) {
+		daemonLogger.Info("shutdown", "reason", d.shutdownReason(), "flush_completed", flushCompleted)
+	}
+}
+
+func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time, signals <-chan os.Signal) *daemonDeps {
+	// Neither store failing aborts the daemon's primary job: a nil hook store
+	// keeps a dropped session's hook and sweeps nothing, a nil project store
+	// prunes nothing.
+	hookStore, err := loadHookStore()
+	if err != nil {
+		daemonLogger.Warn("load hook store failed; a dropped session's resume hook is kept", "error", err)
+	}
+	projectStore, err := loadProjectStore()
+	if err != nil {
+		daemonLogger.Warn("load project store failed; stale-project prune disabled", "error", err)
+	}
+	return &daemonDeps{
+		Dir:           dir,
+		Version:       Version(),
+		Backend:       b,
+		Saver:         saver.New(saver.Config{Backend: b, StateDir: dir, Hooks: hookStore, Now: time.Now}),
+		Projects:      projectStore,
+		Hooks:         hookStore,
+		Ticks:         ticks,
+		Signals:       signals,
+		ShutdownBound: shutdownBound,
+		FlushNaming:   flushNaming,
+		// Anchored to the daemon's start, so each prune first runs an
+		// interval in.
+		lastProjectCleanup: time.Now(),
+		lastHookSweep:      time.Now(),
+	}
+}
+
+// The daemon runs in the _portal-saver session, which the bootstrap creates.
+// It refuses an index this version must not touch, or a migration cut short,
+// before it holds anything.
 var stateDaemonCmd = &cobra.Command{
 	Use:    "daemon",
 	Short:  "Run the Portal save daemon (internal)",
@@ -411,71 +396,21 @@ var stateDaemonCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
-
-		logger := daemonLogger
-
-		// Defensive dirty-flag clear: a stale save.requested from a crashed or
-		// restarted daemon must not trigger a save during the restore window.
-		_ = os.Remove(state.SaveRequested(dir))
-
-		hm := state.SeedHashMap(dir, logger)
-
-		// The previous index a cycle falls back on when it cannot read
-		// sessions.json itself. An unreadable file is reported by the cycle that
-		// reads it, so this read logs nothing.
-		var prevIdx *state.Index
-		if idx, skip, _ := state.ReadIndex(dir); !skip {
-			prevIdx = &idx
+		if err := refuseUnusableIndexIn(dir); err != nil {
+			daemonLogger.Warn("refused to start", "path", sessionindex.Path(dir), "error", err)
+			return err
 		}
-
-		// A path-resolution failure must not abort the daemon's primary job, so
-		// the nil store just disables stale-cleanup for this daemon's lifetime.
-		hookStore, err := loadHookStore()
+		b, err := sessionBackend()
 		if err != nil {
-			logger.Warn("load hook store failed; hooks stale-cleanup disabled", "error", err)
-			hookStore = nil
+			return err
 		}
+		signals := make(chan os.Signal, 2)
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		ticker := time.NewTicker(daemonTick)
+		defer ticker.Stop()
 
-		projectStore, err := loadProjectStore()
-		if err != nil {
-			logger.Warn("load project store failed; stale-project prune disabled", "error", err)
-			projectStore = nil
-		}
-
-		client := tmux.DefaultClient()
-		startedAt := time.Now()
-		deps := &daemonDeps{
-			Dir:       dir,
-			Version:   version,
-			Logger:    logger,
-			Client:    client,
-			OwnServer: ownTmuxServer(),
-			// Anchored to daemon start so each prune first fires one interval
-			// in, not on the first idle tick.
-			HookStore:          hookStore,
-			lastCleanup:        startedAt,
-			ProjectStore:       projectStore,
-			lastProjectCleanup: startedAt,
-			HashMap:            hm,
-			PrevIndex:          prevIdx,
-			TickerPeriod:       1 * time.Second,
-			MaxGap:             30 * time.Second,
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
-		go func() {
-			// Record before cancelling: defaultShutdownFlush reads the signal
-			// only after ctx.Done().
-			sig := <-sigCh
-			deps.recordShutdownSignal(sig)
-			cancel()
-		}()
-
-		return daemonRunFunc(ctx, deps)
+		return defaultDaemonRun(context.Background(), newDaemonDeps(dir, b, ticker.C, signals))
 	},
 }
 

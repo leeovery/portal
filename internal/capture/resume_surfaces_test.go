@@ -17,8 +17,9 @@ import (
 // The seeds are restated here rather than read off the surface: an expectation
 // built from the value the code renders asserts nothing about what it holds.
 const (
-	surfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
-	surfaceReport  = "the pane is frozen and will not lift"
+	surfaceCommand       = "cd ~/code/portal/internal && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+	surfaceReport        = "can't unpause this session: permission denied"
+	discardSurfaceReport = "can't write hooks.json: permission denied"
 )
 
 const (
@@ -46,7 +47,7 @@ func surfaceWants() []surfaceWant {
 		{name: "resume-panel-waiting-report", render: tui.RenderResumePanel, report: surfaceReport, w: surfaceRoomyWidth, h: surfaceRoomyHeight},
 		{name: "resume-panel-waiting-degraded", render: tui.RenderResumePanel, w: surfaceDegradedWidth, h: surfaceDegradedHeight, degraded: true},
 		{name: "resume-panel-discard", render: tui.RenderResumeDiscardConfirm, w: surfaceRoomyWidth, h: surfaceRoomyHeight},
-		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: surfaceReport, w: surfaceRoomyWidth, h: surfaceRoomyHeight},
+		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: discardSurfaceReport, w: surfaceRoomyWidth, h: surfaceRoomyHeight},
 		{name: "resume-panel-discard-degraded", render: tui.RenderResumeDiscardConfirm, w: surfaceDegradedWidth, h: surfaceDegradedHeight, degraded: true},
 	}
 }
@@ -154,12 +155,13 @@ func TestResumeSurfaces_RendersTheProductionScreen(t *testing.T) {
 		for _, want := range surfaceWants() {
 			t.Run(want.name, func(t *testing.T) {
 				visible := ansi.Strip(surfaceFrame(t, want.name, th, false))
-				carries := strings.Contains(visible, surfaceReport)
-				if want.report != "" && !carries {
-					t.Errorf("the report surface does not carry %q:\n%s", surfaceReport, visible)
+				if want.report != "" && !strings.Contains(visible, want.report) {
+					t.Errorf("the report surface does not carry %q:\n%s", want.report, visible)
 				}
-				if want.report == "" && carries {
-					t.Errorf("a surface seeded with no report carries %q; the row is present only when there is something to say:\n%s", surfaceReport, visible)
+				for _, report := range []string{surfaceReport, discardSurfaceReport} {
+					if report != want.report && strings.Contains(visible, report) {
+						t.Errorf("the surface carries %q, which it was not seeded with:\n%s", report, visible)
+					}
 				}
 			})
 		}

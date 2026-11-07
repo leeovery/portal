@@ -1,505 +1,285 @@
 package bootstrap
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
-	"strings"
+	"slices"
 	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/saverhost"
+	"golang.org/x/sys/unix"
 )
 
-// listPanesWarnMessage is the message of the sweep's saver-read failure WARN.
-const listPanesWarnMessage = "sweep: list-panes _portal-saver failed, legitimate set empty"
+// The proofs a sweep's Prove can fail with, as saverhost's wrap them.
+var (
+	errNotTheSaversDaemon = fmt.Errorf("pid's environment lacks ZMX_SESSION=_portal-saver: %w", saverhost.ErrNotSaverDaemon)
+	errUnprovable         = fmt.Errorf("read the environment: %w", saverhost.ErrUnreadable)
+	errGoneBeforeItsProof = fmt.Errorf("pid: %w", saverhost.ErrGone)
+)
 
-type recordingIdentify struct {
-	calls   []int
-	results map[int]identifyOutcome
-	def     identifyOutcome
+// sweepFakes proves, signals and waits for exits for a sweep, recording each
+// in order. A pid with no entry in failed proves; one with no entry in
+// exitErrs finishes exiting once sent SIGKILL.
+type sweepFakes struct {
+	failed     map[int]error
+	signalErrs map[int]error
+	exitErrs   map[int]error
+	saverReads int
+	events     []string
 }
 
-type identifyOutcome struct {
-	res state.IdentifyResult
-	err error
+func (f *sweepFakes) prove(pid int) error {
+	f.events = append(f.events, fmt.Sprintf("prove %d", pid))
+	return f.failed[pid]
 }
 
-func (r *recordingIdentify) fn(pid int) (state.IdentifyResult, error) {
-	r.calls = append(r.calls, pid)
-	if r.results != nil {
-		if v, ok := r.results[pid]; ok {
-			return v.res, v.err
+func (f *sweepFakes) signal(pid int, sig syscall.Signal) error {
+	f.events = append(f.events, fmt.Sprintf("%s %d", unix.SignalName(sig), pid))
+	return f.signalErrs[pid]
+}
+
+func (f *sweepFakes) awaitExit(_ context.Context, pid int) error {
+	f.events = append(f.events, fmt.Sprintf("await %d", pid))
+	return f.exitErrs[pid]
+}
+
+// killed is every pid sent SIGKILL, in order.
+func (f *sweepFakes) killed() []int {
+	var pids []int
+	for _, e := range f.events {
+		var pid int
+		if _, err := fmt.Sscanf(e, "SIGKILL %d", &pid); err == nil {
+			pids = append(pids, pid)
 		}
 	}
-	return r.def.res, r.def.err
+	return pids
 }
 
-type recordingKill struct {
-	calls []int
-	errs  map[int]error
-}
-
-func (r *recordingKill) fn(pid int) error {
-	r.calls = append(r.calls, pid)
-	if r.errs != nil {
-		if e, ok := r.errs[pid]; ok {
-			return e
-		}
-	}
-	return nil
-}
-
-func TestSweepOrphanDaemons_killsTwoOrphansLeavesLegitimate(t *testing.T) {
-	const legitPID = 1000
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{legitPID, 2001, 2002}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return legitPID, true, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-
-	if len(kill.calls) != 2 {
-		t.Fatalf("expected 2 kill calls, got %d (%v)", len(kill.calls), kill.calls)
-	}
-	got := map[int]struct{}{kill.calls[0]: {}, kill.calls[1]: {}}
-	for _, want := range []int{2001, 2002} {
-		if _, ok := got[want]; !ok {
-			t.Errorf("expected pid %d killed; got %v", want, kill.calls)
-		}
-	}
-	for _, p := range kill.calls {
-		if p == legitPID {
-			t.Errorf("legitimate pid %d must not be killed", legitPID)
-		}
+// saver answers the sweep's read of the saver session's process.
+func (f *sweepFakes) saver(pid int, present bool, err error) func(context.Context) (int, bool, error) {
+	return func(context.Context) (int, bool, error) {
+		f.saverReads++
+		return pid, present, err
 	}
 }
 
-func TestSweepOrphanDaemons_saverAbsentKillsAllIdentifying(t *testing.T) {
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{3001, 3002, 3003}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-
-	if len(kill.calls) != 3 {
-		t.Fatalf("expected 3 kill calls (legitimate set empty), got %d (%v)", len(kill.calls), kill.calls)
+func (f *sweepFakes) sweep(candidates []int, saverPID func(context.Context) (int, bool, error), logger *slog.Logger) *OrphanSweepCore {
+	return &OrphanSweepCore{
+		Pgrep:     func() ([]int, error) { return candidates, nil },
+		SaverPID:  saverPID,
+		Prove:     f.prove,
+		Signal:    f.signal,
+		AwaitExit: f.awaitExit,
+		Logger:    logger,
 	}
 }
 
-func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
-	sink := &logtest.Sink{}
-	sentinel := errors.New("pgrep boom")
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return nil, sentinel },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyIsPortalDaemon, nil },
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("expected nil err under pgrep failure; got %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("expected zero kill calls on pgrep error; got %v", kill.calls)
-	}
-	warn := sink.Records().WithMessage("sweep: pgrep failed").AtExactLevel(slog.LevelWarn).Only(t, "pgrep-failure WARN")
-	if comp := warn.AttrString(t, "component"); comp != "bootstrap" {
-		t.Errorf("pgrep Warn component = %q, want %q", comp, "bootstrap")
-	}
-	if got := warn.ErrorAttr(t, "error"); !errors.Is(got, sentinel) {
-		t.Errorf("pgrep Warn error = %v, want %v", got, sentinel)
+func run(t *testing.T, c *OrphanSweepCore) {
+	t.Helper()
+	if err := c.SweepOrphanDaemons(t.Context()); err != nil {
+		t.Fatalf("SweepOrphanDaemons = %v, want nil: the sweep is best-effort", err)
 	}
 }
 
-func TestSweepOrphanDaemons_listPanesErrorTreatsLegitimateEmpty(t *testing.T) {
-	sink := &logtest.Sink{}
-	sentinel := errors.New("list-panes boom")
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
+func TestSweepOrphanDaemons(t *testing.T) {
+	const saverPID = 1000
 
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{4001, 4002}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 2 {
-		t.Fatalf("expected 2 kill calls (legitimate empty), got %d (%v)", len(kill.calls), kill.calls)
-	}
-	warn := sink.Records().WithMessage(listPanesWarnMessage).AtExactLevel(slog.LevelWarn).Only(t, "list-panes-failure WARN")
-	if comp := warn.AttrString(t, "component"); comp != "bootstrap" {
-		t.Errorf("list-panes Warn component = %q, want %q", comp, "bootstrap")
-	}
-	if got := warn.ErrorAttr(t, "error"); !errors.Is(got, sentinel) {
-		t.Errorf("list-panes Warn error = %v, want %v", got, sentinel)
-	}
-}
+	t.Run("it kills each proved orphan, proving each just before its kill and waiting for it to exit after", func(t *testing.T) {
+		f := &sweepFakes{}
 
-func TestSweepOrphanDaemons_identifyDeadSkipped(t *testing.T) {
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyDead}}
-	kill := &recordingKill{}
+		run(t, f.sweep([]int{2001, 2002}, f.saver(saverPID, true, nil), nil))
 
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{5001, 5002}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("IdentifyDead must skip kill; got %v", kill.calls)
-	}
-}
-
-func TestSweepOrphanDaemons_identifyNotPortalDaemonSkipped(t *testing.T) {
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyNotPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{6001, 6002}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("IdentifyNotPortalDaemon must skip kill; got %v", kill.calls)
-	}
-}
-
-func TestSweepOrphanDaemons_identifyTransientErrorSkipped(t *testing.T) {
-	sink := &logtest.Sink{}
-	transient := errors.New("ps malformed output")
-	identify := &recordingIdentify{def: identifyOutcome{err: transient}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{7001}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("Identify transient error must skip kill; got %v", kill.calls)
-	}
-	warn := sink.Records().WithMessage("sweep: identity-check failed, skipping").AtExactLevel(slog.LevelWarn).
-		Only(t, "identity-check-failure WARN")
-	if pid := warn.IntAttr(t, "target_pid"); pid != 7001 {
-		t.Errorf("identity-check Warn target_pid = %d, want 7001", pid)
-	}
-}
-
-func TestSweepOrphanDaemons_killErrorLogsWarnContinues(t *testing.T) {
-	sink := &logtest.Sink{}
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	killSentinel := errors.New("kill: no such process")
-	kill := &recordingKill{errs: map[int]error{8001: killSentinel}}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{8001, 8002}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 2 {
-		t.Errorf("expected both PIDs attempted despite first kill error; got %v", kill.calls)
-	}
-	warn := sink.Records().WithMessage("sweep: kill failed").AtExactLevel(slog.LevelWarn).Only(t, "kill-failure WARN")
-	if pid := warn.IntAttr(t, "target_pid"); pid != 8001 {
-		t.Errorf("kill Warn target_pid = %d, want 8001", pid)
-	}
-}
-
-func TestSweepOrphanDaemons_cleanStateZeroInfo(t *testing.T) {
-	const legitPID = 9000
-	sink := &logtest.Sink{}
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{legitPID}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return legitPID, true, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("clean state must send zero signals; got %v", kill.calls)
-	}
-	for _, rec := range sink.Records().AtExactLevel(slog.LevelInfo) {
-		if strings.Contains(rec.Msg, "killed orphan daemon") {
-			t.Errorf("clean state must emit zero killed-orphan INFO entries; got %+v", rec)
-		}
-	}
-}
-
-func TestSweepOrphanDaemons_neverSIGTERM(t *testing.T) {
-	var capturedSig syscall.Signal
-	var capturedPID int
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill: func(pid int) error {
-			capturedPID = pid
-			capturedSig = syscall.SIGKILL
-			return nil
-		},
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if capturedPID != 0 {
-		t.Errorf("unexpected Kill invocation; pid=%d sig=%v", capturedPID, capturedSig)
-	}
-	if capturedSig != 0 {
-		t.Errorf("unexpected signal recorded; sig=%v", capturedSig)
-	}
-}
-
-func TestSweepOrphanDaemons_defensiveOwnPIDSkip(t *testing.T) {
-	ownPID := os.Getpid()
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{ownPID, 10001}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	for _, p := range kill.calls {
-		if p == ownPID {
-			t.Fatalf("own pid %d must never be killed; got %v", ownPID, kill.calls)
-		}
-	}
-	if len(kill.calls) != 1 || kill.calls[0] != 10001 {
-		t.Errorf("expected only 10001 killed; got %v", kill.calls)
-	}
-}
-
-func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
-	sink := &logtest.Sink{}
-	kill := &recordingKill{}
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     func(pid int) (state.IdentifyResult, error) { return 0, nil },
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 0 {
-		t.Errorf("empty pgrep must produce zero kill calls; got %v", kill.calls)
-	}
-	if warns := sink.Records().AtExactLevel(slog.LevelWarn); warns != nil {
-		t.Errorf("empty pgrep must produce zero warnings; got %+v", warns)
-	}
-	if infos := sink.Records().AtExactLevel(slog.LevelInfo); infos != nil {
-		t.Errorf("empty pgrep must produce zero INFO entries; got %+v", infos)
-	}
-}
-
-func TestSweepOrphanDaemons_perKillNotEmittedAtInfoOnBootstrapLogger(t *testing.T) {
-	sink := &logtest.Sink{}
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{11001}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       slog.New(sink).With("component", "bootstrap"),
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-	}
-	if len(kill.calls) != 1 || kill.calls[0] != 11001 {
-		t.Fatalf("expected pid 11001 killed; got %v", kill.calls)
-	}
-	for _, rec := range sink.Records().AtExactLevel(slog.LevelInfo) {
-		if strings.Contains(rec.Msg, "killed orphan daemon") {
-			t.Errorf("per-kill INFO must be demoted off the bootstrap logger; got %q (component %q)", rec.Msg, rec.AttrOrEmpty("component"))
-		}
-	}
-}
-
-func TestSweepOrphanDaemons_nilLoggerSafe(t *testing.T) {
-	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-	kill := &recordingKill{}
-	c := &OrphanSweepCore{
-		Pgrep:        func() ([]int, error) { return []int{12001}, nil },
-		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-		Identify:     identify.fn,
-		Kill:         kill.fn,
-		Logger:       nil,
-	}
-	if err := c.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned error under nil Logger: %v", err)
-	}
-}
-
-func TestSweepOrphanDaemons_presentVsAbsentTriState(t *testing.T) {
-	t.Run("absent — (0, false, nil) — empty legit set, no warning", func(t *testing.T) {
-		sink := &logtest.Sink{}
-		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-		kill := &recordingKill{}
-		c := &OrphanSweepCore{
-			Pgrep:        func() ([]int, error) { return []int{20001}, nil },
-			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-			Identify:     identify.fn,
-			Kill:         kill.fn,
-			Logger:       slog.New(sink).With("component", "bootstrap"),
-		}
-		if err := c.SweepOrphanDaemons(); err != nil {
-			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-		}
-		if len(kill.calls) != 1 || kill.calls[0] != 20001 {
-			t.Errorf("absent: expected pid 20001 killed (empty legit set); got %v", kill.calls)
-		}
-		if warns := sink.Records().WithMessage(listPanesWarnMessage).AtExactLevel(slog.LevelWarn); warns != nil {
-			t.Errorf("absent path must NOT emit list-panes Warn; got %+v", warns)
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001", "prove 2002", "SIGKILL 2002", "await 2002"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q", f.events, want)
 		}
 	})
 
-	t.Run("present with pid 0 — (0, true, nil) — distinct from absent, no warning", func(t *testing.T) {
-		sink := &logtest.Sink{}
-		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-		kill := &recordingKill{}
-		c := &OrphanSweepCore{
-			Pgrep:        func() ([]int, error) { return []int{20002}, nil },
-			SaverPanePID: func() (pid int, present bool, err error) { return 0, true, nil },
-			Identify:     identify.fn,
-			Kill:         kill.fn,
-			Logger:       slog.New(sink).With("component", "bootstrap"),
-		}
-		if err := c.SweepOrphanDaemons(); err != nil {
-			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-		}
-		if warns := sink.Records().WithMessage(listPanesWarnMessage).AtExactLevel(slog.LevelWarn); warns != nil {
-			t.Errorf("present=true path must NOT emit list-panes Warn; got %+v", warns)
-		}
-		if len(kill.calls) != 1 || kill.calls[0] != 20002 {
-			t.Errorf("present (pid 0): expected pid 20002 killed; got %v", kill.calls)
+	t.Run("it never kills the saver session's process, nor proves it", func(t *testing.T) {
+		f := &sweepFakes{}
+
+		run(t, f.sweep([]int{saverPID, 2001}, f.saver(saverPID, true, nil), nil))
+
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q: the saver's process passed over", f.events, want)
 		}
 	})
 
-	t.Run("error — (0, false, err) — warning emitted, sweep proceeds", func(t *testing.T) {
-		sink := &logtest.Sink{}
-		sentinel := errors.New("list-panes tri boom")
-		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
-		kill := &recordingKill{}
-		c := &OrphanSweepCore{
-			Pgrep:        func() ([]int, error) { return []int{20003}, nil },
-			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
-			Identify:     identify.fn,
-			Kill:         kill.fn,
-			Logger:       slog.New(sink).With("component", "bootstrap"),
-		}
-		if err := c.SweepOrphanDaemons(); err != nil {
-			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
-		}
-		if len(kill.calls) != 1 || kill.calls[0] != 20003 {
-			t.Errorf("error: expected pid 20003 killed (legit empty); got %v", kill.calls)
-		}
-		warn := sink.Records().WithMessage(listPanesWarnMessage).AtExactLevel(slog.LevelWarn).Only(t, "list-panes-failure WARN")
-		if got := warn.ErrorAttr(t, "error"); !errors.Is(got, sentinel) {
-			t.Errorf("list-panes Warn error = %v, want %v", got, sentinel)
+	t.Run("it never kills itself, nor proves itself", func(t *testing.T) {
+		f := &sweepFakes{}
+
+		run(t, f.sweep([]int{os.Getpid(), 2001}, f.saver(0, false, nil), nil))
+
+		if want := []string{"prove 2001", "SIGKILL 2001", "await 2001"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q: this process passed over", f.events, want)
 		}
 	})
-}
 
-func TestSweepOrphanDaemons_neverReturnsError(t *testing.T) {
-	cases := []struct {
-		name string
-		core *OrphanSweepCore
-	}{
-		{
-			name: "pgrep error",
-			core: &OrphanSweepCore{
-				Pgrep:        func() ([]int, error) { return nil, errors.New("pgrep") },
-				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-				Identify:     func(pid int) (state.IdentifyResult, error) { return 0, nil },
-				Kill:         func(pid int) error { return nil },
-			},
-		},
-		{
-			name: "list-panes error",
-			core: &OrphanSweepCore{
-				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, errors.New("list-panes") },
-				Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyDead, nil },
-				Kill:         func(pid int) error { return nil },
-			},
-		},
-		{
-			name: "identify error",
-			core: &OrphanSweepCore{
-				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-				Identify:     func(pid int) (state.IdentifyResult, error) { return 0, errors.New("identify") },
-				Kill:         func(pid int) error { return nil },
-			},
-		},
-		{
-			name: "kill error",
-			core: &OrphanSweepCore{
-				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
-				Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyIsPortalDaemon, nil },
-				Kill:         func(pid int) error { return errors.New("kill") },
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.core.SweepOrphanDaemons(); err != nil {
-				t.Errorf("expected nil err; got %v", err)
+	for name, err := range map[string]error{
+		"lacks the saver session's marks, as the tmux Portal's daemon does": errNotTheSaversDaemon,
+		"can't be read":                     errUnprovable,
+		"has gone before its proof is read": errGoneBeforeItsProof,
+	} {
+		t.Run("a daemon whose proof "+name+" is never killed", func(t *testing.T) {
+			f := &sweepFakes{failed: map[int]error{2001: err}}
+
+			run(t, f.sweep([]int{2001, 2002}, f.saver(0, false, nil), nil))
+
+			if got := f.killed(); !slices.Equal(got, []int{2002}) {
+				t.Errorf("killed = %v, want 2002 alone", got)
 			}
 		})
 	}
+
+	t.Run("with no saver session every proved daemon is an orphan", func(t *testing.T) {
+		f := &sweepFakes{}
+
+		run(t, f.sweep([]int{3001, 3002, 3003}, f.saver(0, false, nil), nil))
+
+		if got := f.killed(); !slices.Equal(got, []int{3001, 3002, 3003}) {
+			t.Errorf("killed = %v, want all three", got)
+		}
+	})
+
+	for name, read := range map[string]struct {
+		pid     int
+		present bool
+		err     error
+	}{
+		"can't be read":             {0, false, errors.New("read session \"_portal-saver\": no answer in 1s")},
+		"answers naming no process": {0, true, nil},
+	} {
+		t.Run("a saver session that "+name+" kills nothing, since it can't be spared", func(t *testing.T) {
+			sink := &logtest.Sink{}
+			f := &sweepFakes{}
+
+			run(t, f.sweep([]int{4001, 4002}, f.saver(read.pid, read.present, read.err), slog.New(sink).With("component", "bootstrap")))
+
+			if len(f.events) != 0 {
+				t.Errorf("events = %q, want nothing proved or signalled", f.events)
+			}
+			sink.Records().WithMessage("sweep: saver pid unreadable, nothing killed").AtExactLevel(slog.LevelWarn).Only(t, "the WARN")
+		})
+	}
+
+	t.Run("it sends SIGKILL and nothing else", func(t *testing.T) {
+		f := &sweepFakes{}
+
+		run(t, f.sweep([]int{5001}, f.saver(0, false, nil), nil))
+
+		if want := []string{"prove 5001", "SIGKILL 5001", "await 5001"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q", f.events, want)
+		}
+	})
+
+	t.Run("a pgrep that finds nothing reads no saver and kills nothing", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		f := &sweepFakes{}
+
+		run(t, f.sweep(nil, f.saver(saverPID, true, nil), slog.New(sink).With("component", "bootstrap")))
+
+		if f.saverReads != 0 || len(f.events) != 0 {
+			t.Errorf("saver reads = %d, events = %q; want none", f.saverReads, f.events)
+		}
+		if warns := sink.Records().AtOrAboveLevel(slog.LevelWarn); warns != nil {
+			t.Errorf("warnings = %+v, want none", warns)
+		}
+	})
+
+	t.Run("a pgrep that fails warns and kills nothing", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		boom := errors.New("pgrep boom")
+		f := &sweepFakes{}
+		c := f.sweep(nil, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap"))
+		c.Pgrep = func() ([]int, error) { return nil, boom }
+
+		run(t, c)
+
+		if len(f.events) != 0 {
+			t.Errorf("events = %q, want none", f.events)
+		}
+		warn := sink.Records().WithMessage("sweep: pgrep failed").AtExactLevel(slog.LevelWarn).Only(t, "the pgrep WARN")
+		if got := warn.ErrorAttr(t, "error"); !errors.Is(got, boom) {
+			t.Errorf("error = %v, want %v", got, boom)
+		}
+	})
+
+	t.Run("an unprovable pid warns; one proved no orphan is a DEBUG", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		f := &sweepFakes{failed: map[int]error{6001: errUnprovable, 6002: errNotTheSaversDaemon}}
+
+		run(t, f.sweep([]int{6001, 6002}, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap")))
+
+		warn := sink.Records().WithMessage("sweep: pid unprovable, skipping").AtExactLevel(slog.LevelWarn).Only(t, "the unprovable WARN")
+		if pid := warn.IntAttr(t, "target_pid"); pid != 6001 {
+			t.Errorf("unprovable target_pid = %d, want 6001", pid)
+		}
+		debug := sink.Records().WithMessage("sweep: pid not proved an orphaned saver daemon, skipping").AtExactLevel(slog.LevelDebug).
+			Only(t, "the not-proved DEBUG")
+		if pid := debug.IntAttr(t, "target_pid"); pid != 6002 {
+			t.Errorf("not-proved target_pid = %d, want 6002", pid)
+		}
+	})
+
+	t.Run("a kill that fails warns, and the sweep goes on", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		f := &sweepFakes{signalErrs: map[int]error{8001: syscall.EPERM}}
+
+		run(t, f.sweep([]int{8001, 8002}, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap")))
+
+		if got := f.killed(); !slices.Equal(got, []int{8001, 8002}) {
+			t.Errorf("killed = %v, want both tried", got)
+		}
+		warn := sink.Records().WithMessage("sweep: kill failed").AtExactLevel(slog.LevelWarn).Only(t, "the kill WARN")
+		if pid := warn.IntAttr(t, "target_pid"); pid != 8001 {
+			t.Errorf("kill failed target_pid = %d, want 8001", pid)
+		}
+	})
+
+	t.Run("an orphan that doesn't finish exiting warns, and the sweep goes on", func(t *testing.T) {
+		sink := &logtest.Sink{}
+		stillExiting := errors.New("pid 8001 still hadn't finished exiting 2s later")
+		f := &sweepFakes{exitErrs: map[int]error{8001: stillExiting}}
+
+		run(t, f.sweep([]int{8001, 8002}, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap")))
+
+		if want := []string{"prove 8001", "SIGKILL 8001", "await 8001", "prove 8002", "SIGKILL 8002", "await 8002"}; !slices.Equal(f.events, want) {
+			t.Errorf("events = %q, want %q", f.events, want)
+		}
+		warn := sink.Records().WithMessage("sweep: kill failed").AtExactLevel(slog.LevelWarn).Only(t, "the kill WARN")
+		if pid := warn.IntAttr(t, "target_pid"); pid != 8001 {
+			t.Errorf("kill failed target_pid = %d, want 8001", pid)
+		}
+	})
+
+	for name, unwire := range map[string]func(*OrphanSweepCore){
+		"Pgrep":     func(c *OrphanSweepCore) { c.Pgrep = nil },
+		"SaverPID":  func(c *OrphanSweepCore) { c.SaverPID = nil },
+		"Prove":     func(c *OrphanSweepCore) { c.Prove = nil },
+		"Signal":    func(c *OrphanSweepCore) { c.Signal = nil },
+		"AwaitExit": func(c *OrphanSweepCore) { c.AwaitExit = nil },
+	} {
+		t.Run("a sweep with no "+name+" kills nothing", func(t *testing.T) {
+			sink := &logtest.Sink{}
+			f := &sweepFakes{}
+			c := f.sweep([]int{9001}, f.saver(0, false, nil), slog.New(sink).With("component", "bootstrap"))
+			unwire(c)
+
+			run(t, c)
+
+			if got := f.killed(); len(got) != 0 {
+				t.Errorf("killed = %v, want none", got)
+			}
+			sink.Records().WithMessage("sweep: not wired, nothing killed").AtExactLevel(slog.LevelWarn).Only(t, "the WARN")
+		})
+	}
+
+	t.Run("a nil Logger is tolerated", func(t *testing.T) {
+		f := &sweepFakes{}
+		run(t, f.sweep([]int{12001}, f.saver(0, false, nil), nil))
+	})
 }

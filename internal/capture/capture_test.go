@@ -1,6 +1,7 @@
 package capture_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/capture"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -33,22 +35,21 @@ func TestFixtureByName(t *testing.T) {
 
 		type want struct {
 			name     string
-			windows  int
 			attached bool
 		}
 		wants := []want{
-			{"agentic-workflows-code-based", 3, true},
-			{"agentic-workflows-codify", 2, false},
-			{"fab-flowx-explore", 1, false},
-			{"evvi webhooks and watchers", 4, false},
-			{"aviva-proxy-qNyfEO", 1, false},
-			{"designlab-web-r8suyU", 2, false},
-			{"evvi-sync-engine", 1, false},
-			{"fab-aws-migration", 5, false},
-			{"flow-v1-api-XkkhTN", 1, false},
-			{"flowx-7UKPZH", 2, false},
-			{"fabric-lk26UG", 1, false},
-			{"folio-Jiz4el", 1, false},
+			{"orchard-pipeline-code-based", true},
+			{"orchard-pipeline-codify", false},
+			{"kiln-relayx-explore", false},
+			{"lumen webhooks and watchers", false},
+			{"tessera-proxy-Vb3kQw", false},
+			{"atelier-web-m4TzpD", false},
+			{"lumen-sync-engine", false},
+			{"kiln-aws-migration", false},
+			{"relay-v1-api-Hq7wNe", false},
+			{"relayx-3RJDWA", false},
+			{"loom-p84cXa", false},
+			{"quill-Ue9fLr", false},
 		}
 
 		if len(sessions) != len(wants) {
@@ -59,8 +60,8 @@ func TestFixtureByName(t *testing.T) {
 			if got.Name != w.name {
 				t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 			}
-			if got.Windows != w.windows {
-				t.Errorf("session[%d].Windows = %d, want %d (%s)", i, got.Windows, w.windows, w.name)
+			if got.NotAnswering {
+				t.Errorf("session[%d] does not answer (%s)", i, w.name)
 			}
 			if got.Attached != w.attached {
 				t.Errorf("session[%d].Attached = %t, want %t (%s)", i, got.Attached, w.attached, w.name)
@@ -127,8 +128,8 @@ func TestLoadingScreenFixture(t *testing.T) {
 		t.Errorf("ActivePage() = %d, want PageLoading (the loading-screen fixture must park on the loading page)", m.ActivePage())
 	}
 
-	if !m.ServerStarted() {
-		t.Error("loading-screen fixture must set ServerStarted so the cold-boot loading page shows")
+	if !m.Bootstrapping() {
+		t.Error("loading-screen fixture must set Bootstrapping so the cold-boot loading page shows")
 	}
 
 	found := false
@@ -156,10 +157,9 @@ func TestLoadingErrorFixture(t *testing.T) {
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
-		FailedStep: 3,
-		Message:    "Portal failed to set @portal-restoring marker: permission denied",
+		FailedStep: 2,
+		Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 		Err:        errors.New("permission denied"),
 	})
 
@@ -175,7 +175,7 @@ func TestLoadingErrorFixture(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("loading-error frame missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to set @portal-restoring marker") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("loading-error frame missing the one-line fatal message:\n%s", visible)
 	}
 	if !strings.Contains(visible, "quit") {
@@ -215,7 +215,7 @@ func TestSessionsByProjectFixture(t *testing.T) {
 		t.Errorf("sessions-by-project fixture has %d projects, want >=2 (multiple group headings)", len(projects))
 	}
 
-	idx := project.NewIndex(projects)
+	idx := project.NewIndexBy(projects, fx.Deps(darkBuiltinTheme(t)).DirKey)
 	sessions, err := fx.Lister.ListSessions()
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
@@ -379,10 +379,10 @@ func TestSessionsInlineFlashFixture(t *testing.T) {
 		t.Fatalf("ListSessions: %v", err)
 	}
 	wantNames := []string{
-		"fab-flowx-explore",
-		"agentic-workflows-codify",
-		"flowx-7UKPZH",
-		"aviva-proxy-qNyfEO",
+		"kiln-relayx-explore",
+		"orchard-pipeline-codify",
+		"relayx-3RJDWA",
+		"tessera-proxy-Vb3kQw",
 	}
 	if len(sessions) != len(wantNames) {
 		t.Fatalf("sessions-inline-flash has %d sessions, want %d (reference set)", len(sessions), len(wantNames))
@@ -393,7 +393,7 @@ func TestSessionsInlineFlashFixture(t *testing.T) {
 		}
 	}
 
-	const msg = "folio-Jiz4el closed externally — list updated"
+	const msg = "quill-Ue9fLr closed externally — list updated"
 	if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != msg {
 		t.Errorf("Deps().Capture.Flash = %q, want %q (seeded warning flash)", got, msg)
 	}
@@ -452,14 +452,13 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 	}
 	type want struct {
 		name     string
-		windows  int
 		attached bool
 	}
 	wants := []want{
-		{"fab-flowx-explore", 3, true},
-		{"agentic-workflows-codify", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"aviva-proxy-qNyfEO", 4, false},
+		{"kiln-relayx-explore", true},
+		{"orchard-pipeline-codify", false},
+		{"relayx-3RJDWA", false},
+		{"tessera-proxy-Vb3kQw", false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-no-tags-signpost has %d sessions, want %d (reference set)", len(sessions), len(wants))
@@ -469,8 +468,8 @@ func TestSessionsNoTagsSignpostFixture(t *testing.T) {
 		if got.Name != w.name {
 			t.Errorf("session[%d].Name = %q, want %q", i, got.Name, w.name)
 		}
-		if got.Windows != w.windows {
-			t.Errorf("session[%d].Windows = %d, want %d (%s)", i, got.Windows, w.windows, w.name)
+		if got.NotAnswering {
+			t.Errorf("session[%d] does not answer (%s)", i, w.name)
 		}
 		if got.Attached != w.attached {
 			t.Errorf("session[%d].Attached = %t, want %t (%s)", i, got.Attached, w.attached, w.name)
@@ -522,8 +521,8 @@ func TestProjectsFixture(t *testing.T) {
 		}
 		seen[p.Name] = true
 	}
-	if projects[0].Name != "flow-v1-api" {
-		t.Errorf("projects fixture first project = %q, want %q (the reference cursor row)", projects[0].Name, "flow-v1-api")
+	if projects[0].Name != "relay-v1-api" {
+		t.Errorf("projects fixture first project = %q, want %q (the reference cursor row)", projects[0].Name, "relay-v1-api")
 	}
 }
 
@@ -557,28 +556,20 @@ func TestPreviewScreenFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
-	if len(sessions) == 0 || sessions[0].Name != "aviva-proxy-qNyfEO" {
-		t.Fatalf("first session = %+v, want first to be aviva-proxy-qNyfEO", sessions)
+	if len(sessions) == 0 || sessions[0].Name != "tessera-proxy-Vb3kQw" {
+		t.Fatalf("first session = %+v, want first to be tessera-proxy-Vb3kQw", sessions)
 	}
 
-	groups, err := fx.Deps(darkBuiltinTheme(t)).Enumerator.ListWindowsAndPanesInSession("aviva-proxy-qNyfEO")
+	body, err := fx.Deps(darkBuiltinTheme(t)).History.History(context.Background(), "tessera-proxy-Vb3kQw", 0)
 	if err != nil {
-		t.Fatalf("Enumerator: %v", err)
-	}
-	if len(groups) != 1 || len(groups[0].Panes) != 1 {
-		t.Errorf("enumerator groups = %+v, want a single window with a single pane (Window 1/1 · Pane 1/1)", groups)
-	}
-
-	body, err := fx.Deps(darkBuiltinTheme(t)).Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"})
-	if err != nil {
-		t.Fatalf("Reader.Tail: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	if len(body) == 0 {
-		t.Error("preview-screen scrollback is empty; the overlay would render the (no saved content) placeholder")
+		t.Error("preview-screen history is empty; the backend never answers with an empty history")
 	}
 	for _, banned := range []string{"Claude", "Fable", "Brewed"} {
 		if strings.Contains(string(body), banned) {
-			t.Errorf("preview-screen scrollback references %q; the captured content must be generic, tool-agnostic example output", banned)
+			t.Errorf("preview-screen history references %q; the captured content must be generic, tool-agnostic example output", banned)
 		}
 	}
 }
@@ -607,35 +598,34 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 	}
 	type want struct {
 		name     string
-		windows  int
 		attached bool
 	}
 	wants := []want{
-		{"agentic-workflows-code-based", 3, true},
-		{"agentic-workflows-codify", 2, false},
-		{"fab-flowx-explore", 1, false},
-		{"evvi webhooks and watchers", 4, false},
-		{"aviva-proxy-qNyfEO", 1, false},
-		{"designlab-web-r8suyU", 2, false},
-		{"evvi-sync-engine", 1, false},
-		{"fab-aws-migration", 5, false},
-		{"flow-v1-api-XkkhTN", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"fabric-lk26UG", 1, false},
-		{"folio-Jiz4el", 1, false},
+		{"orchard-pipeline-code-based", true},
+		{"orchard-pipeline-codify", false},
+		{"kiln-relayx-explore", false},
+		{"lumen webhooks and watchers", false},
+		{"tessera-proxy-Vb3kQw", false},
+		{"atelier-web-m4TzpD", false},
+		{"lumen-sync-engine", false},
+		{"kiln-aws-migration", false},
+		{"relay-v1-api-Hq7wNe", false},
+		{"relayx-3RJDWA", false},
+		{"loom-p84cXa", false},
+		{"quill-Ue9fLr", false},
 	}
 	if len(sessions) != len(wants) {
 		t.Fatalf("sessions-multi-select-active has %d sessions, want %d (the sessions-flat set)", len(sessions), len(wants))
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		if got.Name != w.name || got.NotAnswering || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,notAnswering=%t,%t}, want {%q,notAnswering=false,%t}", i, got.Name, got.NotAnswering, got.Attached, w.name, w.attached)
 		}
 	}
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -644,7 +634,7 @@ func TestSessionsMultiSelectActiveFixture(t *testing.T) {
 			t.Errorf("Deps().Capture.MultiSelect[%d] = %q, want %q", i, deps.Capture.MultiSelect[i], w)
 		}
 	}
-	if got, want := deps.Capture.Cursor, "fab-flowx-explore"; got != want {
+	if got, want := deps.Capture.Cursor, "kiln-relayx-explore"; got != want {
 		t.Errorf("Deps().Capture.Cursor = %q, want %q (cursor on a marked, banded row)", got, want)
 	}
 
@@ -682,24 +672,23 @@ func TestFixtureNamesIncludesMultiSelectActive(t *testing.T) {
 
 type flatFixtureWant struct {
 	name     string
-	windows  int
 	attached bool
 }
 
 func flatFixtureWants() []flatFixtureWant {
 	return []flatFixtureWant{
-		{"agentic-workflows-code-based", 3, true},
-		{"agentic-workflows-codify", 2, false},
-		{"fab-flowx-explore", 1, false},
-		{"evvi webhooks and watchers", 4, false},
-		{"aviva-proxy-qNyfEO", 1, false},
-		{"designlab-web-r8suyU", 2, false},
-		{"evvi-sync-engine", 1, false},
-		{"fab-aws-migration", 5, false},
-		{"flow-v1-api-XkkhTN", 1, false},
-		{"flowx-7UKPZH", 2, false},
-		{"fabric-lk26UG", 1, false},
-		{"folio-Jiz4el", 1, false},
+		{"orchard-pipeline-code-based", true},
+		{"orchard-pipeline-codify", false},
+		{"kiln-relayx-explore", false},
+		{"lumen webhooks and watchers", false},
+		{"tessera-proxy-Vb3kQw", false},
+		{"atelier-web-m4TzpD", false},
+		{"lumen-sync-engine", false},
+		{"kiln-aws-migration", false},
+		{"relay-v1-api-Hq7wNe", false},
+		{"relayx-3RJDWA", false},
+		{"loom-p84cXa", false},
+		{"quill-Ue9fLr", false},
 	}
 }
 
@@ -715,8 +704,8 @@ func assertFlatFixtureSet(t *testing.T, fx *capture.Fixture) {
 	}
 	for i, w := range wants {
 		got := sessions[i]
-		if got.Name != w.name || got.Windows != w.windows || got.Attached != w.attached {
-			t.Errorf("session[%d] = {%q,%d,%t}, want {%q,%d,%t}", i, got.Name, got.Windows, got.Attached, w.name, w.windows, w.attached)
+		if got.Name != w.name || got.NotAnswering || got.Attached != w.attached {
+			t.Errorf("session[%d] = {%q,notAnswering=%t,%t}, want {%q,notAnswering=false,%t}", i, got.Name, got.NotAnswering, got.Attached, w.name, w.attached)
 		}
 	}
 }
@@ -819,7 +808,7 @@ func TestSessionsMultiSelectPreflightAbortFixture(t *testing.T) {
 	assertFlatFixtureSet(t, fx)
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -828,10 +817,10 @@ func TestSessionsMultiSelectPreflightAbortFixture(t *testing.T) {
 			t.Errorf("Deps().Capture.MultiSelect[%d] = %q, want %q", i, deps.Capture.MultiSelect[i], w)
 		}
 	}
-	if got, want := deps.Capture.Cursor, "fab-flowx-explore"; got != want {
+	if got, want := deps.Capture.Cursor, "kiln-relayx-explore"; got != want {
 		t.Errorf("Deps().Capture.Cursor = %q, want %q (cursor on the gone row)", got, want)
 	}
-	wantGone := []string{"fab-flowx-explore"}
+	wantGone := []string{"kiln-relayx-explore"}
 	if len(deps.Capture.GoneFlagged) != len(wantGone) || deps.Capture.GoneFlagged[0] != wantGone[0] {
 		t.Errorf("Deps().Capture.GoneFlagged = %v, want %v", deps.Capture.GoneFlagged, wantGone)
 	}
@@ -858,7 +847,7 @@ func TestSessionsBurstOpeningFixture(t *testing.T) {
 	assertFlatFixtureSet(t, fx)
 
 	deps := fx.Deps(darkBuiltinTheme(t))
-	wantMarked := []string{"agentic-workflows-codify", "fab-flowx-explore", "designlab-web-r8suyU"}
+	wantMarked := []string{"orchard-pipeline-codify", "kiln-relayx-explore", "atelier-web-m4TzpD"}
 	if len(deps.Capture.MultiSelect) != len(wantMarked) {
 		t.Fatalf("Deps().Capture.MultiSelect = %v, want %v", deps.Capture.MultiSelect, wantMarked)
 	}
@@ -895,70 +884,39 @@ func TestFakeSeamsAreInert(t *testing.T) {
 	if err := d.Killer.KillSession("anything"); err != nil {
 		t.Errorf("Killer.KillSession returned %v, want nil (no-op)", err)
 	}
-	if err := d.Renamer.RenameSession("a", "b"); err != nil {
-		t.Errorf("Renamer.RenameSession returned %v, want nil (no-op)", err)
+	if err := d.AskedKiller.KillSession("anything"); err != nil {
+		t.Errorf("AskedKiller.KillSession returned %v, want nil (no-op)", err)
+	}
+	if err := d.Labeller.SetLabel("a", "b"); err != nil {
+		t.Errorf("Labeller.SetLabel returned %v, want nil (no-op)", err)
 	}
 	if _, err := d.Creator.CreateFromDir("/x", nil); err != nil {
 		t.Errorf("Creator.CreateFromDir returned %v, want nil (no-op)", err)
 	}
 
-	groups, err := d.Enumerator.ListWindowsAndPanesInSession("agentic-workflows-code-based")
-	if err != nil {
-		t.Errorf("Enumerator returned %v, want nil", err)
-	}
-	if len(groups) == 0 {
-		t.Error("Enumerator returned no window groups, want canned data")
-	}
-	if _, err := d.Reader.Tail(tui.PaneScrollback{PaneKey: "any-pane-key"}); err != nil {
-		t.Errorf("Reader.Tail returned %v, want nil", err)
+	if body, err := d.History.History(context.Background(), "orchard-pipeline-code-based", 0); err != nil || len(body) == 0 {
+		t.Errorf("History returned (%q, %v), want canned data", body, err)
 	}
 }
 
-// The refusal wording is never seeded: the fixtures type into the real rename
+// The refusal wording is never seeded: the fixture types into the real rename
 // modal, so the frame carries whatever the production band composes.
-func TestSessionsRenameRefusedFixtures(t *testing.T) {
-	cases := []struct {
-		fixture string
-		flash   string
-	}{
-		{
-			fixture: "sessions-rename-refused-separator",
-			flash:   `":" isn't allowed in a session name — tmux reads it as a separator`,
-		},
-		{
-			fixture: "sessions-rename-refused-id-prefix",
-			flash:   `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`,
-		},
-		{
-			fixture: "sessions-rename-refused-flag-prefix",
-			flash:   `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`,
-		},
+func TestSessionsRenameRefusedLabelFixture(t *testing.T) {
+	fx, err := capture.FixtureByName("sessions-rename-refused-label")
+	if err != nil {
+		t.Fatalf("FixtureByName: %v", err)
+	}
+	if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != "" {
+		t.Errorf("Deps().Capture.Flash = %q, want empty — the refusal must be typed, not seeded", got)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.fixture, func(t *testing.T) {
-			fx, err := capture.FixtureByName(tc.fixture)
-			if err != nil {
-				t.Fatalf("FixtureByName(%s): %v", tc.fixture, err)
-			}
-			if got := fx.Deps(darkBuiltinTheme(t)).Capture.Flash; got != "" {
-				t.Errorf("Deps().Capture.Flash = %q, want empty — the refusal must be typed, not seeded", got)
-			}
-
-			m := fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
-			frame := ansi.Strip(m.View().Content)
-			if !strings.Contains(frame, tc.flash) {
-				t.Errorf("captured frame is missing the refusal %q:\n%s", tc.flash, frame)
-			}
-		})
+	m := fx.ModelAt(darkBuiltinTheme(t), harnessWidth, harnessHeight)
+	frame := ansi.Strip(m.View().Content)
+	if want := sessionindex.ErrLabelUnprintable.Error(); !strings.Contains(frame, want) {
+		t.Errorf("captured frame is missing the refusal %q:\n%s", want, frame)
 	}
-}
-
-func TestFixtureNamesIncludesRenameRefusals(t *testing.T) {
-	for _, want := range []string{"sessions-rename-refused-separator", "sessions-rename-refused-id-prefix", "sessions-rename-refused-flag-prefix"} {
-		if !slices.Contains(capture.FixtureNames(), want) {
-			t.Errorf("FixtureNames() %v does not include %s", capture.FixtureNames(), want)
-		}
+	if !strings.Contains(frame, "orchard-pipeline-code-based") || strings.Contains(frame, "Rename session") {
+		t.Errorf("want the rows back under the band with the modal closed:\n%s", frame)
 	}
 }
 
@@ -1067,16 +1025,18 @@ func TestSessionsSearchResultsFixture(t *testing.T) {
 				t.Errorf("the frame is missing the matching session %q:\n%s", name, frame)
 			}
 		}
-		if strings.Contains(frame, "evvi-sync-engine") {
-			t.Errorf("the frame carries evvi-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
+		if strings.Contains(frame, "lumen-sync-engine") {
+			t.Errorf("the frame carries lumen-sync-engine, which matches neither field — the list is not narrowed:\n%s", frame)
 		}
 	})
 
-	t.Run("it renders the fixture's home paths abbreviated under an arbitrary home directory", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		frame := searchResultsFrame(t)
-		if !strings.Contains(frame, "portal-a1b2 ~/code/portal") {
-			t.Errorf("the frame does not carry the abbreviated directory under a home the fixture was not written against:\n%s", frame)
+	t.Run("it draws the same frame whatever the process's home directory", func(t *testing.T) {
+		want := searchResultsFrame(t)
+		for _, home := range []string{t.TempDir(), "", "/", "/home/user/", "/home/user"} {
+			t.Setenv("HOME", home)
+			if got := searchResultsFrame(t); got != want {
+				t.Errorf("under HOME=%q the frame differs — the fixture's home must come through Deps, never the environment:\n%s", home, got)
+			}
 		}
 	})
 

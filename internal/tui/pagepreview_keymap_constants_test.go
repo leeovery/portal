@@ -3,12 +3,10 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestPreviewFooterCanonicalByteContent(t *testing.T) {
-	const want = "↑↓ session  ←→ window  ⇥ pane  ⏎ attach  ␣ back"
+	const want = "↑↓ session  ⏎ attach  ␣ back"
 	got := stripANSI(composePreviewFooterRow(200, testDarkTheme(t), false))
 	if got != want {
 		t.Errorf("preview footer = %q, want %q", got, want)
@@ -24,11 +22,11 @@ func TestPreviewFooterNoMiddots(t *testing.T) {
 
 func TestPreviewFooterCompactGlyphsOnly(t *testing.T) {
 	got := stripANSI(composePreviewFooterRow(20, testDarkTheme(t), false))
-	const want = "↑↓  ←→  ⇥  ⏎  ␣"
+	const want = "↑↓  ⏎  ␣"
 	if got != want {
 		t.Errorf("compact preview footer = %q, want %q", got, want)
 	}
-	for _, label := range []string{"session", "window", "pane", "attach", "back"} {
+	for _, label := range []string{"session", "attach", "back"} {
 		if strings.Contains(got, label) {
 			t.Errorf("compact preview footer must drop labels; found %q in %q", label, got)
 		}
@@ -44,9 +42,7 @@ func TestPreviewMarkerExactByteContent(t *testing.T) {
 
 func TestPreviewBorderResolvesTheModeAccentToken(t *testing.T) {
 	th := testDarkTheme(t)
-	m := newPeekPreviewModel(t, "work", []tmux.WindowGroup{
-		{WindowIndex: 0, WindowName: "editor", Panes: []tmux.WindowPane{{Index: 0}}},
-	}, []byte("hello\n"), 80, 24)
+	m := newPeekPreviewModel(t, "work", "hello", 80, 24)
 	m.th = th
 	frame := m.View()
 

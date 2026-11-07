@@ -106,7 +106,7 @@ func setPrefsFile(t *testing.T, content string) string {
 	return path
 }
 
-// Mirrors the tolerant prefs read openTUI performs at construction: any
+// Mirrors the tolerant prefs read runPicker performs at construction: any
 // failure collapses to Flat.
 func loadInitialModeForTest(t *testing.T) prefs.SessionListMode {
 	t.Helper()

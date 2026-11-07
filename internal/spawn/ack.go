@@ -1,116 +1,154 @@
 package spawn
 
-import "strings"
-
-type serverOptionWriter interface {
-	SetServerOption(name, value string) error
-	UnsetServerOption(name string) error
-}
-
-type serverOptionLister interface {
-	ShowAllServerOptions() (string, error)
-}
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
 
 type AckCollector interface {
 	Collect(batch string) (map[string]struct{}, error)
 }
 
-// AckCleaner is best-effort: a leaked marker self-expires with the tmux server.
 type AckCleaner interface {
 	Clean(batch string) error
 }
 
-// AckWriter writes a spawned window's own token marker just before it execs.
+// AckWriter writes a spawned window's own ack once its attach has begun, or
+// just before it execs the attach in its place.
 type AckWriter interface {
 	Write(batch, token string) error
 }
 
-// AckChannelFull omits Write deliberately: the burster never writes markers,
+// AckChannelFull omits Write deliberately: the burster never writes acks,
 // the spawned windows do.
 type AckChannelFull interface {
 	AckCollector
 	AckCleaner
 }
 
-// ServerOptionAckChannel implements the token-ack contract over tmux server
-// options. Markers are presence-only — the value is never read.
-type ServerOptionAckChannel struct {
-	w serverOptionWriter
-	l serverOptionLister
+// ackDir is where the acks live in the state directory.
+const ackDir = "spawn-acks"
+
+// staleAckAge is how old an ack is before Clean takes it for one a burst
+// left behind. A burst cleans its own within the ack timeout of its last
+// window, so no live burst's ack is ever this old.
+const staleAckAge = time.Hour
+
+// FileAckChannel is the token-ack channel as files in the state directory's
+// spawn-acks/, one empty file named <batch>-<token> per window acked, only
+// its owner able to read it. Presence is the signal.
+type FileAckChannel struct {
+	dir string
 }
 
-func NewServerOptionAckChannel(w serverOptionWriter, l serverOptionLister) *ServerOptionAckChannel {
-	return &ServerOptionAckChannel{w: w, l: l}
+func NewFileAckChannel(stateDir string) *FileAckChannel {
+	return &FileAckChannel{dir: filepath.Join(stateDir, ackDir)}
 }
 
 var (
-	_ AckWriter      = (*ServerOptionAckChannel)(nil)
-	_ AckCollector   = (*ServerOptionAckChannel)(nil)
-	_ AckCleaner     = (*ServerOptionAckChannel)(nil)
-	_ AckChannelFull = (*ServerOptionAckChannel)(nil)
+	_ AckWriter      = (*FileAckChannel)(nil)
+	_ AckChannelFull = (*FileAckChannel)(nil)
 )
 
-// Write is idempotent: presence is the signal, the value opaque.
-func (c *ServerOptionAckChannel) Write(batch, token string) error {
-	return c.w.SetServerOption(SpawnMarkerName(batch, token), "1")
+// Write is idempotent. It refuses a batch or token no burst could have
+// minted before either reaches a path.
+func (c *FileAckChannel) Write(batch, token string) error {
+	name, err := ackFileName(batch, token)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(c.dir, 0o700); err != nil {
+		return fmt.Errorf("spawn: write ack: %w", err)
+	}
+	// MkdirAll leaves a directory that already exists as it is.
+	if err := os.Chmod(c.dir, 0o700); err != nil {
+		return fmt.Errorf("spawn: write ack: %w", err)
+	}
+	f, err := os.OpenFile(filepath.Join(c.dir, name), os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("spawn: write ack: %w", err)
+	}
+	return f.Close()
 }
 
-// Collect returns the tokens marked for batch. A listing failure returns
-// (nil, err) rather than an empty-as-success set, which would mis-classify every
-// window as failed; on success the map is non-nil.
-func (c *ServerOptionAckChannel) Collect(batch string) (map[string]struct{}, error) {
-	out, err := c.l.ShowAllServerOptions()
+// Collect returns the tokens acked for batch. A failed read returns (nil, err)
+// rather than an empty-as-success set, which would mis-classify every window
+// as failed; on success the map is non-nil, and a directory never made holds
+// no acks.
+func (c *FileAckChannel) Collect(batch string) (map[string]struct{}, error) {
+	acks, err := c.list()
 	if err != nil {
 		return nil, err
 	}
 	tokens := map[string]struct{}{}
-	forEachBatchMarker(out, batch, func(_, token string) {
-		tokens[token] = struct{}{}
-	})
+	for _, a := range acks {
+		if a.batch == batch {
+			tokens[a.token] = struct{}{}
+		}
+	}
 	return tokens, nil
 }
 
-// Clean is idempotent and tolerates a concurrent unset. A per-marker failure
-// does not abort the sweep; the first error encountered is returned.
-func (c *ServerOptionAckChannel) Clean(batch string) error {
-	out, err := c.l.ShowAllServerOptions()
+// Clean removes batch's acks, and any other burst's old enough to be stale,
+// as one that ended before cleaning leaves them. It is idempotent and
+// tolerates a concurrent removal. A failed removal does not stop the rest;
+// the first error is returned.
+func (c *FileAckChannel) Clean(batch string) error {
+	acks, err := c.list()
 	if err != nil {
 		return err
 	}
 	var firstErr error
-	forEachBatchMarker(out, batch, func(name, _ string) {
-		if uerr := c.w.UnsetServerOption(name); uerr != nil && firstErr == nil {
-			firstErr = uerr
+	staleBefore := time.Now().Add(-staleAckAge)
+	for _, a := range acks {
+		stale := a.batch != batch && a.modified.Before(staleBefore)
+		if a.batch != batch && !stale {
+			continue
 		}
-	})
+		path := filepath.Join(c.dir, a.name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			firstErr = cmp.Or(firstErr, err)
+			continue
+		}
+		if stale {
+			spawnLogger.Debug("stale spawn ack removed", "path", path)
+		}
+	}
 	return firstErr
 }
 
-func forEachBatchMarker(out, batch string, fn func(name, token string)) {
-	for _, name := range optionNames(out) {
-		b, token, ok := ParseSpawnMarkerName(name)
-		if !ok || b != batch {
-			continue
-		}
-		fn(name, token)
-	}
+// ack is one ack file.
+type ack struct {
+	name, batch, token string
+	modified           time.Time
 }
 
-func optionNames(out string) []string {
-	if out == "" {
-		return nil
+// list reads the acks in the directory, skipping any other file and one
+// removed as it is read.
+func (c *FileAckChannel) list() ([]ack, error) {
+	entries, err := os.ReadDir(c.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
-	var names []string
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	if err != nil {
+		return nil, fmt.Errorf("spawn: read acks: %w", err)
+	}
+	var acks []ack
+	for _, e := range entries {
+		batch, token, ok := parseAckFileName(e.Name())
+		if !ok || !e.Type().IsRegular() {
 			continue
 		}
-		idx := strings.IndexAny(line, " \t")
-		if idx < 0 {
+		info, err := e.Info()
+		if err != nil {
 			continue
 		}
-		names = append(names, line[:idx])
+		acks = append(acks, ack{name: e.Name(), batch: batch, token: token, modified: info.ModTime()})
 	}
-	return names
+	return acks, nil
 }

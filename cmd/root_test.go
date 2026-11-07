@@ -5,14 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -121,50 +121,31 @@ func runRootCmd(t *testing.T, args ...string) (*bytes.Buffer, *bytes.Buffer, err
 	return outBuf, errBuf, err
 }
 
-func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{name: "portal open fails without tmux", args: []string{"open"}},
-		{name: "portal list fails without tmux", args: []string{"list"}},
-		{name: "portal kill fails without tmux", args: []string{"kill", "test-session"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("PATH", "/nonexistent/path")
-
-			resetRootCmd()
-			rootCmd.SetArgs(tt.args)
-			err := rootCmd.Execute()
-
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-
-			errMsg := err.Error()
-			want := "Portal requires tmux. Install with: brew install tmux"
-			if errMsg != want {
-				t.Errorf("error = %q, want %q", errMsg, want)
-			}
-		})
-	}
-}
-
-func TestNonTmuxCommandsWorkWithoutTmux(t *testing.T) {
+func TestExemptCommandsWorkWithNothingOnPath(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		env  map[string]string
+		// stage sets up what the command reads beyond its env.
+		stage func(t *testing.T)
 	}{
-		{name: "portal version works without tmux", args: []string{"version"}},
-		{name: "portal init works without tmux", args: []string{"init", "zsh"}},
-		{name: "portal help works without tmux", args: []string{"help"}},
+		{name: "portal version works with nothing on PATH", args: []string{"version"}},
+		{name: "portal init works with nothing on PATH", args: []string{"init", "zsh"}},
+		{name: "portal help works with nothing on PATH", args: []string{"help"}},
 		{
-			name: "portal alias set works without tmux",
+			name: "portal alias set works with nothing on PATH",
 			args: []string{"alias", "set", "proj", "/some/path"},
 			env:  map[string]string{"PORTAL_ALIASES_FILE": "TEMPDIR/aliases"},
+		},
+		{
+			name: "portal current works with nothing on PATH",
+			args: []string{"current"},
+			env:  map[string]string{"ZMX_SESSION": currentSessionName, "PORTAL_STATE_DIR": "TEMPDIR/"},
+		},
+		{
+			name:  "portal rename works with nothing on PATH",
+			args:  []string{"rename", "api work"},
+			stage: func(t *testing.T) { stageRename(t) },
 		},
 	}
 
@@ -177,6 +158,9 @@ func TestNonTmuxCommandsWorkWithoutTmux(t *testing.T) {
 					v = filepath.Join(t.TempDir(), after)
 				}
 				t.Setenv(k, v)
+			}
+			if tt.stage != nil {
+				tt.stage(t)
 			}
 
 			resetRootCmd()
@@ -223,53 +207,15 @@ func TestSpawnCommandIsRetired(t *testing.T) {
 	}
 }
 
-func TestTmuxDependentCommandsSucceedWithTmux(t *testing.T) {
-	originalPath := os.Getenv("PATH")
-	if originalPath == "" {
-		t.Skip("PATH not set")
-	}
-
-	tests := []struct {
-		name string
-		args []string
-	}{
-		// open is excluded: it launches a full-screen TUI requiring a TTY.
-		{name: "portal list succeeds with tmux", args: []string{"list"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Everything downstream of the tmux-availability precheck must
-			// stay injected: uninjected, this ran a complete production
-			// bootstrap against the developer's real tmux server.
-			stub := &stubVersionChecker{}
-			installStubVersionChecker(t, stub)
-			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-			withListDeps(t, ListDeps{
-				Lister: &mockSessionLister{sessions: []tmux.Session{}},
-				IsTTY:  func() bool { return false },
-			})
-
-			resetRootCmd()
-			rootCmd.SetArgs(tt.args)
-			err := rootCmd.Execute()
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
 type nopRunner struct{}
 
-func (nopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, nil
+func (nopRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, nil
 }
 
 type panicRunner struct{}
 
-func (panicRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+func (panicRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
 	panic("buildBootstrapDeps / Run must not be reached")
 }
 
@@ -277,19 +223,15 @@ type errRunner struct {
 	err error
 }
 
-func (r *errRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, r.err
+func (r *errRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, r.err
 }
 
-func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
-	t.Run("orchestrator Run called for tmux-requiring commands", func(t *testing.T) {
+func TestPersistentPreRunE_RunsAnInjectedOrchestrator(t *testing.T) {
+	t.Run("orchestrator Run called for non-exempt commands", func(t *testing.T) {
 		runner := &recordingRunner{}
 		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		withListDeps(t, ListDeps{
-			Lister: &mockSessionLister{sessions: []tmux.Session{}},
-			IsTTY:  func() bool { return false },
-		})
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 		resetRootCmd()
 		rootCmd.SetArgs([]string{"list"})
@@ -304,7 +246,7 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 	})
 
 	t.Run("orchestrator error propagates to caller", func(t *testing.T) {
-		runner := &recordingRunner{err: fmt.Errorf("failed to start tmux server: permission denied")}
+		runner := &recordingRunner{err: fmt.Errorf("take bootstrap.lock: permission denied")}
 		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 		resetRootCmd()
@@ -314,14 +256,14 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		want := "failed to start tmux server: permission denied"
+		want := "take bootstrap.lock: permission denied"
 		if err.Error() != want {
 			t.Errorf("error = %q, want %q", err.Error(), want)
 		}
 	})
 
-	t.Run("orchestrator Run not called for skipTmuxCheck commands", func(t *testing.T) {
-		// skipTmuxCheck keys on cobra's canonical c.Name(), so the `hooks`
+	t.Run("orchestrator Run not called for bootstrap-exempt commands", func(t *testing.T) {
+		// bootstrapExempt keys on cobra's canonical c.Name(), so the `hooks`
 		// alias rows exercise the alias resolving to the single `hook` entry.
 		tests := []struct {
 			name string
@@ -330,7 +272,7 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 			{name: "version", argv: []string{"version"}},
 			// Load-bearing: cobra's __complete runs the root
 			// PersistentPreRunE, so without the exemption every TAB press
-			// fires the full bootstrap and starts tmux.
+			// fires the full bootstrap.
 			{name: "__complete open", argv: []string{"__complete", "open", ""}},
 			{name: "hook list", argv: []string{"hook", "list"}},
 			{name: "hook set", argv: []string{"hook", "set", "--on-resume", "true"}},
@@ -338,6 +280,8 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 			{name: "hooks alias list", argv: []string{"hooks", "list"}},
 			{name: "hooks alias set", argv: []string{"hooks", "set", "--on-resume", "true"}},
 			{name: "hooks alias rm", argv: []string{"hooks", "rm", "--on-resume"}},
+			{name: "current", argv: []string{"current"}},
+			{name: "rename", argv: []string{"rename", "api work"}},
 		}
 
 		for _, tt := range tests {
@@ -345,25 +289,12 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 				runner := &recordingRunner{}
 				withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
-				// Without these the command reaches real tmux and the
-				// developer's config dir.
-				if len(tt.argv) >= 2 {
-					switch tt.argv[1] {
-					case "set", "rm":
-						hooksFileInTempDir(t, map[string]map[string]string{
-							hookstest.UnjudgeableSeedA: {"on-resume": "claude --resume abc123"},
-						})
-						t.Setenv("TMUX_PANE", "%3")
-
-						resolver := &mockKeyResolver{key: hookstest.UnjudgeableSeedA}
-						withHooksDeps(t, HooksDeps{KeyResolver: resolver})
-					case "list":
-						// The list body resolves each entry's location through the
-						// pane enumeration, so it is the empty store — not a real
-						// tmux server — that must be what leaves the read untaken.
-						withHooksDeps(t, HooksDeps{PaneLister: &loudPaneHookLister{t: t}})
-					}
-				}
+				// Without these the command reaches the developer's config
+				// and state dirs.
+				hooksFileInTempDir(t, map[string]map[string]string{
+					hookSessionA: {"on-resume": "claude --resume abc123"},
+				})
+				inSession(t, hookSessionA)
 
 				resetRootCmd()
 				rootCmd.SetOut(new(bytes.Buffer))
@@ -380,249 +311,21 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("PersistentPreRunE stores serverStarted=true in context", func(t *testing.T) {
-		runner := &recordingRunner{started: true}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		var gotStarted bool
-		testCmd := &cobra.Command{
-			Use: "testcmd",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				gotStarted = serverWasStarted(cmd)
-				return nil
-			},
-		}
-		rootCmd.AddCommand(testCmd)
-		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"testcmd"})
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !gotStarted {
-			t.Error("expected serverWasStarted=true, got false")
-		}
-	})
-
-	t.Run("PersistentPreRunE stores serverStarted=false in context", func(t *testing.T) {
-		runner := &recordingRunner{started: false}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		var gotStarted bool
-		var runCalled bool
-		testCmd := &cobra.Command{
-			Use: "testcmd2",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				runCalled = true
-				gotStarted = serverWasStarted(cmd)
-				return nil
-			},
-		}
-		rootCmd.AddCommand(testCmd)
-		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"testcmd2"})
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !runCalled {
-			t.Fatal("RunE was not called")
-		}
-		if gotStarted {
-			t.Error("expected serverWasStarted=false, got true")
-		}
-	})
-}
-
-type recordingHookRegistrar struct {
-	calls   int
-	gotNil  bool
-	gotSame bool
-	want    *tmux.Client
-	err     error
-}
-
-func (r *recordingHookRegistrar) Register(c *tmux.Client) error {
-	r.calls++
-	if c == nil {
-		r.gotNil = true
-	}
-	if r.want != nil && c == r.want {
-		r.gotSame = true
-	}
-	return r.err
-}
-
-func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
-	t.Run("RegisterHooks is called once after orchestrator for non-exempt commands", func(t *testing.T) {
-		runner := &recordingRunner{}
-		// An unsatisfied latch is what routes to the full-bootstrap path; the
-		// abridged path deliberately skips hook registration.
-		client := notSatisfiedLatchClient()
-		registrar := &recordingHookRegistrar{want: client}
-
-		withBootstrapDeps(t, BootstrapDeps{
-			Orchestrator:  runner,
-			Client:        client,
-			RegisterHooks: registrar.Register,
-		})
-
-		withListDeps(t, ListDeps{
-			Lister: &mockSessionLister{sessions: []tmux.Session{}},
-			IsTTY:  func() bool { return false },
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"list"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if runner.calls != 1 {
-			t.Errorf("orchestrator Run call count = %d, want 1", runner.calls)
-		}
-		if registrar.calls != 1 {
-			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
-		}
-		if registrar.gotNil {
-			t.Error("RegisterHooks received nil client")
-		}
-		if !registrar.gotSame {
-			t.Error("RegisterHooks did not receive the bootstrapped client instance")
-		}
-	})
-
-	t.Run("RegisterHooks is NOT called for exempt commands", func(t *testing.T) {
-		exempt := []struct {
-			name string
-			args []string
-		}{
-			{name: "portal version", args: []string{"version"}},
-			{name: "portal state", args: []string{"state"}},
-		}
-		for _, tt := range exempt {
-			t.Run(tt.name, func(t *testing.T) {
-				registrar := &recordingHookRegistrar{}
-				withBootstrapDeps(t, BootstrapDeps{
-					Orchestrator:  &nopRunner{},
-					RegisterHooks: registrar.Register,
-				})
-
-				resetRootCmd()
-				rootCmd.SetArgs(tt.args)
-				err := rootCmd.Execute()
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-
-				if registrar.calls != 0 {
-					t.Errorf("RegisterHooks call count for exempt command = %d, want 0", registrar.calls)
-				}
-			})
-		}
-	})
-
-	t.Run("RegisterHooks error propagates from PersistentPreRunE", func(t *testing.T) {
-		sentinel := errors.New("hook registration failed")
-		// An unsatisfied latch is what routes to the full-bootstrap path; the
-		// abridged path would skip RegisterHooks entirely.
-		client := notSatisfiedLatchClient()
-		registrar := &recordingHookRegistrar{err: sentinel}
-
-		withBootstrapDeps(t, BootstrapDeps{
-			Orchestrator:  &nopRunner{},
-			Client:        client,
-			RegisterHooks: registrar.Register,
-		})
-
-		withListDeps(t, ListDeps{
-			Lister: &mockSessionLister{sessions: []tmux.Session{}},
-			IsTTY:  func() bool { return false },
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"list"})
-		err := rootCmd.Execute()
-
-		if err == nil {
-			t.Fatal("expected error from RegisterHooks, got nil")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
-		}
-		if registrar.calls != 1 {
-			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
-		}
-	})
 }
 
 type fatalRunner struct {
 	fatal *bootstrap.FatalError
 }
 
-func (r *fatalRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, r.fatal
-}
-
-func TestPersistentPreRunE_WrapsCheckTmuxAvailableErrorAsFatal(t *testing.T) {
-	t.Setenv("PATH", "/nonexistent/path")
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	err := rootCmd.Execute()
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	var fatal *bootstrap.FatalError
-	if !errors.As(err, &fatal) {
-		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
-	}
-	want := "Portal requires tmux. Install with: brew install tmux"
-	if fatal.UserMessage != want {
-		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, want)
-	}
-}
-
-func TestPersistentPreRunE_WrapsVersionCheckErrorAsFatal(t *testing.T) {
-	resetVersionCheckForTest()
-	t.Cleanup(resetVersionCheckForTest)
-
-	withFuncSeam(t, &versionChecker, func(tmux.Commander) error {
-		return errors.New("Portal requires tmux \u2265 3.0 (found 2.9). Please upgrade.")
-	})
-
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	err := rootCmd.Execute()
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	var fatal *bootstrap.FatalError
-	if !errors.As(err, &fatal) {
-		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
-	}
-	want := "Portal requires tmux \u2265 3.0 (found 2.9). Please upgrade."
-	if fatal.UserMessage != want {
-		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, want)
-	}
+func (r *fatalRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
+	return nil, r.fatal
 }
 
 func TestPersistentPreRunE_OrchestratorFatalErrorPropagatesUnwrapped(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	cause := errors.New("hooks boom")
-	want := "Portal failed to register tmux hooks: hooks boom"
+	cause := errors.New("permission denied")
+	want := "Portal failed to raise the restoring flag: permission denied"
 	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, cause)}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
@@ -648,7 +351,7 @@ func TestPersistentPreRunE_OrchestratorFatalErrorPropagatesUnwrapped(t *testing.
 func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	want := "Portal failed to register tmux hooks: synthetic"
+	want := "Portal failed to raise the restoring flag: synthetic"
 	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, errors.New("synthetic"))}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
@@ -675,6 +378,32 @@ func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	}
 	if strings.Count(got, "\n") != 1 {
 		t.Errorf("stderr contained %d newlines; want exactly 1", strings.Count(got, "\n"))
+	}
+}
+
+// decision 75: a mint whose create the backend refused, because a zmx 0.8.1
+// first on PATH made the session, fails with the older-zmx fatal, as a
+// bootstrap meeting that zmx does.
+func TestExecute_UnsupportedCreateIsTheOlderZmxFatal(t *testing.T) {
+	fake, _ := stageAttach(t)
+	stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
+	fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w; zmx kill ended the session", "x", backend.ErrUnsupportedProtocol))
+
+	var stderr bytes.Buffer
+	originalWriter := fatalErrorStderr
+	fatalErrorStderr = &stderr
+	t.Cleanup(func() { fatalErrorStderr = originalWriter })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", t.TempDir()})
+	err := Execute()
+
+	fatal, ok := errors.AsType[*bootstrap.FatalError](err)
+	if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
+		t.Fatalf("Execute = %v, want the older-zmx fatal carrying the refusal", err)
+	}
+	if got, want := stderr.String(), bootstrap.OlderZmxMessage+"\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }
 
@@ -738,7 +467,7 @@ func TestResetRootCmdClearsStateChildFlags(t *testing.T) {
 	t.Run("it refuses a resume-wait naming no command after a sibling set one", func(t *testing.T) {
 		withFuncSeam(t, &resumeWaitRunFunc, func(resumeWaitConfig) error { return nil })
 
-		payload := resumeChainPayload{Command: "make deploy", HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}
+		payload := resumeChainPayload{Command: "make deploy", Session: "proj-a1b2"}
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		errBuf := new(bytes.Buffer)
@@ -751,7 +480,7 @@ func TestResetRootCmdClearsStateChildFlags(t *testing.T) {
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})
+		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--session", "proj-a1b2"})
 		if err := rootCmd.Execute(); err == nil {
 			t.Error("executing resume-wait with no --command succeeded; the sibling's --command outlived the reset")
 		}
@@ -776,4 +505,16 @@ func nonDefaultFlagValue(t *testing.T, f *pflag.Flag) string {
 	}
 	t.Fatalf("no non-default value known for --%s of type %s", f.Name, f.Value.Type())
 	return ""
+}
+
+// The one mapping from a create's error to its fatal, shared by the picker's
+// mint and Execute: the older-zmx fatal for a refusal, and none otherwise.
+func TestCreateFatal(t *testing.T) {
+	refusal := fmt.Errorf("create session %q: %w", "x", backend.ErrUnsupportedProtocol)
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](createFatal(refusal)); !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("createFatal(refusal) = %v, want the older-zmx fatal carrying it", createFatal(refusal))
+	}
+	if err := createFatal(errors.New("boom")); err != nil {
+		t.Errorf("createFatal(boom) = %#v, want nil", err)
+	}
 }

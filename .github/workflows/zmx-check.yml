@@ -1,0 +1,108 @@
+name: zmx check
+
+# Portal's formula depends on official zmx, which Homebrew upgrades freely, so
+# this runs the zmx-backed tests against zmx's latest release and its main
+# branch: every test that runs a real zmx. The release leg takes the macOS
+# build zmx publishes, the one Homebrew installs, rather than building the
+# release's source: 1.0.0's published macOS builds carried Linux's ioctl
+# numbers, which a build from source never shows. The tests of how Portal treats
+# zmx 0.8.1 (zmxtest.OlderBinary) skip here: 0.8.1 never changes, so the local
+# integration lane covers them. zmxtest.Binary fails a test these
+# lines don't run, and reads them strictly (internal/zmxtest/weeklycheck.go):
+# keep each to -tags integration, -p 1, -timeout, one single-quoted -run and
+# ./ packages, in a run: | block holding nothing else, and set neither Go's
+# flags variable nor a step's working directory anywhere here: naming either
+# fails the read. A failed run is the alert: GitHub emails it.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zmx:
+    name: zmx ${{ matrix.leg }}
+    # zmxtest proves which processes it owns through kern.procargs2, so the
+    # tests run on macOS only.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [release, main]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve zmx
+        id: zmx
+        env:
+          LEG: ${{ matrix.leg }}
+        run: |
+          if [ "$LEG" = release ]; then
+            tag=$(gh api repos/neurosnap/zmx/releases/latest --jq .tag_name)
+            echo "zmx's latest release is $tag"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          commit=$(gh api repos/neurosnap/zmx/commits/main --jq .sha)
+          zig=$(gh api "repos/neurosnap/zmx/contents/build.zig.zon?ref=$commit" -H 'Accept: application/vnd.github.raw' \
+            | sed -n 's/.*\.minimum_zig_version *= *"\([^"]*\)".*/\1/p')
+          if [ -z "$zig" ]; then
+            echo "::error::no minimum_zig_version in zmx main ($commit) build.zig.zon"
+            exit 1
+          fi
+          echo "zmx main is $commit, built with Zig $zig"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "zig=$zig" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Zig
+        if: matrix.leg == 'main'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zmx.outputs.zig }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build zmx
+        if: matrix.leg == 'main'
+        env:
+          COMMIT: ${{ steps.zmx.outputs.commit }}
+        run: |
+          binary=$(scripts/zmx-build "$COMMIT")
+          echo "PORTAL_TEST_ZMX_BINARY=$binary" >> "$GITHUB_ENV"
+
+      - name: Download zmx
+        if: matrix.leg == 'release'
+        env:
+          TAG: ${{ steps.zmx.outputs.tag }}
+        run: |
+          case $(uname -m) in
+          arm64) arch=aarch64 ;;
+          x86_64) arch=x86_64 ;;
+          *) echo "::error::zmx publishes no macOS build for $(uname -m)"; exit 1 ;;
+          esac
+          asset="zmx-${TAG#v}-macos-$arch.tar.gz"
+          dir="$RUNNER_TEMP/zmx-release"
+          mkdir -p "$dir"
+          gh release download "$TAG" --repo neurosnap/zmx --pattern "$asset" --pattern "$asset.sha256" --dir "$dir"
+          want=$(cut -d ' ' -f 1 "$dir/$asset.sha256")
+          got=$(shasum -a 256 "$dir/$asset" | cut -d ' ' -f 1)
+          if [ "$want" != "$got" ]; then
+            echo "::error::$asset is $got, but its published checksum is $want"
+            exit 1
+          fi
+          tar -xzf "$dir/$asset" -C "$dir" zmx
+          echo "zmx $TAG's published build is $asset ($got)"
+          echo "PORTAL_TEST_ZMX_BINARY=$dir/zmx" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: |
+          go test -tags integration -p 1 -timeout 30m ./internal/backend/zmx/... ./internal/runner/... ./internal/saverhost/... ./internal/spawn/... ./internal/zmxtest/...
+          go test -tags integration -p 1 -timeout 30m -run 'AgainstZmx$' ./cmd ./internal/portaltest ./internal/restore ./internal/vtcapture

@@ -1,6 +1,8 @@
 package capture
 
 import (
+	"cmp"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tui"
@@ -22,18 +24,33 @@ func keyEnter() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: tea.KeyEnter}
 }
 
-// keyLineStart is the text input's own line-start binding.
-func keyLineStart() tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
-}
-
 // ModelAt drives the model to its captured state with no tea program running.
 // BootstrapCompleteMsg and LoadingMinElapsedMsg are deliberately never sent:
 // loading fixtures stay parked precisely because neither arrives.
 func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
-	deps := f.Deps(th)
-	var model tea.Model = tui.Build(deps)
 	w, h = f.renderSize(w, h)
+	return f.modelAt(f.Deps(th), w, h)
+}
+
+// drawing is the fixture's golden frame source, kept at its frame size with any
+// declared render size substituted, so the stem names the size it is drawn at.
+func (f *Fixture) drawing() Drawing {
+	w, h := f.renderSize(cmp.Or(f.frame.Width, harnessSize.Width), cmp.Or(f.frame.Height, harnessSize.Height))
+	return Drawing{name: f.name, size: Size{Width: w, Height: h}, draw: f.draw}
+}
+
+// colourless joins the fixture's own NO_COLOR, so the environment can take
+// colour away but never give it to a colourless fixture.
+func (f *Fixture) draw(th theme.Theme, colourless bool, size Size) (tea.View, Size) {
+	deps := f.Deps(th)
+	deps.NoColor = deps.NoColor || colourless
+	w, h := f.renderSize(size.Width, size.Height)
+	return f.modelAt(deps, w, h).View(), Size{Width: w, Height: h}
+}
+
+// modelAt takes the size as rendered: any declared size already substituted.
+func (f *Fixture) modelAt(deps tui.Deps, w, h int) tui.Model {
+	var model tea.Model = tui.Build(deps)
 	model, _ = model.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 	sessions, err := f.Lister.ListSessions()
@@ -48,8 +65,12 @@ func (f *Fixture) ModelAt(th theme.Theme, w, h int) tui.Model {
 	if f.fatalEvent.FailedStep > 0 {
 		model, _ = model.Update(f.fatalEvent)
 	}
+	var cmd tea.Cmd
 	for _, key := range f.captureKeys {
-		model, _ = model.Update(key)
+		model, cmd = model.Update(key)
+	}
+	if f.landsLastKeyRead && cmd != nil {
+		model, _ = model.Update(cmd())
 	}
 	return model.(tui.Model)
 }
@@ -60,11 +81,11 @@ func pendingSessionsOf(r tui.PendingResumeReader) map[string]struct{} {
 	if r == nil {
 		return nil
 	}
-	view, err := r.ListPendingResumePanes()
+	pending, err := r.ListPendingResumeSessions()
 	if err != nil {
 		return nil
 	}
-	return view.Sessions
+	return pending
 }
 
 // renderSize substitutes whichever dimension the fixture declares for the

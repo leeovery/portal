@@ -12,7 +12,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func flattenNoticeBand(band string) string {
@@ -45,9 +44,9 @@ func viewHasNoticeMessage(t *testing.T, m Model, role noticeBandRole, message st
 }
 
 func noticeBandModel(names ...string) Model {
-	sessions := make([]tmux.Session, 0, len(names))
+	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, tmux.Session{Name: n, Windows: 1, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -120,7 +119,7 @@ func TestRenderNoticeBand_NoColor(t *testing.T) {
 func TestNoticeSlot_SingleBand_TransientFlashWins(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -145,7 +144,7 @@ func TestNoticeSlot_SingleBand_TransientFlashWins(t *testing.T) {
 func TestNoticeSlot_PersistentReturnsAfterFlashClear(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -168,7 +167,7 @@ func TestNoticeSlot_PersistentReturnsAfterFlashClear(t *testing.T) {
 func TestNoticeSlot_NeverBothBandsSimultaneously(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80
@@ -426,7 +425,7 @@ func TestNoticeBand_ShortMessageSingleLine(t *testing.T) {
 func TestSessionBandHeight_TracksWrappedLineCount(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 40
@@ -448,7 +447,7 @@ func TestSessionBandHeight_TracksWrappedLineCount(t *testing.T) {
 func TestNoticeBand_WrappedFrameHeightStaysTermH(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal"}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 40
@@ -480,8 +479,10 @@ func bandShippedCopy() []struct{ name, message string } {
 	return []struct{ name, message string }{
 		{"the by-tag signpost", byTagSignpostText},
 		{"the remote no-op", spawn.UnsupportedNoopMessage(spawn.Identity{})},
+		{"the unsure no-op", spawn.UnsupportedNoopMessage(spawn.Identity{Unsure: true})},
 		{"the named no-op", spawn.UnsupportedNoopMessage(named)},
 		{"the remote multi-select refusal", multiSelectBlockedRemoteFlash},
+		{"the unsure multi-select refusal", multiSelectBlockedUnsureFlash},
 		{"the named multi-select refusal", multiSelectBlockedNamedFlash},
 	}
 }

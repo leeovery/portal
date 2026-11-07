@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func drainCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
@@ -41,16 +40,10 @@ func pressSpaceThenEsc(t *testing.T, m Model) Model {
 }
 
 func TestPreviewEscReturnsToSessionsPage(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 
 	got := pressSpaceThenEsc(t, m)
 
@@ -60,19 +53,13 @@ func TestPreviewEscReturnsToSessionsPage(t *testing.T) {
 }
 
 func TestPreviewEscPreservesListCursor(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
-		{Name: "charlie", Windows: 1, Attached: false},
-		{Name: "delta", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
+		{Name: "delta", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 	m.sessionList.Select(3)
 	if got := m.sessionList.Index(); got != 3 {
 		t.Fatalf("test setup invariant: expected Index()=3 before Space, got %d", got)
@@ -86,17 +73,11 @@ func TestPreviewEscPreservesListCursor(t *testing.T) {
 }
 
 func TestPreviewEscPreservesNoFilterState(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 	if m.sessionList.IsFiltered() {
 		t.Fatalf("test setup invariant: expected IsFiltered()=false before Space")
 	}
@@ -113,18 +94,12 @@ func TestPreviewEscPreservesNoFilterState(t *testing.T) {
 }
 
 func TestPreviewEscPreservesCommittedFilter(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "alphabet", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 	m.sessionList.SetFilterText("alpha")
 	m.sessionList.SetFilterState(list.FilterApplied)
 	if !m.sessionList.IsFiltered() {
@@ -145,18 +120,12 @@ func TestPreviewEscPreservesCommittedFilter(t *testing.T) {
 }
 
 func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "alphabet", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	m := modelWithSeams(t, sessions, historyFor(t, "hi", sessions))
 	m.sessionList.SetFilterText("alpha")
 	m.sessionList.SetFilterState(list.FilterApplied)
 
@@ -181,38 +150,30 @@ func TestSecondEscClearsCommittedFilterViaListDefault(t *testing.T) {
 	}
 }
 
-func TestPreviewReopenAfterDismissConstructsFreshPreviewModel(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
+func TestPreviewReopenAfterDismissReadsTheHistoryAfresh(t *testing.T) {
+	sessions := []Session{
+		{Name: "alpha", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(t, sessions, enum, reader)
+	history := historyFor(t, "first", sessions)
+	m := modelWithSeams(t, sessions, history)
 
-	afterFirst := pressSpaceThenEsc(t, m)
-	if enum.calls != 1 {
-		t.Fatalf("expected 1 enumerator call after first open, got %d", enum.calls)
+	first := openPreviewOn(t, m)
+	updated, dismiss := first.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	afterFirst := asModel(t, dropCmd(asModel(t, updated).Update(drainCmd(t, dismiss))))
+	if n := len(historyCalls(history)); n != 1 {
+		t.Fatalf("expected 1 History read after first open, got %d", n)
 	}
-	if len(reader.calls) != 1 {
-		t.Fatalf("expected 1 reader call after first open, got %d", len(reader.calls))
-	}
+	history.SetHistory("alpha", []byte("second"))
 
-	updated, _ := afterFirst.Update(keySpaceMsg())
-	got, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("expected Model after second Space, got %T", updated)
-	}
+	got := openPreviewOn(t, afterFirst)
+
 	if got.activePage != pagePreview {
 		t.Errorf("expected pagePreview after second Space, got %v", got.activePage)
 	}
-	if enum.calls != 2 {
-		t.Errorf("expected enumerator calls to bump to 2 after re-open, got %d", enum.calls)
+	if n := len(historyCalls(history)); n != 2 {
+		t.Errorf("expected History reads to bump to 2 after re-open, got %d", n)
 	}
-	if len(reader.calls) != 2 {
-		t.Errorf("expected reader calls to bump to 2 after re-open, got %d", len(reader.calls))
+	if body := lastBodyRow(got.preview); body != "second" {
+		t.Errorf("re-opened body = %q, want the history as it is now", body)
 	}
 }

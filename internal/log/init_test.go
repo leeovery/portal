@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -224,6 +225,27 @@ func TestInit_DoesNotImportInternalState(t *testing.T) {
 	}
 }
 
+func TestInit_ProcessStartQuotesAnArgumentHoldingASpace(t *testing.T) {
+	snapshotInitState(t)
+	prevArgs := os.Args
+	t.Cleanup(func() { os.Args = prevArgs })
+	os.Args = []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "portal-xn85z5 zmw rework", "--lazy"}
+
+	dir := t.TempDir()
+	if err := Init(dir, "0.5.0", "hydrate"); err != nil {
+		t.Fatalf("Init returned error: %v", err)
+	}
+
+	starts := processLinesByMessage(parseProcessLines(t, readPortalLog(t, dir)), "start")
+	if len(starts) != 1 {
+		t.Fatalf("got %d process:start lines, want exactly 1", len(starts))
+	}
+	const want = "state hydrate --session 'portal-xn85z5 zmw rework' --lazy"
+	if got := starts[0].attrs["args"]; got != want {
+		t.Errorf("start args = %q, want %q", got, want)
+	}
+}
+
 func TestInit_EmitsProcessStartThenLogLevelResolvedInOrder(t *testing.T) {
 	snapshotInitState(t)
 	t.Setenv("PORTAL_LOG_LEVEL", "debug")
@@ -259,7 +281,7 @@ func TestInit_EmitsProcessStartThenLogLevelResolvedInOrder(t *testing.T) {
 	if got := start.attrs["cmd"]; got != filepath.Base(os.Args[0]) {
 		t.Errorf("start cmd = %q, want %q", got, filepath.Base(os.Args[0]))
 	}
-	if got, want := start.attrs["args"], strings.Join(os.Args[1:], " "); got != want {
+	if got, want := start.attrs["args"], shellquote.Readable(os.Args[1:]); got != want {
 		t.Errorf("start args = %q, want %q", got, want)
 	}
 

@@ -12,7 +12,6 @@ func TestResolveProcessRole(t *testing.T) {
 		{"state daemon with trailing flag", []string{"state", "daemon", "--foreground"}, "daemon"},
 
 		{"state hydrate", []string{"state", "hydrate"}, "hydrate"},
-		{"state signal-hydrate", []string{"state", "signal-hydrate"}, "hydrate"},
 		{"state resume-draw", []string{"state", "resume-draw"}, "hydrate"},
 		{"state resume-wait", []string{"state", "resume-wait"}, "hydrate"},
 		{"state resume-recover", []string{"state", "resume-recover"}, "hydrate"},
@@ -82,16 +81,14 @@ func TestResolveProcessRole_DriftTripwire(t *testing.T) {
 		}
 	}
 
-	if got := ResolveProcessRole([]string{"state", "signal-hydrate"}); got != roleHydrate {
-		t.Errorf("ResolveProcessRole(state signal-hydrate) = %q, want %q", got, roleHydrate)
-	}
-
 	fallbackInputs := [][]string{
 		{"version"},
 		{"init", "zsh"},
 		{"alias", "set", "foo", "."},
 		{"state"},
 		{"state", "wat"},
+		// Retired with the tmux helper's FIFO: no build runs it any more.
+		{"state", "signal-hydrate"},
 		{"totally", "unknown", "verb"},
 	}
 	for _, argv := range fallbackInputs {

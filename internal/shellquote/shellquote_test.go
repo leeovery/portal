@@ -80,3 +80,41 @@ func TestJoin(t *testing.T) {
 		}
 	})
 }
+
+func TestReadable(t *testing.T) {
+	t.Run("it leaves a word a shell reads back unchanged bare", func(t *testing.T) {
+		got := shellquote.Readable([]string{"state", "hydrate", "--session", "proj-x_1", "--file", "/a/b.bin", "--ack", "b1:t1", "PATH=/b", "a@b%c+d,e"})
+
+		const want = "state hydrate --session proj-x_1 --file /a/b.bin --ack b1:t1 PATH=/b a@b%c+d,e"
+		if got != want {
+			t.Errorf("Readable = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it quotes a word a shell would split, expand or glob", func(t *testing.T) {
+		got := shellquote.Readable([]string{"--session", "portal-xn85z5 zmw rework", "$HOME", "~/x", "*.go", "a;b", "it's", "café"})
+
+		want := `--session 'portal-xn85z5 zmw rework' '$HOME' '~/x' '*.go' 'a;b' 'it'\''s' 'café'`
+		if got != want {
+			t.Errorf("Readable = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it quotes a word starting with = and leaves one holding it bare", func(t *testing.T) {
+		if got, want := shellquote.Readable([]string{"=ls", "--key=value"}), `'=ls' --key=value`; got != want {
+			t.Errorf("Readable = %q, want %q (zsh expands a word starting with =, and only there)", got, want)
+		}
+	})
+
+	t.Run("it keeps an empty element as an empty quoted word", func(t *testing.T) {
+		if got, want := shellquote.Readable([]string{"portal", ""}), `portal ''`; got != want {
+			t.Errorf("Readable = %q, want %q (an empty argument must survive as one word)", got, want)
+		}
+	})
+
+	t.Run("it renders an empty argv as the empty string", func(t *testing.T) {
+		if got := shellquote.Readable(nil); got != "" {
+			t.Errorf("Readable = %q, want the empty string", got)
+		}
+	})
+}

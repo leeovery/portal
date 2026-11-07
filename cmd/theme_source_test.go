@@ -117,14 +117,14 @@ func TestThemeSource_SharesTheConstructionReadsDedupScope(t *testing.T) {
 }
 
 // Building a second loader is silent — everything works, the user just gets
-// every theme WARN twice per launch — and openTUI ends in a running Bubble Tea
+// every theme WARN twice per picker — and runPicker ends in a running Bubble Tea
 // program, so only a source guard reaches it.
-func TestOpenTUI_BuildsOneThemeLoader(t *testing.T) {
-	fn := funcDeclForTest(t, "open.go", "openTUI")
+func TestRunPicker_BuildsOneThemeLoader(t *testing.T) {
+	fn := funcDeclForTest(t, "open.go", "runPicker")
 
 	for _, constructor := range []string{"buildThemeLoader", "newThemeLoader"} {
 		if got := callCount(fn, constructor); got > 1 {
-			t.Errorf("openTUI calls %s %d times, want at most 1 — one loader per launch is one dedup scope per launch", constructor, got)
+			t.Errorf("runPicker calls %s %d times, want at most 1 — one loader per picker is one dedup scope per picker", constructor, got)
 		}
 	}
 
@@ -146,7 +146,7 @@ func assertThemeSourceTakesBoundLoader(t *testing.T, n ast.Node) {
 		}
 		found = true
 		if _, isIdent := call.Args[0].(*ast.Ident); !isIdent {
-			t.Errorf("openTUI hands newThemeSource a freshly-constructed loader; it must share the construction-time instance")
+			t.Errorf("runPicker hands newThemeSource a freshly-constructed loader; it must share the construction-time instance")
 		}
 		return true
 	})

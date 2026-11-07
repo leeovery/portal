@@ -5,7 +5,6 @@ import (
 
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func wireTOCTOUResolveSeams(m *Model, detectAdapter spawn.Adapter, ack spawn.AckChannelFull) *int {
@@ -21,14 +20,16 @@ func wireTOCTOUResolveSeams(m *Model, detectAdapter spawn.Adapter, ack spawn.Ack
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() (spawn.WindowEnvironment, error) {
+		return spawn.WindowEnvironment{Set: []string{"PATH=/usr/bin"}}, nil
+	}
 	return calls
 }
 
 func TestBurstDispatch_UsesCachedAdapter_AlreadyResolved(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	detectAdapter := &spawntest.FakeAdapter{Ack: ack}
@@ -59,9 +60,9 @@ func TestBurstDispatch_UsesCachedAdapter_AlreadyResolved(t *testing.T) {
 }
 
 func TestBurstDispatch_UsesCachedAdapter_DeferredEntry(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	detectAdapter := &spawntest.FakeAdapter{Ack: ack}
@@ -97,9 +98,9 @@ func TestBurstDispatch_UsesCachedAdapter_DeferredEntry(t *testing.T) {
 }
 
 func TestBurstDispatch_NilCachedAdapter_RoutesToUnsupportedNoOp(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	m := NewModelWithSessions(sessions)
@@ -110,7 +111,9 @@ func TestBurstDispatch_NilCachedAdapter_RoutesToUnsupportedNoOp(t *testing.T) {
 	m.sessionExists = allPresent
 	m.ackChannel = ack
 	m.spawnExe = func() (string, error) { return "/abs/portal", nil }
-	m.spawnGetenv = func(string) string { return "/usr/bin" }
+	m.spawnEnv = func() (spawn.WindowEnvironment, error) {
+		return spawn.WindowEnvironment{Set: []string{"PATH=/usr/bin"}}, nil
+	}
 
 	m = resolveDetection(t, m, ghosttyIdentity())
 	if m.DetectUnsupported() {

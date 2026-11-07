@@ -53,7 +53,7 @@ type execOsascriptRunner struct{}
 var _ osascriptRunner = execOsascriptRunner{}
 
 func (execOsascriptRunner) Run(argv []string) (string, int, error) {
-	return runArgvCombined(argv)
+	return runAdapterArgv(argv)
 }
 
 type ghosttyAdapter struct {

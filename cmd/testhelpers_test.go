@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/tui"
@@ -23,30 +24,11 @@ import (
 // timeout through, so no case waits out the production figure.
 const lockBound = 60 * time.Millisecond
 
-// withHooksDeps installs deps as the package-level hooks seam for the rest of
-// the test and registers the restore in the same breath. The seam outlives the
-// test that sets it, so the install and its restore are written together here
-// rather than left to each call site to pair.
-func withHooksDeps(t *testing.T, deps HooksDeps) {
-	t.Helper()
-	hooksDeps = &deps
-	t.Cleanup(func() { hooksDeps = nil })
-}
-
-// withoutHooksDeps leaves the hooks seam unset for the rest of the test, so a
-// case whose subject is the production default states that precondition instead
-// of inheriting it.
-func withoutHooksDeps(t *testing.T) {
-	t.Helper()
-	hooksDeps = nil
-	t.Cleanup(func() { hooksDeps = nil })
-}
-
-// The seams below are staged the same way, for the same reason. Each is a
-// package-level pointer the production command body reads, so an install
-// without its paired restore outlives the test that made it and answers for
-// every later test in the package. Writing the install and the restore in one
-// place is what makes the pair impossible to separate at a call site.
+// Each seam below is a package-level pointer the production command body
+// reads, so an install without its paired restore outlives the test that made
+// it and answers for every later test in the package. Writing the install and
+// the restore in one place is what makes the pair impossible to separate at a
+// call site.
 
 // withBootstrapDeps installs deps as the package-level bootstrap seam for the
 // rest of the test and registers the restore in the same breath.
@@ -80,14 +62,6 @@ func withDoctorDeps(t *testing.T, deps DoctorDeps) {
 	t.Cleanup(func() { doctorDeps = nil })
 }
 
-// withKillDeps installs deps as the package-level kill seam for the rest of the
-// test and registers the restore in the same breath.
-func withKillDeps(t *testing.T, deps KillDeps) {
-	t.Helper()
-	killDeps = &deps
-	t.Cleanup(func() { killDeps = nil })
-}
-
 // withListDeps installs deps as the package-level list seam for the rest of the
 // test and registers the restore in the same breath.
 func withListDeps(t *testing.T, deps ListDeps) {
@@ -96,20 +70,38 @@ func withListDeps(t *testing.T, deps ListDeps) {
 	t.Cleanup(func() { listDeps = nil })
 }
 
-// withCommitNowDeps installs deps as the package-level commit-now seam for the
-// rest of the test and registers the restore in the same breath.
-func withCommitNowDeps(t *testing.T, deps CommitNowDeps) {
-	t.Helper()
-	commitNowDeps = &deps
-	t.Cleanup(func() { commitNowDeps = nil })
-}
-
 // withUninstallDeps installs deps as the package-level uninstall seam for the
 // rest of the test and registers the restore in the same breath.
 func withUninstallDeps(t *testing.T, deps UninstallDeps) {
 	t.Helper()
 	uninstallDeps = &deps
 	t.Cleanup(func() { uninstallDeps = nil })
+}
+
+// withMigrateDeps installs deps as the package-level migrate seam for the rest
+// of the test and registers the restore in the same breath.
+func withMigrateDeps(t *testing.T, deps MigrateDeps) {
+	t.Helper()
+	migrateDeps = &deps
+	t.Cleanup(func() { migrateDeps = nil })
+}
+
+// requireStagedBackend refuses a nil Backend at the staging site, where it
+// would otherwise surface later as a nil-interface panic in a command body.
+func requireStagedBackend(t harnesstest.TestingT, deps BackendDeps) {
+	t.Helper()
+	if deps.Backend == nil {
+		t.Fatalf("withBackendDeps: BackendDeps.Backend is nil; stage a backend, such as backendtest.New()")
+	}
+}
+
+// withBackendDeps installs deps as the package-level backend seam for the rest
+// of the test and registers the restore in the same breath.
+func withBackendDeps(t *testing.T, deps BackendDeps) {
+	t.Helper()
+	requireStagedBackend(t, deps)
+	backendDeps = &deps
+	t.Cleanup(func() { backendDeps = nil })
 }
 
 // withFuncSeam installs replacement as the package-level function seam at seam
@@ -125,6 +117,14 @@ func withFuncSeam[F any](t *testing.T, seam *F, replacement F) {
 	original := *seam
 	*seam = replacement
 	t.Cleanup(func() { *seam = original })
+}
+
+// withOsExitFake swaps the osExit seam. The replacement is expected to panic
+// after recording: were it to return, the caller would run on past an exit the
+// real os.Exit would never return from.
+func withOsExitFake(t *testing.T, fake func(int)) {
+	t.Helper()
+	withFuncSeam(t, &osExit, fake)
 }
 
 // readFileBytes returns nil on ENOENT, so callers can distinguish "file absent"
@@ -257,6 +257,10 @@ func shapeOfLanding(l pickerLanding) landingShape {
 	}
 	return shape
 }
+
+// idleBootstrap is a bootstrap behind the picker that sends nothing, for a
+// test that drives the loading page's messages itself.
+func idleBootstrap() tea.Msg { return nil }
 
 // driveLoadingGates satisfies both of the picker's loading gates and, when the
 // model answers by dispatching its search decision rather than dismissing,

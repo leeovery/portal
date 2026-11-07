@@ -16,8 +16,9 @@ import (
 // Restated rather than read off the surface, so a seed that drifts is a failure
 // here rather than an expectation that drifts with it.
 const (
-	surfaceCommand = "cd ~/code/portal/internal/capture && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
-	surfaceReport  = "the pane is frozen and will not lift"
+	surfaceCommand       = "cd ~/code/portal/internal && ./scripts/watch --session 45604077-a9d0-41bd-9692-b97f63f237fc"
+	surfaceReport        = "can't unpause this session: permission denied"
+	discardSurfaceReport = "can't write hooks.json: permission denied"
 )
 
 type surfaceWant struct {
@@ -33,7 +34,7 @@ func surfaceWants() []surfaceWant {
 		{name: "resume-panel-waiting-report", render: tui.RenderResumePanel, report: surfaceReport, w: 80, h: 24},
 		{name: "resume-panel-waiting-degraded", render: tui.RenderResumePanel, w: 40, h: 10},
 		{name: "resume-panel-discard", render: tui.RenderResumeDiscardConfirm, w: 80, h: 24},
-		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: surfaceReport, w: 80, h: 24},
+		{name: "resume-panel-discard-report", render: tui.RenderResumeDiscardConfirm, report: discardSurfaceReport, w: 80, h: 24},
 		{name: "resume-panel-discard-degraded", render: tui.RenderResumeDiscardConfirm, w: 40, h: 10},
 	}
 }
@@ -51,9 +52,9 @@ func (w surfaceWant) production(th theme.Theme, colourless bool) string {
 
 // The program's own path: resolve, then feed it the filtered resize a live
 // terminal would produce.
-func surfaceViewThrough(t *testing.T, name, themeArg string) tea.View {
+func surfaceViewThrough(t *testing.T, name, themeArg string, colourless bool) tea.View {
 	t.Helper()
-	m, err := resolveProgram(name, themeArg, io.Discard)
+	m, err := resolveProgram(name, themeArg, io.Discard, colourless)
 	if err != nil {
 		t.Fatalf("resolveProgram(%s, %s): %v", name, themeArg, err)
 	}
@@ -69,7 +70,7 @@ func TestResolveProgram_ResumeSurfaces(t *testing.T) {
 		th := themetest.Builtin(t, "nord")
 		for _, want := range surfaceWants() {
 			t.Run(want.name, func(t *testing.T) {
-				if got := surfaceViewThrough(t, want.name, "nord").Content; got != want.production(th, false) {
+				if got := surfaceViewThrough(t, want.name, "nord", false).Content; got != want.production(th, false) {
 					t.Errorf("the surface's view is not the production render at its pinned %d×%d\n got: %q\nwant: %q", want.w, want.h, got, want.production(th, false))
 				}
 			})
@@ -84,7 +85,7 @@ func TestResolveProgram_ResumeSurfaces(t *testing.T) {
 		}
 		for _, want := range surfaceWants() {
 			t.Run(want.name, func(t *testing.T) {
-				if got := surfaceViewThrough(t, want.name, path).Content; got != want.production(result.Theme, false) {
+				if got := surfaceViewThrough(t, want.name, path, false).Content; got != want.production(result.Theme, false) {
 					t.Errorf("the surface does not render the file's palette\n got: %q\nwant: %q", got, want.production(result.Theme, false))
 				}
 			})
@@ -92,11 +93,10 @@ func TestResolveProgram_ResumeSurfaces(t *testing.T) {
 	})
 
 	t.Run("it renders colourless under NO_COLOR", func(t *testing.T) {
-		t.Setenv("NO_COLOR", "1")
 		th := themetest.Builtin(t, "nord")
 		for _, want := range surfaceWants() {
 			t.Run(want.name, func(t *testing.T) {
-				if got := surfaceViewThrough(t, want.name, "nord").Content; got != want.production(th, true) {
+				if got := surfaceViewThrough(t, want.name, "nord", true).Content; got != want.production(th, true) {
 					t.Errorf("the surface is not the colourless production render; NO_COLOR must reach a surface by the same read a fixture takes\n got: %q\nwant: %q", got, want.production(th, true))
 				}
 			})
@@ -106,7 +106,7 @@ func TestResolveProgram_ResumeSurfaces(t *testing.T) {
 	t.Run("it sets no terminal background", func(t *testing.T) {
 		for _, want := range surfaceWants() {
 			t.Run(want.name, func(t *testing.T) {
-				view := surfaceViewThrough(t, want.name, "nord")
+				view := surfaceViewThrough(t, want.name, "nord", false)
 				if !view.AltScreen {
 					t.Error("the view does not declare the alt screen")
 				}
@@ -114,7 +114,7 @@ func TestResolveProgram_ResumeSurfaces(t *testing.T) {
 					t.Errorf("the view sets a terminal background (%v); a pane draw never does", view.BackgroundColor)
 				}
 
-				m, err := resolveProgram(want.name, "nord", io.Discard)
+				m, err := resolveProgram(want.name, "nord", io.Discard, false)
 				if err != nil {
 					t.Fatalf("resolveProgram(%s): %v", want.name, err)
 				}
@@ -154,12 +154,12 @@ func TestNoColorIsReadInOnePlace(t *testing.T) {
 		t.Fatalf("read main.go: %v", err)
 	}
 	if got := strings.Count(string(body), `"NO_COLOR"`); got != 1 {
-		t.Errorf("main.go names NO_COLOR %d times, want exactly 1 — the surface branch and resolveModel read it through one helper", got)
+		t.Errorf("main.go names NO_COLOR %d times, want exactly 1 — run reads it once and hands every branch the answer", got)
 	}
 }
 
 func TestCapturetool_SurfacesAreEnumeratedForTheUser(t *testing.T) {
-	_, err := resolveProgram("", defaultThemeSlug, io.Discard)
+	_, err := resolveProgram("", defaultThemeSlug, io.Discard, false)
 	if err == nil {
 		t.Fatal("resolveProgram with no fixture returned no error")
 	}

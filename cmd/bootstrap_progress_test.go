@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,14 +14,19 @@ import (
 )
 
 type emittingRunner struct {
+	// waited sends the event a long wait for another bootstrap sends, before
+	// any step.
+	waited   bool
 	steps    int
-	started  bool
 	warnings []bootstrap.Warning
 	err      error
 }
 
-func (r *emittingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
+func (r *emittingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
+	if r.waited && emit != nil {
+		emit(bootstrap.StepEvent{Waiting: true})
+	}
 	if r.err == nil {
 		for i := 1; i <= r.steps; i++ {
 			if emit != nil {
@@ -27,7 +34,7 @@ func (r *emittingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, er
 			}
 		}
 	}
-	return r.started, r.warnings, r.err
+	return r.warnings, r.err
 }
 
 func drainPipe(t *testing.T, receiver tea.Cmd) []tea.Msg {
@@ -50,7 +57,7 @@ func drainPipe(t *testing.T, receiver tea.Cmd) []tea.Msg {
 }
 
 func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -68,8 +75,8 @@ func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) 
 			sawClosed = true
 		}
 	}
-	if progressCount != 11 {
-		t.Errorf("progress msgs = %d, want 11 (one per real step)", progressCount)
+	if progressCount != 7 {
+		t.Errorf("progress msgs = %d, want 7 (one per real step)", progressCount)
 	}
 	if !sawComplete {
 		t.Error("never received terminal BootstrapCompleteMsg")
@@ -80,7 +87,7 @@ func TestBootstrapProgressPipe_EmitsPerStepThenTerminalThenCloses(t *testing.T) 
 }
 
 func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -92,8 +99,8 @@ func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
 			order = append(order, pm.Index)
 		}
 	}
-	if len(order) != 11 {
-		t.Fatalf("got %d progress indices, want 11: %v", len(order), order)
+	if len(order) != 7 {
+		t.Fatalf("got %d progress indices, want 7: %v", len(order), order)
 	}
 	for i, idx := range order {
 		if idx != i+1 {
@@ -102,20 +109,27 @@ func TestBootstrapProgressPipe_PreservesStepOrder(t *testing.T) {
 	}
 }
 
-func TestBootstrapProgressPipe_CarriesServerStartedOnTerminalEvent(t *testing.T) {
-	runner := &emittingRunner{steps: 1, started: true}
+func TestBootstrapProgressPipe_CarriesTheWaitAheadOfTheSteps(t *testing.T) {
+	runner := &emittingRunner{waited: true, steps: 1}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
-	_ = drainPipe(t, pipe.receiver())
+	msgs := drainPipe(t, pipe.receiver())
 
-	if !pipe.ServerStarted() {
-		t.Error("pipe.ServerStarted() = false after a cold (started=true) run; serverStarted not carried over the channel")
+	want := []tui.BootstrapProgressMsg{{Waiting: true}, {Index: 1}}
+	var got []tui.BootstrapProgressMsg
+	for _, m := range msgs {
+		if pm, ok := m.(tui.BootstrapProgressMsg); ok {
+			got = append(got, pm)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("progress msgs = %+v, want %+v", got, want)
 	}
 }
 
 func TestBootstrapProgressPipe_FastColdBoot_ZeroRestoreItems(t *testing.T) {
-	runner := &emittingRunner{steps: 11, started: true}
+	runner := &emittingRunner{steps: 7}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -131,14 +145,14 @@ func TestBootstrapProgressPipe_FastColdBoot_ZeroRestoreItems(t *testing.T) {
 			sawComplete = true
 		}
 	}
-	if progressCount != 11 || !sawComplete {
-		t.Errorf("fast cold boot: progress=%d complete=%v, want 11 + terminal", progressCount, sawComplete)
+	if progressCount != 7 || !sawComplete {
+		t.Errorf("fast cold boot: progress=%d complete=%v, want 7 + terminal", progressCount, sawComplete)
 	}
 }
 
 func TestBootstrapProgressPipe_ClosesChannelOnFatal(t *testing.T) {
 	boom := errors.New("ensure-server boom")
-	runner := &emittingRunner{steps: 0, started: true, err: boom}
+	runner := &emittingRunner{steps: 0, err: boom}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -153,8 +167,8 @@ func TestBootstrapProgressPipe_ClosesChannelOnFatal(t *testing.T) {
 	if !sawClosed {
 		t.Error("channel was not closed on fatal — goroutine would leak")
 	}
-	if !errors.Is(pipe.Err(), boom) {
-		t.Errorf("pipe.Err() = %v, want %v carried through", pipe.Err(), boom)
+	if fatal := fatalMsgFrom(t, msgs); !errors.Is(fatal.Err, boom) {
+		t.Errorf("fatal Err = %v, want %v carried through", fatal.Err, boom)
 	}
 }
 
@@ -163,7 +177,7 @@ func TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent(t *testing.T) {
 		{Lines: []string{"saver is down", "restart to recover"}},
 		{Lines: []string{"sessions.json corrupt"}},
 	}
-	runner := &emittingRunner{steps: 1, started: true, warnings: warnings}
+	runner := &emittingRunner{steps: 1, warnings: warnings}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -189,8 +203,74 @@ func TestBootstrapProgressPipe_CarriesWarningsOnTerminalEvent(t *testing.T) {
 	}
 }
 
+// unwindingRunner is a bootstrap that runs until its context ends, then takes
+// a moment to unwind, as a restore cut short lowers the restoring flag on its
+// way out. One that ignores its context runs until released.
+type unwindingRunner struct {
+	ignoresItsEnd bool
+	release       chan struct{}
+	returned      atomic.Bool
+}
+
+func (r *unwindingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
+	if r.ignoresItsEnd {
+		<-r.release
+	} else {
+		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond)
+	}
+	r.returned.Store(true)
+	return nil, ctx.Err()
+}
+
+func TestBootstrapProgressPipe_Unwind(t *testing.T) {
+	t.Run("it ends the bootstrap's context and waits for it to return", func(t *testing.T) {
+		runner := &unwindingRunner{}
+		pipe := newBootstrapProgressPipe()
+		pipe.start(context.Background(), runner)
+
+		pipe.unwind()
+
+		if !runner.returned.Load() {
+			t.Error("unwind returned before the bootstrap did")
+		}
+	})
+
+	t.Run("it gives up on a bootstrap that doesn't return past its bound", func(t *testing.T) {
+		runner := &unwindingRunner{ignoresItsEnd: true, release: make(chan struct{})}
+		t.Cleanup(func() { close(runner.release) })
+		pipe := newBootstrapProgressPipe()
+		pipe.unwindWait = 50 * time.Millisecond
+		pipe.start(context.Background(), runner)
+		start := time.Now()
+
+		pipe.unwind()
+
+		if took := time.Since(start); took < pipe.unwindWait || took > time.Second {
+			t.Errorf("unwind took %s, want it giving up once %s had passed", took, pipe.unwindWait)
+		}
+		if runner.returned.Load() {
+			t.Error("the bootstrap returned, want it still running")
+		}
+	})
+
+	t.Run("after a bootstrap that finished it returns at once", func(t *testing.T) {
+		pipe := newBootstrapProgressPipe()
+		pipe.unwindWait = time.Minute
+		pipe.start(context.Background(), &emittingRunner{steps: 6})
+		_ = drainPipe(t, pipe.receiver())
+		start := time.Now()
+
+		pipe.unwind()
+
+		if took := time.Since(start); took > time.Second {
+			t.Errorf("unwind took %s over a bootstrap that had finished", took)
+		}
+	})
+}
+
 func TestBootstrapProgressPipe_ReceiverStopsReIssuingOnClose(t *testing.T) {
-	runner := &emittingRunner{steps: 3, started: true}
+	runner := &emittingRunner{steps: 3}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 	receiver := pipe.receiver()

@@ -21,11 +21,11 @@ const (
 // built by the code under test's own wrap asserts nothing about where it broke.
 var (
 	discardConsequenceAtCard = []string{
-		"Removes this pane's resume command permanently. The",
-		"session and its scrollback are untouched.",
+		"Removes this session's resume command permanently.",
+		"The session and its scrollback are untouched.",
 	}
 	discardConsequenceAtStack = []string{
-		"Removes this pane's resume",
+		"Removes this session's resume",
 		"command permanently. The",
 		"session and its scrollback are",
 		"untouched.",
@@ -98,8 +98,8 @@ func TestRenderResumeDiscardConfirm_Card(t *testing.T) {
 			rows := discardCardRows(t, r, resumePartsLongCommand, "")
 			assertRowsEqual(t, rows, discardGoldenCard([]string{
 				"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7",
-				"--cwd /Users/leeovery/Code/portal/internal/tui --",
-				"output-format stream-json",
+				"--cwd /Users/leeovery/Code/portal/internal/tui",
+				"--output-format stream-json",
 			}, "", discardConsequenceAtCard))
 			out := RenderResumeDiscardConfirm(discardScreenOf(r, resumeGoldenCommand, "", resumeRoomyWidth, resumeRoomyHeight))
 			assertEmphasisedToken(t, labelSegment(t, out, resumeGoldenCommand), r.th.StateDestructive, true, r.colourless)
@@ -113,7 +113,7 @@ func TestRenderResumeDiscardConfirm_Card(t *testing.T) {
 					t.Errorf("the card does not read %q:\n%q", want, content)
 				}
 			}
-			const sentence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."
+			const sentence = "Removes this session's resume command permanently. The session and its scrollback are untouched."
 			if discardConfirmConsequence != sentence {
 				t.Errorf("the consequence constant reads\n got: %q\nwant: %q", discardConfirmConsequence, sentence)
 			}

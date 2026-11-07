@@ -1,22 +1,20 @@
 package cmd
 
 import (
+	"cmp"
 	"fmt"
 	"os"
+	"strings"
 
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 var listDeps *ListDeps
 
-type SessionLister interface {
-	ListSessions() ([]tmux.Session, error)
-}
-
 type ListDeps struct {
-	Lister SessionLister
-	IsTTY  func() bool
+	IsTTY func() bool
 }
 
 func isTTY() bool {
@@ -27,21 +25,32 @@ func isTTY() bool {
 	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
-func formatSessionLong(s tmux.Session) string {
+const listColumnGap = "    "
+
+const listNotAnswering = "not answering"
+
+// formatSessionLong is name, label, attached state and dir: the recorded one,
+// as search and grouping read it, else the session's cwd. A session that did
+// not answer is known only by its name, so it says so rather than leave its
+// other fields to read as missing.
+func formatSessionLong(s tui.Session) string {
+	if s.NotAnswering {
+		return s.Name + listColumnGap + listNotAnswering
+	}
 	status := "detached"
 	if s.Attached {
 		status = "attached"
 	}
-	windowWord := "windows"
-	if s.Windows == 1 {
-		windowWord = "window"
+	fields := []string{s.Name, s.DisplayName(), status}
+	if dir := cmp.Or(s.Dir, s.Cwd); dir != "" {
+		fields = append(fields, dir)
 	}
-	return fmt.Sprintf("%s    %s    %d %s", s.Name, status, s.Windows, windowWord)
+	return strings.Join(fields, listColumnGap)
 }
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List running tmux sessions",
+	Short: "List running sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shortFlag, _ := cmd.Flags().GetBool("short")
 		longFlag, _ := cmd.Flags().GetBool("long")
@@ -50,51 +59,58 @@ var listCmd = &cobra.Command{
 			return fmt.Errorf("--short and --long are mutually exclusive")
 		}
 
-		lister, ttyDetect := buildListDeps(cmd)
-
-		sessions, err := lister.ListSessions()
+		b, err := sessionBackend()
 		if err != nil {
 			return err
 		}
-
+		sessions, err := userSessions(cmd.Context(), b)
+		if err != nil {
+			return err
+		}
 		if len(sessions) == 0 {
 			return nil
 		}
 
-		useLong := ttyDetect()
-		if shortFlag {
-			useLong = false
-		}
-		if longFlag {
-			useLong = true
+		useLong := (listToTTY() || longFlag) && !shortFlag
+		format := func(s backend.Session) string { return s.Name }
+		if useLong {
+			shown, err := listLabels(longFlag)
+			if err != nil {
+				return err
+			}
+			format = func(s backend.Session) string { return formatSessionLong(shown.show(s)) }
 		}
 
 		w := cmd.OutOrStdout()
 		for _, s := range sessions {
-			var err error
-			if useLong {
-				_, err = fmt.Fprintln(w, formatSessionLong(s))
-			} else {
-				_, err = fmt.Fprintln(w, s.Name)
-			}
-			if err != nil {
+			if _, err := fmt.Fprintln(w, format(s)); err != nil {
 				return err
 			}
 		}
-
 		return nil
 	},
 }
 
-func buildListDeps(cmd *cobra.Command) (SessionLister, func() bool) {
-	if listDeps != nil {
-		return listDeps.Lister, listDeps.IsTTY
+// listLabels is the index the long form takes its labels from. Asked for
+// with --long, an index that cannot be read fails the listing. A terminal's
+// default long form loses only its labels to one, so it reads as empty.
+func listLabels(asked bool) (shownIndex, error) {
+	shown, err := readShownIndex()
+	if err != nil && !asked {
+		return shownIndex{}, nil
 	}
-	return tmuxClient(cmd), isTTY
+	return shown, err
+}
+
+func listToTTY() bool {
+	if listDeps != nil {
+		return listDeps.IsTTY()
+	}
+	return isTTY()
 }
 
 func init() {
 	listCmd.Flags().Bool("short", false, "Output session names only")
-	listCmd.Flags().Bool("long", false, "Output full session details")
+	listCmd.Flags().Bool("long", false, "Output label, attached state and directory too")
 	rootCmd.AddCommand(listCmd)
 }

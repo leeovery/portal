@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 func foundHook(command string) func(string) (hooks.OnResume, error) {
@@ -27,17 +30,17 @@ func answerEnter(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload) {
 }
 
 // assertHookHandOff pins the resume exec against the shape the hydrate helper
-// already uses, so the pane still closes on the first exit.
+// already uses, so the session still closes on the first exit.
 func assertHookHandOff(t *testing.T, p *resumeWaitProbe, command string) {
 	t.Helper()
-	wantProg, wantArgs := hookExecArgs(command, resolveShell())
+	wantProg, wantArgs := hookExecArgs(command, resolveShell(log.Discard()))
 	assertExec(t, p, wantProg, wantArgs, true)
 }
 
 func assertShellHandOff(t *testing.T, p *resumeWaitProbe) {
 	t.Helper()
-	shell := resolveShell()
-	assertExec(t, p, shell, []string{shell}, false)
+	shell := resolveShell(log.Discard())
+	assertExec(t, p, shell, wantLoginShell(shell), false)
 }
 
 func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []string, wantHook bool) {
@@ -56,8 +59,8 @@ func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []st
 	if got := rec.AttrOrEmpty("target"); got != wantProg {
 		t.Errorf("exec marker target = %q, want %q", got, wantProg)
 	}
-	if got := rec.AttrOrEmpty("args"); got != strings.Join(wantArgs, " ") {
-		t.Errorf("exec marker args = %q, want %q", got, strings.Join(wantArgs, " "))
+	if got := rec.AttrOrEmpty("args"); got != shellquote.Readable(wantArgs) {
+		t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(wantArgs))
 	}
 	if got := rec.AttrOrEmpty("hook_present"); got != strconv.FormatBool(wantHook) {
 		t.Errorf("exec marker hook_present = %q, want %v", got, wantHook)
@@ -65,7 +68,7 @@ func assertExec(t *testing.T, p *resumeWaitProbe, wantProg string, wantArgs []st
 }
 
 func TestResumeAnswerEnter_Order(t *testing.T) {
-	t.Run("it leaves the panel's screen before it clears the marker", func(t *testing.T) {
+	t.Run("it leaves the panel's screen before it clears the flag", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerEnter(t, &probe, samplePayload())
 
@@ -73,11 +76,11 @@ func TestResumeAnswerEnter_Order(t *testing.T) {
 			t.Fatalf("answer sequence = %q, want the leave sequence written before the clear", probe.order)
 		}
 		if got := probe.stdout.String(); got != hydrateResetPreamble {
-			t.Errorf("what the answer wrote to the pane = %q, want the leave sequence %q", got, hydrateResetPreamble)
+			t.Errorf("what the answer wrote to the session = %q, want the leave sequence %q", got, hydrateResetPreamble)
 		}
 	})
 
-	t.Run("it clears the marker before it reads the store", func(t *testing.T) {
+	t.Run("it clears the flag before it reads the store", func(t *testing.T) {
 		var probe resumeWaitProbe
 		probe.lookup = foundHook("make deploy")
 		answerEnter(t, &probe, samplePayload())
@@ -93,34 +96,9 @@ func TestResumeAnswerEnter_Order(t *testing.T) {
 	})
 }
 
-func TestResumeAnswerEnter_ReleasesThePin(t *testing.T) {
-	t.Run("it confirms the leave and lifts the pin after the clear and before it reads the store", func(t *testing.T) {
-		var probe resumeWaitProbe
-		probe.lookup = foundHook("make deploy")
-		answerEnter(t, &probe, samplePayload())
-
-		want := []string{"stdout", "clear", "confirm", "unpin", "lookup", "exec"}
-		if !slices.Equal(probe.order, want) {
-			t.Errorf("answer sequence = %q, want %q", probe.order, want)
-		}
-		assertHookHandOff(t, &probe, "make deploy")
-	})
-
-	t.Run("it leaves the pin standing when the clear is refused", func(t *testing.T) {
-		var probe resumeWaitProbe
-		probe.clearErr = errors.New("can't find pane: %7")
-		answerEnter(t, &probe, samplePayload())
-
-		want := []string{"stdout", "clear", "exec"}
-		if !slices.Equal(probe.order, want) {
-			t.Errorf("answer sequence = %q, want %q: the redraw needs the pin", probe.order, want)
-		}
-	})
-}
-
 func TestResumeAnswerEnter_FailedClear(t *testing.T) {
-	clearErr := tmuxRefusal(t)
-	const clearRow = "can't unpause this pane: can't find pane: %7"
+	clearErr := flagRefusal(t)
+	const clearRow = "can't unpause this session: permission denied"
 
 	t.Run("it redraws the panel with the reason when the clear fails", func(t *testing.T) {
 		var probe resumeWaitProbe
@@ -156,8 +134,8 @@ func TestResumeAnswerEnter_FailedClear(t *testing.T) {
 		if len(probe.lookupKeys) != 0 {
 			t.Errorf("the store was read %d times after a failed clear, want 0", len(probe.lookupKeys))
 		}
-		if slices.Contains(probe.execArgs, "sh") || probe.execProg == resolveShell() {
-			t.Errorf("exec argv = %q, want no shell or hook while the marker stands", probe.execArgs)
+		if slices.Contains(probe.execArgs, "sh") || probe.execProg == resolveShell(log.Discard()) {
+			t.Errorf("exec argv = %q, want no shell or hook while the flag stands", probe.execArgs)
 		}
 	})
 
@@ -193,26 +171,26 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		payload := samplePayload()
 		answerEnter(t, &probe, payload)
 
-		if !slices.Equal(probe.lookupKeys, []string{payload.HookKey}) {
-			t.Errorf("store read with %q, want one read of %q", probe.lookupKeys, payload.HookKey)
+		if !slices.Equal(probe.lookupKeys, []string{payload.Session}) {
+			t.Errorf("store read with %q, want one read of %q", probe.lookupKeys, payload.Session)
 		}
 		assertHookHandOff(t, &probe, "make deploy-rewritten")
-		if _, displayedArgs := hookExecArgs(payload.Command, resolveShell()); slices.Equal(probe.execArgs, displayedArgs) {
+		if _, displayedArgs := hookExecArgs(payload.Command, resolveShell(log.Discard())); slices.Equal(probe.execArgs, displayedArgs) {
 			t.Errorf("exec argv = %q, want the command the store holds rather than the one the panel displayed", probe.execArgs)
 		}
 	})
 
-	t.Run("it drops the pane to a plain shell when the entry has gone", func(t *testing.T) {
+	t.Run("it drops the session to a plain shell when the entry has gone", func(t *testing.T) {
 		var probe resumeWaitProbe
 		answerEnter(t, &probe, samplePayload())
 
 		assertShellHandOff(t, &probe)
 		if probe.clearCalls != 1 {
-			t.Errorf("ClearMarker called %d times, want exactly 1", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want exactly 1", probe.clearCalls)
 		}
 	})
 
-	t.Run("it drops the pane to a plain shell when the command is empty", func(t *testing.T) {
+	t.Run("it drops the session to a plain shell when the command is empty", func(t *testing.T) {
 		var probe resumeWaitProbe
 		probe.lookup = func(string) (hooks.OnResume, error) {
 			return hooks.OnResume{Found: true}, nil
@@ -221,11 +199,11 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 
 		assertShellHandOff(t, &probe)
 		if probe.clearCalls != 1 {
-			t.Errorf("ClearMarker called %d times, want exactly 1", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want exactly 1", probe.clearCalls)
 		}
 	})
 
-	t.Run("it drops the pane to a plain shell when the store is unreadable", func(t *testing.T) {
+	t.Run("it drops the session to a plain shell when the store is unreadable", func(t *testing.T) {
 		var probe resumeWaitProbe
 		lookupErr := errors.New("is a directory")
 		probe.lookup = func(string) (hooks.OnResume, error) { return hooks.OnResume{}, lookupErr }
@@ -234,11 +212,11 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 
 		assertShellHandOff(t, &probe)
 		if probe.clearCalls != 1 {
-			t.Errorf("ClearMarker called %d times, want exactly 1: the pane is no longer waiting whatever the read returned", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want exactly 1: the session is no longer waiting whatever the read returned", probe.clearCalls)
 		}
 		warn := probe.sink.Records().WithMessage("lookup on-resume hook failed").Only(t, "the failed lookup's WARN")
-		if got := warn.AttrOrEmpty("hook_key"); got != payload.HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, payload.HookKey)
+		if got := warn.AttrOrEmpty("hook_key"); got != payload.Session {
+			t.Errorf("WARN hook_key = %q, want %q", got, payload.Session)
 		}
 		debug := probe.sink.Records().WithMessage("hook lookup").Only(t, "the lookup's DEBUG")
 		if got := debug.AttrOrEmpty("result"); got != "error" {
@@ -251,7 +229,18 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		var probe resumeWaitProbe
 		answerEnter(t, &probe, samplePayload())
 
-		assertExec(t, &probe, "/bin/sh", []string{"/bin/sh"}, false)
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+	})
+
+	t.Run("it hands a session whose shell is gone /bin/sh, as its $SHELL too", func(t *testing.T) {
+		t.Setenv("SHELL", filepath.Join(t.TempDir(), "zsh"))
+		var probe resumeWaitProbe
+		answerEnter(t, &probe, samplePayload())
+
+		assertExec(t, &probe, "/bin/sh", []string{"-sh"}, false)
+		if probe.execShellEnv != "/bin/sh" {
+			t.Errorf("$SHELL at the exec = %q, want /bin/sh", probe.execShellEnv)
+		}
 	})
 
 	t.Run("it treats an already-absent marker as cleared", func(t *testing.T) {
@@ -260,28 +249,28 @@ func TestResumeAnswerEnter_ReadsTheStoreAtTheAnswer(t *testing.T) {
 		answerEnter(t, &probe, samplePayload())
 
 		if probe.clearCalls != 1 {
-			t.Errorf("ClearMarker called %d times, want exactly 1", probe.clearCalls)
+			t.Errorf("ClearPending called %d times, want exactly 1", probe.clearCalls)
 		}
 		assertHookHandOff(t, &probe, "make deploy")
 	})
 }
 
 // The wait path and the hydrate helper must compose one argv for one command:
-// the pane closes on the first exit only because the hook's own shell is exec'd
+// the session closes on the first exit only because the hook's own shell is exec'd
 // over it.
 func TestResumeAnswerEnter_HookShapeMatchesTheHelper(t *testing.T) {
 	t.Run("it runs the hook in the shape the helper already uses", func(t *testing.T) {
 		const command = "make deploy && echo 'done'"
 		payload := samplePayload()
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Entries: map[string]string{payload.HookKey: command},
+			Entries: map[string]string{payload.Session: command},
 		})
 
 		var helperProg string
 		var helperArgs []string
 		logger, _ := logtest.NewCaptureLogger(t)
 		execLookedUpRegistration(hydrateConfig{
-			HookKey:   payload.HookKey,
+			Session:   payload.Session,
 			Logger:    logger,
 			HookStore: store,
 			ExecShell: func(prog string, args []string) {
@@ -313,7 +302,7 @@ func TestResumeAnswerEnter_TerminalAndExecFailure(t *testing.T) {
 			{"an unreadable store", func(p *resumeWaitProbe) {
 				p.lookup = func(string) (hooks.OnResume, error) { return hooks.OnResume{}, errors.New("is a directory") }
 			}},
-			{"a clear that failed", func(p *resumeWaitProbe) { p.clearErr = errors.New("can't find pane: %7") }},
+			{"a clear that failed", func(p *resumeWaitProbe) { p.clearErr = errors.New("permission denied") }},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

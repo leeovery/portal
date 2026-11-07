@@ -7,10 +7,14 @@ import (
 
 // Identity is a host terminal's macOS bundle id plus a friendly display name.
 // The zero value is the NULL identity — no host-local terminal — which a
-// remote/mosh client or a transient detection failure resolves to.
+// remote/mosh client resolves to.
 type Identity struct {
 	BundleID string
 	Name     string
+	// Unsure marks a NULL identity detection couldn't settle: it can't tell
+	// which terminal Portal is running in, where a plain NULL is one with no
+	// app on this machine.
+	Unsure bool
 }
 
 func (i Identity) IsNull() bool {

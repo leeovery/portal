@@ -65,11 +65,8 @@ func TestRunResumeDraw_Echo(t *testing.T) {
 		if got := warn.AttrOrEmpty("component"); got != "hydrate" {
 			t.Errorf("WARN component = %q, want hydrate", got)
 		}
-		if got := warn.AttrOrEmpty("pane_key"); got != payload.PaneKey {
-			t.Errorf("WARN pane_key = %q, want %q", got, payload.PaneKey)
-		}
-		if got := warn.AttrOrEmpty("hook_key"); got != payload.HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, payload.HookKey)
+		if got := warn.AttrOrEmpty("session"); got != payload.Session {
+			t.Errorf("WARN session = %q, want %q", got, payload.Session)
 		}
 		if probe.stdout.Len() == 0 {
 			t.Error("the draw painted nothing after its echo step was refused")
@@ -121,11 +118,8 @@ func TestResumeWait_EchoOnHandingThePaneOn(t *testing.T) {
 				t.Errorf("ExecSelf called %d times, want the pane handed on", probe.execCalls)
 			}
 			warn := probe.sink.Records().WithMessage("enable terminal echo failed").Only(t, "the failed enable")
-			if got := warn.AttrOrEmpty("pane_key"); got != a.payload.PaneKey {
-				t.Errorf("WARN pane_key = %q, want %q", got, a.payload.PaneKey)
-			}
-			if got := warn.AttrOrEmpty("hook_key"); got != a.payload.HookKey {
-				t.Errorf("WARN hook_key = %q, want %q", got, a.payload.HookKey)
+			if got := warn.AttrOrEmpty("session"); got != a.payload.Session {
+				t.Errorf("WARN session = %q, want %q", got, a.payload.Session)
 			}
 		})
 	}

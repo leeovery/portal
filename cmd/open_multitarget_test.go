@@ -27,7 +27,7 @@ func installOpenMultiTargetSeams(t *testing.T, deps *OpenDeps, rawArgs []string)
 
 	bc := &burstCapture{}
 
-	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, surfaces []spawn.Surface, _ []string) error {
+	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, surfaces []spawn.Surface, _ resolver.QueryResult, _ []string) error {
 		bc.burstCalled = true
 		bc.burstSurfaces = surfaces
 		return nil
@@ -44,7 +44,7 @@ func installOpenMultiTargetSeams(t *testing.T, deps *OpenDeps, rawArgs []string)
 		return nil
 	})
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		bc.tuiCalled = true
 		return nil
 	})

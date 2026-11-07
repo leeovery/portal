@@ -8,20 +8,19 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestGroupedViewDoesNotOverflowViewport(t *testing.T) {
 	const w, h = 100, 30
 
-	var sessions []tmux.Session
+	var sessions []Session
 	var projects []project.Project
 	for i := range 12 {
 		dir := t.TempDir()
 		projects = append(projects, project.Project{Name: fmt.Sprintf("proj%02d", i), Path: dir})
 		sessions = append(sessions,
-			tmux.Session{Name: fmt.Sprintf("proj%02d-a", i), Dir: dir, Windows: 1},
-			tmux.Session{Name: fmt.Sprintf("proj%02d-b", i), Dir: dir, Windows: 1},
+			Session{Name: fmt.Sprintf("proj%02d-a", i), Dir: dir},
+			Session{Name: fmt.Sprintf("proj%02d-b", i), Dir: dir},
 		)
 	}
 

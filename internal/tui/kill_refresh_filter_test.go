@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type killerStub struct {
@@ -19,25 +18,19 @@ func (k *killerStub) KillSession(name string) error {
 }
 
 func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
-	first := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "alphabet", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	first := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "alphabet", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
-	postKill := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 1, Attached: false},
+	postKill := []Session{
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	}
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
-	reader := &recordingReader{bytes: []byte("hi")}
-	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
+	lister := &stepListerStub{steps: [][]Session{postKill}}
 	killer := &killerStub{}
 
-	m := modelWithSeamsAndLister(t, first, enum, reader, lister)
+	m := modelWithSeamsAndLister(t, first, historyFor(t, "hi", first), lister)
 	m.sessionKiller = killer
 
 	m.sessionList.SetFilterText("alpha")
@@ -59,8 +52,8 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	if afterK.modal != modalKillConfirm {
 		t.Fatalf("expected modalKillConfirm after 'k', got %v", afterK.modal)
 	}
-	if afterK.pendingKillName != "alphabet" {
-		t.Fatalf("expected pendingKillName=%q after 'k', got %q", "alphabet", afterK.pendingKillName)
+	if afterK.pendingKill.Name != "alphabet" {
+		t.Fatalf("expected pendingKillName=%q after 'k', got %q", "alphabet", afterK.pendingKill.Name)
 	}
 
 	updated2, killCmd := afterK.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})

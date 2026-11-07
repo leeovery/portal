@@ -1,0 +1,40 @@
+
+  P O R T A L ▌                                                                                        session manager
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+  Sessions 100                                                                                             / to filter
+
+  ▌ session-00                                                                                                     ●
+    session-01
+    session-02
+    session-03
+    session-04
+    session-05
+    session-06
+    session-07
+    session-08
+    session-09
+    session-10
+    session-11
+    session-12
+    session-13
+    session-14
+    session-15
+    session-16
+    session-17
+    session-18
+    session-19
+    session-20
+    session-21
+    session-22
+    session-23
+    session-24
+    session-25
+    session-26
+    session-27
+    session-28
+
+                                                          ••••
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ⏎ attach · / filter · ␣ preview · s switch view · x projects · t theme · m multi                              ? help
+

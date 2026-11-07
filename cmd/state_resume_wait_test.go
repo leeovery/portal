@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resumekeys"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
@@ -30,6 +31,10 @@ type resumeWaitProbe struct {
 	execProg  string
 	execArgs  []string
 	execCalls int
+
+	// execShellEnv is the $SHELL the exec hands on: it passes this process's
+	// environment.
+	execShellEnv string
 
 	// Restores already run when the exec happened, so a restore that moved
 	// below the hand-off is visible as a zero reading.
@@ -65,13 +70,11 @@ type resumeWaitProbe struct {
 	restoresAtEchoOn int
 	execsAtEchoOn    int
 
-	// Escape on the panel sends the client showing the pane back to the
-	// picker unless the probe is told no client is showing it.
-	backCalls  int
-	backErr    error
-	backUnseen bool
-
-	pin pinProbe
+	// Escape on the panel sends the terminals showing the session back to the
+	// picker unless the probe is told to refuse.
+	backCalls int
+	backRoute backRoute
+	backErr   error
 }
 
 // orderedWriter records that the pane was written to before it passes the bytes
@@ -104,7 +107,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.rawCalls++
 			return func() { p.restores++ }, nil
 		},
-		ClearMarker: func() error {
+		ClearPending: func() error {
 			p.order = append(p.order, "clear")
 			p.clearCalls++
 			return p.clearErr
@@ -138,19 +141,16 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 			p.execsAtEchoOn = p.execCalls
 			return p.echoOnErr
 		},
-		BackToPicker: func() (bool, error) {
+		BackToPicker: func() (backRoute, error) {
 			p.order = append(p.order, "back")
 			p.backCalls++
-			if p.backErr != nil {
-				return false, p.backErr
-			}
-			return !p.backUnseen, nil
+			return p.backRoute, p.backErr
 		},
-		AltScreen: p.pin.seams(&p.order),
 		ExecSelf: func(prog string, args []string) {
 			p.order = append(p.order, "exec")
 			p.execProg = prog
 			p.execArgs = args
+			p.execShellEnv = os.Getenv("SHELL")
 			p.execCalls++
 			p.restoredAtExec = p.restores
 		},
@@ -205,8 +205,8 @@ func assertHandOff(t *testing.T, p *resumeWaitProbe, payload resumeChainPayload)
 	if got := rec.AttrOrEmpty("target"); got != exe {
 		t.Errorf("exec marker target = %q, want %q", got, exe)
 	}
-	if got := rec.AttrOrEmpty("args"); got != strings.Join(want, " ") {
-		t.Errorf("exec marker args = %q, want %q", got, strings.Join(want, " "))
+	if got := rec.AttrOrEmpty("args"); got != shellquote.Readable(want) {
+		t.Errorf("exec marker args = %q, want %q", got, shellquote.Readable(want))
 	}
 	if rec.Level != slog.LevelInfo {
 		t.Errorf("exec marker level = %v, want INFO", rec.Level)
@@ -371,7 +371,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		for _, imp := range source.File.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
 			if slices.Contains(forbidden, path) {
-				t.Errorf("%s imports %s; the pane between screens carries the wait alone", source.Path, path)
+				t.Errorf("%s imports %s; the session between screens carries the wait alone", source.Path, path)
 			}
 		}
 
@@ -379,9 +379,9 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		// it with no import. Identifiers rather than calls, because the waiter
 		// wires its seams by reference.
 		samePackageRoute := []string{
-			"paneDrawTheme",
-			"paneDrawNomination",
-			"shippedPaneThemePair",
+			"sessionDrawTheme",
+			"sessionDrawNomination",
+			"shippedSessionThemePair",
 			"renderResumeScreen",
 			"runResumeDraw",
 			"resumeDrawRunFunc",
@@ -392,7 +392,7 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		}
 		ast.Inspect(source.File, func(n ast.Node) bool {
 			if id, ok := n.(*ast.Ident); ok && slices.Contains(samePackageRoute, id.Name) {
-				t.Errorf("%s: references %s; the pane between screens carries the wait alone", source.Position(id.Pos()), id.Name)
+				t.Errorf("%s: references %s; the session between screens carries the wait alone", source.Position(id.Pos()), id.Name)
 			}
 			return true
 		})
@@ -486,12 +486,12 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 	})
 }
 
-// A waiting pane's process declining a hangup would outlive the destruction of
-// its own pane, leaving a Portal process per culled session. SIGWINCH is
+// A waiting session's process declining a hangup would outlive the end of its
+// own session, leaving a Portal process per culled session. SIGWINCH is
 // watched for a resize and SIGTERM caught to outlast a shutdown; nothing else
 // may be taken off its default disposition.
 func TestResumeWaitingPane_LeavesHangupAndInterruptAtTheirDefault(t *testing.T) {
-	const onlyWatchable = "only syscall.SIGWINCH and syscall.SIGTERM may be notified — the default disposition must end a waiting pane's process when tmux tears the pane down"
+	const onlyWatchable = "only syscall.SIGWINCH and syscall.SIGTERM may be notified — the default disposition must end a waiting session's process when its session ends"
 	watchable := map[string]bool{"syscall.SIGWINCH": true, "syscall.SIGTERM": true}
 
 	for _, name := range []string{"state_resume_wait.go", "state_resume_draw.go", "state_resume_chain.go"} {
@@ -562,9 +562,7 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		payload := resumeChainPayload{
 			Command: "make deploy",
 			Report:  "could not clear the pending marker",
-			HookKey: "tok123",
-			Pane:    "%7",
-			PaneKey: "proj-a1b2:0.1",
+			Session: "proj-a1b2",
 			Width:   120,
 			Height:  40,
 		}
@@ -595,7 +593,7 @@ func TestStateResumeWaitCommand(t *testing.T) {
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--pane", "%7"})
+		rootCmd.SetArgs([]string{"state", resumeWaitSubcommand, "--session", "proj-a1b2"})
 		if err := rootCmd.Execute(); err == nil {
 			t.Error("executing resume-wait with no --command succeeded; the flag is required")
 		}

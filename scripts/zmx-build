@@ -1,0 +1,49 @@
+#!/bin/sh
+# Usage: scripts/zmx-build [ref]
+#
+# Builds zmx into .cache/zmx/<commit>/zmx, unless it is already there, and
+# prints the binary's path. With no ref it builds the commit pinned in
+# scripts/zmx-commit, which development and the integration tests drive; an
+# installed zmx is never touched. A ref (tag, branch or full commit) builds
+# that instead, for PORTAL_TEST_ZMX_BINARY. Needs git and the Zig version the
+# ref's build.zig.zon asks for.
+#
+# ZMX_REPO overrides where the source is fetched from, such as a local clone.
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+repo=${ZMX_REPO:-https://github.com/neurosnap/zmx.git}
+ref=${1:-$(tr -d '[:space:]' < "$root/scripts/zmx-commit")}
+
+# A full commit is known before fetching, so its build is reused without one.
+case $ref in
+*[!0-9a-f]*) want= ;;
+*) [ ${#ref} -eq 40 ] && want=$ref || want= ;;
+esac
+if [ -n "$want" ] && [ -x "$root/.cache/zmx/$want/zmx" ]; then
+	printf '%s\n' "$root/.cache/zmx/$want/zmx"
+	exit 0
+fi
+
+mkdir -p "$root/.cache/zmx"
+src=$(mktemp -d "$root/.cache/zmx/src.XXXXXX")
+trap 'rm -rf "$src"' EXIT
+git -C "$src" init --quiet
+git -C "$src" fetch --quiet --depth 1 "$repo" "$ref"
+git -C "$src" checkout --quiet --detach FETCH_HEAD
+commit=$(git -C "$src" rev-parse HEAD)
+if [ -n "$want" ] && [ "$commit" != "$want" ]; then
+	echo "zmx-build: fetched $commit, want $want" >&2
+	exit 1
+fi
+
+cache="$root/.cache/zmx/$commit"
+bin="$cache/zmx"
+if [ ! -x "$bin" ]; then
+	rm -rf "$cache/out"
+	mkdir -p "$cache"
+	(cd "$src" && zig build -Doptimize=ReleaseSafe --prefix "$cache/out") >&2
+	mv "$cache/out/bin/zmx" "$bin"
+	rm -rf "$cache/out"
+fi
+printf '%s\n' "$bin"

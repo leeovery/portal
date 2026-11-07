@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -128,7 +130,7 @@ type searchFormCapture struct {
 	attached      string
 	pathCalled    bool
 	seams         *recordingResolverSeams
-	source        *fakeSearchSource
+	fake          *backendtest.Fake
 	// readsAtTUI is the number of session reads taken by the time the picker
 	// seam ran, which is what separates an up-front count from a deferred one.
 	readsAtTUI int
@@ -137,26 +139,25 @@ type searchFormCapture struct {
 func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	t.Helper()
 
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-	sc := &searchFormCapture{seams: &recordingResolverSeams{}, source: &fakeSearchSource{}}
+	sc := &searchFormCapture{seams: &recordingResolverSeams{}, fake: backendtest.New()}
+	withBootstrapDeps(t, BootstrapDeps{})
+	withBackendDeps(t, BackendDeps{Backend: sc.fake})
 
 	withOpenDeps(t, OpenDeps{
-		SessionLister:  sc.seams,
-		AliasLookup:    sc.seams,
-		Zoxide:         sc.seams,
-		DirValidator:   sc.seams,
-		SearchSessions: sc.source,
+		SessionLister: sc.seams,
+		AliasLookup:   sc.seams,
+		Zoxide:        sc.seams,
+		DirValidator:  sc.seams,
 	})
 
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		sc.tuiCalled = true
 		sc.landing = landing
 		sc.command = command
-		sc.readsAtTUI = sc.source.listCalls + sc.source.currentCalls
+		sc.readsAtTUI = len(sc.fake.CallsTo(backendtest.OpList))
 		return nil
 	})
-	withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, []string) error {
+	withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, resolver.QueryResult, []string) error {
 		sc.burstCalled = true
 		return nil
 	})
@@ -171,6 +172,14 @@ func installSearchFormSeams(t *testing.T) *searchFormCapture {
 	})
 
 	return sc
+}
+
+// live holds sessions of the names given in the capture's backend, each
+// created at joinCreated.
+func (sc *searchFormCapture) live(names ...string) {
+	for _, name := range names {
+		sc.fake.Add(backend.Session{Name: name, Created: joinCreated})
+	}
 }
 
 func executeOpen(t *testing.T, argv ...string) {
@@ -214,7 +223,7 @@ func TestOpenCommand_SearchForm_ResolvesNothing(t *testing.T) {
 
 func TestOpenCommand_SearchForm_GlobMetacharactersAreLiteralText(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "po*rt-x"}, {Name: "portal-a1b2"}}
+	sc.live("po*rt-x", "portal-a1b2")
 
 	executeOpen(t, "/po*")
 
@@ -228,7 +237,7 @@ func TestOpenCommand_SearchForm_GlobMetacharactersAreLiteralText(t *testing.T) {
 
 func TestOpenCommand_SearchForm_AttachesASessionWhoseNameEqualsTheTerm(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "port"}}
+	sc.live("port")
 
 	executeOpen(t, "/port")
 
@@ -243,11 +252,11 @@ func TestOpenCommand_SearchForm_AttachesASessionWhoseNameEqualsTheTerm(t *testin
 func TestOpenCommand_SearchForm_EmitsNoResolveLine(t *testing.T) {
 	tests := []struct {
 		name     string
-		sessions []tmux.Session
+		sessions []string
 	}{
 		{name: "no match"},
-		{name: "one match", sessions: []tmux.Session{{Name: "port"}}},
-		{name: "two matches", sessions: []tmux.Session{{Name: "port"}, {Name: "portal-a1b2"}}},
+		{name: "one match", sessions: []string{"port"}},
+		{name: "two matches", sessions: []string{"port", "portal-a1b2"}},
 	}
 
 	for _, tt := range tests {
@@ -255,7 +264,7 @@ func TestOpenCommand_SearchForm_EmitsNoResolveLine(t *testing.T) {
 			sink := logtest.Install(t)
 
 			sc := installSearchFormSeams(t)
-			sc.source.sessions = tt.sessions
+			sc.live(tt.sessions...)
 
 			executeOpen(t, "/port")
 
@@ -283,7 +292,7 @@ func TestOpenCommand_MultiSegmentPathPositional_StillMints(t *testing.T) {
 		gotPath = path
 		return nil
 	})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a multi-segment path positional must mint rather than open the picker")
 		return nil
 	})
@@ -435,7 +444,7 @@ func TestValidateSearchFormCollisions_AdmitsASearchFormThatSetNoFlag(t *testing.
 func TestValidateOpenArgs_RefusedLineStartsNoBootstrap(t *testing.T) {
 	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a refused line must never reach the picker")
 		return nil
 	})
@@ -486,30 +495,9 @@ func TestValidateOpenArgs_AdmitsEveryNonSearchLine(t *testing.T) {
 	}
 }
 
-// fakeSearchSource stands in for the live session enumeration the search form
-// counts over, recording every read so a test can assert none was taken.
-type fakeSearchSource struct {
-	sessions     []tmux.Session
-	listErr      error
-	current      string
-	currentErr   error
-	listCalls    int
-	currentCalls int
-}
-
-func (f *fakeSearchSource) ListSessionsProbe() ([]tmux.Session, error) {
-	f.listCalls++
-	return slices.Clone(f.sessions), f.listErr
-}
-
-func (f *fakeSearchSource) CurrentSessionName() (string, error) {
-	f.currentCalls++
-	return f.current, f.currentErr
-}
-
 func TestOpenCommand_SearchForm_AttachesTheSingleMatch(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+	sc.live("portal-a1b2", "blog-c3d4")
 
 	executeOpen(t, "/port")
 
@@ -523,10 +511,9 @@ func TestOpenCommand_SearchForm_AttachesTheSingleMatch(t *testing.T) {
 
 func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirectory(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{
-		{Name: "api-work", Dir: filepath.Join(os.Getenv("HOME"), "Code", "portal")},
-		{Name: "blog-c3d4"},
-	}
+	sc.live("api-work", "blog-c3d4")
+	dir := filepath.Join(os.Getenv("HOME"), "Code", "portal")
+	seedIndex(t, sessionindex.Entry{Name: "api-work", Dir: dir, CreatedAt: joinCreated})
 
 	executeOpen(t, "/portal")
 
@@ -540,7 +527,7 @@ func TestOpenCommand_SearchForm_AttachesASessionMatchedOnlyByItsRecordedDirector
 
 func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "blog-c3d4"}, {Name: "api-e5f6"}}
+	sc.live("blog-c3d4", "api-e5f6")
 
 	_, errBuf, err := runRootCmd(t, "open", "/port")
 	if err != nil {
@@ -559,7 +546,7 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNothingMatches(t *testing.T) {
 
 func TestOpenCommand_SearchForm_OpensPickerWhenTwoOrMoreMatch(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}, {Name: "blog-c3d4"}}
+	sc.live("portal-a1b2", "port-agent", "blog-c3d4")
 
 	executeOpen(t, "/port")
 
@@ -589,13 +576,12 @@ func TestOpenCommand_SearchForm_OpensPickerWhenNoSessionsAreLive(t *testing.T) {
 
 func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+	sc.live("portal-a1b2")
 
 	executeOpen(t, "/")
 
-	if sc.source.listCalls != 0 || sc.source.currentCalls != 0 {
-		t.Errorf("term-less form read the session set: ListSessionsProbe=%d CurrentSessionName=%d, want 0 and 0",
-			sc.source.listCalls, sc.source.currentCalls)
+	if n := len(sc.fake.CallsTo(backendtest.OpList)); n != 0 {
+		t.Errorf("term-less form listed the sessions %d times, want 0", n)
 	}
 	if got, want := shapeOfLanding(sc.landing), (landingShape{search: true}); got != want {
 		t.Errorf("landing = %+v, want %+v", got, want)
@@ -607,8 +593,8 @@ func TestOpenCommand_SearchForm_TermLessFormTakesNoCount(t *testing.T) {
 
 func TestOpenCommand_SearchForm_ExcludesTheCurrentSessionFromTheCount(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
-	sc.source.current = "portal-a1b2"
+	sc.live("portal-a1b2", "blog-c3d4")
+	sc.fake.SetCurrent("portal-a1b2")
 
 	executeOpen(t, "/port")
 
@@ -622,8 +608,8 @@ func TestOpenCommand_SearchForm_ExcludesTheCurrentSessionFromTheCount(t *testing
 
 func TestOpenCommand_SearchForm_AttachesTheOtherMatchWhenTheCurrentSessionAlsoMatches(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
-	sc.source.current = "portal-a1b2"
+	sc.live("portal-a1b2", "port-agent")
+	sc.fake.SetCurrent("portal-a1b2")
 
 	executeOpen(t, "/port")
 
@@ -635,101 +621,40 @@ func TestOpenCommand_SearchForm_AttachesTheOtherMatchWhenTheCurrentSessionAlsoMa
 	}
 }
 
-func TestOpenCommand_SearchForm_CountsNothingOutWhenTheCurrentSessionReadFails(t *testing.T) {
+func TestOpenCommand_SearchForm_ExcludesNothingOutsideASession(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
-	sc.source.currentErr = errors.New("no current client")
+	sc.live("portal-a1b2", "port-agent")
 
 	executeOpen(t, "/port")
 
-	if sc.sessionCalled {
-		t.Errorf("attached %q: a failed current-session read must drop no candidate", sc.attached)
-	}
 	if !sc.tuiCalled {
-		t.Fatal("both sessions remain candidates, so two matches open the picker")
+		t.Fatal("outside a session both sessions are candidates, so two matches open the picker")
 	}
 }
 
-func TestOpenCommand_SearchForm_ExcludesNothingOutsideTmux(t *testing.T) {
-	t.Setenv("TMUX", "")
-
+func TestOpenCommand_SearchForm_CountsOverTheUserSessionsOnly(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
-	sc.source.current = "portal-a1b2"
-
-	executeOpen(t, "/port")
-
-	if sc.source.currentCalls != 0 {
-		t.Errorf("CurrentSessionName was read %d times outside tmux, want 0", sc.source.currentCalls)
-	}
-	if !sc.tuiCalled {
-		t.Fatal("outside tmux both sessions are candidates, so two matches open the picker")
-	}
-}
-
-// verbatimSearchSource hands back the very slice it holds, so a test can see
-// whether searchCandidates wrote through the enumeration it was given.
-type verbatimSearchSource struct {
-	sessions []tmux.Session
-	current  string
-}
-
-func (v *verbatimSearchSource) ListSessionsProbe() ([]tmux.Session, error) {
-	return v.sessions, nil
-}
-
-func (v *verbatimSearchSource) CurrentSessionName() (string, error) {
-	return v.current, nil
-}
-
-func TestSearchCandidates_LeavesTheEnumerationItWasHandedUnmodified(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/portal-search-candidates-test,0,0")
-
-	src := &verbatimSearchSource{
-		sessions: []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}, {Name: "blog-c3d4"}},
-		current:  "portal-a1b2",
-	}
-
-	if _, err := searchCandidates(src); err != nil {
-		t.Fatalf("searchCandidates() error = %v", err)
-	}
-
-	got := make([]string, 0, len(src.sessions))
-	for _, s := range src.sessions {
-		got = append(got, s.Name)
-	}
-	want := []string{"portal-a1b2", "port-agent", "blog-c3d4"}
-	if !slices.Equal(got, want) {
-		t.Errorf("enumeration after searchCandidates = %v, want %v unchanged", got, want)
-	}
-}
-
-func TestOpenCommand_SearchForm_CountsOverExactlyTheEnumeratedSessions(t *testing.T) {
-	sc := installSearchFormSeams(t)
-	sc.source.sessions = []tmux.Session{{Name: "_portal-saver"}, {Name: "portal-a1b2"}}
+	sc.live("_portal-saver", "portal-a1b2")
 
 	executeOpen(t, "/portal")
 
-	if sc.sessionCalled {
-		t.Errorf("attached %q: the count is the enumeration's, with no filter of its own on top", sc.attached)
+	if sc.attached != "portal-a1b2" {
+		t.Errorf("attached %q, want portal-a1b2: Portal's own sessions are no candidates", sc.attached)
 	}
-	if !sc.tuiCalled {
-		t.Fatal("both enumerated sessions match, so the picker must open")
-	}
-	if sc.source.listCalls != 1 {
-		t.Errorf("ListSessionsProbe was called %d times, want 1", sc.source.listCalls)
+	if n := len(sc.fake.CallsTo(backendtest.OpList)); n != 1 {
+		t.Errorf("the sessions were listed %d times, want 1", n)
 	}
 }
 
 func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
 	sc := installSearchFormSeams(t)
-	sc.source.listErr = errors.New("no server running")
+	sc.fake.Fail(backendtest.OpList, errors.New("unreadable zmx dir"))
 
 	resetRootCmd()
 	rootCmd.SetArgs([]string{"open", "/port"})
 
 	err := rootCmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "no server running") {
+	if err == nil || !strings.Contains(err.Error(), "unreadable zmx dir") {
 		t.Fatalf("error = %v, want the enumeration failure", err)
 	}
 	if usage, ok := errors.AsType[*UsageError](err); ok {
@@ -738,50 +663,6 @@ func TestOpenCommand_SearchForm_ReturnsAnEnumerationError(t *testing.T) {
 	if sc.tuiCalled || sc.sessionCalled {
 		t.Error("a failed read is not a zero match: neither the picker nor an attach may follow it")
 	}
-}
-
-func TestCurrentPickerSession(t *testing.T) {
-	t.Run("it returns the attached session's name inside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
-		src := &fakeSearchSource{current: "portal-a1b2"}
-
-		if got := currentPickerSession(src); got != "portal-a1b2" {
-			t.Errorf("currentPickerSession = %q, want %q", got, "portal-a1b2")
-		}
-		if src.currentCalls != 1 {
-			t.Errorf("CurrentSessionName was read %d times, want 1", src.currentCalls)
-		}
-	})
-
-	t.Run("it takes no current-session read outside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "")
-		src := &fakeSearchSource{current: "portal-a1b2"}
-
-		if got := currentPickerSession(src); got != "" {
-			t.Errorf("currentPickerSession = %q, want the empty string outside tmux", got)
-		}
-		if src.currentCalls != 0 {
-			t.Errorf("CurrentSessionName was read %d times outside tmux, want 0", src.currentCalls)
-		}
-	})
-
-	t.Run("it returns the empty string when the current-session read fails", func(t *testing.T) {
-		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
-		src := &fakeSearchSource{current: "portal-a1b2", currentErr: errors.New("no current client")}
-
-		if got := currentPickerSession(src); got != "" {
-			t.Errorf("currentPickerSession = %q, want the empty string on a failed read", got)
-		}
-	})
-
-	t.Run("it returns the empty string when the current-session read answers empty", func(t *testing.T) {
-		t.Setenv("TMUX", "/tmp/portal-current-picker-session-test,0,0")
-		src := &fakeSearchSource{}
-
-		if got := currentPickerSession(src); got != "" {
-			t.Errorf("currentPickerSession = %q, want the empty string on an empty read", got)
-		}
-	})
 }
 
 // executeOpenExpectingPreBootstrapUsage runs an open line expected to be refused
@@ -794,14 +675,14 @@ func executeOpenExpectingPreBootstrapUsage(t *testing.T, wantMsg string, argv ..
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 	seams := &recordingResolverSeams{}
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 	withOpenDeps(t, OpenDeps{
-		SessionLister:  seams,
-		AliasLookup:    seams,
-		Zoxide:         seams,
-		DirValidator:   seams,
-		SearchSessions: &fakeSearchSource{},
+		SessionLister: seams,
+		AliasLookup:   seams,
+		Zoxide:        seams,
+		DirValidator:  seams,
 	})
-	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string, bool) error {
+	withFuncSeam(t, &openTUIFunc, func(*cobra.Command, pickerLanding, []string) error {
 		t.Error("a refused line must never reach the picker")
 		return nil
 	})
@@ -918,17 +799,17 @@ func TestValidateOpenArgs_StillAnswersHelpOnAMalformedFilterLine(t *testing.T) {
 	}
 }
 
-func TestOpenCommand_MalformedAckStillRefusedFromTheCommandBody(t *testing.T) {
+func TestOpenCommand_MalformedAckRefusedFromTheCommandBody(t *testing.T) {
 	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 	seams := &recordingResolverSeams{}
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 	withOpenDeps(t, OpenDeps{
-		SessionLister:  seams,
-		AliasLookup:    seams,
-		Zoxide:         seams,
-		DirValidator:   seams,
-		SearchSessions: &fakeSearchSource{},
+		SessionLister: seams,
+		AliasLookup:   seams,
+		Zoxide:        seams,
+		DirValidator:  seams,
 	})
 
 	executeOpenExpectingUsage(t, "open: --ack must be <batch>:<token>", "dev", "--ack", "notcolon")

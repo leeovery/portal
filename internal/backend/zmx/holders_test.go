@@ -1,0 +1,239 @@
+package zmx_test
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/proctable"
+)
+
+// zmxProcess is a process with no terminal, exec'd from zmx's executable with
+// argv and env, as a session's daemon is.
+func zmxProcess(argv []string, env ...string) zmx.Process {
+	return zmx.Process{
+		Process: proctable.Process{PID: 40, PPID: 1, Command: "zmx"},
+		Args:    proctable.Args{Argv: argv, Env: env},
+	}
+}
+
+// caught is a read of a process caught as it forks or execs, as the kernel
+// fails one under load.
+func caught(errno syscall.Errno) error {
+	return fmt.Errorf("read arguments of process 40: %w", errno)
+}
+
+// settling is proc, whose first reads fail as one caught mid-exec's do.
+func settling(proc zmx.Process) zmx.Process {
+	proc.Reads = zmx.FailReads(caught(syscall.EINVAL), caught(syscall.EIO), caught(syscall.EINVAL))
+	return proc
+}
+
+// existsOver is Exists of dev, whose socket in dir refuses, over a process
+// table holding procs.
+func existsOver(t *testing.T, dir string, procs ...zmx.Process) (bool, error) {
+	t.Helper()
+	b := newBackend(t, dir)
+	zmx.FakeProcesses(b, procs, nil)
+	return b.Exists(t.Context(), "dev")
+}
+
+func TestRefusingSocket_IsHeldByAProcessThatMayHoldItsSession(t *testing.T) {
+	runtimeDir := socketDir(t)
+	dir := filepath.Join(runtimeDir, "zmx")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	refusing(t, dir, "dev")
+	inDir := "ZMX_DIR=" + dir
+	asPrivate := "ZMX_DIR=" + filepath.Join("/private", dir)
+	link := filepath.Join(socketDir(t), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	renamed := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
+	renamed.Command = "zmx-0.9"
+
+	for _, tt := range []struct {
+		name string
+		proc zmx.Process
+	}{
+		{"zmx attach on its name", zmxProcess([]string{"/opt/bin/zmx", "attach", "dev", "/bin/sh"}, inDir)},
+		{"zmx a", zmxProcess([]string{"zmx", "a", "dev"}, inDir)},
+		{"zmx attach past --labels", zmxProcess([]string{"zmx", "attach", "--labels", "k=v", "dev"}, inDir)},
+		{"zmx run", zmxProcess([]string{"zmx", "run", "dev", "make"}, inDir)},
+		{"zmx r", zmxProcess([]string{"zmx", "r", "dev", "-d", "make"}, inDir)},
+		{"zmx write", zmxProcess([]string{"zmx", "write", "dev", "notes.txt"}, inDir)},
+		{"zmx wr", zmxProcess([]string{"zmx", "wr", "dev", "notes.txt"}, inDir)},
+		{"zmx attach naming it after a prefix", zmxProcess([]string{"zmx", "attach", "v"}, inDir, "ZMX_SESSION_PREFIX=de")},
+		{"zmx run naming the prefix alone", zmxProcess([]string{"zmx", "run"}, inDir, "ZMX_SESSION_PREFIX=dev")},
+		{"its directory given with a trailing slash", zmxProcess([]string{"zmx", "attach", "dev"}, inDir+"/")},
+		{"its directory under /private, as macOS resolves /tmp", zmxProcess([]string{"zmx", "attach", "dev"}, asPrivate)},
+		{"its directory through a symbolic link", zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR="+link)},
+		{"its directory as zmx's default", zmxProcess([]string{"zmx", "attach", "dev"}, "XDG_RUNTIME_DIR="+runtimeDir)},
+		{"a relative directory, which may resolve to it", zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=zmx")},
+		{"a client on a terminal", client(41, []string{"zmx", "attach", "dev"}, inDir)},
+		{"a zmx the kernel names otherwise, renamed or wrapped", renamed},
+		{"its first ZMX_DIR this directory, as zmx's getenv reads it", zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_DIR=/tmp/zx-other")},
+		{"zmx attach naming it after its first prefix", zmxProcess([]string{"zmx", "attach", "v"}, inDir, "ZMX_SESSION_PREFIX=de", "ZMX_SESSION_PREFIX=p-")},
+		{"one whose reads fail a while, as a process caught mid-exec's do", settling(zmxProcess([]string{"zmx", "attach", "dev"}, inDir))},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := existsOver(t, dir, tt.proc)
+			if !errors.Is(err, zmx.ErrRefusing) || !errors.Is(err, backend.ErrTimeout) {
+				t.Errorf("Exists(dev) = %v, %v; want ErrRefusing wrapping ErrTimeout", got, err)
+			}
+			if err != nil && !strings.Contains(err.Error(), fmt.Sprintf("process %d", tt.proc.PID)) {
+				t.Errorf("Exists(dev) = %v, want the error to name the process", err)
+			}
+		})
+	}
+}
+
+func TestRefusingSocket_IsStaleWhenTheTableProvesNoProcessHoldsIt(t *testing.T) {
+	dir := socketDir(t)
+	refusing(t, dir, "dev")
+	inDir := "ZMX_DIR=" + dir
+	exiting := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
+	exiting.Err = fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone)
+	otherVerb := zmxProcess([]string{"tmux", "new-session", "dev"}, inDir)
+	otherVerb.Command = "tmux"
+	hardenedOnAnotherName := zmxProcess([]string{"/opt/homebrew/bin/tart", "run", "kit-vm"})
+	hardenedOnAnotherName.Command = "tart"
+	hardenedOnNoName := zmxProcess([]string{"/opt/homebrew/bin/tart", "run"})
+	hardenedOnNoName.Command = "tart"
+	goneAsItIsRead := zmxProcess([]string{"zmx", "attach", "dev"}, inDir)
+	goneAsItIsRead.Reads = zmx.FailReads(caught(syscall.EIO), fmt.Errorf("read arguments of process 40: %w", proctable.ErrGone))
+	unreadableOther := zmxProcess(nil)
+	unreadableOther.Command = "node"
+	unreadableOther.Err = caught(syscall.EINVAL)
+
+	for _, tt := range []struct {
+		name  string
+		procs []zmx.Process
+	}{
+		{"no process", nil},
+		{"zmx kill on its name", []zmx.Process{zmxProcess([]string{"zmx", "kill", "dev"}, inDir)}},
+		{"zmx history on its name", []zmx.Process{zmxProcess([]string{"zmx", "history", "dev"}, inDir)}},
+		{"zmx attach on another name", []zmx.Process{zmxProcess([]string{"zmx", "attach", "devx"}, inDir)}},
+		{"zmx attach on its name under a prefix", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_SESSION_PREFIX=p-")}},
+		{"zmx attach on its name in another directory", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=/tmp/zx-other")}},
+		{"zmx attach on its name in zmx's default directory, another", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, "TMPDIR=/var/t")}},
+		{"zmx attach answered with help", []zmx.Process{zmxProcess([]string{"zmx", "attach", "-h", "dev"}, inDir)}},
+		{"zmx run answered with help", []zmx.Process{zmxProcess([]string{"zmx", "run", "--help"}, inDir)}},
+		{"a zmx exiting as it is read", []zmx.Process{exiting}},
+		{"another program naming it after a verb that starts nothing", []zmx.Process{otherVerb}},
+		{"a program of that argv shape on a name it can't end with, whose environment the kernel doesn't show", []zmx.Process{hardenedOnAnotherName}},
+		{"a program of that argv shape naming no session, whose environment the kernel doesn't show", []zmx.Process{hardenedOnNoName}},
+		{"zmx attach on its name, its first ZMX_DIR another directory", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, "ZMX_DIR=/tmp/zx-other", inDir)}},
+		{"zmx attach on its name under its first prefix", []zmx.Process{zmxProcess([]string{"zmx", "attach", "dev"}, inDir, "ZMX_SESSION_PREFIX=p-", "ZMX_SESSION_PREFIX=")}},
+		{"a process whose reads fail a while, then show it holds nothing", []zmx.Process{settling(zmxProcess([]string{"zmx", "kill", "dev"}, inDir))}},
+		{"a zmx gone between reads that fail", []zmx.Process{goneAsItIsRead}},
+		// Decision 70: under load a scan often catches a process mid-exec,
+		// some for seconds; only one the kernel names zmx may be one.
+		{"a process the kernel names otherwise that it can't read, even once it has read it again a while", []zmx.Process{unreadableOther}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := existsOver(t, dir, tt.procs...); got || err != nil {
+				t.Errorf("Exists(dev) = %v, %v; want false, nil: a socket no process holds is stale", got, err)
+			}
+		})
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "dev")); err != nil {
+		t.Errorf("the stale socket after Exists: %v; only zmx removes it", err)
+	}
+}
+
+func TestRefusingSocket_StaysRefusingWhenNoProofCanBeRead(t *testing.T) {
+	dir := socketDir(t)
+	refusing(t, dir, "dev")
+	unreadableNamed := func(command string) zmx.Process {
+		p := zmxProcess(nil)
+		p.Command = command
+		p.Err = caught(syscall.EINVAL)
+		return p
+	}
+	hidingItsEnvironment := zmxProcess([]string{"zmx", "attach", "dev"})
+	hidingItsPrefix := zmxProcess([]string{"zmx", "attach", "v"})
+
+	for _, tt := range []struct {
+		name  string
+		procs []zmx.Process
+		err   error
+	}{
+		{"a zmx it can't read", []zmx.Process{unreadableNamed("zmx")}, nil},
+		{"a process the kernel names zmx-foo that it can't read", []zmx.Process{unreadableNamed("zmx-foo")}, nil},
+		{"a process the kernel names .zmx-wrapped that it can't read", []zmx.Process{unreadableNamed(".zmx-wrapped")}, nil},
+		{"a zmx attach on its name whose environment the kernel doesn't show", []zmx.Process{hidingItsEnvironment}, nil},
+		{"a zmx attach on a name it ends with, whose environment, and so prefix, the kernel doesn't show", []zmx.Process{hidingItsPrefix}, nil},
+		{"a process table it can't list", nil, errors.New("sysctl failed")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newBackend(t, dir)
+			zmx.FakeProcesses(b, tt.procs, tt.err)
+
+			if got, err := b.Exists(t.Context(), "dev"); !errors.Is(err, zmx.ErrRefusing) {
+				t.Errorf("Exists(dev) = %v, %v; want ErrRefusing: a proof that can't be read proves nothing", got, err)
+			}
+		})
+	}
+}
+
+// A table of processes it can't read, each read again for a while before it
+// is skipped, takes longer to scan than the probe's ceiling: the scan ends
+// with the ceiling, unproved, and the socket stays refusing.
+func TestRefusingSocket_StaysRefusingWhenTheCeilingCutsTheProofShort(t *testing.T) {
+	dir := socketDir(t)
+	refusing(t, dir, "dev")
+	var unreadable []zmx.Process
+	for pid := range 20 {
+		unreadable = append(unreadable, zmx.Process{
+			Process: proctable.Process{PID: 1000 + pid, PPID: 1, Command: "launchd-helper"},
+			Err:     caught(syscall.EINVAL),
+		})
+	}
+	b := newBackend(t, dir)
+	zmx.FakeProcesses(b, unreadable, nil)
+	// The ceiling, and slack for load, well short of the 2 s a scan settling
+	// every process in turn takes.
+	soon := ceiling + 800*time.Millisecond
+
+	start := time.Now()
+	alive, err := b.Exists(t.Context(), "dev")
+	if took := time.Since(start); !errors.Is(err, zmx.ErrRefusing) || took > soon {
+		t.Errorf("Exists(dev) = %v, %v after %s; want ErrRefusing within %s, the proof unfinished", alive, err, took, soon)
+	}
+
+	start = time.Now()
+	sessions, err := b.List(t.Context())
+	if took := time.Since(start); err != nil || len(sessions) != 1 || sessions[0] != (backend.Session{Name: "dev"}) || took > soon {
+		t.Errorf("List = %+v, %v after %s; want dev listed by name only within %s", sessions, err, took, soon)
+	}
+}
+
+func TestProcessTable_IsReadOnlyOnARefusal(t *testing.T) {
+	dir := socketDir(t)
+	serve(t, dir, "live", answering(infoFrame(t)))
+	stale(t, dir, "crashed")
+	b := newBackend(t, dir)
+	zmx.FakeProcessesFrom(b, func() ([]zmx.Process, error) {
+		t.Error("the process table was read for a socket that did not refuse, or one from before this boot")
+		return nil, nil
+	})
+
+	for _, name := range []string{"live", "crashed", "gone"} {
+		if _, err := b.Exists(t.Context(), name); err != nil {
+			t.Errorf("Exists(%s): %v", name, err)
+		}
+	}
+	if _, err := b.List(t.Context()); err != nil {
+		t.Errorf("List: %v", err)
+	}
+}

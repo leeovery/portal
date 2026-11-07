@@ -63,7 +63,7 @@ func TestReadSharedLock(t *testing.T) {
 		if _, err := store.List(hooks.ViaCLI); err != nil {
 			t.Fatalf("List: %v", err)
 		}
-		if _, err := store.CleanStale(abortingEnumeration(nil)); !errors.Is(err, errAbortEnumeration) {
+		if _, err := store.CleanStale(abortingEnumeration(nil), noIndex); !errors.Is(err, errAbortEnumeration) {
 			t.Fatalf("CleanStale snapshot read: %v", err)
 		}
 		if _, err := store.LookupOnResume("k00", hooks.ViaHydrate); err != nil {
@@ -276,7 +276,7 @@ func TestReadSharedLockVia(t *testing.T) {
 		{"Load", hooks.ViaCLI, func(s *hooks.Store) error { _, err := s.Load(hooks.ViaCLI); return err }},
 		{"List", hooks.ViaDoctor, func(s *hooks.Store) error { _, err := s.List(hooks.ViaDoctor); return err }},
 		{"CleanStale snapshot", hooks.ViaInternal, func(s *hooks.Store) error {
-			if _, err := s.CleanStale(abortingEnumeration(nil)); !errors.Is(err, errAbortEnumeration) {
+			if _, err := s.CleanStale(abortingEnumeration(nil), noIndex); !errors.Is(err, errAbortEnumeration) {
 				return err
 			}
 			return nil
@@ -461,7 +461,7 @@ func TestSnapshotLockBoundDerivation(t *testing.T) {
 		start := time.Now()
 		// Aborted at the enumeration, so the elapsed time measures the pre-read
 		// alone rather than the exclusive acquire that would follow it.
-		_, err := store.CleanStale(abortingEnumeration(&entries))
+		_, err := store.CleanStale(abortingEnumeration(&entries), noIndex)
 		elapsed := time.Since(start)
 
 		if !errors.Is(err, errAbortEnumeration) {

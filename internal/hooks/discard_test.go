@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -297,7 +298,7 @@ func TestDiscard(t *testing.T) {
 	t.Run("it leaves every other entry byte-unchanged", func(t *testing.T) {
 		seed := `{"` + hookstest.SubjectSeedA + `":{"on-resume":"claude --resume abc123"},` +
 			`"` + hookstest.SubjectSeedB + `":{"on-resume":{"command":"npm start","resume":"lazy","extra":[1, 2]}},` +
-			`"` + hookstest.UnjudgeableSeedA + `":{"on-resume":"vim ."}}`
+			`"` + hookstest.TmuxEraSeedA + `":{"on-resume":"vim ."}}`
 		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
 		before := decodeHooksFile(t, path)
 
@@ -309,7 +310,7 @@ func TestDiscard(t *testing.T) {
 		if len(after) != 2 {
 			t.Fatalf("hooks.json holds %d keys, want 2: %v", len(after), after)
 		}
-		for _, key := range []string{hookstest.SubjectSeedB, hookstest.UnjudgeableSeedA} {
+		for _, key := range []string{hookstest.SubjectSeedB, hookstest.TmuxEraSeedA} {
 			if got, want := compactJSON(t, after[key]["on-resume"]), compactJSON(t, before[key]["on-resume"]); got != want {
 				t.Errorf("%s on-resume = %s, want %s", key, got, want)
 			}
@@ -464,5 +465,80 @@ func TestDiscard_Refusals(t *testing.T) {
 			t.Errorf("err = %v, want no ErrLockHeld: nothing held the lock", err)
 		}
 		hookstest.AssertLockWarn(t, sink, "discard", hookstest.SubjectSeedA, "panel")
+	})
+}
+
+func TestDiscardEach(t *testing.T) {
+	t.Run("it removes each key whose command is the one shown, keeping one whose command changed", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{Entries: map[string]string{
+			hookstest.SubjectSeedA: "claude --resume a",
+			hookstest.SubjectSeedB: "make dev",
+			hookstest.SubjectSeedC: "npm start",
+		}})
+		sink := logtest.Install(t)
+
+		removed, err := store.DiscardEach(hooks.EventOnResume, map[string]string{
+			hookstest.SubjectSeedA: "claude --resume a",
+			hookstest.SubjectSeedB: "make serve",
+			hookstest.SubjectSeedC: "npm start",
+			hookstest.SubjectSeedD: "vim",
+		}, hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("DiscardEach: %v", err)
+		}
+
+		want := []string{hookstest.SubjectSeedA, hookstest.SubjectSeedC}
+		slices.Sort(want)
+		if !slices.Equal(removed, want) {
+			t.Errorf("removed = %v, want %v", removed, want)
+		}
+		decoded := decodeHooksFile(t, path)
+		if _, ok := decoded[hookstest.SubjectSeedB]; len(decoded) != 1 || !ok {
+			t.Errorf("hooks.json = %v, want the changed command's key alone", decoded)
+		}
+		records := sink.Records().Matching("hooks", "discard").AtExactLevel(slog.LevelInfo)
+		if len(records) != 2 {
+			t.Fatalf("discard records = %d, want one a removed key", len(records))
+		}
+		for _, rec := range records {
+			if key := rec.AttrString(t, "hook_key"); !slices.Contains(want, key) || rec.AttrString(t, "value") == "" {
+				t.Errorf("record = %+v, want a removed key carrying its command", rec)
+			}
+		}
+	})
+
+	t.Run("a lock held past its bound removes none, writing each key's WARN", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{Entries: map[string]string{
+			hookstest.SubjectSeedA: "claude --resume a",
+			hookstest.SubjectSeedB: "make dev",
+		}})
+		hookstest.HoldHooksSidecar(t, path)
+		hooks.SetLockTimeoutForTest(t, 30*time.Millisecond)
+		before := readFileBytes(t, path)
+		sink := logtest.Install(t)
+
+		removed, err := store.DiscardEach(hooks.EventOnResume, map[string]string{
+			hookstest.SubjectSeedA: "claude --resume a",
+			hookstest.SubjectSeedB: "make dev",
+		}, hooks.ViaInternal)
+
+		if !errors.Is(err, hooks.ErrLockHeld) || len(removed) != 0 {
+			t.Errorf("DiscardEach = %v, %v; want nothing removed and ErrLockHeld", removed, err)
+		}
+		hookstest.AssertHooksFileUnchanged(t, path, before, "changed by a refused discard")
+		if n := len(sink.Records().Matching("hooks", "discard").AtExactLevel(slog.LevelWarn)); n != 2 {
+			t.Errorf("discard warnings = %d, want one a key", n)
+		}
+	})
+
+	t.Run("nothing shown takes no lock and writes nothing", func(t *testing.T) {
+		store, path := hookstest.StageStore(t, hookstest.Staging{SidecarAbsent: true, Entries: map[string]string{hookstest.SubjectSeedA: "vim"}})
+
+		if removed, err := store.DiscardEach(hooks.EventOnResume, nil, hooks.ViaInternal); err != nil || len(removed) != 0 {
+			t.Errorf("DiscardEach = %v, %v; want nothing removed", removed, err)
+		}
+		if _, err := os.Stat(hookstest.SidecarPath(path)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat sidecar = %v, want none created", err)
+		}
 	})
 }

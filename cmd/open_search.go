@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -55,13 +56,19 @@ func completingPreDashPositional(cmd *cobra.Command, args []string) bool {
 type pickerLanding struct {
 	filter string
 	search *tui.SearchForm
+	// flash is a warning the picker opens on: why the attach that asked for it
+	// failed to do what was asked.
+	flash string
+	// kill is the session the kill key asked to kill from inside it: the
+	// picker opens on its kill prompt, which offers to attach it again.
+	kill string
 }
 
 // validateOpenArgs refuses a search form beside anything else, a command scoped
 // both ways or scoped emptily, and a filter beside a target or with no text. It
 // runs as open's Args validator because each of those refusals is decided from
 // the arguments alone, and cobra validates args before PersistentPreRunE — so a
-// refused line starts no tmux server, restores nothing and paints no frame.
+// refused line bootstraps nothing, restores nothing and paints no frame.
 //
 // The refusals are tested in a fixed order, so a line colliding several ways
 // always names the same one.
@@ -136,57 +143,23 @@ func validateCommandScopeAndFilter(cmd *cobra.Command, args []string) error {
 	return validateFilterFlag(cmd, destination)
 }
 
-// SearchSessionSource enumerates the live sessions a search term is counted
-// against, and names the session the caller is attached to so the count is taken
-// over the set the picker would list. The enumeration discriminates a failed
-// read from an empty server: a list that could not be read has searched nothing,
-// so it must not be counted as no matches.
-type SearchSessionSource interface {
-	ListSessionsProbe() ([]tmux.Session, error)
-	CurrentSessionName() (string, error)
-}
-
-func buildSearchSessionSource(cmd *cobra.Command) SearchSessionSource {
-	if openDeps != nil && openDeps.SearchSessions != nil {
-		return openDeps.SearchSessions
-	}
-	return tmuxClient(cmd)
-}
-
-// currentSessionReader names the session the caller is attached to.
-type currentSessionReader interface {
-	CurrentSessionName() (string, error)
-}
-
-// currentPickerSession returns the session the caller is attached to, and the
-// empty string outside tmux or when the read fails or answers empty — so a
-// surface keying off it holds nothing back on a failed read.
-func currentPickerSession(src currentSessionReader) string {
-	if !tmux.InsideTmux() {
-		return ""
-	}
-	current, err := src.CurrentSessionName()
-	if err != nil {
-		return ""
-	}
-	return current
-}
-
-// searchCandidates returns the sessions a term is counted over: the enumeration
-// less the session the caller is already in, which the picker omits too.
-func searchCandidates(src SearchSessionSource) ([]tmux.Session, error) {
-	sessions, err := src.ListSessionsProbe()
+// searchCandidates returns the sessions a term is counted over: the user's
+// sessions less the one the caller is in, which the picker omits too, as the
+// picker shows them.
+func searchCandidates(ctx context.Context, b backend.Backend) ([]tui.Session, error) {
+	sessions, err := listShownSessions(ctx, b)
 	if err != nil {
 		return nil, err
 	}
-	return tui.PickerSessions(sessions, currentPickerSession(src)), nil
+	return tui.PickerSessions(sessions, b.Current()), nil
 }
 
-// searchMatches returns, in enumeration order, the sessions the term matches.
-func searchMatches(term string, sessions []tmux.Session) []tmux.Session {
-	var matches []tmux.Session
+// searchMatches returns, in enumeration order, the sessions the term matches,
+// their directories abbreviated against home as the picker shows them.
+func searchMatches(home, term string, sessions []tui.Session) []tui.Session {
+	var matches []tui.Session
 	for _, s := range sessions {
-		if resolver.MatchesSearchTerm(term, s.Name, s.Dir) {
+		if resolver.MatchesSearchTerm(home, term, s.SearchSubject()) {
 			matches = append(matches, s)
 		}
 	}
@@ -197,13 +170,13 @@ func searchMatches(term string, sessions []tmux.Session) []tmux.Session {
 // is the session to attach, any other count is ("", nil) and leaves the picker
 // to it, and a failed enumeration is returned unchanged. It is a closure because
 // the moment it runs differs by route — here, or from inside the picker.
-func searchDecision(src SearchSessionSource, term string) func() (string, error) {
+func searchDecision(ctx context.Context, b backend.Backend, term string) func() (string, error) {
 	return func() (string, error) {
-		sessions, err := searchCandidates(src)
+		sessions, err := searchCandidates(ctx, b)
 		if err != nil {
 			return "", err
 		}
-		if matches := searchMatches(term, sessions); len(matches) == 1 {
+		if matches := searchMatches(resolver.ProcessHome(), term, sessions); len(matches) == 1 {
 			return matches[0].Name, nil
 		}
 		return "", nil
@@ -220,15 +193,19 @@ func searchDecision(src SearchSessionSource, term string) func() (string, error)
 // it hands the count to the picker, which takes it once that bootstrap completes.
 func runSearchForm(cmd *cobra.Command, term string) error {
 	if term == "" {
-		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil, serverWasStarted(cmd))
+		return openTUIFunc(cmd, pickerLanding{search: &tui.SearchForm{}}, nil)
 	}
 
-	decide := searchDecision(buildSearchSessionSource(cmd), term)
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
+	decide := searchDecision(cmd.Context(), b, term)
 	landing := pickerLanding{search: &tui.SearchForm{Term: term}}
 
 	if deferredBootstrapFromContext(cmd) != nil {
 		landing.search.Decide = decide
-		return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+		return openTUIFunc(cmd, landing, nil)
 	}
 
 	name, err := decide()
@@ -241,9 +218,9 @@ func runSearchForm(cmd *cobra.Command, term string) error {
 	if name != "" {
 		// No picker is painted on this route, so the notice band never surfaces
 		// what the bootstrap accumulated: it goes to the terminal instead, before
-		// the attach hands that terminal to tmux.
+		// the attach hands that terminal to the session.
 		bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		return openSessionFunc(cmd, name)
 	}
-	return openTUIFunc(cmd, landing, nil, serverWasStarted(cmd))
+	return openTUIFunc(cmd, landing, nil)
 }

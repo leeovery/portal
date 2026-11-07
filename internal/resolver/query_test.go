@@ -565,7 +565,7 @@ func TestQueryResolver_Resolve_SessionDomain(t *testing.T) {
 	})
 
 	t.Run("lister error collapses to no match, not a resolve error", func(t *testing.T) {
-		sessions := &mockSessionLister{err: errors.New("tmux unreachable")}
+		sessions := &mockSessionLister{err: errors.New("zmx unreachable")}
 		aliasLookup := &mockAliasLookup{aliases: map[string]string{}}
 		zoxide := &mockZoxideQuerier{err: resolver.ErrNoMatch}
 		dirValidator := &mockDirValidator{existing: map[string]bool{}}
@@ -721,7 +721,7 @@ func TestQueryResolver_ResolveSessionPin(t *testing.T) {
 	})
 
 	t.Run("lister error collapses to a miss, not a resolve error", func(t *testing.T) {
-		qr := newPinResolver(t, nil, errors.New("tmux unreachable"))
+		qr := newPinResolver(t, nil, errors.New("zmx unreachable"))
 
 		result, err := qr.ResolveSessionPin("anything")
 		if result != nil {
@@ -810,7 +810,7 @@ func TestQueryResolver_ExactSessionMatch_UnifiedAcrossEntryPoints(t *testing.T) 
 	})
 
 	t.Run("lister error is no match with no escalation via Resolve", func(t *testing.T) {
-		qr := newResolver(nil, errors.New("tmux unreachable"))
+		qr := newResolver(nil, errors.New("zmx unreachable"))
 
 		result, err := qr.Resolve("anything")
 		if err != nil {
@@ -825,7 +825,7 @@ func TestQueryResolver_ExactSessionMatch_UnifiedAcrossEntryPoints(t *testing.T) 
 	})
 
 	t.Run("lister error is no match with no escalation via ResolveSessionPin", func(t *testing.T) {
-		qr := newResolver(nil, errors.New("tmux unreachable"))
+		qr := newResolver(nil, errors.New("zmx unreachable"))
 
 		result, err := qr.ResolveSessionPin("anything")
 		if result != nil {
@@ -840,7 +840,7 @@ func TestQueryResolver_ExactSessionMatch_UnifiedAcrossEntryPoints(t *testing.T) 
 	})
 
 	t.Run("lister error is no match with no escalation via ResolveSessionPinAll", func(t *testing.T) {
-		qr := newResolver(nil, errors.New("tmux unreachable"))
+		qr := newResolver(nil, errors.New("zmx unreachable"))
 
 		results, err := qr.ResolveSessionPinAll("anything")
 		if err != nil {

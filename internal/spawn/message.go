@@ -34,10 +34,17 @@ func PartialFailureMessage(failed []string, othersOpened bool) string {
 	return fmt.Sprintf("%s failed to open — nothing opened", QuoteJoin(failed))
 }
 
+// UnsureTerminal is why an unsure identity opens nothing, for every surface
+// that says so.
+const UnsureTerminal = "can't tell which terminal Portal is running in"
+
 // UnsupportedNoopMessage names the bundle id for a non-NULL identity: it is the
 // terminals.json key the user needs.
 func UnsupportedNoopMessage(id Identity) string {
-	if id.IsNull() {
+	switch {
+	case id.Unsure:
+		return UnsureTerminal + " — nothing opened"
+	case id.IsNull():
 		return "can't open new windows over a remote connection — nothing opened"
 	}
 	return fmt.Sprintf("can't open new windows in %s · %s — nothing opened", id.Name, id.BundleID)

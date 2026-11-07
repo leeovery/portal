@@ -3,7 +3,6 @@ package capture
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -26,6 +24,9 @@ type Fixture struct {
 	// geometry rather than content at whatever size the caller has. Zero takes
 	// the caller's.
 	width, height int
+	// The terminal its golden frame is kept at, per dimension, where the screen
+	// is designed for one other than the harness's. Zero takes harnessSize's.
+	frame Size
 
 	Lister *fakeLister
 	// Session names, never indicator text: the delegate draws the indicator.
@@ -37,7 +38,10 @@ type Fixture struct {
 	initialMode   prefs.SessionListMode
 	// search non-nil opens the picker as a session search did, with the term
 	// committed as the list's filter.
-	search             *tui.SearchForm
+	search *tui.SearchForm
+	// killAsk opens the picker as the kill key does from inside the session it
+	// names: on that session's kill prompt.
+	killAsk            string
 	initialMultiSelect []string
 	initialCursor      string
 	// Independent of the `--theme` palette: the union is what the panel lists —
@@ -60,15 +64,18 @@ type Fixture struct {
 	initialBurstOpening [2]int
 	initialFlash        string
 	command             []string
-	scrollback          string
-	enumeratorGroups    []tmux.WindowGroup
-	serverStarted       bool
+	history             string
+	historyFile         string
 	loadingEvents       []tui.BootstrapProgressMsg
 	fatalEvent          tui.BootstrapFatalMsg
 	// Tapes are scaffolding and do not live in the repository, so the post-load
 	// key script is declared here.
 	captureKeys []tea.KeyPressMsg
-	noColor     bool
+	// landsLastKeyRead runs the last capture key's command and delivers what it
+	// returns, as a running program would: the preview's body arrives that way.
+	// It delivers only that command's own message, not any it leads to.
+	landsLastKeyRead bool
+	noColor          bool
 }
 
 // Deps hands the palette to two seams that must agree — the constant nomination
@@ -82,23 +89,26 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		Lister:        f.Lister,
 		PendingReader: f.pendingReader(),
 		Killer:        fakeKiller{},
-		Renamer:       fakeRenamer{},
+		AskedKiller:   fakeKiller{},
+		Labeller:      fakeLabeller{},
 		Creator:       fakeCreator{},
 		ProjectStore:  f.projectStore,
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
-		Enumerator:    fakeEnumerator{groups: f.enumeratorGroups},
-		Reader:        fakeScrollbackReader{content: f.scrollback},
-		// DirReader/DirRunner stay nil, so the lazy pane-read fallback returns
-		// before reading anything and a fixture session carrying no recorded
-		// directory groups into the catch-all; ModePersister stays nil so an
-		// `s`-toggle writes nowhere.
-		InitialMode:   f.initialMode,
-		Search:        f.search,
-		Command:       f.command,
-		CWD:           "/home/user",
-		ServerStarted: f.serverStarted,
-		NoColor:       f.noColor,
+		History:       fakeHistory{content: f.history, file: f.historyFile},
+		// DirRunner stays nil, so the git-root fallback resolves nothing and a
+		// fixture session carrying no recorded directory groups into the
+		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
+		// A fixture's paths are made up, so they match by their text: resolving
+		// one on disk stats /home, an automount on macOS, at every build.
+		DirKey:      filepath.Clean,
+		InitialMode: f.initialMode,
+		Search:      f.search,
+		KillAsk:     f.killAsk,
+		Command:     f.command,
+		CWD:         fixtureHome,
+		Home:        fixtureHome,
+		NoColor:     f.noColor,
 		Capture: tui.CaptureSeeds{
 			ThemeCursor:  f.initialThemeCursor,
 			ThemeConfirm: f.initialThemeConfirm,
@@ -153,12 +163,15 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsFlatFixture,
 		sessionsEmptyFixture,
 		sessionsByProjectFixture,
+		sessionsByProjectLabelledFixture,
 		sessionsByTagFixture,
 		sessionsPagedFixture,
 		sessionsInlineFlashFixture,
-		sessionsRenameRefusedSeparatorFixture,
-		sessionsRenameRefusedIDPrefixFixture,
-		sessionsRenameRefusedFlagPrefixFixture,
+		sessionsRenameRefusedLabelFixture,
+		sessionsHelpFixture,
+		sessionsFilteringFixture,
+		sessionsKillConfirmFixture,
+		sessionsKillAskFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -166,12 +179,16 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsBurstOpeningFixture,
 		sessionsNoTagsSignpostFixture,
 		sessionsSearchResultsFixture,
+		sessionsSearchHomeFixture,
 		sessionsPendingResumeFixture,
 		sessionsPendingResumeColourlessFixture,
+		sessionsNotAnsweringFixture,
 		projectsFixture,
 		projectsCommandPendingFixture,
+		projectsEditFixture,
 		themePanelAdaptivePairFixture,
 		themePanelConstantPreviewingFixture,
+		themePanelOpenFixture,
 		themePanelInvalidRowFixture,
 		themePanelDirUnreadableFixture,
 		themePanelNarrowFixture,
@@ -182,6 +199,7 @@ func fixtureBuilders() []func() *Fixture {
 		themePanelMinHeightMessageFixture,
 		previewScreenFixture,
 		previewLongScrollbackFixture,
+		previewZmxHistoryFixture,
 		loadingScreenFixture,
 		loadingErrorFixture,
 	}
@@ -193,7 +211,11 @@ func FixtureByName(name string) (*Fixture, error) {
 			return fx, nil
 		}
 	}
-	return nil, fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
+	return nil, unknownFixture(name)
+}
+
+func unknownFixture(name string) error {
+	return fmt.Errorf("unknown fixture %q (available: %s)", name, strings.Join(FixtureNames(), ", "))
 }
 
 // FixtureNames includes the standalone names too — the contrast-validation
@@ -211,22 +233,22 @@ func FixtureNames() []string {
 	return names
 }
 
-// Every session carries a stamped Dir so the grouped-render lazy pane-read
-// fallback never fires (the harness has no tmux server).
+// Every session carries a recorded Dir, so grouping never needs the git-root
+// fallback the harness leaves unwired.
 func sessionsFlatFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fab-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "flow-v1-api-XkkhTN", Windows: 1, Attached: false, Dir: "/home/user/code/flow"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "fabric-lk26UG", Windows: 1, Attached: false, Dir: "/home/user/code/fabric"},
-		{Name: "folio-Jiz4el", Windows: 1, Attached: false, Dir: "/home/user/code/folio"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "relay-v1-api-Hq7wNe", Attached: false, Dir: "/home/user/code/relay"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "loom-p84cXa", Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Attached: false, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
@@ -249,26 +271,24 @@ func sessionsEmptyFixture() *Fixture {
 	}
 }
 
-// The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
-// sides, so the grouping is deterministic without a real filesystem.
 func sessionsByProjectFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
 		// Matches no project → lands in the Unknown catch-all.
-		{Name: "orphan-explore", Windows: 1, Attached: false, Dir: "/home/user/code/untracked-scratch"},
+		{Name: "orphan-explore", Attached: false, Dir: "/home/user/code/untracked-scratch"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
-		{Path: "/home/user/code/fab", Name: "fab"},
-		{Path: "/home/user/code/evvi", Name: "evvi"},
-		{Path: "/home/user/code/aviva", Name: "aviva"},
-		{Path: "/home/user/code/designlab", Name: "designlab"},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+		{Path: "/home/user/code/lumen", Name: "lumen"},
+		{Path: "/home/user/code/tessera", Name: "tessera"},
+		{Path: "/home/user/code/atelier", Name: "atelier"},
 	}
 
 	return &Fixture{
@@ -279,28 +299,54 @@ func sessionsByProjectFixture() *Fixture {
 	}
 }
 
-// The paths do not exist; CanonicalDirKey falls back to Clean(abs) on both
-// sides, so the match is deterministic without a real filesystem.
-func sessionsByTagFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi webhooks and watchers", Windows: 4, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "designlab-web-r8suyU", Windows: 2, Attached: false, Dir: "/home/user/code/designlab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fab-aws-migration", Windows: 5, Attached: false, Dir: "/home/user/code/fab"},
+// Labelled rows in a grouped mode: each group, the catch-all included, orders
+// by the text its rows show, so a label sits where it reads and two rows
+// showing the same text fall back to their names.
+func sessionsByProjectLabelledFixture() *Fixture {
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-Vb3kQw", Label: "release checklist", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-Hq7wNe", Label: "api · user search", Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-m4TzpD", Label: "spike", Dir: "/home/user/code/kiln"},
+		{Name: "kiln-3RJDWA", Label: "spike", Dir: "/home/user/code/kiln"},
+		{Name: "kiln-aws-migration", Dir: "/home/user/code/kiln"},
+		{Name: "scratch-p84cXa", Label: "notes on the outage", Dir: "/home/user/code/untracked-scratch"},
+		{Name: "scratch-Ue9fLr", Dir: "/home/user/code/untracked-scratch"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows", Tags: []string{"work"}},
-		{Path: "/home/user/code/fab", Name: "fab", Tags: []string{"work", "client"}},
-		{Path: "/home/user/code/aviva", Name: "aviva", Tags: []string{"client"}},
-		{Path: "/home/user/code/designlab", Name: "designlab", Tags: []string{"personal"}},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+	}
+
+	return &Fixture{
+		name:         "sessions-by-project-labelled",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: projects},
+		initialMode:  prefs.ModeByProject,
+	}
+}
+
+func sessionsByTagFixture() *Fixture {
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen webhooks and watchers", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "atelier-web-m4TzpD", Attached: false, Dir: "/home/user/code/atelier"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "kiln-aws-migration", Attached: false, Dir: "/home/user/code/kiln"},
+	}
+
+	projects := []project.Project{
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline", Tags: []string{"work"}},
+		{Path: "/home/user/code/kiln", Name: "kiln", Tags: []string{"work", "client"}},
+		{Path: "/home/user/code/tessera", Name: "tessera", Tags: []string{"client"}},
+		{Path: "/home/user/code/atelier", Name: "atelier", Tags: []string{"personal"}},
 		// Deliberately untagged → its sessions land in the Untagged catch-all,
 		// so a tagged heading and the catch-all share one frame.
-		{Path: "/home/user/code/evvi", Name: "evvi"},
+		{Path: "/home/user/code/lumen", Name: "lumen"},
 	}
 
 	return &Fixture{
@@ -316,18 +362,17 @@ func sessionsByTagFixture() *Fixture {
 func sessionsPagedFixture() *Fixture {
 	const count = 100
 	dirs := []string{
-		"/home/user/code/agentic-workflows",
-		"/home/user/code/fab",
-		"/home/user/code/evvi",
-		"/home/user/code/aviva",
-		"/home/user/code/designlab",
-		"/home/user/code/flow",
+		"/home/user/code/orchard-pipeline",
+		"/home/user/code/kiln",
+		"/home/user/code/lumen",
+		"/home/user/code/tessera",
+		"/home/user/code/atelier",
+		"/home/user/code/relay",
 	}
-	sessions := make([]tmux.Session, 0, count)
+	sessions := make([]tui.Session, 0, count)
 	for i := range count {
-		sessions = append(sessions, tmux.Session{
+		sessions = append(sessions, tui.Session{
 			Name:     fmt.Sprintf("session-%02d", i),
-			Windows:  (i % 4) + 1,
 			Attached: i == 0,
 			Dir:      dirs[i%len(dirs)],
 		})
@@ -342,11 +387,11 @@ func sessionsPagedFixture() *Fixture {
 }
 
 func sessionsInlineFlashFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
-		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore", Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	return &Fixture{
@@ -354,35 +399,68 @@ func sessionsInlineFlashFixture() *Fixture {
 		Lister:       &fakeLister{sessions: sessions},
 		projectStore: &fakeProjectStore{projects: nil},
 		initialMode:  prefs.ModeFlat,
-		initialFlash: "folio-Jiz4el closed externally — list updated",
+		initialFlash: "quill-Ue9fLr closed externally — list updated",
 	}
 }
 
 // The refusal is typed, never seeded: the keys open the real rename modal and
-// commit an unaddressable name, so the band carries production's own wording
-// rather than a copy of it this file could drift from.
-func sessionsRenameRefusedSeparatorFixture() *Fixture {
+// add a zero-width space, a format character the text input keeps, so the band
+// carries the index's own refusal rather than a copy this file could drift from.
+func sessionsRenameRefusedLabelFixture() *Fixture {
 	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-separator"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune(':'), keyEnter()}
+	fx.name = "sessions-rename-refused-label"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyRune('\u200b'), keyEnter()}
+	fx.landsLastKeyRead = true
 	return fx
 }
 
-// The modal opens with the cursor at the end of the current name and only a
-// leading "$" is refused, so the line-start key is load-bearing.
-func sessionsRenameRefusedIDPrefixFixture() *Fixture {
+func sessionsHelpFixture() *Fixture {
 	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-id-prefix"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('$'), keyEnter()}
+	fx.name = "sessions-help"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('?')}
 	return fx
 }
 
-// The third refusal, and the longest of the three: only a leading "-" is
-// refused, so the line-start key is load-bearing here too.
-func sessionsRenameRefusedFlagPrefixFixture() *Fixture {
+// The term is typed, not committed: the frame is the filter input still taking
+// keys, with the rows it has narrowed to beneath. The list narrows on the
+// command a keystroke returns, so without the last key's read landing every row
+// still shows.
+func sessionsFilteringFixture() *Fixture {
 	fx := sessionsFlatFixture()
-	fx.name = "sessions-rename-refused-flag-prefix"
-	fx.captureKeys = []tea.KeyPressMsg{keyRune('r'), keyLineStart(), keyRune('-'), keyEnter()}
+	fx.name = "sessions-filtering"
+	fx.captureKeys = slices.Concat([]tea.KeyPressMsg{keyRune('/')}, keysTyping(sessionsFilteringTerm))
+	fx.landsLastKeyRead = true
+	return fx
+}
+
+// Matches the three relay sessions, one of them mid-name, and nothing else in
+// the flat world.
+const sessionsFilteringTerm = "relay"
+
+func keysTyping(s string) []tea.KeyPressMsg {
+	keys := make([]tea.KeyPressMsg, 0, len(s))
+	for _, r := range s {
+		keys = append(keys, keyRune(r))
+	}
+	return keys
+}
+
+// The modal opens over a labelled row, so the frame shows which of the
+// session's names the confirmation asks about.
+func sessionsKillConfirmFixture() *Fixture {
+	fx := sessionsByProjectLabelledFixture()
+	fx.name = "sessions-kill-confirm"
+	fx.initialCursor = "orchard-pipeline-Hq7wNe"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('k')}
+	return fx
+}
+
+// The prompt the kill key asks for from inside a session: k's own, offering
+// Enter to attach the session again.
+func sessionsKillAskFixture() *Fixture {
+	fx := sessionsByProjectLabelledFixture()
+	fx.name = "sessions-kill-ask"
+	fx.killAsk = "orchard-pipeline-Hq7wNe"
 	return fx
 }
 
@@ -390,11 +468,11 @@ func sessionsMultiSelectActiveFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-multi-select-active"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
-	fx.initialCursor = "fab-flowx-explore"
+	fx.initialCursor = "kiln-relayx-explore"
 	return fx
 }
 
@@ -420,12 +498,12 @@ func sessionsMultiSelectPreflightAbortFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-multi-select-preflight-abort"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
-	fx.initialCursor = "fab-flowx-explore"
-	fx.initialGoneFlagged = []string{"fab-flowx-explore"}
+	fx.initialCursor = "kiln-relayx-explore"
+	fx.initialGoneFlagged = []string{"kiln-relayx-explore"}
 	return fx
 }
 
@@ -433,9 +511,9 @@ func sessionsBurstOpeningFixture() *Fixture {
 	fx := sessionsFlatFixture()
 	fx.name = "sessions-burst-opening"
 	fx.initialMultiSelect = []string{
-		"agentic-workflows-codify",
-		"fab-flowx-explore",
-		"designlab-web-r8suyU",
+		"orchard-pipeline-codify",
+		"kiln-relayx-explore",
+		"atelier-web-m4TzpD",
 	}
 	fx.initialBurstOpening = [2]int{2, 3}
 	return fx
@@ -444,18 +522,18 @@ func sessionsBurstOpeningFixture() *Fixture {
 // The project store is populated deliberately: the zero-tags condition, not a
 // missing store, must drive the signpost.
 func sessionsNoTagsSignpostFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 3, Attached: true, Dir: "/home/user/code/fab"},
-		{Name: "agentic-workflows-codify", Windows: 1, Attached: false, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "flowx-7UKPZH", Windows: 2, Attached: false, Dir: "/home/user/code/flowx"},
-		{Name: "aviva-proxy-qNyfEO", Windows: 4, Attached: false, Dir: "/home/user/code/aviva"},
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore", Attached: true, Dir: "/home/user/code/kiln"},
+		{Name: "orchard-pipeline-codify", Attached: false, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/relayx"},
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
 	}
 
 	projects := []project.Project{
-		{Path: "/home/user/code/fab", Name: "fab"},
-		{Path: "/home/user/code/agentic-workflows", Name: "agentic-workflows"},
-		{Path: "/home/user/code/flowx", Name: "flowx"},
-		{Path: "/home/user/code/aviva", Name: "aviva"},
+		{Path: "/home/user/code/kiln", Name: "kiln"},
+		{Path: "/home/user/code/orchard-pipeline", Name: "orchard-pipeline"},
+		{Path: "/home/user/code/relayx", Name: "relayx"},
+		{Path: "/home/user/code/tessera", Name: "tessera"},
 	}
 
 	return &Fixture{
@@ -466,19 +544,9 @@ func sessionsNoTagsSignpostFixture() *Fixture {
 	}
 }
 
-// fixtureHome is the directory the search-results fixture's home-relative paths
-// are built under. It answers the running process's home so the renderer's
-// home-abbreviation folds them on whatever machine draws the frame, and falls
-// back to the /home/user literal on the same condition that abbreviation gives
-// up on — where it returns the path as given, so the frame carries whole
-// absolute paths rather than a half-folded one.
-func fixtureHome() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "/home/user"
-	}
-	return home
-}
+// fixtureHome is the home directory every fixture's model abbreviates against,
+// handed to it through Deps, so no frame reads the process's $HOME.
+const fixtureHome = "/home/user"
 
 // One frame carrying every branch of the search-opened directory column: a home
 // path shown abbreviated, a row matched on its directory alone, a row whose
@@ -487,30 +555,29 @@ func fixtureHome() string {
 // and a session matching neither field so the narrowing is visible by its
 // absence.
 //
-// legacy-port-shim carries no Dir, against this file's stamped-Dir convention:
-// the dir-resolution seams are nil, so a grouped rebuild resolves nothing and
-// routes it to the catch-all rather than issuing a pane read the harness has no
-// server for.
+// legacy-port-shim carries no Dir, against this file's recorded-Dir convention:
+// the git-root fallback is unwired, so a grouped rebuild resolves nothing and
+// routes it to the catch-all.
 func sessionsSearchResultsFixture() *Fixture {
-	home := fixtureHome()
+	home := fixtureHome
 	portalDir := filepath.Join(home, "code/portal")
 	gatewayDir := filepath.Join(home, "code/portal-gateway")
-	evviDir := filepath.Join(home, "code/evvi")
+	lumenDir := filepath.Join(home, "code/lumen")
 
-	sessions := []tmux.Session{
-		{Name: "portal-a1b2", Windows: 3, Attached: true, Dir: portalDir},
-		{Name: "api-work", Windows: 2, Attached: false, Dir: gatewayDir},
-		{Name: "legacy-port-shim", Windows: 1, Attached: false},
-		{Name: "portal-design-exports-review", Windows: 2, Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames")},
-		{Name: "portal-notes", Windows: 1, Attached: false, Dir: "/opt/portal-tools"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: evviDir},
+	sessions := []tui.Session{
+		{Name: "portal-a1b2", Attached: true, Dir: portalDir},
+		{Name: "api-work", Attached: false, Dir: gatewayDir},
+		{Name: "legacy-port-shim", Attached: false},
+		{Name: "portal-design-exports-review", Attached: false, Dir: filepath.Join(portalDir, "internal/capture/testdata/reference/design-exports/frames/archive/2026-q3")},
+		{Name: "portal-notes", Attached: false, Dir: "/opt/portal-tools"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: lumenDir},
 	}
 
 	projects := []project.Project{
 		{Path: portalDir, Name: "portal", Tags: []string{"work"}},
 		{Path: gatewayDir, Name: "portal-gateway", Tags: []string{"work", "client"}},
 		{Path: "/opt/portal-tools", Name: "portal-tools", Tags: []string{"tools"}},
-		{Path: evviDir, Name: "evvi"},
+		{Path: lumenDir, Name: "lumen"},
 	}
 
 	return &Fixture{
@@ -522,22 +589,51 @@ func sessionsSearchResultsFixture() *Fixture {
 	}
 }
 
+// The same sessions searched by a term only the home abbreviation can match:
+// every row present is there because its directory folded to ~/code under the
+// fixture's pinned home, which the process's $HOME never is in a test.
+func sessionsSearchHomeFixture() *Fixture {
+	fx := sessionsSearchResultsFixture()
+	fx.name = "sessions-search-home"
+	fx.search = &tui.SearchForm{Term: "~/code"}
+	return fx
+}
+
 // One row per attached × pending combination, so the indicators' packing is
 // seen in one frame rather than inferred from rows showing one each.
 func sessionsPendingResumeFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "agentic-workflows-codify", Windows: 2, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
-		{Name: "fabric-lk26UG", Windows: 1, Attached: false, Dir: "/home/user/code/fabric"},
-		{Name: "folio-Jiz4el", Windows: 3, Attached: true, Dir: "/home/user/code/folio"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-codify", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
+		{Name: "loom-p84cXa", Attached: false, Dir: "/home/user/code/loom"},
+		{Name: "quill-Ue9fLr", Attached: true, Dir: "/home/user/code/quill"},
 	}
 
 	return &Fixture{
 		name:            "sessions-pending-resume",
 		Lister:          &fakeLister{sessions: sessions},
-		pendingSessions: []string{"evvi-sync-engine", "folio-Jiz4el"},
+		pendingSessions: []string{"lumen-sync-engine", "quill-Ue9fLr"},
 		projectStore:    &fakeProjectStore{projects: nil},
 		initialMode:     prefs.ModeFlat,
+	}
+}
+
+// Sessions that did not answer, each known by its name alone, beside ones that
+// did — one under the cursor, so both the selected and the canvas dimming show.
+func sessionsNotAnsweringFixture() *Fixture {
+	sessions := []tui.Session{
+		{Name: "kiln-relayx-explore", NotAnswering: true},
+		{Name: "orchard-pipeline-codify", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "lumen-sync-engine", Dir: "/home/user/code/lumen"},
+		{Name: "quill-Ue9fLr", NotAnswering: true},
+		{Name: "loom-p84cXa", Dir: "/home/user/code/loom"},
+	}
+
+	return &Fixture{
+		name:         "sessions-not-answering",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
 	}
 }
 
@@ -602,14 +698,33 @@ func themePanelConstantPreviewingFixture() *Fixture {
 	return fx
 }
 
+// The README's still of the panel: the six built-ins alone, the constant
+// tokyo-night marked and under the cursor, so the theme the panel previews is
+// the frames' own and the still is the truth. Capture with `--theme
+// tokyo-night`.
+func themePanelOpenFixture() *Fixture {
+	fx := sessionsFlatFixture()
+	fx.name = "theme-panel-open"
+	fx.themeKeys = theme.RawKeys{Theme: FramesThemeSlug}
+	fx.themeEnumeration = themePanelDirEnumeration()
+	fx.themeUnion = themePanelUnionFrom(fx.themeEnumeration, fx.themeKeys)
+	fx.themeSlots = []theme.SlotResolution{
+		{Slot: theme.SlotConstant, Requested: FramesThemeSlug, Resolved: FramesThemeSlug},
+	}
+	fx.initialThemeCursor = FramesThemeSlug
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('t')}
+	return fx
+}
+
 // Capture at the panel's minimum width (the message slot may wrap there) with
 // `--theme tokyo-night-day`, the row under the seeded cursor. The fixture
-// declares no render size, so that width comes from the capturing terminal: at
-// a wide one the same frame renders the confirm on a single row.
+// declares no render size, only its frame size, so live that width comes from
+// the capturing terminal: at a wide one it renders the confirm on a single row.
 func themePanelConfirmFixture() *Fixture {
 	fx := themePanelConstantPreviewingFixture()
 	fx.name = "theme-panel-confirm"
 	fx.initialThemeConfirm = true
+	fx.frame.Width = tui.ThemePanelMinWidthTerminal()
 	return fx
 }
 
@@ -690,11 +805,11 @@ func themePanelInvalidRowFixture() *Fixture {
 	return fx
 }
 
-const themePanelBrokenSlug = "nord-lee"
+const themePanelBrokenSlug = "nord-frost"
 
 // The dir-unreadable warning is viewport chrome, not a list row — only
 // observable after paging past where a list row would have scrolled away,
-// hence the Ctrl+↓ and a capture height that forces a second page. Capture
+// hence the Ctrl+↓ and a frame height that forces a second page. Capture
 // with `--theme tokyo-night`, where the paging key lands the cursor.
 func themePanelDirUnreadableFixture() *Fixture {
 	fx := sessionsFlatFixture()
@@ -712,12 +827,16 @@ func themePanelDirUnreadableFixture() *Fixture {
 	// the dark fallback, already on page 2, and the paging key would move nothing.
 	fx.initialThemeCursor = "nord"
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('t'), keyPageDown()}
+	fx.frame.Height = themePanelDirUnreadableFrameHeight
 	return fx
 }
 
+// Short enough that the panel's list spans two pages.
+const themePanelDirUnreadableFrameHeight = 18
+
 // Sorts between the nord* rows and the tokyo-night* ones, putting one badged
 // persisted row on each page of the captured frame.
-const themePanelUnreachableLightSlug = "solarized-lee"
+const themePanelUnreachableLightSlug = "solarized-dusk"
 
 // Identical data to the adaptive pair; it declares the terminal that steps the
 // panel down to its minimum width, which is the whole of what it exercises —
@@ -778,29 +897,29 @@ func themePanelProjectsFixture() *Fixture {
 // Opens on Sessions (the production no-arg default); `x` reaches the Projects
 // page the capture is of.
 func projectsFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/Users/leeovery/Code/agentic-workflows"},
-		{Name: "portal", Windows: 2, Attached: false, Dir: "/Users/leeovery/Code/portal"},
-		{Name: "flowx-7UKPZH", Windows: 1, Attached: false, Dir: "/Users/leeovery/Code/fabric/flowx"},
+	sessions := []tui.Session{
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "portal", Attached: false, Dir: "/home/user/code/portal"},
+		{Name: "relayx-3RJDWA", Attached: false, Dir: "/home/user/code/loom/relayx"},
 	}
 
-	// flow-v1-api's tags render as the edit-project modal's seeded chips.
-	flowPath := "/Users/leeovery/Code/fabric/flowv1/flow-v1-api"
+	// relay-v1-api's tags render as the edit-project modal's seeded chips.
+	relayPath := "/home/user/code/loom/relayv1/relay-v1-api"
 	projects := []project.Project{
-		{Name: "flow-v1-api", Path: flowPath, Tags: []string{"Fabric", "api"}},
-		{Name: "portal", Path: "/Users/leeovery/Code/portal"},
-		{Name: "mint", Path: "/Users/leeovery/Code/mint"},
-		{Name: "agntc", Path: "/Users/leeovery/Code/agntc"},
-		{Name: "agentic-workflows", Path: "/Users/leeovery/Code/agentic-workflows"},
-		{Name: "leeovery", Path: "/Users/leeovery"},
-		{Name: "flowx", Path: "/Users/leeovery/Code/fabric/flowx"},
-		{Name: "designlab-web", Path: "/Users/leeovery/Code/designlab/designlab-web"},
-		{Name: "evvi", Path: "/Users/leeovery/Code/evvi"},
-		{Name: "aviva-proxy", Path: "/Users/leeovery/Code/aviva"},
-		{Name: "fab-aws-migration", Path: "/Users/leeovery/Code/fab"},
-		{Name: "folio", Path: "/Users/leeovery/Code/folio"},
-		{Name: "fabric", Path: "/Users/leeovery/Code/fabric"},
-		{Name: "evvi-sync-engine", Path: "/Users/leeovery/Code/evvi-sync"},
+		{Name: "relay-v1-api", Path: relayPath, Tags: []string{"Loom", "api"}},
+		{Name: "portal", Path: "/home/user/code/portal"},
+		{Name: "sorrel", Path: "/home/user/code/sorrel"},
+		{Name: "bramble", Path: "/home/user/code/bramble"},
+		{Name: "orchard-pipeline", Path: "/home/user/code/orchard-pipeline"},
+		{Name: "user", Path: "/home/user"},
+		{Name: "relayx", Path: "/home/user/code/loom/relayx"},
+		{Name: "atelier-web", Path: "/home/user/code/atelier/atelier-web"},
+		{Name: "lumen", Path: "/home/user/code/lumen"},
+		{Name: "tessera-proxy", Path: "/home/user/code/tessera"},
+		{Name: "kiln-aws-migration", Path: "/home/user/code/kiln"},
+		{Name: "quill", Path: "/home/user/code/quill"},
+		{Name: "loom", Path: "/home/user/code/loom"},
+		{Name: "lumen-sync-engine", Path: "/home/user/code/lumen-sync"},
 	}
 
 	return &Fixture{
@@ -812,8 +931,8 @@ func projectsFixture() *Fixture {
 		// modal's per-project lookup matches.
 		projectEditor: fakeProjectEditor{},
 		aliasEditor: fakeAliasEditor{aliases: map[string]string{
-			"fapi": flowPath,
-			"v1":   flowPath,
+			"rapi": relayPath,
+			"v1":   relayPath,
 		}},
 		initialMode: prefs.ModeFlat,
 		captureKeys: []tea.KeyPressMsg{keyRune('x')},
@@ -828,32 +947,44 @@ func projectsCommandPendingFixture() *Fixture {
 	return fx
 }
 
-// The scrollback stays generic terminal output: no fixture may reference a
+// Projects opens with the cursor on relay-v1-api, whose seeded tags and
+// aliases are the modal's chips.
+func projectsEditFixture() *Fixture {
+	fx := projectsFixture()
+	fx.name = "projects-edit"
+	fx.captureKeys = []tea.KeyPressMsg{keyRune('x'), keyRune('e')}
+	return fx
+}
+
+// The history stays generic terminal output: no fixture may reference a
 // specific tool.
 func previewScreenFixture() *Fixture {
-	sessions := []tmux.Session{
-		{Name: "aviva-proxy-qNyfEO", Windows: 1, Attached: false, Dir: "/home/user/code/aviva"},
-		{Name: "agentic-workflows-code-based", Windows: 3, Attached: true, Dir: "/home/user/code/agentic-workflows"},
-		{Name: "fab-flowx-explore", Windows: 1, Attached: false, Dir: "/home/user/code/fab"},
-		{Name: "evvi-sync-engine", Windows: 1, Attached: false, Dir: "/home/user/code/evvi"},
+	sessions := []tui.Session{
+		{Name: "tessera-proxy-Vb3kQw", Attached: false, Dir: "/home/user/code/tessera"},
+		{Name: "orchard-pipeline-code-based", Attached: true, Dir: "/home/user/code/orchard-pipeline"},
+		{Name: "kiln-relayx-explore", Attached: false, Dir: "/home/user/code/kiln"},
+		{Name: "lumen-sync-engine", Attached: false, Dir: "/home/user/code/lumen"},
 	}
 
-	scrollback := "$ kubectl rollout status deploy/aviva-proxy\n" +
-		"deployment \"aviva-proxy\" successfully rolled out\n" +
+	history := "$ kubectl rollout status deploy/tessera-proxy\n" +
+		"deployment \"tessera-proxy\" successfully rolled out\n" +
 		"$ make build\n" +
-		"go build -o bin/aviva-proxy ./cmd/aviva-proxy\n" +
+		"go build -o bin/tessera-proxy ./cmd/tessera-proxy\n" +
 		"build complete in 4.2s\n" +
-		"$ ./bin/aviva-proxy --check\n" +
+		"$ ./bin/tessera-proxy --check\n" +
 		"config ok · 3 routes · listening on :8080\n"
 
 	return &Fixture{
-		name:             "preview-screen",
-		Lister:           &fakeLister{sessions: sessions},
-		projectStore:     &fakeProjectStore{projects: nil},
-		initialMode:      prefs.ModeFlat,
-		scrollback:       scrollback,
-		enumeratorGroups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}}},
-		captureKeys:      []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		name:         "preview-screen",
+		Lister:       &fakeLister{sessions: sessions},
+		projectStore: &fakeProjectStore{projects: nil},
+		initialMode:  prefs.ModeFlat,
+		history:      history,
+		// The history is tessera's, so the cursor sits on its row.
+		initialCursor: "tessera-proxy-Vb3kQw",
+		captureKeys:   []tea.KeyPressMsg{{Code: tea.KeySpace}},
+		// Without the read landing, the frame is the preview's loading line.
+		landsLastKeyRead: true,
 	}
 }
 
@@ -866,7 +997,16 @@ func previewLongScrollbackFixture() *Fixture {
 	for i := 1; i <= 300; i++ {
 		fmt.Fprintf(&b, "%3d  build step %d complete\n", i, i)
 	}
-	fx.scrollback = b.String()
+	fx.history = b.String()
+	return fx
+}
+
+// Drawn from zmx's own serialisation of a real session, so the frame shows the
+// preview's rendering of what zmx sends, not of what a fixture author typed.
+func previewZmxHistoryFixture() *Fixture {
+	fx := previewScreenFixture()
+	fx.name = "preview-zmx-history"
+	fx.historyFile = zmxHistoryFile()
 	return fx
 }
 
@@ -876,17 +1016,15 @@ func loadingScreenFixture() *Fixture {
 		{Index: 2},
 		{Index: 3},
 		{Index: 4},
-		{Index: 5},
 		// Sets the active "Restoring sessions" 8/12 counter without completing
 		// restore, so the page sits mid-restore.
-		{Index: 6, RestoreN: 8, RestoreM: 12},
+		{Index: 5, RestoreN: 8, RestoreM: 12},
 	}
 	return &Fixture{
 		name:          "loading-screen",
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		serverStarted: true,
 		loadingEvents: events,
 	}
 }
@@ -894,18 +1032,16 @@ func loadingScreenFixture() *Fixture {
 func loadingErrorFixture() *Fixture {
 	events := []tui.BootstrapProgressMsg{
 		{Index: 1},
-		{Index: 2},
 	}
 	return &Fixture{
 		name:          "loading-error",
 		Lister:        &fakeLister{sessions: nil},
 		projectStore:  &fakeProjectStore{projects: nil},
 		initialMode:   prefs.ModeFlat,
-		serverStarted: true,
 		loadingEvents: events,
 		fatalEvent: tui.BootstrapFatalMsg{
-			FailedStep: 3,
-			Message:    "Portal failed to set @portal-restoring marker: permission denied",
+			FailedStep: 2,
+			Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 			Err:        errFixtureFatal,
 		},
 	}

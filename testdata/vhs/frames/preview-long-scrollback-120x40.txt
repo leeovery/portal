@@ -1,0 +1,40 @@
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │  ◉ preview tessera-proxy-Vb3kQw                                                                                  │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  269  build step 269 complete                                                                                    │
+  │  270  build step 270 complete                                                                                    │
+  │  271  build step 271 complete                                                                                    │
+  │  272  build step 272 complete                                                                                    │
+  │  273  build step 273 complete                                                                                    │
+  │  274  build step 274 complete                                                                                    │
+  │  275  build step 275 complete                                                                                    │
+  │  276  build step 276 complete                                                                                    │
+  │  277  build step 277 complete                                                                                    │
+  │  278  build step 278 complete                                                                                    │
+  │  279  build step 279 complete                                                                                    │
+  │  280  build step 280 complete                                                                                    │
+  │  281  build step 281 complete                                                                                    │
+  │  282  build step 282 complete                                                                                    │
+  │  283  build step 283 complete                                                                                    │
+  │  284  build step 284 complete                                                                                    │
+  │  285  build step 285 complete                                                                                    │
+  │  286  build step 286 complete                                                                                    │
+  │  287  build step 287 complete                                                                                    │
+  │  288  build step 288 complete                                                                                    │
+  │  289  build step 289 complete                                                                                    │
+  │  290  build step 290 complete                                                                                    │
+  │  291  build step 291 complete                                                                                    │
+  │  292  build step 292 complete                                                                                    │
+  │  293  build step 293 complete                                                                                    │
+  │  294  build step 294 complete                                                                                    │
+  │  295  build step 295 complete                                                                                    │
+  │  296  build step 296 complete                                                                                    │
+  │  297  build step 297 complete                                                                                    │
+  │  298  build step 298 complete                                                                                    │
+  │  299  build step 299 complete                                                                                    │
+  │  300  build step 300 complete                                                                                    │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  ↑↓ session  ⏎ attach  ␣ back                                                                                    │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+

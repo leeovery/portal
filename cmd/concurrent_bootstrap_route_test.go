@@ -1,182 +1,116 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"reflect"
+	"path/filepath"
 	"testing"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
-
-	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/tmux"
+	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
-func coldCommander() *commandertest.Scripted {
-	return commandertest.Quiet(
-		commandertest.Fails(context.DeadlineExceeded, "info"),
-	)
-}
-
-func TestPersistentPreRunE_ColdTUI_DefersBootstrap(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	client := tmux.NewClient(coldCommander())
-	runner := &recordingRunner{started: true}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-
-	var deferredSeen bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
-		if runner.calls != 0 {
-			t.Errorf("orchestrator ran synchronously (%d calls) on the cold/TUI path; want deferred", runner.calls)
+// A picker quit from its loading page, as on Ctrl+C mid-restore, ends the
+// bootstrap it runs and waits for it, so a restore cut short lowers the
+// restoring flag before Portal exits.
+func TestPickerQuitFromItsLoadingPage_UnwindsTheBootstrap(t *testing.T) {
+	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(t.TempDir(), "projects.json"))
+	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(t.TempDir(), "aliases"))
+	setPrefsFile(t, `{"theme":"nord"}`)
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+	runner := &unwindingRunner{}
+	withFuncSeam(t, &runProgramFunc, func(m tui.Model) (tea.Model, error) {
+		if !m.Bootstrapping() {
+			t.Error("the picker opened past its loading page")
 		}
-		deferredSeen = deferredBootstrapFromContext(cmd) != nil
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !deferredSeen {
-		t.Error("openTUI did not receive a deferred bootstrap on the cold/TUI path")
-	}
-}
-
-func TestPersistentPreRunE_LatchedTUI_TakesAbridgedPath(t *testing.T) {
-	resetBootstrapOnce(t)
-	resetBootstrapWarnings(t)
-
-	client := tmux.NewClient(satisfiedLatchAliveSaverCommander())
-	runner := &recordingRunner{started: false}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-
-	var deferredSeen bool
-	var serverStarted bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, started bool) error {
-		deferredSeen = deferredBootstrapFromContext(cmd) != nil
-		serverStarted = started
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runner.calls != 0 {
-		t.Errorf("abridged path: orchestrator calls = %d, want 0 (never runs the full bootstrap)", runner.calls)
-	}
-	if deferredSeen {
-		t.Error("abridged path stashed a deferred bootstrap; want none (serverStarted=false must survive to the instant-picker gate)")
-	}
-	if serverStarted {
-		t.Error("abridged path threaded serverStarted=true; want false (no loading page)")
-	}
-}
-
-func TestPersistentPreRunE_ColdCLI_RunsSynchronously(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	client := tmux.NewClient(coldCommander())
-	runner := &recordingRunner{started: true}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-
-	withListDeps(t, ListDeps{
-		Lister: &mockSessionLister{sessions: []tmux.Session{}},
-		IsTTY:  func() bool { return false },
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runner.calls != 1 {
-		t.Errorf("cold CLI path: orchestrator calls = %d, want 1 (synchronous, not deferred)", runner.calls)
-	}
-}
-
-func TestPersistentPreRunE_ColdSearchForm_DefersBootstrap(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	client := tmux.NewClient(coldCommander())
-	runner := &recordingRunner{started: true}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
-
-	var deferredSeen bool
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
-		if runner.calls != 0 {
-			t.Errorf("orchestrator ran synchronously (%d calls) for a cold search form; want deferred", runner.calls)
+		if runner.returned.Load() {
+			t.Error("the bootstrap returned before the picker quit")
 		}
-		deferredSeen = deferredBootstrapFromContext(cmd) != nil
-		return nil
+		return m, nil
 	})
+	cmd := contextCommand()
+	cmd.SetContext(context.WithValue(cmd.Context(), deferredBootstrapKey, &deferredBootstrap{runner: runner}))
 
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "/port"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := openTUI(cmd, pickerLanding{}, nil); err != nil {
+		t.Fatalf("openTUI: %v", err)
 	}
-
-	if !deferredSeen {
-		t.Error("openTUI did not receive a deferred bootstrap for a cold search form")
+	if !runner.returned.Load() {
+		t.Error("openTUI returned with the bootstrap still running")
 	}
 }
 
-func TestPersistentPreRunE_LatchedSearchForm_TakesAbridgedPath(t *testing.T) {
+// stageGate stages runner as the bootstrap, owed as the gate answers.
+func stageGate(t *testing.T, runner *recordingRunner, owed bool) {
+	t.Helper()
 	resetBootstrapOnce(t)
-	resetBootstrapWarnings(t)
-	// A down saver is what puts a warning in the sink on the abridged path, so
-	// this is also where the search form's stderr silence is decided.
-	stubSaverAliveCheck(t, false)
-	shrinkSaverRetryDelay(t)
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+	withBootstrapDeps(t, BootstrapDeps{
+		Owed:         func(context.Context) bool { return owed },
+		Orchestrator: runner,
+	})
+}
 
-	client := tmux.NewClient(satisfiedLatchSaverAbsentCommander())
-	runner := &recordingRunner{started: false}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, Client: client})
-	withOpenDeps(t, OpenDeps{SearchSessions: &fakeSearchSource{}})
+// runPickerRoute executes open with args under a gate answering owed, and
+// reports whether openTUI was handed a bootstrap to run behind its loading page.
+func runPickerRoute(t *testing.T, owed bool, args ...string) (deferred bool) {
+	t.Helper()
+	runner := &recordingRunner{}
+	stageGate(t, runner, owed)
 
-	var deferredSeen bool
-	var serverStarted bool
-	var pendingAtOpenTUI []bootstrap.Warning
-	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string, started bool) error {
-		deferredSeen = deferredBootstrapFromContext(cmd) != nil
-		serverStarted = started
-		pendingAtOpenTUI = bootstrapWarnings.Drain()
+	reached := false
+	withFuncSeam(t, &openTUIFunc, func(cmd *cobra.Command, _ pickerLanding, _ []string) error {
+		if runner.calls != 0 {
+			t.Errorf("orchestrator ran synchronously (%d calls) on the picker path; want deferred", runner.calls)
+		}
+		reached, deferred = true, deferredBootstrapFromContext(cmd) != nil
 		return nil
 	})
 
 	resetRootCmd()
-	var stderr bytes.Buffer
-	rootCmd.SetErr(&stderr)
-	rootCmd.SetArgs([]string{"open", "/port"})
+	rootCmd.SetArgs(append([]string{"open"}, args...))
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !reached {
+		t.Fatal("openTUI was not reached")
+	}
+	return deferred
+}
 
-	if runner.calls != 0 {
-		t.Errorf("abridged path: orchestrator calls = %d, want 0 (never runs the full bootstrap)", runner.calls)
+func TestPersistentPreRunE_PickerOwedABootstrap_DefersIt(t *testing.T) {
+	if !runPickerRoute(t, true) {
+		t.Error("openTUI did not receive a deferred bootstrap with one owed")
 	}
-	if deferredSeen {
-		t.Error("abridged path stashed a deferred bootstrap for a search form; want none")
+}
+
+func TestPersistentPreRunE_SearchFormOwedABootstrap_DefersIt(t *testing.T) {
+	if !runPickerRoute(t, true, "/port") {
+		t.Error("openTUI did not receive a deferred bootstrap for a search form with one owed")
 	}
-	if serverStarted {
-		t.Error("abridged path threaded serverStarted=true; want false (no loading page)")
+}
+
+func TestPersistentPreRunE_PickerOwedNone_OpensStraightOntoList(t *testing.T) {
+	if runPickerRoute(t, false) {
+		t.Error("a deferred bootstrap was stashed with none owed; want none, so no loading page")
 	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want empty: the picker claims this terminal with its alt-screen", stderr.String())
-	}
-	if len(pendingAtOpenTUI) != 1 {
-		t.Fatalf("openTUI saw %d pending warnings, want 1 (SaverDownWarning left for the notice band)", len(pendingAtOpenTUI))
-	}
-	if !reflect.DeepEqual(pendingAtOpenTUI[0], bootstrap.SaverDownWarning()) {
-		t.Errorf("pending warning = %#v, want %#v", pendingAtOpenTUI[0], bootstrap.SaverDownWarning())
+}
+
+func TestPersistentPreRunE_CLI_RunsAnOwedBootstrapSynchronously(t *testing.T) {
+	for _, owed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "owed", false: "not owed"}[owed], func(t *testing.T) {
+			runner := &recordingRunner{}
+			stageGate(t, runner, owed)
+
+			resetRootCmd()
+			rootCmd.SetArgs([]string{"list"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if want := map[bool]int{true: 1, false: 0}[owed]; runner.calls != want {
+				t.Errorf("CLI path: orchestrator calls = %d, want %d", runner.calls, want)
+			}
+		})
 	}
 }

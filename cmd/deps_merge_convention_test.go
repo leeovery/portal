@@ -1,19 +1,23 @@
 package cmd
 
 import (
+	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/hooksweep"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // seamCase pins one field of a *Deps struct: what a test injects into it, and
@@ -43,26 +47,67 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 
 		deps := resolveDoctorDeps()
 
-		if deps.ServerRunning == nil {
-			t.Error("ServerRunning = nil; an unset seam must fall through to its production default")
+		if deps.ZmxDir == "" {
+			t.Error("ZmxDir is empty; an unset seam must fall through to its production default")
 		}
-		if deps.SaverPresent == nil {
-			t.Error("SaverPresent = nil; an unset seam must fall through to its production default")
+		if deps.LookPath == nil {
+			t.Error("LookPath = nil; an unset seam must fall through to its production default")
 		}
-		if deps.HookCounts == nil {
-			t.Error("HookCounts = nil; an unset seam must fall through to its production default")
+		if deps.ProtocolVersion == nil {
+			t.Error("ProtocolVersion = nil; an unset seam must fall through to its production default")
 		}
-		if deps.HookLister == nil {
-			t.Error("HookLister = nil; an unset seam must fall through to its production default")
-		}
-		if deps.PendingResumes == nil {
-			t.Error("PendingResumes = nil; an unset seam must fall through to its production default")
+		if deps.ListSessions == nil {
+			t.Error("ListSessions = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Detector == nil {
 			t.Error("Detector = nil; an unset seam must fall through to its production default")
 		}
 		if deps.Resolve == nil {
 			t.Error("Resolve = nil; an unset seam must fall through to its production default")
+		}
+		if deps.Saver == nil {
+			t.Error("Saver = nil; an unset seam must fall through to its production default")
+		}
+		if deps.Version != Version() {
+			t.Errorf("Version = %q; want this binary's %q", deps.Version, Version())
+		}
+		if deps.DaemonSettle != saverhost.ReadyWait {
+			t.Errorf("DaemonSettle = %v; want saverhost.ReadyWait, %v", deps.DaemonSettle, saverhost.ReadyWait)
+		}
+	})
+
+	// The zmx dir check judges ZmxDir, so the sessions must be listed and
+	// probed there too, not in whatever dir the environment names.
+	t.Run("it lists and probes the sessions in the zmx dir it judges", func(t *testing.T) {
+		dir, err := os.MkdirTemp("/tmp", "pd-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		ln, err := net.Listen("unix", filepath.Join(dir, "probe"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				_ = c.Close()
+			}
+		}()
+		withDoctorDeps(t, DoctorDeps{ZmxDir: dir})
+
+		deps := resolveDoctorDeps()
+
+		sessions, err := deps.ListSessions(t.Context())
+		if err != nil || len(sessions) != 1 || sessions[0].Name != "probe" {
+			t.Errorf("ListSessions() = (%+v, %v); want the session in %s", sessions, err, dir)
+		}
+		if _, err := deps.ProtocolVersion(t.Context(), "probe"); !errors.Is(err, backend.ErrTimeout) || errors.Is(err, backend.ErrNoSuchSession) {
+			t.Errorf("ProtocolVersion(probe) = %v; want the session in %s found and not answering", err, dir)
 		}
 	})
 
@@ -95,45 +140,15 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 	})
 }
 
-func TestResolveCommitNowDepsMergeConvention(t *testing.T) {
-	t.Run("it resolves commit-now's seams by the same rule", func(t *testing.T) {
-		for _, tc := range commitNowSeamCases() {
-			t.Run(tc.field, func(t *testing.T) {
-				tc.inject(t)
-				tc.assert(t)
-			})
-		}
-	})
-
-	t.Run("every exported field of CommitNowDeps is covered", func(t *testing.T) {
-		assertSeamCasesCoverFields(t, reflect.TypeFor[CommitNowDeps](), commitNowSeamCases())
-	})
-
-	t.Run("it falls through to the production default for an unset field", func(t *testing.T) {
-		withCommitNowDeps(t, CommitNowDeps{TouchSaveRequested: func(string) error { return nil }})
-
-		deps := resolveCommitNowDeps()
-
-		if deps.RunCommitCycle == nil {
-			t.Error("RunCommitCycle = nil; an unset seam must fall through to its production default")
-		}
-		if deps.NewClient == nil {
-			t.Error("NewClient = nil; an unset seam must fall through to its production default")
-		}
-		if deps.IsRestoring == nil {
-			t.Error("IsRestoring = nil; an unset seam must fall through to its production default")
-		}
-	})
-}
-
 // doctorSeamCases is a func rather than a var so each case's sentinels are minted
 // fresh per run, and so the coverage guard reads the same table the cases do.
 func doctorSeamCases() []seamCase {
+	sentinelNames := backendtest.New()
 	sentinelHookStore := hooks.NewStore("/sentinel/hooks.json")
 	sentinelProjectStore := project.NewStore("/sentinel/projects.json")
 	sentinelPrefsStore := prefs.NewStore("/sentinel/prefs.json")
-	sentinelLister := &stubStaleSweepReader{}
 	sentinelDetector := fakeTerminalDetector{id: spawn.NewIdentity("com.sentinel.term", "Sentinel")}
+	sentinelSaver := &saverAnswers{present: true, pid: 77}
 
 	return []seamCase{
 		{
@@ -155,62 +170,54 @@ func doctorSeamCases() []seamCase {
 			},
 		},
 		{
-			field: "ServerRunning",
+			field: "ListSessions",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{ServerRunning: func() bool { return true }})
+				withDoctorDeps(t, DoctorDeps{ListSessions: backendtest.New(backend.Session{Name: "sentinel"}).List})
 			},
 			assert: func(t *testing.T) {
-				if !resolveDoctorDeps().ServerRunning() {
-					t.Error("ServerRunning() = false; want the injected seam's true")
+				sessions, err := resolveDoctorDeps().ListSessions(t.Context())
+				if err != nil || len(sessions) != 1 || sessions[0].Name != "sentinel" {
+					t.Errorf("ListSessions() = (%+v, %v); want the injected seam's sentinel", sessions, err)
 				}
 			},
 		},
 		{
-			field: "SaverPresent",
-			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{SaverPresent: func() (bool, error) { return true, nil }})
-			},
+			field:  "ZmxDir",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{ZmxDir: "/sentinel/zmx"}) },
 			assert: func(t *testing.T) {
-				present, err := resolveDoctorDeps().SaverPresent()
-				if err != nil || !present {
-					t.Errorf("SaverPresent() = (%v, %v); want the injected seam's (true, nil)", present, err)
+				if got := resolveDoctorDeps().ZmxDir; got != "/sentinel/zmx" {
+					t.Errorf("ZmxDir = %q; want the injected /sentinel/zmx", got)
 				}
 			},
 		},
 		{
-			field: "HookCounts",
+			field: "LookPath",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{HookCounts: func() (map[string]int, error) {
-					return map[string]int{"sentinel": 1}, nil
-				}})
+				withDoctorDeps(t, DoctorDeps{LookPath: func(string) (string, error) { return "/sentinel/zmx", nil }})
 			},
 			assert: func(t *testing.T) {
-				counts, err := resolveDoctorDeps().HookCounts()
-				if err != nil || counts["sentinel"] != 1 {
-					t.Errorf("HookCounts() = (%v, %v); want the injected seam's sentinel count", counts, err)
+				if got, err := resolveDoctorDeps().LookPath("zmx"); err != nil || got != "/sentinel/zmx" {
+					t.Errorf("LookPath() = (%q, %v); want the injected seam's /sentinel/zmx", got, err)
 				}
 			},
 		},
 		{
-			field: "PendingResumes",
+			field: "ProtocolVersion",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{PendingResumes: func() (tmux.PendingResumeView, error) {
-					return tmux.PendingResumeView{Panes: 7}, nil
-				}})
+				withDoctorDeps(t, DoctorDeps{ProtocolVersion: func(context.Context, string) (int, error) { return 7, nil }})
 			},
 			assert: func(t *testing.T) {
-				view, err := resolveDoctorDeps().PendingResumes()
-				if err != nil || view.Panes != 7 {
-					t.Errorf("PendingResumes() = (%+v, %v); want the injected seam's sentinel count", view, err)
+				if got, err := resolveDoctorDeps().ProtocolVersion(t.Context(), "s"); err != nil || got != 7 {
+					t.Errorf("ProtocolVersion() = (%d, %v); want the injected seam's 7", got, err)
 				}
 			},
 		},
 		{
-			field:  "HookLister",
-			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{HookLister: sentinelLister}) },
+			field:  "Names",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Names: sentinelNames}) },
 			assert: func(t *testing.T) {
-				if got := resolveDoctorDeps().HookLister; got != hooksweep.Reader(sentinelLister) {
-					t.Errorf("HookLister = %#v; want the injected lister", got)
+				if got, ok := resolveDoctorDeps().Names.(*backendtest.Fake); !ok || got != sentinelNames {
+					t.Errorf("Names = %v; want the injected backend %p", got, sentinelNames)
 				}
 			},
 		},
@@ -251,6 +258,33 @@ func doctorSeamCases() []seamCase {
 			},
 		},
 		{
+			field:  "Saver",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Saver: sentinelSaver}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().Saver; got != sentinelSaver {
+					t.Errorf("Saver = %v; want the injected %v", got, sentinelSaver)
+				}
+			},
+		},
+		{
+			field:  "Version",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{Version: "9.9.9-sentinel"}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().Version; got != "9.9.9-sentinel" {
+					t.Errorf("Version = %q; want the injected 9.9.9-sentinel", got)
+				}
+			},
+		},
+		{
+			field:  "DaemonSettle",
+			inject: func(t *testing.T) { withDoctorDeps(t, DoctorDeps{DaemonSettle: 7 * time.Millisecond}) },
+			assert: func(t *testing.T) {
+				if got := resolveDoctorDeps().DaemonSettle; got != 7*time.Millisecond {
+					t.Errorf("DaemonSettle = %v; want the injected 7ms", got)
+				}
+			},
+		},
+		{
 			field: "Resolve",
 			inject: func(t *testing.T) {
 				withDoctorDeps(t, DoctorDeps{Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
@@ -260,77 +294,6 @@ func doctorSeamCases() []seamCase {
 			assert: func(t *testing.T) {
 				if _, got := resolveDoctorDeps().Resolve(spawn.Identity{}); got != spawn.ResolutionNative {
 					t.Errorf("Resolve() resolution = %q; want the injected seam's %q", got, spawn.ResolutionNative)
-				}
-			},
-		},
-	}
-}
-
-func commitNowSeamCases() []seamCase {
-	return []seamCase{
-		{
-			field: "RunCommitCycle",
-			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{RunCommitCycle: func(state.CommitCycle) (state.CaptureCycle, error) {
-					return state.CaptureCycle{Index: state.Index{Version: 98}}, nil
-				}})
-			},
-			assert: func(t *testing.T) {
-				capture, _ := resolveCommitNowDeps().RunCommitCycle(state.CommitCycle{})
-				if capture.Index.Version != 98 {
-					t.Errorf("RunCommitCycle() version = %d; want the injected seam's 98", capture.Index.Version)
-				}
-			},
-		},
-		{
-			field: "NewClient",
-			inject: func(t *testing.T) {
-				called := false
-				withCommitNowDeps(t, CommitNowDeps{NewClient: func() state.CaptureCycleClient {
-					called = true
-					return nil
-				}})
-				t.Cleanup(func() {
-					if !called {
-						t.Error("the injected NewClient seam was never called; resolveCommitNowDeps must not overwrite it")
-					}
-				})
-			},
-			assert: func(t *testing.T) {
-				if got := resolveCommitNowDeps().NewClient(); got != nil {
-					t.Errorf("NewClient() = %#v; want the injected seam's nil client", got)
-				}
-			},
-		},
-		{
-			field: "IsRestoring",
-			inject: func(t *testing.T) {
-				withCommitNowDeps(t, CommitNowDeps{IsRestoring: func() (bool, error) { return true, nil }})
-			},
-			assert: func(t *testing.T) {
-				restoring, err := resolveCommitNowDeps().IsRestoring()
-				if err != nil || !restoring {
-					t.Errorf("IsRestoring() = (%v, %v); want the injected seam's (true, nil)", restoring, err)
-				}
-			},
-		},
-		{
-			field: "TouchSaveRequested",
-			inject: func(t *testing.T) {
-				touched := ""
-				withCommitNowDeps(t, CommitNowDeps{TouchSaveRequested: func(dir string) error {
-					touched = dir
-					return nil
-				}})
-				t.Cleanup(func() {
-					if touched != "/sentinel/state" {
-						t.Errorf("the injected TouchSaveRequested seam saw %q; want /sentinel/state", touched)
-					}
-				})
-			},
-			assert: func(t *testing.T) {
-				if err := resolveCommitNowDeps().TouchSaveRequested("/sentinel/state"); err != nil {
-					t.Errorf("TouchSaveRequested() err = %v; want the injected seam's nil", err)
 				}
 			},
 		},

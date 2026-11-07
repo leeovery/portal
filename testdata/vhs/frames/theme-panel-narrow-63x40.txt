@@ -1,0 +1,40 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                     │
+  Sessions 12                        │ Themes
+                                     │
+  ▌ atelier-web-m4TzpD               │   catppuccin-latte
+    kiln-aws-migration               │   gitlab-dark-grey
+    kiln-relayx-explore              │   horizon
+    loom-p84cXa                      │ ▌ nord          ● dark
+    lumen webhooks and watchers      │   nord-wave
+    lumen-sync-engine                │   tokyo-night
+    orchard-pipeline-code-based      │   tokyo-night… ● light
+    orchard-pipeline-codify          │
+    quill-Ue9fLr                     │
+    relay-v1-api-Hq7wNe              │
+    relayx-3RJDWA                    │
+    tessera-proxy-Vb3kQw             │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │
+                                     │ ⏎   set theme
+                                     │ d   set as dark
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light
+  ⏎ attach · / filter · ␣ preview · s│ esc close
+

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/warning"
 )
@@ -19,9 +19,8 @@ func coldCommandPendingModel(t *testing.T, terminal tea.Msg) tui.Model {
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           &mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}},
+		Lister:           fakePickerLister(backend.Session{Name: "portal-a1b2"}),
 		Command:          []string{"npm", "run", "dev"},
-		ServerStarted:    true,
 		ProgressReceiver: receiver,
 	})
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

@@ -7,13 +7,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func openKillModal(m *Model, name string) {
 	m.modal = modalKillConfirm
-	m.pendingKillName = name
-	m.pendingKillWindows = 1
+	m.pendingKill.Name = name
 }
 
 func TestModalBlankScreen_ClearsListRowsBehindModal(t *testing.T) {
@@ -93,9 +91,9 @@ func TestModalBlankScreen_ColourlessClearsToNativeBg(t *testing.T) {
 	m := New(fakeLister{}, WithColourless(true))
 	m.termWidth = w
 	m.termHeight = h
-	m.applySessions([]tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
+	m.applySessions([]Session{
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
 	}, nil)
 	openKillModal(&m, "alpha")
 

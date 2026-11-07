@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -41,10 +40,10 @@ func enterMultiSelectEmpty(t *testing.T, m Model) Model {
 	return m
 }
 
-func twoFlatSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+func twoFlatSessions() []Session {
+	return []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	}
 }
 
@@ -80,7 +79,7 @@ func TestMultiSelectSuppressesRowActions(t *testing.T) {
 
 	t.Run("r opens no rename modal in mode", func(t *testing.T) {
 		m := NewModelWithSessions(twoFlatSessions())
-		m.sessionRenamer = keymapParityRenamer{}
+		m.sessionLabeller = keymapParityLabeller{}
 		m = enterMultiSelect(t, m)
 
 		m = pressSession(t, m, keyR)
@@ -159,8 +158,7 @@ func TestOutOfModeNewInCWDUnchanged(t *testing.T) {
 func TestMultiSelectKeepsCoexistingKeysLive(t *testing.T) {
 	t.Run("Space opens the preview in mode", func(t *testing.T) {
 		m := NewModelWithSessions(twoFlatSessions())
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m.history = newPreviewHistory(keymapParityHistory{})
 		m = enterMultiSelect(t, m)
 
 		m = pressSession(t, m, keySpace)
@@ -342,7 +340,7 @@ func TestMultiSelectEnterRoutesToBurstArm(t *testing.T) {
 
 func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 	t.Run("k opens the kill confirm modal", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionKiller = keymapParityKiller{}
 
 		m = pressSession(t, m, keyK)
@@ -350,13 +348,13 @@ func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 		if m.modal != modalKillConfirm {
 			t.Errorf("out of mode, k must open the kill confirm modal; modal = %v", m.modal)
 		}
-		if m.pendingKillName != "alpha" {
-			t.Errorf("kill target = %q, want alpha", m.pendingKillName)
+		if m.pendingKill.Name != "alpha" {
+			t.Errorf("kill target = %q, want alpha", m.pendingKill.Name)
 		}
 	})
 
 	t.Run("x switches to the Projects page", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 
 		m = pressSession(t, m, keyX)
 
@@ -366,16 +364,16 @@ func TestOutOfModeRowActionsUnchanged(t *testing.T) {
 	})
 
 	t.Run("r opens the rename modal", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
-		m.sessionRenamer = keymapParityRenamer{}
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
+		m.sessionLabeller = keymapParityLabeller{}
 
 		m = pressSession(t, m, keyR)
 
 		if m.modal != modalRename {
 			t.Errorf("out of mode, r must open the rename modal; modal = %v", m.modal)
 		}
-		if m.renameTarget != "alpha" {
-			t.Errorf("rename target = %q, want alpha", m.renameTarget)
+		if m.renameTarget.Name != "alpha" {
+			t.Errorf("rename target = %q, want alpha", m.renameTarget.Name)
 		}
 	})
 }

@@ -94,7 +94,20 @@ type prefsFile struct {
 	ThemeMigrated migrationMarker `json:"theme_migrated,omitempty"`
 	// Must stay declared for the same re-encode reason as Appearance.
 	ResumeMode resumeModeValue `json:"resume_mode,omitempty"`
+	// Kept raw, never decoded here, so a value the attach runner can't parse
+	// survives every other write: its entries, their order and every value as
+	// written. Only its whitespace is re-indented.
+	Keys json.RawMessage `json:"keys,omitempty"`
 }
+
+// A strict read of a prefs.json that does not decode wraps one of these
+// beside the decoder's own error.
+var (
+	// ErrInvalidJSON is a prefs.json that is not JSON at all.
+	ErrInvalidJSON = errors.New("not valid JSON")
+	// ErrNotObject is a prefs.json that is JSON, but not an object.
+	ErrNotObject = errors.New("not a JSON object")
+)
 
 // ThemeKeys carries the raw theme slugs from prefs.json verbatim — validation,
 // defaulting and the theme-wins tiebreak belong to the resolver.
@@ -172,12 +185,15 @@ func (s *Store) readFileStrict() (prefsFile, bool, error) {
 	var f prefsFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && typeErr.Field != "" {
+		if !errors.As(err, &typeErr) {
+			// Named, not bare: this aborts a commit, and the raw decode error
+			// tells the user nothing about which file to open.
+			return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrInvalidJSON, err)
+		}
+		if typeErr.Field != "" {
 			return f, true, nil
 		}
-		// Named, not bare: this aborts a commit, and the raw decode error tells
-		// the user nothing about which file to open.
-		return prefsFile{}, false, fmt.Errorf("prefs: %s is not valid JSON: %w", s.path, err)
+		return prefsFile{}, false, fmt.Errorf("prefs: %s is %w: %w", s.path, ErrNotObject, err)
 	}
 
 	return f, true, nil
@@ -219,6 +235,19 @@ func (s *Store) LoadResumeMode() (resumemode.Mode, error) {
 		return mode, nil
 	}
 	return resumemode.Default, nil
+}
+
+// LoadKeys reads the attach runner's keys object verbatim; nil when prefs.json
+// sets none. Unlike the other loads it reads strictly, so its caller can say
+// why the keys keep their defaults: a prefs.json that does not decode is an
+// error wrapping ErrInvalidJSON or ErrNotObject. It writes nothing, so it is
+// safe on doctor's read-only path.
+func (s *Store) LoadKeys() (json.RawMessage, error) {
+	f, _, err := s.readFileStrict()
+	if err != nil {
+		return nil, err
+	}
+	return f.Keys, nil
 }
 
 // LoadThemeKeys reads the raw theme slugs verbatim, under the same tolerant
@@ -345,14 +374,20 @@ func (s *Store) SaveTranslation(slug string) (persisted bool, err error) {
 }
 
 // Substitutable so the write can be intercepted without a filesystem;
-// production never reassigns it.
-var atomicWrite = fileutil.AtomicWrite
+// production never reassigns it. prefs logs nothing, so a directory sync that
+// fails after the rename goes unreported, the write landed all the same.
+var atomicWrite = func(path string, data []byte) error { return fileutil.AtomicWrite(path, data) }
 
+// HTML escaping stays off so a raw value keeps its bytes: it would rewrite a
+// "<" or "&" inside one as a \u escape.
 func (s *Store) write(f prefsFile) error {
-	data, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(f); err != nil {
 		return fmt.Errorf("failed to marshal prefs: %w", err)
 	}
 
-	return atomicWrite(s.path, data)
+	return atomicWrite(s.path, buf.Bytes())
 }

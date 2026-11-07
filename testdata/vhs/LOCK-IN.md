@@ -174,4 +174,4 @@ the result against task 2-1.
 - **Ctrl+↑/↓ chord finding:** **deliverable** — `Ctrl+↑`→`^[[1;5A`, `Ctrl+↓`→`^[[1;5B`,
   both distinct/bindable (verified at the gate, see above). Task 2-1 binds them
   directly; no fallback needed. Re-confirm tmux-passthrough at 2-1.
-- **Eyeballed by / date:** Lee Overy / 2026-06-19.
+- **Eyeballed by / date:** the maintainer / 2026-06-19.

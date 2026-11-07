@@ -14,6 +14,7 @@ import (
 const (
 	wantMsgResolved   = "detection resolved host terminal"
 	wantMsgNullBundle = "detection resolved no host-local terminal"
+	wantMsgUnsure     = "detection could not tell the host terminal"
 	wantMsgTransient  = "detection transient failure"
 )
 
@@ -28,17 +29,22 @@ func assertNoWarn(t *testing.T, sink *logtest.Sink) {
 	}
 }
 
+// outsideDetector detects outside any session, with env as the environment.
+func outsideDetector(t *testing.T, env map[string]string, logger *slog.Logger) *Detector {
+	return &Detector{
+		sessions: fakeSessions{},
+		getenv:   mapGetenv(env),
+		selfPID:  100,
+		walker:   failWalker{t},
+		reader:   failReader{t},
+		logger:   logger,
+	}
+}
+
 func TestDetectorDetect(t *testing.T) {
 	t.Run("it emits a resolved INFO with terminal and bundle_id and returns the identity", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
-		d := &Detector{
-			insideTmux: func() bool { return false },
-			getenv:     mapGetenv(map[string]string{"__CFBundleIdentifier": "com.apple.Terminal"}),
-			selfPID:    100,
-			walker:     failWalker{t},
-			reader:     failReader{t},
-			logger:     logger,
-		}
+		d := outsideDetector(t, map[string]string{"__CFBundleIdentifier": "com.apple.Terminal"}, logger)
 
 		got := d.Detect()
 
@@ -58,38 +64,28 @@ func TestDetectorDetect(t *testing.T) {
 		if v := rec.AttrString(t, "bundle_id"); v != "com.apple.Terminal" {
 			t.Errorf("bundle_id attr = %q, want %q", v, "com.apple.Terminal")
 		}
-		if !rec.HasAttr("detail") || rec.AttrString(t, "detail") == "" {
-			t.Errorf("resolved record missing a non-empty opaque detail attr: %+v", rec.Attrs)
+		if v := rec.AttrString(t, "detail"); v != "outside-session env/self walk" {
+			t.Errorf("detail = %q, want the outside-session route", v)
 		}
 		assertNoWarn(t, sink)
 	})
 
-	t.Run("it emits a NULL-bundle INFO with no WARN for a clean remote-only detection", func(t *testing.T) {
+	t.Run("it emits a NULL-bundle INFO with no WARN for a remote leader", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
-		walker, reader := localWalkSeams()
-		d := &Detector{
-			insideTmux:     func() bool { return true },
-			currentSession: func() (string, error) { return "dev", nil },
-			lister: &fakeClientLister{clients: []ClientActivity{
-				{PID: 601, Activity: 100},
-				{PID: 602, Activity: 200},
-			}},
-			walker: walker,
-			reader: reader,
-			logger: logger,
-		}
+		d, _, _ := insideDetector(leaderWith(), local(601))
+		d.logger = logger
 
 		got := d.Detect()
 
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL for a remote-only client set", got)
+		if !got.IsNull() || got.Unsure {
+			t.Fatalf("identity = %+v, want a plain NULL for a remote leader", got)
 		}
 		rec := sink.Records().Only(t, "log record")
-		if rec.Level != slog.LevelInfo {
-			t.Errorf("record level = %v, want INFO", rec.Level)
+		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgNullBundle {
+			t.Errorf("record = %v %q, want INFO %q", rec.Level, rec.Msg, wantMsgNullBundle)
 		}
-		if rec.Msg != wantMsgNullBundle {
-			t.Errorf("record message = %q, want %q", rec.Msg, wantMsgNullBundle)
+		if v := rec.AttrString(t, "detail"); v != "inside-session raw client walk" {
+			t.Errorf("detail = %q, want the raw client route", v)
 		}
 		if rec.HasAttr("terminal") || rec.HasAttr("bundle_id") {
 			t.Errorf("NULL-bundle record must carry neither terminal nor bundle_id: %+v", rec.Attrs)
@@ -97,123 +93,80 @@ func TestDetectorDetect(t *testing.T) {
 		assertNoWarn(t, sink)
 	})
 
-	t.Run("it folds a transient detection error to NULL and emits a spawn WARN", func(t *testing.T) {
+	t.Run("it folds an uncertain leader to NULL with an INFO saying why", func(t *testing.T) {
 		logger, sink := logtest.NewCaptureLogger(t)
-		listFailure := errors.New("list-clients: server not found")
-		d := &Detector{
-			insideTmux:     func() bool { return true },
-			currentSession: func() (string, error) { return "dev", nil },
-			lister:         &fakeClientLister{err: listFailure},
-			walker:         &fakeWalker{procs: map[int]fakeProc{}},
-			reader:         &fakeReader{bundles: map[string]fakeBundle{}},
-			logger:         logger,
-		}
+		d, _, _ := insideDetector(leaderWith(), local(501), local(502))
+		d.logger = logger
 
 		got := d.Detect()
 
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL folded from the transient error", got)
+		if !got.IsNull() || !got.Unsure {
+			t.Fatalf("identity = %+v, want an unsure NULL for two raw clients", got)
 		}
 		rec := sink.Records().Only(t, "log record")
-		if rec.Level != slog.LevelWarn {
-			t.Errorf("record level = %v, want WARN", rec.Level)
+		if rec.Level != slog.LevelInfo || rec.Msg != wantMsgUnsure {
+			t.Errorf("record = %v %q, want INFO %q", rec.Level, rec.Msg, wantMsgUnsure)
 		}
-		if rec.Msg != wantMsgTransient {
-			t.Errorf("record message = %q, want %q", rec.Msg, wantMsgTransient)
+		want := `inside-session raw client walk: no one terminal leads the session: 2 of 2 zmx attach processes on session "dev" can be its leader, want 1`
+		if v := rec.AttrString(t, "detail"); v != want {
+			t.Errorf("detail = %q, want %q", v, want)
 		}
-		detail := rec.AttrString(t, "detail")
-		if !strings.Contains(detail, listFailure.Error()) {
-			t.Errorf("WARN detail = %q, want it to carry the underlying error %q", detail, listFailure.Error())
+		assertNoWarn(t, sink)
+	})
+
+	t.Run("it folds a transient detection error to NULL and emits a spawn WARN", func(t *testing.T) {
+		logger, sink := logtest.NewCaptureLogger(t)
+		failure := errors.New("no answer in 1s")
+		d, _, _ := insideDetector(nil)
+		d.sessions = fakeSessions{current: "dev", err: failure}
+		d.logger = logger
+
+		got := d.Detect()
+
+		if !got.IsNull() || !got.Unsure {
+			t.Fatalf("identity = %+v, want an unsure NULL folded from the transient error", got)
+		}
+		rec := sink.Records().Only(t, "log record")
+		if rec.Level != slog.LevelWarn || rec.Msg != wantMsgTransient {
+			t.Errorf("record = %v %q, want WARN %q", rec.Level, rec.Msg, wantMsgTransient)
+		}
+		if detail := rec.AttrString(t, "detail"); !strings.Contains(detail, failure.Error()) {
+			t.Errorf("WARN detail = %q, want it to carry the underlying error %q", detail, failure.Error())
 		}
 		if rec.HasAttr("terminal") || rec.HasAttr("bundle_id") {
 			t.Errorf("transient WARN must carry neither terminal nor bundle_id: %+v", rec.Attrs)
 		}
 	})
 
-	t.Run("it folds a current-session read error to NULL and emits a spawn WARN", func(t *testing.T) {
-		logger, sink := logtest.NewCaptureLogger(t)
-		sessionFailure := errors.New("display-message: no current session")
-		d := &Detector{
-			insideTmux:     func() bool { return true },
-			currentSession: func() (string, error) { return "", sessionFailure },
-			lister:         &fakeClientLister{},
-			walker:         failWalker{t},
-			reader:         failReader{t},
-			logger:         logger,
-		}
-
-		got := d.Detect()
-
-		if !got.IsNull() {
-			t.Fatalf("identity = %+v, want NULL folded from the current-session read error", got)
-		}
-		rec := sink.Records().Only(t, "log record")
-		if rec.Level != slog.LevelWarn {
-			t.Errorf("record level = %v, want WARN", rec.Level)
-		}
-		if rec.Msg != wantMsgTransient {
-			t.Errorf("record message = %q, want %q", rec.Msg, wantMsgTransient)
-		}
-		if detail := rec.AttrString(t, "detail"); !strings.Contains(detail, sessionFailure.Error()) {
-			t.Errorf("WARN detail = %q, want it to carry the underlying error %q", detail, sessionFailure.Error())
-		}
-	})
-
-	t.Run("it emits only the terminal, bundle_id and detail attr keys in phase 1", func(t *testing.T) {
-		walker, reader := localWalkSeams()
-		scenarios := []struct {
-			name     string
-			detector func(logger *slog.Logger) *Detector
-		}{
-			{
-				name: "resolved",
-				detector: func(logger *slog.Logger) *Detector {
-					return &Detector{
-						insideTmux: func() bool { return false },
-						getenv:     mapGetenv(map[string]string{"__CFBundleIdentifier": "com.apple.Terminal"}),
-						selfPID:    100,
-						walker:     failWalker{t},
-						reader:     failReader{t},
-						logger:     logger,
-					}
-				},
+	t.Run("it emits only the terminal, bundle_id and detail attr keys", func(t *testing.T) {
+		for name, detector := range map[string]func(*slog.Logger) *Detector{
+			"resolved": func(logger *slog.Logger) *Detector {
+				return outsideDetector(t, map[string]string{"__CFBundleIdentifier": "com.apple.Terminal"}, logger)
 			},
-			{
-				name: "clean NULL",
-				detector: func(logger *slog.Logger) *Detector {
-					return &Detector{
-						insideTmux:     func() bool { return true },
-						currentSession: func() (string, error) { return "dev", nil },
-						lister:         &fakeClientLister{clients: []ClientActivity{{PID: 601, Activity: 100}}},
-						walker:         walker,
-						reader:         reader,
-						logger:         logger,
-					}
-				},
+			"clean NULL": func(logger *slog.Logger) *Detector {
+				d, _, _ := insideDetector(leaderWith(), local(601))
+				d.logger = logger
+				return d
 			},
-			{
-				name: "transient",
-				detector: func(logger *slog.Logger) *Detector {
-					return &Detector{
-						insideTmux:     func() bool { return true },
-						currentSession: func() (string, error) { return "dev", nil },
-						lister:         &fakeClientLister{err: errors.New("boom")},
-						walker:         &fakeWalker{procs: map[int]fakeProc{}},
-						reader:         &fakeReader{bundles: map[string]fakeBundle{}},
-						logger:         logger,
-					}
-				},
+			"uncertain": func(logger *slog.Logger) *Detector {
+				d, _, _ := insideDetector(nil)
+				d.logger = logger
+				return d
 			},
-		}
-
-		for _, sc := range scenarios {
-			t.Run(sc.name, func(t *testing.T) {
+			"transient": func(logger *slog.Logger) *Detector {
+				d, _, _ := insideDetector(nil)
+				d.sessions = fakeSessions{current: "dev", err: errors.New("boom")}
+				d.logger = logger
+				return d
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
 				logger, sink := logtest.NewCaptureLogger(t)
-				sc.detector(logger).Detect()
+				detector(logger).Detect()
 				for _, rec := range sink.Records() {
 					for _, forbidden := range phase1ForbiddenAttrKeys {
 						if rec.HasAttr(forbidden) {
-							t.Errorf("record %q carries forbidden Phase-1 attr key %q: %+v", rec.Msg, forbidden, rec.Attrs)
+							t.Errorf("record %q carries forbidden attr key %q: %+v", rec.Msg, forbidden, rec.Attrs)
 						}
 					}
 				}
@@ -221,50 +174,26 @@ func TestDetectorDetect(t *testing.T) {
 		}
 	})
 
-	t.Run("it branches to inside-tmux detection when TMUX is set", func(t *testing.T) {
+	t.Run("outside a session it reads the environment and asks no leader", func(t *testing.T) {
 		logger, _ := logtest.NewCaptureLogger(t)
-		sessionAsked := false
-		lister := &fakeClientLister{clients: []ClientActivity{{PID: 501, Activity: 100}}}
-		walker, reader := localWalkSeams()
-		d := &Detector{
-			insideTmux: func() bool { return true },
-			getenv: func(string) string {
-				t.Fatalf("getenv called: inside-tmux detection must not use the env fast-path")
-				return ""
-			},
-			currentSession: func() (string, error) { sessionAsked = true; return "dev", nil },
-			lister:         lister,
-			walker:         walker,
-			reader:         reader,
-			logger:         logger,
-		}
+		d := outsideDetector(t, map[string]string{"GHOSTTY_RESOURCES_DIR": "/x"}, logger)
+		d.runners = &fakeRunners{err: errors.New("asked a runner outside a session")}
 
-		got := d.Detect()
-
-		if got.BundleID != "com.mitchellh.ghostty" {
-			t.Errorf("BundleID = %q, want the inside-tmux walk's %q", got.BundleID, "com.mitchellh.ghostty")
-		}
-		if !sessionAsked {
-			t.Error("currentSession was not consulted; inside-tmux branch did not run")
-		}
-		if len(lister.calls) != 1 || lister.calls[0] != "dev" {
-			t.Errorf("lister calls = %v, want exactly [dev]", lister.calls)
+		if got := d.Detect(); got.BundleID != "com.mitchellh.ghostty" {
+			t.Errorf("BundleID = %q, want the environment's Ghostty", got.BundleID)
 		}
 	})
 }
 
 func TestNewDetectorWiresProductionSeams(t *testing.T) {
-	// A typed-nil client is valid here: construction invokes no method on it.
-	d := NewDetector(nil)
+	sessions, runners, clients := &fakeSessions{current: "dev"}, &fakeRunners{}, &fakeClients{}
+	d := NewDetector(sessions, runners, clients)
 
-	if d == nil {
-		t.Fatal("NewDetector returned nil")
+	if d.sessions != sessions || d.runners != runners || d.clients != clients {
+		t.Error("NewDetector did not keep the seams it was given")
 	}
-	if d.insideTmux == nil || d.getenv == nil || d.currentSession == nil {
-		t.Error("NewDetector left a function seam unwired")
-	}
-	if d.walker == nil || d.reader == nil || d.lister == nil {
-		t.Error("NewDetector left a walk/list seam unwired")
+	if d.getenv == nil || d.selfPID == 0 || d.walker == nil || d.reader == nil {
+		t.Error("NewDetector left a production seam unwired")
 	}
 	if d.logger == nil {
 		t.Error("NewDetector left the logger unwired")

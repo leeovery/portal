@@ -101,10 +101,11 @@ func seqIDGen() func() (string, error) {
 	}
 }
 
-const (
-	testBurstPath = "/opt/homebrew/bin:/usr/bin"
-	testBurstExe  = "/abs/portal"
-)
+const testBurstExe = "/abs/portal"
+
+func fixedEnv(env WindowEnvironment) WindowEnv {
+	return func() (WindowEnvironment, error) { return env, nil }
+}
 
 func TestBurster_Run(t *testing.T) {
 	t.Run("it resolves the executable once and composes an ack-flagged open argv per surface in list order", func(t *testing.T) {
@@ -115,7 +116,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: exe,
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -145,7 +146,7 @@ func TestBurster_Run(t *testing.T) {
 			if results[i].Ack != AckConfirmed {
 				t.Errorf("results[%d].Ack = %q, want %q", i, results[i].Ack, AckConfirmed)
 			}
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
+			want := composeOpenArgv(testBurstExe, testWindowEnv, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
@@ -158,7 +159,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -176,7 +177,7 @@ func TestBurster_Run(t *testing.T) {
 			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
 		}
 		for i, surface := range surfaces {
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
+			want := composeOpenArgv(testBurstExe, testWindowEnv, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] (%s) argv = %#v, want %#v", i, surface.Kind, adapter.calls[i], want)
 			}
@@ -203,7 +204,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 75 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -222,7 +223,7 @@ func TestBurster_Run(t *testing.T) {
 			t.Fatalf("OpenWindow called %d times, want %d", len(adapter.calls), len(surfaces))
 		}
 		for i, surface := range surfaces {
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, command)
+			want := composeOpenArgv(testBurstExe, testWindowEnv, surface, batch, results[i].Token, command)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] (%s) argv = %#v, want %#v", i, surface.Kind, adapter.calls[i], want)
 			}
@@ -247,7 +248,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack, confirm: []bool{false, true}}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 750 * time.Millisecond, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -274,7 +275,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 750 * time.Millisecond, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -302,7 +303,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -329,7 +330,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack, results: []Result{SpawnFailed("osascript: -1743")}}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -359,7 +360,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack, results: []Result{Success(""), SpawnFailed("osascript: -1743"), Success("")}}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -389,7 +390,7 @@ func TestBurster_Run(t *testing.T) {
 		adapter := &writingAdapter{ack: ack, results: []Result{Success(""), PermissionRequired("evt -1743", "grant Automation for Ghostty")}}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -409,7 +410,7 @@ func TestBurster_Run(t *testing.T) {
 			t.Errorf("window 2 Outcome = %v, want OutcomePermissionRequired", results[1].Result.Outcome)
 		}
 		for i, surface := range AttachSurfaces([]string{"w1", "w2"}) {
-			want := composeOpenArgv(testBurstExe, testBurstPath, surface, batch, results[i].Token, nil)
+			want := composeOpenArgv(testBurstExe, testWindowEnv, surface, batch, results[i].Token, nil)
 			if !slices.Equal(adapter.calls[i], want) {
 				t.Errorf("OpenWindow[%d] argv = %#v, want %#v", i, adapter.calls[i], want)
 			}
@@ -423,7 +424,7 @@ func TestBurster_Run(t *testing.T) {
 		b := &Burster{
 			Adapter: adapter, Ack: newDelayingAck(clock.now, 0),
 			Exe:     func() (string, error) { return "", sentinel },
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -444,6 +445,31 @@ func TestBurster_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("it aborts before opening any window when the window environment cannot be resolved", func(t *testing.T) {
+		clock := &manualClock{}
+		sentinel := errors.New("state dir: $HOME is not defined")
+		adapter := &writingAdapter{}
+		b := &Burster{
+			Adapter: adapter, Ack: newDelayingAck(clock.now, 0),
+			Exe:     fixedExe(testBurstExe),
+			Env:     func() (WindowEnvironment, error) { return WindowEnvironment{}, sentinel },
+			NewID:   seqIDGen(),
+			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
+			Now: clock.now, Sleep: clock.sleep,
+		}
+
+		batch, results, err := b.Run(context.Background(), AttachSurfaces([]string{"s1", "s2"}), nil, nil)
+		if batch != "" || results != nil {
+			t.Errorf("Run = (%q, %#v), want no batch and no results when the window environment fails", batch, results)
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("errors.Is(err, sentinel) = false, want true; err = %v", err)
+		}
+		if len(adapter.calls) != 0 {
+			t.Errorf("OpenWindow called %d times, want 0", len(adapter.calls))
+		}
+	})
+
 	t.Run("it aborts before opening any window when an ack id cannot be generated", func(t *testing.T) {
 		clock := &manualClock{}
 		sentinel := errors.New("crypto/rand: read failed")
@@ -451,7 +477,7 @@ func TestBurster_Run(t *testing.T) {
 		b := &Burster{
 			Adapter: adapter, Ack: newDelayingAck(clock.now, 0),
 			Exe:     fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   func() (string, error) { return "", sentinel },
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -480,7 +506,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -505,7 +531,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 		adapter := &writingAdapter{ack: ack}
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -527,7 +553,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		b := &Burster{
 			Adapter: adapter, Ack: ack, Exe: fixedExe(testBurstExe),
-			Getenv:  mapGetenv(map[string]string{"PATH": testBurstPath}),
+			Env:     fixedEnv(testWindowEnv),
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second, Poll: 100 * time.Millisecond,
 			Now: clock.now, Sleep: clock.sleep,
@@ -553,7 +579,7 @@ func TestBurster_Run_Progress(t *testing.T) {
 func TestNewBurster_Defaults(t *testing.T) {
 	adapter := &writingAdapter{}
 	ack := newDelayingAck(time.Now, 0)
-	b := NewBurster(adapter, ack, fixedExe(testBurstExe), mapGetenv(map[string]string{"PATH": testBurstPath}))
+	b := NewBurster(adapter, ack, fixedExe(testBurstExe), fixedEnv(testWindowEnv))
 
 	if b.Timeout != spawnAckTimeout {
 		t.Errorf("default Timeout = %v, want spawnAckTimeout %v", b.Timeout, spawnAckTimeout)

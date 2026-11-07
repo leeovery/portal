@@ -84,7 +84,20 @@ func AssertSidecarFree(t *testing.T, hooksPath string) {
 	_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
 }
 
-func openSidecar(t *testing.T, hooksPath string) *os.File {
+// AssertSidecarHeld proves the operation under test holds the sidecar
+// exclusively: a shared non-blocking acquire from a fresh open file
+// description fails only while another fd holds it exclusively.
+func AssertSidecarHeld(t harnesstest.TestingT, hooksPath string) {
+	t.Helper()
+	f := openSidecar(t, hooksPath)
+	defer func() { _ = f.Close() }()
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH|unix.LOCK_NB); err == nil {
+		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		t.Errorf("hookstest.AssertSidecarHeld: the sidecar is not held exclusively")
+	}
+}
+
+func openSidecar(t harnesstest.TestingT, hooksPath string) *os.File {
 	t.Helper()
 	f, err := os.OpenFile(SidecarPath(hooksPath), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {

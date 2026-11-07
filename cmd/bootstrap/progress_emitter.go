@@ -7,16 +7,19 @@ import "context"
 
 // StepEvent is the per-step progress signal on the concurrent cold-boot route.
 // Index is 1-based. RestoreN and RestoreM are zero except on the restore step's
-// per-session events, which set RestoreM > 0 and RestoreN in 1..M.
+// per-session events, which set RestoreM > 0 and RestoreN in 1..M. Waiting
+// marks the one event, before any step, sent once a wait for bootstrap.lock
+// has lasted past Locked's notice.
 type StepEvent struct {
 	Index    int
 	Name     string
 	RestoreN int
 	RestoreM int
+	Waiting  bool
 }
 
-// ProgressEmitter is invoked once per completed bootstrap step. It must not
-// block the orchestrator.
+// ProgressEmitter is invoked once per completed bootstrap step, and once on a
+// long wait for another bootstrap. It must not block the orchestrator.
 type ProgressEmitter func(StepEvent)
 
 type progressEmitterKey struct{}

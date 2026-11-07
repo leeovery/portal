@@ -12,7 +12,7 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 - Calendar-daily log rotation with a configurable size-cap safety valve, replacing the 1 MiB churn-prone scheme.
 - Bounded, auditable retention (default 30 days) with per-deletion breadcrumbs.
 - A locked log-level contract (DEBUG/INFO/WARN/ERROR), production default INFO.
-- A closed subsystem-prefix taxonomy (18 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
+- A closed subsystem-prefix taxonomy (21 components), a closed attr-key vocabulary, and mandatory per-record baseline attrs.
 - Defensive invariants (per-process lifecycle markers, rotated-file immutability, `O_CREAT|O_EXCL` first-of-day open) that make log destruction detectable post-hoc.
 - Instrumentation catalogs: state-mutation audit trail, cycle-level summaries, saver/daemon lifecycle events, hydrate-helper forensic trail, and a boundary-context-preservation sweep.
 
@@ -114,8 +114,8 @@ Call sites then use `logger.{Debug,Info,Warn,Error}` directly with `slog.Attr` a
 
 **The rule is bind-once *per package, per component* — not one package per component**, and the taxonomy is deliberately not partitioned by package:
 
-- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`; `bootstrap`, `hooks`, `clean` and `spawn` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
-- **A package may bind several components.** `cmd` holds package-level bindings for `daemon`, `hydrate`, `notify`, `hooks`, `bootstrap`, `restore`, `preview`, `signal`, `capture`, `spawn`, `resolve` and `theme`.
+- **A component may be bound by several packages.** `signal` is bound in `cmd`, `cmd/bootstrap` and `internal/state`, `attach` in `cmd`, `internal/runner` and `internal/runnerreg`, `sessions` in `cmd`, `internal/sessionindex` and `internal/state`, and `bootstrap` in `cmd`, `internal/tmux` and `internal/state`; `hooks`, `clean` and `spawn` each span two. The component names a *subsystem*, and a subsystem's code need not live in one package for `grep "<component>:"` to reconstruct it.
+- **A package may bind several components.** `cmd` holds package-level bindings for `daemon`, `hydrate`, `notify`, `bootstrap`, `signal`, `capture`, `spawn`, `resolve`, `theme`, `attach` and `sessions`, and binds `process` and the config stores' components (`hooks`, `projects`, `aliases`, for a file's one-shot move) at their call sites.
 - **A package handed an already-bound logger through a seam binds nothing.** `internal/theme` emits the whole `theme` component through an injected logger and never calls `log.For` at all; the single `log.For("theme")` binding lives in `cmd` (see *The `theme` component event catalog*). `internal/spawn`'s shared emission helpers take an injected logger the same way — `cmd` passes its own binding in for the CLI burst and injects that same binding into `internal/tui` for the picker burst, so the TUI binds nothing either — alongside that package's own binding, which covers its detection path and its `terminals.json` load.
 
 What the rule forbids is a *second* binding of the same component inside one package — invisible at review, because every call site still looks correct in isolation.
@@ -151,42 +151,45 @@ Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem au
 
 Call-site binding is the factory pattern defined in *The `internal/log` package* — a consumer binds each component it emits under once at init via `var logger = log.For("<component>")`, or is handed an already-bound logger through a seam and binds nothing.
 
-### Closed component value space (18 total)
+### Closed component value space (21 total)
 
 ```
 bootstrap  daemon  restore  hydrate  notify  hooks  preview
 saver  capture  signal  log-rotate  clean  aliases  projects
-process  spawn  resolve  theme
+process  spawn  resolve  theme  attach  sessions  migrate
 ```
 
-This list is the **single source of truth** for the component count.
+This list is the **single source of truth** for the component count. Mid-move to zmx, production code binds 18 of them: `notify` went with `portal state notify`, `signal` with the FIFOs, and nothing has bound `preview` since the preview began reading zmx's history.
 
 | Component | Owns |
 |---|---|
 | `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
-| `bootstrap` | The ten-step bootstrap orchestrator |
-| `restore` | Two-phase restore engine (skeleton + geometry + scrollback) |
-| `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
+| `bootstrap` | The six-step bootstrap orchestrator, its gate and `bootstrap.lock`: a DEBUG `bootstrap owed` (`reason`: `latch`, `zmx dir` with `error` when the zmx-dir record is missing, names another zmx dir or can't be read, `no saver`, `saver unknown` with `error`) when a command owes one; an INFO `restoring flag lowered` (`detail`) when the latch's removal finds `restoring` left raised by a restore cut short; an INFO `saver ended` (`detail` the verdict on it, and its end) when a saver found that Portal can't use is ended, the bootstrap going on as if none ran; an INFO `step skipped` (`step`, `detail`) for each step that finishes the restore (Restore, WriteLatch) when an earlier step left it unfinished, and for WriteLatch alone when the saver's old daemon couldn't be replaced, so no latch is written; an INFO `bootstrap skipped` (`detail`, `took`) when one that waited out another finds nothing owed; an ERROR `bootstrap.lock unavailable` (`error`, `took`) when the lock can't be had within its bound, by a bootstrap or by `open` bringing back a kept session. Bound again in `internal/state` for the `bootstrapped` latch: a WARN `latch unsynced` (`error`, `error_class` `write-failed-fsync`) when the directory sync after the latch's rename fails, the latch landed all the same; and for the `zmx-dir` record, an INFO `zmx dir recorded` (`path` the zmx dir recorded) when a bootstrap records the zmx dir a state dir with no record belongs to |
+| `restore` | On zmx, `internal/restore`, under the logger its caller binds: once a bootstrap, the restore of every saved session the backend doesn't hold. One INFO `restore complete` (`restored`, `failed`, `anomalous`, `took`). Per session: a DEBUG `session skipped` (`session`, `reason` ∈ {`it is live`, `another spelling of its name is live`, `it is one of Portal's own`, `it ended this boot`}, and for a retry finding its entry changed since restore read it, `its entry is gone` or `its entry records another creation`), a DEBUG `session restored` (`session`, `path` the directory it started in), and a WARN per anomaly, each counted in `anomalous`: `restore session failed` (`session`, `error`, and `detail` `may be tried again within this bootstrap` for a failure a retry may clear), `record session creation failed` (`session`, `error`), `clear hydrating flag failed` (`session`, `error`) and `scrollback file refused` (`session`, `path`, `error`). A DEBUG `restore retry failed` (`session`, `error`) per retry within the bootstrap that fails again. Once a run: a WARN `sessions.json unreadable` (`error`) or `list sessions failed` (`error`), either restoring nothing; after the first pass, which lists the sessions again to find any whose helper died before its claim (each a WARN `restore session failed` whose `error` says so, with `detail` as for a failure a retry may clear), and once the retries end, which list them again to count restored any running restore's helper, the same WARNs with `detail` saying which count the failure leaves unchecked, the count standing, and a WARN `restore cancelled` (`detail` how many sessions it left, `error` the cause) whenever its context ends with sessions left unrestored: between sessions, during a wait between retries, or during a round of them. On demand, `open` bringing back one kept session (`BringBack`, under `bootstrap.lock`, one try with no retry) logs the same lines for that one entry: the DEBUG `session skipped` when, judged again under the lock, it is live (`it is live`), its entry gone (`its entry is gone`), or kept no longer (`another spelling of its name is live`, `it is one of Portal's own`, `it ended this boot`, or `its name is one the backend can never create`); the WARN `restore session failed` (`session`, `error`) when its try fails; the WARN `sessions.json unreadable` or `list sessions failed` (`error`), either making nothing; and one INFO `restore complete` (`session`, `restored`, `failed`, `anomalous`, `took`) whatever it found. Bound again in `cmd` (`open.go`): the same WARN `sessions.json unreadable` or `list sessions failed` (`session`, `error`) when resolution can't judge whether the saved session of the name it resolves is kept, which it then reads as not kept |
+| `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain. On zmx, an INFO `scrollback kept for the next restore` (`session`, `path`) when a transcript it couldn't replay, wholly or part way, is kept, its hydrating flag left raised |
 | `notify` | Notification helpers |
-| `hooks` | `hooks.json` mutations (`portal hooks set/rm`, `hookStore.CleanStale`) |
+| `hooks` | `hooks.json` mutations (`portal hooks set/rm`, `hookStore.CleanStale`, and `portal migrate`'s rewrite of `hooks.json` from the backup it keeps, `RekeyFrom`: one DEBUG `rekey-move` (`hook_key` the key moved, `value` the key it moved to) and one DEBUG `rekey-rm` (`hook_key`, `value` the commands it held) per key, one INFO `rekey` (`op`, `entries` the keys moved or removed, `via`, `took`), a WARN `rekey` (`op`, `via`, `error`, `error_class` for a failed write, `took`) for a rewrite refused or failed, which writes nothing, and a DEBUG `rekey-noop` (`op`, `via`, `detail`) when there is no backup), and the hook-staleness cycle in `internal/hooksweep`: a DEBUG `clean-stale-skipped` (`op`, `via`, `reason`) for a cycle that stands down, at WARN for `reason` `tmux-keys` (`entries` the stale keys in the tmux version's shape it would otherwise reap), which no cycle clears by itself and which lasts until migration moves the tmux version's state to `state-tmux/`, and at WARN for `reason` `mass-reap` (`entries` the stale keys it holds: three or more, at least half of `hooks.json`) |
 | `preview` | TUI scrollback preview page |
 | `saver` | `_portal-saver` session lifecycle |
-| `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`) |
+| `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`). On zmx, the saver's scrollback capture in `internal/saver`: a DEBUG `capture skipped` (`session`, `error`) when a session's history is unavailable, times out, finds the session gone or shows it on the alternate screen (that history, holding none of the main screen, never replaces a saved transcript; the session is asked again a minute on, like any other), or is too large to read after the saver has warned of it; a WARN `capture too large` (`session`, `error`, the error naming the history's size) the first time in a saver's run that a session's history is too large to read, the saved transcript kept as it is; and a WARN `capture failed` (`session`, `error`) for any other failure, both asked again a minute on; a WARN `write failed` (`session`, `path`, `error`, `error_class`) when the history can't be written, which leaves it unnamed; a WARN `unsynced` (`session`, `path`, `error`, `error_class` `write-failed-fsync`) when the directory sync after the write's rename fails, the file landed all the same; and, from the removal of the scrollback files no entry names and of the temp files a write cut short left there an hour or more ago, a DEBUG `removed` (`path`) per file, one DEBUG `cleaned` (`reaped`) when it removed any, the poll's summary carrying the count at INFO, a WARN `remove failed` (`path`, `error`) per file it couldn't remove and a WARN `clean failed` (`path`, `error`) when the directory can't be read |
 | `signal` | FIFO signaling **mechanism** — `EagerSignalHydrate`, the per-session hook-driven `portal state signal-hydrate` command (`runSignalHydrate`'s marker-enumeration / per-session / per-FIFO-write diagnostics), and the lower-level FIFO signal send/receive plumbing in `internal/state`. `signal-hydrate`'s `process_role` stays `hydrate` (the argv-resolved binary) — orthogonal to this subsystem `component` (cycle-3 decision: the FIFO-signaling subsystem is homed under `signal` regardless of which binary writes it, so `grep "signal:"` reconstructs the whole mechanism). (The hydrate helper's own exit-path outcome lines — incl. `signal timeout` — render under `hydrate` per the Hook-firing catalog, which governs the helper's exec-chain.) |
 | `log-rotate` | Rotation and retention events |
-| `clean` | The sweep paths — bootstrap's orphan-daemon and stale-marker sweeps and `internal/state`'s orphan-FIFO sweep. Named for the `portal clean` command it was introduced for; that command is retired, and its user-invoked repairs live on `portal doctor --fix` |
+| `clean` | The sweep paths — bootstrap's orphan-daemon and stale-flag sweeps (the flag sweep: a DEBUG `stale flag lowered` (`session`, `detail` naming the flag and why) per flag) and `internal/state`'s orphan-FIFO sweep. Named for the `portal clean` command it was introduced for; that command is retired, and its user-invoked repairs live on `portal doctor --fix` |
 | `aliases` | `aliases` store mutations |
 | `projects` | `projects.json` store mutations |
+| `sessions` | The session index, `sessions.json` version 2, in `internal/sessionindex`: one record per change a committed `Update` makes, its `op` the message (`set-label`, `clear-label`, `claim`, `adopt`, `replace`, `rm`, `restored`, `set-scrollback`, `record-cwd`, `set-owed`, `clear-owed`, `migrated`, `create`; `session` (none for a `create`, the first write of an index where there was no file, which `portal migrate` makes even when no session migrates), `value` the label, directory, scrollback file or working directory set, or the directory of an entry `portal migrate` made, or the creation time an `adopt` or `restored` recorded, `detail` what a `replace` dropped, for an `adopt` or `restored` why the entry was taken over (`restore made it` for a `restored`), then the pid and the creation it took the place of, for a `set-owed` made by `Restored` or by a claim adopting the entry while its session is flagged `hydrating` `its restore is unfinished until its helper's claim` (none for the bootstrap's owed marks), or for a `clear-owed` why the entry is owed a restore no longer, `its session is live` or `its helper finished its restore` (a `clear-owed` also ends a migrated entry's `resume_lazy`), or for a `migrated` that the entry is owed a restore, records no creation and resumes lazily until it is restored, and the label and scrollback file it carries over, `via`), at INFO but for `record-cwd`, which the saver makes on most polls, at DEBUG; each a WARN carrying `error` and `error_class` instead when the write fails, and a DEBUG `update-noop` (`op`, `via`) for an `Update` that changed nothing; and a WARN `unsynced` (`op`, `error`, `error_class` `write-failed-fsync`, `via`) when the directory sync after the write's rename fails, the write landed all the same and its changes logged as written. Bound again in `internal/state`, where `Forget` removes, under the commit lock the `Update` held, what Portal keeps beside each entry a committed `Update` removed or replaced (its `hydrating` and `resume-pending` flags, the scrollback file the entry names and its hook, the hook only while it holds the command read, every hook of a batch removed under one hold of the hooks lock, each removal the `hooks` component's `discard` with the caller's `via`): one INFO `forget` (`op`, `session`, `detail` naming what went, `via`) when it removed anything, and a WARN `forget` (`op`, `session`, `detail` naming what it kept, `path` for a file, `error`, `via`) per removal that failed or file it refused, the rest going all the same; and, from `ClaimRule`, a WARN `claim-rule` (`op`, `detail`, `error`), once a process, when the boot time can't be read, so every claim adopts. Bound again in `cmd`: the same WARN `forget` per session when `hooks.json` can't be found, so its hook is kept; and (`open_mint.go`) a WARN `unrecorded` (`op`, `session`, `via`, `error`) when a session minted through the backend can't be claimed in the index for want of the lock or a readable index, or the claim refuses it (a name Create refuses, or no creation read back), the session made all the same. Bound again in `internal/saver`, the saver's poll: an INFO `session dropped` (`session`, `detail` how long it was missing, `via`) per entry a landed write dropped, `session` first so `session dropped session=<name>` greps; a WARN `drops-held` (`op`, `sessions` the count, `detail`, `via`) when a mass vanish holds every entry missing that a drop may remove, those still waiting to be dropped among them; and a DEBUG `claim-skipped` (`op`, `session`, `detail`, `error` when the session didn't answer, `via`) when a session the listing showed reports no creation, doesn't confirm under the lock, within the poll's shared time for confirmations, that it still answers as listed, or is one the claim rule refuses |
+| `migrate` | `portal migrate`'s run, in `internal/migrate`, under the `bootstrap` process role. On the tmux side: an INFO `no tmux server` (`detail`) when no tmux server answers, so there are no hooks to unset and no saver to kill; an INFO `tmux hooks removed` (`unset` the hooks unset) and an INFO `tmux saver killed`, the latter only when there was one; an INFO `tmux daemon exited` (`target_pid`, `took`) once the daemon the tmux version's `daemon.pid` names has exited, none when it names none. Then an INFO `hooks backed up` (`path` the backup) when it writes `hooks.json`'s backup, none when one exists or there is no `hooks.json`; an INFO `state built` (`path` the staging dir, `sessions`); and one INFO per run it doesn't refuse: `migrated` (`sessions`, `path` `state-tmux/`, `took`), `migration finished` (`path` `state-tmux/`, `took`) for a run cut short between its renames finished, `already migrated` (`path` `state-tmux/`, `took`), or `nothing to migrate` (`path` the state dir, `took`). A WARN `unsynced` (`path` the dir renamed into, `error`, `error_class` `write-failed-fsync`) when the parent's sync after a rename fails, the rename landed all the same; the first rename's is logged only after the second, since a log line makes the state dir again. An ERROR `stopped` (`error`, worded for the user) whenever a run stops, or fails to start (the state dir, `hooks.json` or zmx unresolved): a refusal, having migrated nothing (another run holding the lock, a state it won't touch, a `hooks.json` that doesn't parse, a version 1 index it can't read or zmx's sessions not listed, each before the tmux side is touched, or the tmux side or the daemon's wait failing), or a failure, such as a write's, which a re-run picks up from. The `sessions` and `hooks` components record what it writes |
 | `process` | Portal-binary lifecycle markers (`start` / `exit` / `exec` / `panic` / `log-level resolved`) only, regardless of subcommand |
-| `spawn` | The multi-window spawn service — host-terminal detection, adapter resolution, per-window ack outcomes, and the burst's batch summary. Bound in `internal/spawn` and again in `cmd`; both burst surfaces (the picker's multi-select burst and `portal open`'s multi-target burst) emit through `internal/spawn`'s single-sourced renderers, so the two paths cannot drift |
-| `resolve` | `portal open`'s resolution decision — one INFO per bare positional resolved through the guessing chain (glob and domain-pinned targets are deterministic and emit nothing). Bound and emitted **only** in `cmd/open.go`; `internal/resolver` stays a pure, log-free library |
+| `spawn` | The multi-window spawn service — host-terminal detection, adapter resolution, per-window ack outcomes, and the burst's batch summary. Bound in `internal/spawn` and again in `cmd`; both burst surfaces (the picker's multi-select burst and `portal open`'s multi-target burst) emit through `internal/spawn`'s single-sourced renderers, so the two paths cannot drift. Detection emits exactly one line: INFO `detection resolved host terminal` (`terminal`, `bundle_id`, `detail` the route), INFO `detection resolved no host-local terminal` (`detail` the route), INFO `detection could not tell the host terminal` (`detail` the route, then why it can't tell which terminal leads the session), or WARN `detection transient failure` (`detail` the error). The ack channel, `state/spawn-acks/`: a WARN `spawn ack write failed` (`batch`, `error`) when a spawned window can't write its receipt, which then attaches all the same while its burst counts it failed; a WARN `spawn ack clean failed` (`batch`, `error`) when a burst can't clean its acks, which go once stale; and a DEBUG `stale spawn ack removed` (`path`) per ack an hour old a burst's clean removes. `error` and `path` are cross-listed from the Contextual group |
+| `resolve` | `portal open`'s resolution decision — one INFO per bare positional resolved through the guessing chain (glob and domain-pinned targets are deterministic and emit nothing), and one more when a kept session, judged again under `bootstrap.lock`, is kept no longer and the positional resolves again. Bound and emitted **only** in `cmd/open.go`; `internal/resolver` stays a pure, log-free library |
 | `theme` | Theme load / enumeration / persistence **outcomes**, emitted from three sites across two packages: the loader in `internal/theme` (which binds nothing — it emits through an injected logger seam), `cmd/config.go`'s one-shot `appearance` → theme translation, and the `cmd`-owned theme persister behind the panel's commit. Full catalog, levels and cadences: *The `theme` component event catalog* |
+| `attach` | The attach runner in `internal/runner`, and its key config in `cmd`: `zmx attach` run in a pseudo-terminal Portal owns. Once per attach that starts: a DEBUG `started` (`session`, `target_pid`), a DEBUG `ended` (`session`, `took`), then one INFO `outcome` on every end, error ends included (`session`; `reason` ∈ {`detach`, `detach_to_shell`, `kill`, `switch`, `exit`, `signal`, `context`, `panic`, `goexit`}, the action names being `attachkeys.Action`'s, `switch` an end a registry switch request asked for (a request for the picker ends as `detach`), and `goexit` an end where Run's goroutine left through `runtime.Goexit`; a panic outranks a signal, which outranks how the attach otherwise ended; `code` when Run returns an outcome, absent when it returns an error; `detail` naming the signal on a `signal` end; `target` the session a `switch` end attaches next; `error` for the kill key refused while the runner is unsure, or the error the attach ended with; the runner never kills, so a `kill` end with no `error` is the kill key asking, the picker following on the session's kill prompt). As they happen: a DEBUG `terminal input ended` (`session`) when the terminal's input ends, which then ends the attach as SIGHUP; a WARN `child did not exit` per signal the bounded wait sends (`session`, `detail` names it); a WARN `resize failed` (`session`, `error`); a WARN `panic` per panic recovered from a copy loop or from Run's own goroutine, which Run raises again once the attach is torn down (`session`, `error` the panic's value, `detail` its stack); and a DEBUG `terminal reset` (`session`, `reason` ∈ {`exit`, `drain`}) when Portal writes the reset zmx could not: the child did not exit by its own hand, or its last output did not all reach the terminal; a DEBUG `switch seen` (`session`) once the child's output shows a switch, zmx switching the child or a zmx inside the session switching its own client, after which the runner is unsure; and a DEBUG `kill unconfirmed` (`session`, `error` why) when the kill key, pressed while unsure, finds no confirmation that the terminal still shows the session, the attach then ending as `kill` with its refusal as `error`, the picker following on that refusal with no kill prompt. Bound again in `cmd`, where each attach reads its keys: a WARN `key config` per warning `attachkeys.Parse` returns for `prefs.json`'s `keys` (`session`, `detail` the warning as doctor words it), or one when `prefs.json` cannot be read and every action keeps its default (`session`, `error`); a WARN `register failed` (`error`) when the state directory won't resolve, so the attach runs unlisted; and a WARN `leader unknown` (`session`, `error`) when the backend can't say which client leads the session a switch was typed in, which then switches as when no runner leads. Bound again in `internal/runnerreg`, the runner registry. A caller logs one INFO per request it sends a runner, with its result: `switch` (`session` the session the command was typed in, `target` the session to switch to, `target_pid` the runner the leader's token names, absent when it names none, `result` ∈ {`accepted`, `refused`, `failed`, `no runner`}, `no runner` too for a runner whose entry names another session, which is not asked, `error` on a refusal or failure) `detach to picker` (`session`, `target_pid`, `result`, `error`; one with `result` `no runner` when the session has no runner) and `confirm session` (`session` the session spawn detection runs in, `target_pid` the runner the leader's token names, absent when it names none, `result`, `error`), the last asking whether a runner's attach shows the session, sure of it or, having seen a switch, confirmed through the session's leader as it is asked. As it asks, reads a session's runners, or sweeps the registry as a runner registers: a DEBUG `stale runner` per entry removed with its socket because its pid isn't running, or per orphan socket removed because it refused a connection (`path` the entry or the socket, `target_pid` for an entry, `reason` ∈ {`dead`, `orphan socket`}, `error` the orphan's refusal), and a DEBUG `runner entry left` per entry that stays though a request to it failed, or that can't be read (`path`, `target_pid` when known, `reason` ∈ {`unreadable`, `refused`, `another pid`, `connection refused`, `missing`, `timeout`, `no answer`}, `error`). A runner logs a DEBUG `request` per request it serves (`session` its own, `detail` the request's name, absent for one it can't read, `target` a switch's session, `result` ∈ {`accepted`, `refused`}, `error` the refusal); a DEBUG `listed` (`session`, `path` the entry) as it registers or moves to a session, and `unlisted` as it unregisters; a WARN `register failed` (`session`, `error`) when an attach can't be listed or moved there, and goes on unlisted; a WARN `unregister failed` (`error`) when its entry can't be removed; and a WARN `serve failed` (`session`, `error`) when its socket fails to take a connection, once for each run of failures, which it retries with a backoff. Every key is cross-listed from its own group, so the attr-key total is unchanged |
 
 `process` is reserved for portal-binary lifecycle/diagnostic markers only; subsystem-level lifecycle events have their own components. `tmux` is **deliberately excluded** — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Tmux-call detail rides as DEBUG breadcrumbs under the caller's component.
 
 `prefs` and `terminals` are **deliberately excluded** too, on a different argument from `tmux`'s: they are dumb stores — a tolerant decode and a write — with no runtime behaviour and therefore no outcomes worth a trail. (`prefs.json` likewise stays outside the *State-mutation audit trail*'s closed file set.) What earns `theme` a component where those two are refused is that the theme loader **has** outcomes: a nomination that would not parse, a themes directory that could not be read, a shipped palette standing in for the one the user asked for.
 
-### Closed attr-key value space (64 keys)
+### Closed attr-key value space (69 keys)
 
 **Contextual** (set per call as relevant) — 14:
 
@@ -194,43 +197,43 @@ This list is the **single source of truth** for the component count.
 |---|---|
 | `pane_key` | Structural pane key (canonical persisted form, e.g. `session__window.pane`) |
 | `tmux_pane` | `$TMUX_PANE` env var (live tmux pane id, e.g. `%42`) |
-| `session` | tmux session name |
+| `session` | session name: a tmux session's, or a zmx session's as the `sessions` component records it |
 | `project` | project name from `projects.json` |
 | `path` | filesystem path |
 | `took` | duration (`time.Duration` rendered) |
 | `error` | error message (slog idiom: `slog.Any("error", err)`) |
 | `error_class` | swallowed-error classification: `expected` / `unexpected`; or AtomicWrite failure phase |
 | `hook_key` | hooks subsystem — the structural hook key |
-| `op` | state-mutation breadcrumbs — `set` / `modify` / `rm` / `clean-stale` / `migrate` / `set-noop` |
+| `op` | state-mutation breadcrumbs — `set` / `modify` / `rm` / `clean-stale` / `migrate` / `set-noop` / `rekey` / `rekey-move` / `rekey-rm` / `rekey-noop` |
 | `alias` | aliases-store key |
-| `value` | state-mutation — verbatim new value for `set` / `modify` |
-| `via` | state-mutation origin — `cli` / `internal` / `migrate` |
+| `value` | state-mutation — verbatim new value for `set` / `modify`, or for a `sessions` change the label, directory, scrollback file or working directory it set, or the creation time an `adopt` or `restored` recorded; a `discard` carries the command it removed, a `rekey-move` the key it moved the hooks to, and a `rekey-rm` the commands it removed |
+| `via` | state-mutation origin — `cli` / `tui` / `internal` / `migrate` |
 | `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
-**Cycle-summary** (set per summary line as relevant) — 14: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`. (`step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count.)
+**Cycle-summary** (set per summary line as relevant) — 19: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`, `claimed`, `dropped`, `captured`, `restored`, `failed`. (`restored` = sessions a restore made again; `failed` = sessions it couldn't, whose entries it keeps for the next bootstrap; `step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count; `claimed` = sessions a saver poll added to or changed in the index; `dropped` = entries it dropped; `captured` = scrollback files a poll or the daemon's final flush wrote and named; a poll's `reaped` = scrollback files it removed.)
 
 **Lifecycle** (set per saver/daemon lifecycle event) — 7: `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`.
 
 **Hydrate** (set per hook-firing exec-chain event) — 3: `result`, `hook_present`, `bytes`.
 
-**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 64-key total counts it once).
+**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. `args` (on `process: start` and on every exec marker, the failed exec's WARN included) is the argv after the program rendered by `shellquote.Readable`: a word a shell reads back unchanged stays bare and any other is single-quoted, so an argument holding a space, such as a session name, reads as the one argument it is. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 69-key total counts it once).
 
 **Spawn** (set per `spawn:` event — host-terminal detection, `terminals.json` load, per-window outcome, batch summary) — 8:
 
 | Key | What |
 |---|---|
-| `batch` | The burst's option-name-safe nanoid — the `@portal-spawn-<batch>-<token>` ack channel's namespace |
+| `batch` | The burst's nanoid — the namespace of its acks, `state/spawn-acks/<batch>-<token>` |
 | `terminal` | Detected host-terminal name |
 | `bundle_id` | Detected host terminal's macOS bundle id (absent on a NULL / remote identity) |
 | `resolution` | Which route resolved the adapter — `config` (a `terminals.json` recipe) / `native` / `unsupported` |
 | `ack` | One window's token-ack outcome — `confirmed` / `timeout` / `failed` |
 | `opened` | Batch summary — sessions actually surfaced, the trigger's self-attach counted only on full success |
 | `total` | Batch summary — N, the whole target set including the trigger's own surface |
-| `detail` | The opaque lower-layer string: the driver's OS-specific text (osascript output, AppleEvent code), the detection route, or a rejected `terminals.json` entry's reason. Carried verbatim and **never parsed** by the logging layer |
+| `detail` | The opaque lower-layer string: the driver's OS-specific text (osascript output, AppleEvent code), the detection route (`inside-session runner walk`, `inside-session raw client walk`, `outside-session env/self walk`, or `inside-session` before a leader is known) with why when detection refuses, or a rejected `terminals.json` entry's reason. The `sessions` component carries it too, for what a change dropped, displaced or kept (see its row), and so does the `hooks` component's `rekey-noop`, for the backup it found none of. Carried verbatim and **never parsed** by the logging layer |
 
-The per-window records also carry `session` — **defined in the Contextual group and cross-listed here** (not a separate key; the 64-key total counts it once).
+The per-window records also carry `session` — **defined in the Contextual group and cross-listed here** (not a separate key; the 69-key total counts it once).
 
-**Resolve** (set on the single `resolve: resolved` decision line) — 2: `domain` (which arm of the grammar answered — `session` / `path` / `alias` / `zoxide`, or `miss`), `resolved_path` (the resolved directory, the session name on a session hit, empty on a miss). The same line carries `target`, the raw input — **defined in the Process group and cross-listed here** (counts once).
+**Resolve** (set on the single `resolve: resolved` decision line) — 2: `domain` (which arm of the grammar answered — `session` / `kept` (a saved session that isn't live, which the next restore would bring back) / `path` / `alias` / `zoxide`, or `miss`), `resolved_path` (the resolved directory, the session name on a session or kept hit, empty on a miss). The same line carries `target`, the raw input — **defined in the Process group and cross-listed here** (counts once).
 
 **Theme** (set per `theme:` event) — 5:
 
@@ -242,7 +245,7 @@ The per-window records also carry `session` — **defined in the Contextual grou
 | `count` | `theme: enumerated` — rows the panel's union produced, built-ins included |
 | `rejected` | `theme: enumerated` — the unselectable subset of those rows |
 
-Theme events also carry `reason` (Lifecycle group) and `path` (Contextual group) — **cross-listed, not separate keys; the 64-key total counts each once**. `path` is the identity attr for a rejection with no usable slug and for `theme: directory unusable`.
+Theme events also carry `reason` (Lifecycle group) and `path` (Contextual group) — **cross-listed, not separate keys; the 69-key total counts each once**. `path` is the identity attr for a rejection with no usable slug and for `theme: directory unusable`.
 
 **Baseline** (auto-injected per-record by the configured handler) — 4: `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -611,7 +614,7 @@ func main() {
 
 ```go
 // At the AttachConnector call site, immediately before syscall.Exec:
-log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv, " "))
+log.For("process").Info("exec", "target", "tmux", "args", shellquote.Readable(argv))
 syscall.Exec(tmuxPath, argv, env)
 ```
 
@@ -640,7 +643,7 @@ The `process`-component lifecycle set — `start`, `exit`, `exec`, `panic`, and 
 ### Notes
 
 - **`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
-- **Privacy on `args` attr: verbatim.** CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
+- **Privacy on `args` attr: in full.** CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the whole argv in `portal.log`, quoted only where a shell would need it. Acceptable for portal's single-user threat model.
 
 ---
 
@@ -709,7 +712,7 @@ Every mutation of a portal-owned user-config file leaves a breadcrumb in `portal
 - `aliases` (component `aliases`)
 - `projects.json` (component `projects`)
 
-`sessions.json` is **out of scope** — it's daemon-managed high-frequency state (mutated every tick), covered by cycle summaries (one INFO per tick under `daemon` / `capture`, not per-write).
+`sessions.json` is **out of scope** — it's daemon-managed high-frequency state (mutated by the saver's polls), covered by cycle summaries (one INFO per poll that claimed, dropped, captured or removed, under `capture`, not per-write).
 
 ### Seam — the per-file store's mutation methods
 
@@ -732,8 +735,8 @@ The line's component (prefix) is the store's owning component: `hooks` / `aliase
 - On failure (WARN path): `error_class` from the closed AtomicWrite failure space below.
 
 **Optional attrs:**
-- `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`.
-- `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
+- `value` — verbatim new value for `set` / `modify`, the new key for `rekey-move`, the removed commands for `rekey-rm`; absent for `rm` / `clean-stale`.
+- `via` — `cli` for user-facing commands, `tui` for Portal's interactive surfaces (the picker and the attach keys), `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
 
 **Closed `op` value space:**
 
@@ -745,6 +748,11 @@ The line's component (prefix) is the store's owning component: `hooks` / `aliase
 | `clean-stale` | Internal cleanup of an entry (always batched) |
 | `migrate` | One-shot migration from old config path |
 | `set-noop` | `set` where the entry already exists and the value matches (DEBUG only) |
+| `rekey` | `portal migrate`'s rewrite of `hooks.json` from its backup, one write for the batch: the INFO summary (`entries`, `took`), or a WARN (`error`, `error_class` for a failed write) when it refuses or fails and writes nothing. It names no entry |
+| `rekey-move` | A key the rewrite moved (DEBUG only; `value` the key it moved to) |
+| `rekey-rm` | A key the rewrite removed (DEBUG only; `value` the commands it held) |
+| `rekey-noop` | A rewrite with no backup to write from, which writes nothing (DEBUG only) |
+| `unsynced` | The write landed, but the directory sync after its rename failed (WARN only; `error`, `error_class` `write-failed-fsync`). It names no entry, being the file's: the mutation's own line, written as for any landed write, names that |
 
 **Closed `error_class` value space for AtomicWrite failures (per phase):**
 
@@ -860,7 +868,7 @@ Every cycle in portal emits ONE INFO summary at completion, with per-item events
 
 A "cycle" is a function or method whose body matches one of these shapes:
 1. **Loop cycle** — a `for` loop iterating distinct items (sessions, panes, files, entries, orphans).
-2. **Sequence cycle** — an orchestrator running discrete named steps (the ten-step bootstrap orchestrator, the two-phase restore engine).
+2. **Sequence cycle** — an orchestrator running discrete named steps (the six-step bootstrap orchestrator, the two-phase restore engine).
 3. **Tick cycle** — a periodic loop driven by a ticker (the daemon's 1 Hz capture loop).
 
 For every cycle, the function/method MUST:
@@ -880,7 +888,7 @@ logger.Info("<verb> complete",
 
 Where:
 - `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
-- `<unit>` is the item being iterated, drawn **only** from the closed cycle-summary keys: `sessions`, `panes`, `entries`, `steps`. Sweeps report their outcome keys instead (`reaped` / `killed` / `skipped` / `unset`). A new unit key requires a vocabulary amendment — do not invent one ad hoc.
+- `<unit>` is the item being iterated, drawn **only** from the closed cycle-summary keys: `sessions`, `panes`, `entries`, `steps`. Sweeps report their outcome keys instead (`reaped` / `killed` / `skipped` / `unset`), and so do the saver's poll and the daemon's final flush (`claimed` / `dropped` / `captured` / `reaped`), and restore (`restored` / `failed`). A new unit key requires a vocabulary amendment — do not invent one ad hoc.
 - Additional sub-categorisation counts ride as attrs on the same summary line. Defined counts: `natural_churn` — items that ended cleanly mid-cycle by normal action (e.g. a session the user closed during the tick), distinct from a capture failure; `anomalous` — items that failed anomalously without terminating the cycle (each also emits a per-item WARN); `entries_failed` — per-item failures within a batch operation.
 - `took` is always present.
 
@@ -892,15 +900,17 @@ Where:
 
 | Cycle | Owning component | Summary line shape |
 |---|---|---|
-| Daemon tick (1 Hz capture + commit) | `capture` | `capture: tick complete sessions=N panes=N natural_churn=N anomalous=N took=T` |
-| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=11 warnings=N took=T` |
+| Daemon poll (the saver's poll, every 5 s on the 1 Hz tick) | `capture` | `capture: poll complete claimed=N dropped=N captured=N reaped=N took=T`, only for a poll that claimed, dropped, captured or removed something: a quiet poll, or one that only recorded a working directory, logs nothing at INFO |
+| Daemon final flush (shutdown) | `capture` | `capture: flush complete captured=N took=T`, only for a flush that captured something |
+| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=6 warnings=N took=T` |
 | Each bootstrap step | `bootstrap` | `bootstrap: step complete step=<StepName> took=T` |
-| Restore phase A (skeleton) | `restore` | `restore: skeleton complete sessions=N windows=N panes=N took=T` |
-| Restore phase B (geometry + replay) | `restore` | `restore: geometry complete panes=N took=T` |
+| Restore (once a bootstrap) | `restore` | `restore: restore complete restored=N failed=N anomalous=N took=T` |
+| Bringing back one kept session (`open`) | `restore` | `restore: restore complete session=S restored=N failed=N anomalous=N took=T` |
 | Orphan FIFO sweep | `clean` | `clean: orphan-fifo sweep complete reaped=N skipped=N took=T` |
 | Orphan daemon sweep | `clean` | `clean: orphan-daemon sweep complete killed=N took=T` |
-| Marker cleanup | `clean` | `clean: marker sweep complete unset=N took=T` |
+| Stale-flag sweep | `clean` | `clean: stale-flag sweep complete unset=N took=T` |
 | Hooks CleanStale | `hooks` | (same batch-summary shape as *State-mutation audit trail*) |
+| Hooks rewrite from the backup (`portal migrate`) | `hooks` | `hooks: rekey op=rekey entries=N via=V took=T` |
 | Retention sweep (rotated logs) | `log-rotate` | (same shape as *Retention policy*) |
 
 Spec writers consulting this rule produce one INFO call site per cycle in the codebase, with the verb-phrase + counts + `took` triplet, matching the catalog shape.
@@ -929,23 +939,39 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
 | Bootstrap observes a saver pane's host process has exited (e.g. during the kill-barrier exit-poll) | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
 
+The rows above are the tmux version's. On zmx the saver's lifecycle is `internal/saverhost`'s: EnsureSaver (the bootstrap's), and the stop EnsureSaver and `portal uninstall` share, each run holding `saver.lock`:
+
+| Site | msg | Required attrs |
+|---|---|---|
+| EnsureSaver creates `_portal-saver` running `<exe> state daemon` | `session created` | `target_pid` (the session's process, the daemon) |
+| EnsureSaver finds `daemon.pid` naming the session's process and `daemon.version` holding its version | `daemon ready` | `target_pid`, `took` |
+| EnsureSaver finds the saver running at this version (INFO: the operator sees a recycle considered and declined) | `daemon kept` | `target_pid` |
+| EnsureSaver decides to replace the running saver, which it stops before creating another | `recycle` | `target_pid`, `reason` ∈ {`version`, `unknown`} |
+| The stop sends its proved SIGTERM | `stop started` | `target_pid` |
+| The stop's wait for the daemon's exit runs out, and it sends its re-proved SIGKILL | `stop escalated` | `target_pid`, `reason="term-timeout"` |
+| The stop finds the daemon finished exiting, just before it kills the session | `daemon exited` | `target_pid`, `took` (from the stop's start) |
+
+Beside them, not INFO: a WARN `stop refused` (`target_pid`, `error`) when the stop refuses its pid before any proof (this process, or one the saver session no longer runs) or the proof before a signal fails or can't be read, so that signal is not sent and the stop fails; and a DEBUG `session created elsewhere` (`error`) when another process created `_portal-saver` first, which counts once its daemon is ready.
+
 **Daemon lifecycle events (component: `daemon`):**
 
 | Site | msg | Required attrs |
 |---|---|---|
-| Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline), `tmux_pane` |
+| Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline), `session` (the zmx session it runs in, `_portal-saver`; empty outside one) |
 | Daemon's self-supervision counter increments toward eject | (no INFO — DEBUG per the level-discipline "hysteresis-internal failures" clarification) | n/a |
 | Daemon's self-supervision counter trips threshold and ejects | `self-eject` | `ticks` (consecutive-absence count at trip), `threshold` (configured ejection threshold) |
-| Daemon shutdown via the normal return path (SIGHUP, signal, normal exit) | `shutdown` | `reason` ∈ {`sighup`, `signal`, `exit`}, `flush_completed` (bool — whether the final commit completed). **Not emitted on the self-eject path** (which bypasses `daemonShutdownFunc` — see *Defensive invariants* § sanctioned exception). |
+| Daemon shutdown via the normal return path (SIGHUP, signal, normal exit) | `shutdown` | `reason` ∈ {`sighup`, `signal`, `exit`}, `flush_completed` (bool — whether the final flush completed, false when it failed, stood down for a restore, or was cut by the shutdown's bound or a second signal). Emitted once, by the flush or by the bound, whichever comes first. **Not emitted on the self-eject path** (which bypasses `daemonShutdownFunc` — see *Defensive invariants* § sanctioned exception). |
 
 ### Process/subsystem boundary
 
-`process:` owns the OS-process boundary (`start`/`exit`/`exec`/`panic`) for *every* role, including the daemon — emitted by `Init`/`main`. `daemon:`/`saver:` lines are *additive subsystem milestones*, never a substitute for `process:`, and cover only moments `process:` cannot express. A redundant `daemon: spawn` event (it would fire at the same instant as `process: start process_role=daemon`, carrying the same data) is therefore **dropped**; its one unique attr (`tmux_pane`) moves onto `daemon: lock acquired`. The `saver:` catalog is unaffected — those lines are emitted by *bootstrap observing the saver from outside* (a different observer than the saver's own `process:` lines), so they are not redundant.
+`process:` owns the OS-process boundary (`start`/`exit`/`exec`/`panic`) for *every* role, including the daemon — emitted by `Init`/`main`. `daemon:`/`saver:` lines are *additive subsystem milestones*, never a substitute for `process:`, and cover only moments `process:` cannot express. A redundant `daemon: spawn` event (it would fire at the same instant as `process: start process_role=daemon`, carrying the same data) is therefore **dropped**; its one unique attr (`tmux_pane`) moves onto `daemon: lock acquired`, which on zmx carries `session` instead. The `saver:` catalog is unaffected — those lines are emitted by *bootstrap observing the saver from outside* (a different observer than the saver's own `process:` lines), so they are not redundant.
 
 ### Reason value spaces (closed)
 
 - `kill-barrier escalated reason`: `kill-session-timeout` (only value today; new values require amendment).
 - `placeholder died reason`: `signal` / `exit` / `unknown`.
+- `recycle reason`: `version` (the daemon records another version, a dev build's naming its build) / `unknown` (once ReadyWait has passed, no `daemon.pid` naming the session's process, or no `daemon.version`; or this build's version is the unidentified `dev`, which names no one build).
+- `stop escalated reason`: `term-timeout` (only value today).
 - `daemon shutdown reason`: `sighup` / `signal` / `exit`. (`self-eject` is **not** a `daemon: shutdown` reason — the self-eject path emits `daemon: self-eject` + `process: exit` instead, see *Defensive invariants* § sanctioned exception.)
 
 Reason value spaces are closed sets per event — spec writers MAY NOT introduce new reason values without amending this catalog.
@@ -953,7 +979,7 @@ Reason value spaces are closed sets per event — spec writers MAY NOT introduce
 ### Per-tick events (NOT in this catalog)
 
 Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're covered by:
-- *Cycle-level summary* — one INFO per tick at the end of the daemon's capture-and-commit cycle (`capture: tick complete ...`).
+- *Cycle-level summary* — one INFO per saver poll that claimed, dropped, captured or removed something (`capture: poll complete ...`).
 - Level-discipline placement clarifications — per-tick probe failures are DEBUG; only the trip (self-eject) is INFO per this catalog.
 
 ### Calling code locations
@@ -961,6 +987,7 @@ Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're co
 - `cmd/bootstrap/` — all `saver:` lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation, and `placeholder died` — bootstrap observes the saver from outside, per *Subsystem prefix taxonomy* § Process/subsystem boundary).
 - `cmd/state_daemon.go` — daemon lifecycle (`lock acquired`, `self-eject`, `shutdown`). The daemon's process startup is marked by `process: start process_role=daemon`, not a `daemon:` event.
 - `internal/tmux/portal_saver.go` — kill-barrier escalation.
+- `internal/saverhost/` — the zmx saver's lifecycle (`session created`, `daemon ready`, `daemon kept`, `recycle`, `stop started`, `stop escalated`, `daemon exited`), observing the saver from outside as bootstrap's tmux events did.
 
 ---
 

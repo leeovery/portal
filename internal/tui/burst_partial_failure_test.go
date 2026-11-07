@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func newPendingBurstModel(t *testing.T, names []string) Model {
@@ -37,10 +36,10 @@ func injectComplete(t *testing.T, m Model, msg spawnCompleteMsg) (Model, tea.Cmd
 }
 
 func TestBurstPartialFailure_LeavesOpenedWindowsAndSkipsSelfAttach(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack, Results: []spawn.Result{spawn.SpawnFailed("boom")}}
@@ -182,10 +181,10 @@ func TestBurstPartialFailure_AckTimeoutAndSpawnFailedClassifyIdentically(t *test
 
 func TestBurstPartialFailure_PermissionGuidanceOnceAffectedStaysMarked(t *testing.T) {
 	const guidance = "grant Automation access to Ghostty in System Settings"
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{
@@ -231,11 +230,11 @@ func TestBurstPartialFailure_PermissionGuidanceOnceAffectedStaysMarked(t *testin
 }
 
 func TestBurstPartialFailure_UnattemptedPostPermissionStayMarked(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
-		{Name: "delta", Windows: 4},
+	sessions := []Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
+		{Name: "delta"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{

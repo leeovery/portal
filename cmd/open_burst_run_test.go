@@ -108,7 +108,9 @@ func openBurstDepsForTest(id spawn.Identity, resolution spawn.Resolution, adapte
 		Resolve:   func(spawn.Identity) (spawn.Adapter, spawn.Resolution) { return adapter, resolution },
 		Connector: conn,
 		ExePath:   func() (string, error) { return spawnPipelineExe, nil },
-		Getenv:    func(string) string { return spawnPipelinePATH },
+		Env: func() (spawn.WindowEnvironment, error) {
+			return spawn.WindowEnvironment{Set: []string{"PATH=" + spawnPipelinePATH}}, nil
+		},
 		Ack:       &spawntest.FakeAckChannel{},
 		Logger:    nil, // spawn.LogUnsupported is nil-tolerant (log.OrDiscard).
 		LocalMint: mint,
@@ -123,7 +125,7 @@ func withOpenBurster(deps *OpenBurstDeps, inner *spawntest.FakeAdapter, ack *spa
 			Adapter: a,
 			Ack:     ack,
 			Exe:     deps.ExePath,
-			Getenv:  deps.Getenv,
+			Env:     deps.Env,
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second,
 			Poll:    75 * time.Millisecond,
@@ -479,6 +481,11 @@ func TestRunOpenBurst_UnsupportedTerminal_CopyIsPlainLanguage(t *testing.T) {
 			id:   spawn.Identity{}, // empty BundleID → IsNull() true
 			want: "can't open new windows over a remote connection — nothing opened",
 		},
+		{
+			name: "unsure null identity",
+			id:   spawn.Identity{Unsure: true},
+			want: "can't tell which terminal Portal is running in — nothing opened",
+		},
 	}
 
 	for _, tt := range tests {
@@ -705,6 +712,34 @@ func TestRunOpenBurst_TriggerConnectFails_EmitsCorrectiveWarn(t *testing.T) {
 	_ = summaries.Only(t, "opened batch summary")
 }
 
+// An exit status is an attach that landed and has since ended, as a signal
+// ends one: the trigger did attach, so no correction follows the summary.
+func TestRunOpenBurst_TriggerAttachThatEndsWithAStatus_EmitsNoCorrection(t *testing.T) {
+	events := &openBurstEvents{}
+	inner := &spawntest.FakeAdapter{}
+	adapter := &recordingAdapter{events: events, inner: inner}
+	ended := &ExitCodeError{Code: 129}
+	conn := &recordingConnector{events: events, err: ended}
+	mint := &recordingMint{events: events}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, adapter, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, &spawntest.FakeAckChannel{}, &manualClock{})
+
+	surfaces := []spawn.Surface{
+		{Kind: spawn.SurfaceAttach, Value: "trig"},
+		{Kind: spawn.SurfaceAttach, Value: "e1"},
+	}
+	err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps)
+
+	if !errors.Is(err, ended) {
+		t.Fatalf("error = %v, want the attach's exit status", err)
+	}
+	if warns := sink.Records().WithMessage("trigger did not attach"); len(warns) != 0 {
+		t.Errorf("corrective WARN emitted for an attach that landed: %+v", warns)
+	}
+}
+
 func TestRunOpenBurst_TriggerMintOwnConnectFails_PropagatesError(t *testing.T) {
 	events := &openBurstEvents{}
 	inner := &spawntest.FakeAdapter{}
@@ -894,7 +929,7 @@ func TestRunOpenBurst_PerWindowAckTimeout_TimedFromOwnSpawn(t *testing.T) {
 			Adapter: a,
 			Ack:     dack,
 			Exe:     deps.ExePath,
-			Getenv:  deps.Getenv,
+			Env:     deps.Env,
 			NewID:   seqIDGen(),
 			Timeout: 8 * time.Second,
 			Poll:    75 * time.Millisecond,
@@ -936,5 +971,29 @@ func TestRunOpenBurst_PerWindowAckTimeout_TimedFromOwnSpawn(t *testing.T) {
 	}
 	if !slices.Equal(conn.calls, []string{"trig"}) {
 		t.Errorf("self-connect targets = %#v, want exactly [trig]", conn.calls)
+	}
+}
+
+func TestRunOpenBurst_ACleanThatFailsWarns(t *testing.T) {
+	inner := &spawntest.FakeAdapter{}
+	ack := &spawntest.FakeAckChannel{FailClean: errors.New("read-only file system")}
+	conn := &cleanOrderConnector{ack: ack}
+	mint := &recordingMint{events: &openBurstEvents{}}
+	logger, sink := newCaptureLoggerForComponent(t, "spawn")
+	deps := openBurstDepsForTest(ghosttyIdentity(), spawn.ResolutionNative, inner, conn, mint.mint)
+	deps.Logger = logger
+	withOpenBurster(deps, inner, ack, &manualClock{})
+
+	surfaces := []spawn.Surface{{Kind: spawn.SurfaceAttach, Value: "trig"}, {Kind: spawn.SurfaceAttach, Value: "e1"}}
+	if err := runOpenBurstWithDeps(&cobra.Command{}, surfaces, nil, deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rec := sink.Records().Matching("spawn", "spawn ack clean failed").AtExactLevel(slog.LevelWarn).Only(t, "clean record")
+	if rec.AttrString(t, "batch") != ack.Cleaned[0] || rec.AttrString(t, "error") != ack.FailClean.Error() {
+		t.Errorf("record = %+v, want the batch and the error", rec)
+	}
+	if !slices.Equal(conn.calls, []string{"trig"}) {
+		t.Errorf("self-connect targets = %#v, want the trigger all the same", conn.calls)
 	}
 }

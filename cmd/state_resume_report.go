@@ -1,33 +1,40 @@
 package cmd
 
 import (
+	"context"
 	"errors"
-	"os/exec"
+	"os"
+	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/runnertoken"
 )
 
-// The report rows a refused answer puts on the waiting pane. Each names the act
-// before its cause, so the one-line truncation only ever cuts the cause's end;
-// the whole error chain goes to the log instead.
+// The report rows a refused answer puts on the waiting session. Each names the
+// act before its cause, so the one-line truncation only ever cuts the cause's
+// end; the whole error chain goes to the log instead.
 const (
-	resumeReportFallback   = "can't carry out that answer"
-	resumeReportLocate     = "can't locate hooks.json: "
-	resumeReportRead       = "can't read hooks.json: "
-	resumeReportMalformed  = resumeReportRead + "malformed JSON"
-	resumeReportLock       = "can't lock hooks.json: "
-	resumeReportLockHeld   = resumeReportLock + "another process holds it"
-	resumeReportWrite      = "can't write hooks.json: "
-	resumeReportUnpause    = "can't unpause this pane: "
-	resumeReportTmuxNotRun = "tmux could not be run"
-	resumeReportTmuxAbsent = resumeReportUnpause + resumeReportTmuxNotRun
-	resumeReportDrop       = "can't clear pending input: "
-	resumeReportBack       = "can't open the picker: "
+	resumeReportFallback  = "can't carry out that answer"
+	resumeReportLocate    = "can't locate hooks.json: "
+	resumeReportRead      = "can't read hooks.json: "
+	resumeReportMalformed = resumeReportRead + "malformed JSON"
+	resumeReportLock      = "can't lock hooks.json: "
+	resumeReportLockHeld  = resumeReportLock + "another process holds it"
+	resumeReportWrite     = "can't write hooks.json: "
+	resumeReportUnpause   = "can't unpause this session: "
+	resumeReportDrop      = "can't clear pending input: "
+	resumeReportBack      = "can't open the picker: "
+	resumeReportDetach    = "can't detach: "
 )
+
+// resumeReasonSeparator joins the reasons of several runners that refused.
+const resumeReasonSeparator = "; "
+
+// resumeReasonUnanswered is the reason of a runner that never answered.
+const resumeReasonUnanswered = "a runner did not answer"
 
 // hookStoreUnlocatedError marks a store whose path could not be resolved,
 // keeping the resolution's own message as its text.
@@ -62,35 +69,68 @@ func resumeDiscardRefusal(err error) string {
 	}
 }
 
-// resumeClearRefusal is the panel's row for a pending-marker clear tmux did not
-// carry out: tmux's own words when it answered, and none of the argv the
-// client's error leads with.
+// resumeClearRefusal is the panel's row for a resume-pending flag that could
+// not be lowered: the operating system's words for why, or the state
+// directory's or the session name's when the flag could not even be found.
 func resumeClearRefusal(err error) string {
-	return resumeTmuxRefusal(resumeReportUnpause, err, resumeReportFallback)
+	return resumeReportUnpause + causeWords(err)
 }
 
-// resumeBackRefusal is the panel's row for an Escape that could not send the
-// terminal back to the picker. Unlike a clear, it can fail before tmux is asked
-// anything — the binary the picker runs from could not be resolved — and that
-// cause is named too.
+// resumeBackRefusal is the panel's row for an Escape that sent no terminal
+// anywhere: the backend's detach failing with no runner registered, or else
+// why no runner on the session took the request.
 func resumeBackRefusal(err error) string {
-	return resumeTmuxRefusal(resumeReportBack, err, resumeReportBack+causeWords(err))
+	if _, ok := errors.AsType[detachError](err); ok {
+		return resumeReportDetach + causeWords(err)
+	}
+	return resumeReportBack + runnersWords(err)
 }
 
-// resumeTmuxRefusal names act and then tmux's own words for why it did not
-// carry it out, or otherwise when err did not come from tmux.
-func resumeTmuxRefusal(act string, err error, otherwise string) string {
-	cmdErr, ok := errors.AsType[*tmux.CommandError](err)
-	if !ok {
-		return otherwise
+// runnersWords is why the session's runners took no request: each runner's
+// reason once, in their order, or the one cause of a failure met before any
+// runner was asked.
+func runnersWords(err error) string {
+	reasons := joinedErrors(err)
+	if reasons == nil {
+		return runnerWords(err)
 	}
-	if stderr := strings.TrimSpace(cmdErr.Stderr); stderr != "" {
-		return act + stderr
+	var words []string
+	for _, reason := range reasons {
+		if w := runnerWords(reason); !slices.Contains(words, w) {
+			words = append(words, w)
+		}
 	}
-	if _, notRun := errors.AsType[*exec.Error](cmdErr); notRun {
-		return act + resumeReportTmuxNotRun
+	return strings.Join(words, resumeReasonSeparator)
+}
+
+// runnerWords is one runner's reason: its refusal in its own words, Portal's
+// for one that never answered, or else the cause of the failure to ask it.
+func runnerWords(err error) string {
+	if unanswered(err) {
+		return resumeReasonUnanswered
 	}
-	return act + causeWords(cmdErr)
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if errors.Unwrap(e) == runnertoken.ErrRefused {
+			return strings.TrimPrefix(e.Error(), runnertoken.ErrRefused.Error()+": ")
+		}
+	}
+	return causeWords(err)
+}
+
+// unanswered reports whether err is a request cut by a deadline: the
+// runner's own, or its connection's, which Escape's bound ends at the latest.
+func unanswered(err error) bool {
+	return errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// joinedErrors is the errors joined in err's chain, nil when it joins none.
+func joinedErrors(err error) []error {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if joined, ok := e.(interface{ Unwrap() []error }); ok {
+			return joined.Unwrap()
+		}
+	}
+	return nil
 }
 
 func resumeDropRefusal(err error) string {

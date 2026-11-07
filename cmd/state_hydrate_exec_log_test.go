@@ -26,284 +26,153 @@ func execLogLine(t *testing.T, body, level, msg string) string {
 	return matches[0]
 }
 
-// execLookedUpRegistration drives the exec the way an unwaiting tail does: the
-// registration looked up, and no pane parked.
+// countLogLines matches on the "<LEVEL> <msg>" prefix so an attr value
+// containing the phrase cannot false-match.
+func countLogLines(body, level, msg string) int {
+	prefix := level + " " + msg
+	n := 0
+	for line := range strings.SplitSeq(body, "\n") {
+		if line == prefix || strings.HasPrefix(line, prefix+" ") {
+			n++
+		}
+	}
+	return n
+}
+
+// execLookedUpRegistration drives the exec the way an unwaiting session's
+// hand-off does: the registration looked up, and no session parked.
 func execLookedUpRegistration(cfg hydrateConfig) {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	execShellOrHookAndExit(cfg, lookupOnResumeOrLog(cfg), nil)
 }
 
-func TestHydrateExecLog_NilHookStore_MissThenBareShellExec(t *testing.T) {
-	t.Setenv("SHELL", "/bin/zsh")
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+// storeHolding stages a hooks.json holding body.
+func storeHolding(t *testing.T, body map[string]map[string]string) *hooks.Store {
+	t.Helper()
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Body: body})
+	return store
+}
 
-	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "nil:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: nil,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
+func TestHydrateExecLog_ALookupThatFindsNothingRecordsAMissAndExecsTheLoginShell(t *testing.T) {
+	for name, store := range map[string]func(t *testing.T) *hooks.Store{
+		"no hook store":           func(*testing.T) *hooks.Store { return nil },
+		"an unregistered session": emptyHookStore,
+		"a registration elsewhere": func(t *testing.T) *hooks.Store {
+			return storeHolding(t, map[string]map[string]string{"proj-other": {"on-resume": "echo hi"}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("SHELL", "/bin/zsh")
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			exec := &stubExecShell{}
 
-	if exec.target != "/bin/zsh" {
-		t.Errorf("ExecShell target = %q, want /bin/zsh (nil store → bare shell)", exec.target)
-	}
+			execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store(t), ExecShell: exec.fn()})
 
-	body := sink.Body()
-	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
-	if !strings.Contains(dbg, "hook_key=nil:0.0") {
-		t.Errorf("DEBUG line missing hook_key=nil:0.0: %q", dbg)
-	}
-	if !strings.Contains(dbg, "result=miss") {
-		t.Errorf("nil store must map to result=miss: %q", dbg)
-	}
-	if strings.Contains(dbg, "error=") {
-		t.Errorf("nil-store miss must NOT carry an error attr: %q", dbg)
-	}
-
-	info := execLogLine(t, body, "INFO", "exec")
-	if !strings.Contains(info, "target=/bin/zsh") {
-		t.Errorf("exec INFO missing target=/bin/zsh: %q", info)
-	}
-	if !strings.Contains(info, "args=/bin/zsh") {
-		t.Errorf("exec INFO missing args=/bin/zsh: %q", info)
-	}
-	if !strings.Contains(info, "hook_present=false") {
-		t.Errorf("exec INFO missing hook_present=false: %q", info)
+			if exec.target != "/bin/zsh" {
+				t.Errorf("ExecShell target = %q, want /bin/zsh", exec.target)
+			}
+			body := sink.Body()
+			dbg := execLogLine(t, body, "DEBUG", "hook lookup")
+			for _, want := range []string{"hook_key=" + hydrateSession, "result=miss"} {
+				if !strings.Contains(dbg, want) {
+					t.Errorf("DEBUG line %q missing %s", dbg, want)
+				}
+			}
+			if strings.Contains(dbg, "error=") {
+				t.Errorf("a miss must not carry an error attr: %q", dbg)
+			}
+			info := execLogLine(t, body, "INFO", "exec")
+			for _, want := range []string{"target=/bin/zsh", "args=-zsh", "hook_present=false"} {
+				if !strings.Contains(info, want) {
+					t.Errorf("exec INFO %q missing %s", info, want)
+				}
+			}
+		})
 	}
 }
 
-func TestHydrateExecLog_LookupError_ErrorResultWithAttrWarnRetainedBareShell(t *testing.T) {
-	dir := t.TempDir()
-	// An unreadable hooks.json makes the lookup read fail.
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Unreadable: true})
-
+func TestHydrateExecLog_LookupError_ErrorResultWithAttrWarnRetainedLoginShell(t *testing.T) {
+	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Unreadable: true})
 	t.Setenv("SHELL", "/bin/zsh")
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-
 	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "err:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: store,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
+
+	execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store, ExecShell: exec.fn()})
 
 	if exec.target != "/bin/zsh" {
-		t.Errorf("ExecShell target = %q, want /bin/zsh (lookup error → bare shell)", exec.target)
+		t.Errorf("ExecShell target = %q, want /bin/zsh (lookup error → login shell)", exec.target)
 	}
-
 	body := sink.Body()
 	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
-	if !strings.Contains(dbg, "result=error") {
-		t.Errorf("lookup error must map to result=error: %q", dbg)
+	for _, want := range []string{"result=error", "error=", "hook_key=" + hydrateSession} {
+		if !strings.Contains(dbg, want) {
+			t.Errorf("DEBUG line %q missing %s", dbg, want)
+		}
 	}
-	if !strings.Contains(dbg, "error=") {
-		t.Errorf("result=error must carry the error attr: %q", dbg)
-	}
-	if !strings.Contains(dbg, "hook_key=err:0.0") {
-		t.Errorf("DEBUG line missing hook_key=err:0.0: %q", dbg)
-	}
-
 	if n := strings.Count(body, "lookup on-resume hook failed"); n != 1 {
-		t.Errorf("want exactly one existing WARN line, got %d: %q", n, body)
+		t.Errorf("want exactly one lookup WARN, got %d: %q", n, body)
 	}
-
-	info := execLogLine(t, body, "INFO", "exec")
-	if !strings.Contains(info, "target=/bin/zsh") {
-		t.Errorf("exec INFO missing target=/bin/zsh: %q", info)
-	}
-	if !strings.Contains(info, "hook_present=false") {
-		t.Errorf("exec INFO missing hook_present=false: %q", info)
-	}
-}
-
-func TestHydrateExecLog_UnregisteredPaneKey_MissThenBareShellExec(t *testing.T) {
-	dir := t.TempDir()
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{}})
-
-	t.Setenv("SHELL", "/bin/zsh")
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-
-	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "miss:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: store,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
-
-	if exec.target != "/bin/zsh" {
-		t.Errorf("ExecShell target = %q, want /bin/zsh (no hook → bare shell)", exec.target)
-	}
-
-	body := sink.Body()
-	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
-	if !strings.Contains(dbg, "result=miss") {
-		t.Errorf("unregistered pane key must map to result=miss: %q", dbg)
-	}
-	if strings.Contains(dbg, "error=") {
-		t.Errorf("miss must NOT carry an error attr: %q", dbg)
-	}
-
-	info := execLogLine(t, body, "INFO", "exec")
-	if !strings.Contains(info, "hook_present=false") {
+	if info := execLogLine(t, body, "INFO", "exec"); !strings.Contains(info, "hook_present=false") {
 		t.Errorf("exec INFO missing hook_present=false: %q", info)
 	}
 }
 
 func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
-	dir := t.TempDir()
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"hit:0.0": {"on-resume": "echo hi"},
-	}})
-
 	t.Setenv("SHELL", "/bin/zsh")
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-
 	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "hit:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: store,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
+	store := storeHolding(t, map[string]map[string]string{hydrateSession: {"on-resume": "echo hi"}})
+
+	execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store, ExecShell: exec.fn()})
 
 	if exec.target != "/bin/sh" {
 		t.Errorf("ExecShell target = %q, want /bin/sh (hook chain)", exec.target)
 	}
-
 	body := sink.Body()
-	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
-	if !strings.Contains(dbg, "result=hit") {
-		t.Errorf("registered hook must map to result=hit: %q", dbg)
+	if dbg := execLogLine(t, body, "DEBUG", "hook lookup"); !strings.Contains(dbg, "result=hit") {
+		t.Errorf("a registered hook must map to result=hit: %q", dbg)
 	}
-
 	info := execLogLine(t, body, "INFO", "exec")
-	if !strings.Contains(info, "target=/bin/sh") {
-		t.Errorf("exec INFO missing target=/bin/sh: %q", info)
-	}
-	if !strings.Contains(info, "args=sh -c trap : TERM; echo hi; exec /bin/zsh") {
-		t.Errorf("exec INFO missing joined hook-chain args: %q", info)
-	}
-	if !strings.Contains(info, "hook_present=true") {
-		t.Errorf("exec INFO missing hook_present=true: %q", info)
-	}
-}
-
-func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing.T) {
-	dir := t.TempDir()
-	rawCmd := "echo 'it works' && echo \"quoted\""
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"q:0.0": {"on-resume": rawCmd},
-	}})
-
-	t.Setenv("SHELL", "/bin/zsh")
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-
-	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "q:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: store,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
-
-	body := sink.Body()
-	info := execLogLine(t, body, "INFO", "exec")
-	wantArgs := "args=sh -c trap : TERM; " + rawCmd + "; exec /bin/zsh"
-	if !strings.Contains(info, wantArgs) {
-		t.Errorf("exec INFO args not rendered verbatim; want substring %q in %q", wantArgs, info)
-	}
-}
-
-func TestHydrateExecLog_ExecInfoUsesTargetAttrNotPath(t *testing.T) {
-	dir := t.TempDir()
-	store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-		"hit:0.0": {"on-resume": "echo hi"},
-	}})
-
-	t.Setenv("SHELL", "/bin/zsh")
-	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-
-	exec := &stubExecShell{}
-	cfg := hydrateCfg(t, hydrateCfgOpts{
-		HookKey:   "hit:0.0",
-		OpenFIFO:  unexpectedOpenFIFO(t),
-		Logger:    logger,
-		HookStore: store,
-		ExecShell: exec.fn(),
-	})
-	execLookedUpRegistration(cfg)
-
-	info := execLogLine(t, sink.Body(), "INFO", "exec")
-	if !strings.Contains(info, "target=") {
-		t.Errorf("exec INFO must use the target attr: %q", info)
+	for _, want := range []string{"target=/bin/sh", `args=sh -c 'trap : TERM; echo hi; exec '\''/bin/zsh'\'' -l'`, "hook_present=true"} {
+		if !strings.Contains(info, want) {
+			t.Errorf("exec INFO %q missing %s", info, want)
+		}
 	}
 	if strings.Contains(info, "path=") {
-		t.Errorf("exec INFO must NOT use the reserved path attr: %q", info)
+		t.Errorf("exec INFO must use the target attr, never the reserved path attr: %q", info)
+	}
+}
+
+func TestHydrateExecLog_HitQuotesTheChainAsOneArgumentIncludingEmbeddedQuotes(t *testing.T) {
+	rawCmd := "echo 'it works' && echo \"quoted\""
+	t.Setenv("SHELL", "/bin/zsh")
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+	store := storeHolding(t, map[string]map[string]string{hydrateSession: {"on-resume": rawCmd}})
+
+	execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store, ExecShell: (&stubExecShell{}).fn()})
+
+	info := execLogLine(t, sink.Body(), "INFO", "exec")
+	if want := `args=sh -c 'trap : TERM; echo '\''it works'\'' && echo "quoted"; exec '\''/bin/zsh'\'' -l'`; !strings.Contains(info, want) {
+		t.Errorf("exec INFO args not quoted as the argv exec'd; want substring %q in %q", want, info)
 	}
 }
 
 func TestHydrateExecLog_ExecInfoEmittedImmediatelyBeforeExecShell(t *testing.T) {
-	cases := []struct {
-		name      string
-		hookStore func(t *testing.T, dir string) *hooks.Store
-		hookKey   string
-	}{
-		{
-			name:      "bare-shell-nil-store",
-			hookStore: func(_ *testing.T, _ string) *hooks.Store { return nil },
-			hookKey:   "b:0.0",
+	for name, store := range map[string]func(t *testing.T) *hooks.Store{
+		"login shell, no store": func(*testing.T) *hooks.Store { return nil },
+		"login shell, a miss":   emptyHookStore,
+		"hook chain, a hit": func(t *testing.T) *hooks.Store {
+			return storeHolding(t, map[string]map[string]string{hydrateSession: {"on-resume": "echo hi"}})
 		},
-		{
-			name: "bare-shell-miss",
-			hookStore: func(t *testing.T, dir string) *hooks.Store {
-				store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{}})
-				return store
-			},
-			hookKey: "m:0.0",
-		},
-		{
-			name: "hook-chain-hit",
-			hookStore: func(t *testing.T, dir string) *hooks.Store {
-				store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: dir, SidecarAbsent: true, Body: map[string]map[string]string{
-					"h:0.0": {"on-resume": "echo hi"},
-				}})
-				return store
-			},
-			hookKey: "h:0.0",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	} {
+		t.Run(name, func(t *testing.T) {
 			t.Setenv("SHELL", "/bin/zsh")
 			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-			dir := t.TempDir()
-
 			var bodyAtExec string
-			cfg := hydrateCfg(t, hydrateCfgOpts{
-				HookKey:   tc.hookKey,
-				OpenFIFO:  unexpectedOpenFIFO(t),
-				Logger:    logger,
-				HookStore: tc.hookStore(t, dir),
-				ExecShell: func(_ string, _ []string) {
-					// Snapshot at the instant of handoff: the exec INFO must
-					// already be present.
-					bodyAtExec = sink.Body()
-				},
-			})
-			execLookedUpRegistration(cfg)
+
+			execLookedUpRegistration(hydrateConfig{Session: hydrateSession, Logger: logger, HookStore: store(t), ExecShell: func(string, []string) {
+				bodyAtExec = sink.Body()
+			}})
 
 			execLogLine(t, bodyAtExec, "INFO", "exec")
 		})

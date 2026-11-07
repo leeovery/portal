@@ -27,15 +27,15 @@ func mapGetenv(env map[string]string) func(string) string {
 	}
 }
 
-func TestDetectOutsideTmux(t *testing.T) {
+func TestDetectOutsideSession(t *testing.T) {
 	t.Run("it resolves directly from __CFBundleIdentifier without walking", func(t *testing.T) {
 		getenv := mapGetenv(map[string]string{
 			"__CFBundleIdentifier": "com.apple.Terminal",
 		})
 
-		got, err := detectOutsideTmux(getenv, 100, failWalker{t}, failReader{t})
+		got, err := detectOutsideSession(getenv, 100, failWalker{t}, failReader{t})
 		if err != nil {
-			t.Fatalf("detectOutsideTmux returned error: %v, want nil", err)
+			t.Fatalf("detectOutsideSession returned error: %v, want nil", err)
 		}
 		if got.BundleID != "com.apple.Terminal" {
 			t.Errorf("BundleID = %q, want %q", got.BundleID, "com.apple.Terminal")
@@ -52,9 +52,9 @@ func TestDetectOutsideTmux(t *testing.T) {
 					key: "/Applications/Ghostty.app/Contents/Resources",
 				})
 
-				got, err := detectOutsideTmux(getenv, 100, failWalker{t}, failReader{t})
+				got, err := detectOutsideSession(getenv, 100, failWalker{t}, failReader{t})
 				if err != nil {
-					t.Fatalf("detectOutsideTmux returned error: %v, want nil", err)
+					t.Fatalf("detectOutsideSession returned error: %v, want nil", err)
 				}
 				if got.BundleID != "com.mitchellh.ghostty" {
 					t.Errorf("BundleID = %q, want %q", got.BundleID, "com.mitchellh.ghostty")
@@ -75,9 +75,9 @@ func TestDetectOutsideTmux(t *testing.T) {
 			"/Applications/Ghostty.app": {bundleID: "com.mitchellh.ghostty", name: "Ghostty"},
 		}}
 
-		got, err := detectOutsideTmux(getenv, 777, walker, reader)
+		got, err := detectOutsideSession(getenv, 777, walker, reader)
 		if err != nil {
-			t.Fatalf("detectOutsideTmux returned error: %v, want nil", err)
+			t.Fatalf("detectOutsideSession returned error: %v, want nil", err)
 		}
 		if got.BundleID != "com.mitchellh.ghostty" || got.Name != "Ghostty" {
 			t.Errorf("identity = %+v, want the walk's resolved Ghostty identity", got)
@@ -109,9 +109,9 @@ func TestDetectOutsideTmux(t *testing.T) {
 					"/Applications/Ghostty.app": {bundleID: "com.mitchellh.ghostty", name: "Ghostty"},
 				}}
 
-				got, err := detectOutsideTmux(getenv, 100, walker, reader)
+				got, err := detectOutsideSession(getenv, 100, walker, reader)
 				if err != nil {
-					t.Fatalf("detectOutsideTmux returned error: %v, want nil", err)
+					t.Fatalf("detectOutsideSession returned error: %v, want nil", err)
 				}
 				if got.BundleID != "com.mitchellh.ghostty" {
 					t.Errorf("BundleID = %q, want the walk's %q (env value %q must not be trusted)", got.BundleID, "com.mitchellh.ghostty", tc.value)
@@ -131,9 +131,9 @@ func TestDetectOutsideTmux(t *testing.T) {
 			}}
 			reader := &fakeReader{bundles: map[string]fakeBundle{}}
 
-			got, err := detectOutsideTmux(getenv, 100, walker, reader)
+			got, err := detectOutsideSession(getenv, 100, walker, reader)
 			if err != nil {
-				t.Fatalf("detectOutsideTmux returned error: %v, want nil", err)
+				t.Fatalf("detectOutsideSession returned error: %v, want nil", err)
 			}
 			if !got.IsNull() {
 				t.Errorf("identity = %+v, want NULL propagated from the walk", got)
@@ -148,7 +148,7 @@ func TestDetectOutsideTmux(t *testing.T) {
 			}}
 			reader := &fakeReader{bundles: map[string]fakeBundle{}}
 
-			got, err := detectOutsideTmux(getenv, 100, walker, reader)
+			got, err := detectOutsideSession(getenv, 100, walker, reader)
 			if !errors.Is(err, ErrDetectTransient) {
 				t.Errorf("errors.Is(err, ErrDetectTransient) = false, want true; err = %v", err)
 			}

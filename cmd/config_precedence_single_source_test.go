@@ -28,7 +28,7 @@ func TestConfigPrecedenceIsSingleSourced(t *testing.T) {
 	// Every way a route could resolve an environment layer behind the shared
 	// rule's back. lookup(name) is not among them: that is the rule's own seam,
 	// handed the whole environment rather than one variable's precedence.
-	ownEnvReads := []string{"Getenv", "LookupEnv", "Environ", "CutPrefix", "ConfigBase", "ConfigBaseFrom"}
+	ownEnvReads := []string{"Getenv", "LookupEnv", "Environ", "CutPrefix", "ConfigBaseFrom"}
 
 	for _, route := range routes {
 		t.Run(route.fn+" resolves through the shared declaration", func(t *testing.T) {

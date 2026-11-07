@@ -5,7 +5,7 @@ import "github.com/leeovery/portal/internal/resumekeys"
 const (
 	discardConfirmTitle = "Discard resume?"
 	// Tool-agnostic: the resume machinery runs whatever command a registration holds.
-	discardConfirmConsequence = "Removes this pane's resume command permanently. The session and its scrollback are untouched."
+	discardConfirmConsequence = "Removes this session's resume command permanently. The session and its scrollback are untouched."
 
 	discardLabelConfirm = "discard"
 )

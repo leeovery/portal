@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/warning"
 	"github.com/spf13/cobra"
@@ -57,8 +58,7 @@ func searchTeardownModel(t *testing.T, decide func() (string, error), warnings [
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           &mockSessionLister{},
-		ServerStarted:    true,
+		Lister:           fakePickerLister(),
 		ProgressReceiver: receiver,
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
 	})
@@ -76,7 +76,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the accumulated warnings before a warm single-match attach", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+		sc.live("portal-a1b2", "blog-c3d4")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -102,7 +102,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it writes the same lines as the CLI path", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -117,7 +117,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it drains the sink so a later emit writes nothing", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, soakedWarnings())
 		cmd, _ := warmSearchCommand(t)
 
@@ -134,7 +134,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 
 	t.Run("it writes nothing when no warnings accumulated", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 		accumulateWarnings(t, nil)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -151,7 +151,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 		readErr := errors.New("no server running")
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.listErr = readErr
+		sc.fake.Fail(backendtest.OpList, readErr)
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -168,7 +168,7 @@ func TestSearchForm_WarmRoute_WritesAccumulatedWarnings(t *testing.T) {
 	t.Run("it leaves the picker branch's warnings for the model", func(t *testing.T) {
 		warnings := soakedWarnings()
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+		sc.live("portal-a1b2", "port-agent")
 		accumulateWarnings(t, warnings)
 		cmd, stderr := warmSearchCommand(t)
 
@@ -216,8 +216,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		m := tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
-			ServerStarted:    true,
+			Lister:           fakePickerLister(),
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
@@ -270,8 +269,7 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 	t.Run("it owes the buffered set when the loading page was cancelled", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
-			ServerStarted:    true,
+			Lister:           fakePickerLister(),
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
@@ -293,15 +291,14 @@ func TestWarningsOwedAtTeardown(t *testing.T) {
 	t.Run("it owes the buffered set when the loading page was cancelled with the decision still in flight", func(t *testing.T) {
 		receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 		var model tea.Model = tui.Build(tui.Deps{
-			Lister:           &mockSessionLister{},
-			ServerStarted:    true,
+			Lister:           fakePickerLister(),
 			ProgressReceiver: receiver,
 			Search:           &tui.SearchForm{Term: "port", Decide: func() (string, error) { return "portal-a1b2", nil }},
 		})
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 		// The decision command this returns is deliberately left unrun: the escape
-		// the user takes from a tmux server too slow to answer it.
+		// the user takes from a backend too slow to answer it.
 		model, decision := model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
 		if decision == nil || model.(tui.Model).ActivePage() != tui.PageLoading {
 			t.Fatal("both gates satisfied must dispatch the decision and hold the loading page")
@@ -399,13 +396,13 @@ func (c *observingConnector) Connect(string) error {
 func warmPickerModel(t *testing.T, deps tui.Deps, warnings []warning.Warning) tui.Model {
 	t.Helper()
 
-	deps.Lister = &mockSessionLister{sessions: []tmux.Session{{Name: "portal-a1b2"}}}
+	deps.Lister = fakePickerLister(backend.Session{Name: "portal-a1b2"})
 	m := tui.Build(deps)
 	m.SetPendingBootstrapWarnings(warnings)
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{{Name: "portal-a1b2"}}})
+	model, _ = model.Update(tui.SessionsMsg{Sessions: []tui.Session{{Name: "portal-a1b2"}}})
 
 	updated, ok := model.(tui.Model)
 	if !ok {
@@ -452,13 +449,12 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes nothing at teardown when the loading gate already surfaced them", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: fakePickerLister(), ProgressReceiver: idleBootstrap})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
-		// What Init synthesizes on the warm loading-page route.
 		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
@@ -478,7 +474,7 @@ func TestFinishTUI_StagedBootstrapWarnings(t *testing.T) {
 
 	t.Run("it writes the warnings the gate took when the loading page was cancelled", func(t *testing.T) {
 		warnings := soakedWarnings()
-		m := tui.Build(tui.Deps{Lister: &mockSessionLister{}, ServerStarted: true})
+		m := tui.Build(tui.Deps{Lister: fakePickerLister(), ProgressReceiver: idleBootstrap})
 		m.SetPendingBootstrapWarnings(warnings)
 
 		var model tea.Model = m

@@ -1,0 +1,40 @@
+
+  P O R T A L ▌
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+                                                                                        │
+  Sessions 12                                                                           │ Themes
+                                                                                        │
+  ▌ atelier-web-m4TzpD                                                                  │   catppuccin-latte
+    kiln-aws-migration                                                                  │   gitlab-dark-grey
+    kiln-relayx-explore                                                                 │   horizon
+    loom-p84cXa                                                                         │ ▌ nord                ● dark
+    lumen webhooks and watchers                                                         │   nord-wave
+    lumen-sync-engine                                                                   │   tokyo-night
+    orchard-pipeline-code-based                                                         │   tokyo-night-day    ● light
+    orchard-pipeline-codify                                                             │   vivid-01
+    quill-Ue9fLr                                                                        │   vivid-02
+    relay-v1-api-Hq7wNe                                                                 │   vivid-03
+    relayx-3RJDWA                                                                       │   vivid-04
+    tessera-proxy-Vb3kQw                                                                │   vivid-05
+                                                                                        │   vivid-06
+                                                                                        │   vivid-07
+                                                                                        │   vivid-08
+                                                                                        │   vivid-09
+                                                                                        │   vivid-10
+                                                                                        │   vivid-11
+                                                                                        │   vivid-12
+                                                                                        │   vivid-13
+                                                                                        │   vivid-14
+                                                                                        │   vivid-15
+                                                                                        │   vivid-16
+                                                                                        │   vivid-17
+                                                                                        │   vivid-18
+                                                                                        │   vivid-19
+                                                                                        │   vivid-20
+                                                                                        │
+                                                                                        │              ••
+                                                                                        │ ⏎   set theme
+                                                                                        │ d   set as dark
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│ l   set as light
+  ⏎ attach · / filter · ␣ preview · s switch view · x projects · t theme · m multi      │ esc close
+

@@ -85,17 +85,17 @@ func ExpandTilde(path string) string {
 	return path
 }
 
-// AbbreviateHome is the inverse of ExpandTilde: a path under the user's home
-// directory is rewritten to its `~/…` form and every other path is returned
-// unchanged. It never touches the filesystem, so a path that does not exist
-// abbreviates exactly as one that does; it does read the environment's home
-// directory, so one value abbreviates differently under a different $HOME, and
-// a home directory that cannot be resolved degrades to the path as given.
-func AbbreviateHome(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+// AbbreviateHome is the inverse of ExpandTilde: a path under home is rewritten
+// to its `~/…` form and every other path is returned unchanged. It never touches
+// the filesystem or the environment, so a path that does not exist abbreviates
+// exactly as one that does. The home is cleaned first, so one given with a
+// trailing separator abbreviates as the bare directory does. An empty home
+// abbreviates nothing, and a root home only itself, as a shell's prompt does.
+func AbbreviateHome(home, path string) string {
+	if home == "" {
 		return path
 	}
+	home = filepath.Clean(home)
 	if path == home {
 		return "~"
 	}
@@ -103,4 +103,14 @@ func AbbreviateHome(path string) string {
 		return "~/" + path[len(home)+1:]
 	}
 	return path
+}
+
+// ProcessHome is the process's home directory, or empty where it cannot be
+// resolved, which AbbreviateHome reads as abbreviating nothing.
+func ProcessHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }

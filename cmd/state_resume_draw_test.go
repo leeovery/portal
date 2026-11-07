@@ -82,9 +82,7 @@ func fixedSize(w, h int) func() (int, int, error) {
 func samplePayload() resumeChainPayload {
 	return resumeChainPayload{
 		Command: "make deploy",
-		HookKey: "tok123",
-		Pane:    "%7",
-		PaneKey: "proj-a1b2:0.1",
+		Session: "proj-a1b2",
 	}
 }
 
@@ -322,7 +320,7 @@ func TestPaneDrawNomination(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				got := paneDrawNomination(tc.open, tc.loader)
+				got := sessionDrawNomination(tc.open, tc.loader)
 				light, dark := shippedPair(t)
 				if got.Select(theme.MemberLight) != light || got.Select(theme.MemberDark) != dark {
 					t.Errorf("nomination did not degrade to the shipped light/dark pair")
@@ -342,7 +340,7 @@ func TestPaneDrawNomination(t *testing.T) {
 		var translations atomic.Int32
 		withFuncSeam(t, &persistTranslation, func(*prefs.Store, string) { translations.Add(1) })
 
-		paneDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
+		sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
 
 		if got := translations.Load(); got != 0 {
 			t.Errorf("the theme read dispatched %d appearance translations, want 0", got)
@@ -365,9 +363,7 @@ func TestStateResumeDrawCommand(t *testing.T) {
 		payload := resumeChainPayload{
 			Command: "make deploy",
 			Report:  "could not clear the pending marker",
-			HookKey: "tok123",
-			Pane:    "%7",
-			PaneKey: "proj-a1b2:0.1",
+			Session: "proj-a1b2",
 			Width:   120,
 			Height:  40,
 		}
@@ -419,7 +415,7 @@ func TestStateResumeDrawCommand(t *testing.T) {
 			rootCmd.SetOut(new(bytes.Buffer))
 			errBuf := new(bytes.Buffer)
 			rootCmd.SetErr(errBuf)
-			payload := resumeChainPayload{Command: "make deploy", HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}
+			payload := resumeChainPayload{Command: "make deploy", Session: "proj-a1b2"}
 			rootCmd.SetArgs(resumeChainArgv("portal", resumeDrawSubcommand, payload)[1:])
 			if err := rootCmd.Execute(); err != nil {
 				t.Fatalf("executing the composed argv: %v\nstderr: %s", err, errBuf)
@@ -437,7 +433,7 @@ func TestStateResumeDrawCommand(t *testing.T) {
 		resetRootCmd()
 		rootCmd.SetOut(new(bytes.Buffer))
 		rootCmd.SetErr(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"state", resumeDrawSubcommand, "--pane", "%7"})
+		rootCmd.SetArgs([]string{"state", resumeDrawSubcommand, "--session", "proj-a1b2"})
 		if err := rootCmd.Execute(); err == nil {
 			t.Error("executing resume-draw with no --command succeeded; the flag is required")
 		}

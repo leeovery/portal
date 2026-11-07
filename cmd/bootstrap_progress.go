@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -11,6 +12,10 @@ import (
 
 const bootstrapProgressBufferSize = 64
 
+// unwindWait bounds the wait, once the picker has quit, for the bootstrap it
+// ran to return on its context's end.
+const unwindWait = 2 * time.Second
+
 // Exactly one terminal event (Done) is sent, last, before the channel closes.
 type bootstrapProgress struct {
 	Step bootstrap.StepEvent
@@ -18,14 +23,12 @@ type bootstrapProgress struct {
 	RestoreN int
 	RestoreM int
 
-	Done          bool
-	ServerStarted bool
-	Warnings      []bootstrap.Warning
-	Fatal         error
+	Done     bool
+	Warnings []bootstrap.Warning
+	Fatal    error
 
-	// FailedStep is the last emitted step index + 1: a fatal step emits no
-	// step-complete event for itself and nothing after, so the next un-emitted
-	// index is the one that failed. Zero on a successful run.
+	// FailedStep is the index of the step a fatal names, zero on a successful
+	// run and for a fatal before any step, such as bootstrap.lock's.
 	FailedStep int
 }
 
@@ -36,30 +39,25 @@ type bootstrapChannelClosedMsg struct{}
 type bootstrapProgressPipe struct {
 	ch chan bootstrapProgress
 
-	// Written by the goroutine before it closes the channel and read only after
-	// the program exits, so the close the receiver observed is the ordering edge
-	// and no further synchronisation is needed.
-	serverStarted bool
-	warnings      []bootstrap.Warning
-	err           error
+	// cancel ends the bootstrap's context, and done closes once it returns.
+	cancel     context.CancelFunc
+	done       chan struct{}
+	unwindWait time.Duration
 }
 
 func newBootstrapProgressPipe() *bootstrapProgressPipe {
 	return &bootstrapProgressPipe{
-		ch: make(chan bootstrapProgress, bootstrapProgressBufferSize),
+		ch:         make(chan bootstrapProgress, bootstrapProgressBufferSize),
+		done:       make(chan struct{}),
+		unwindWait: unwindWait,
 	}
 }
 
 // start closes the channel on success and fatal alike, so the receiver always
 // observes a close and never leaks a blocked receive.
 func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runner) {
-	// Written and read only on the orchestrator goroutine — the emitter runs
-	// synchronously inside Run — so it needs no synchronisation.
-	lastStep := 0
+	ctx, p.cancel = context.WithCancel(ctx)
 	emitCtx := bootstrap.WithProgressEmitter(ctx, func(ev bootstrap.StepEvent) {
-		if ev.Index > lastStep {
-			lastStep = ev.Index
-		}
 		p.send(ctx, bootstrapProgress{
 			Step:     ev,
 			RestoreN: ev.RestoreN,
@@ -68,23 +66,38 @@ func (p *bootstrapProgressPipe) start(ctx context.Context, runner bootstrap.Runn
 	})
 
 	go func() {
+		defer close(p.done)
 		defer close(p.ch)
-		started, warnings, err := runner.Run(emitCtx)
-		p.serverStarted = started
-		p.warnings = warnings
-		p.err = err
-		failedStep := 0
-		if err != nil {
-			failedStep = lastStep + 1
-		}
+		warnings, err := runner.Run(emitCtx)
 		p.send(ctx, bootstrapProgress{
-			Done:          true,
-			ServerStarted: started,
-			Warnings:      warnings,
-			Fatal:         err,
-			FailedStep:    failedStep,
+			Done:       true,
+			Warnings:   warnings,
+			Fatal:      err,
+			FailedStep: failedStep(err),
 		})
 	}()
+}
+
+// unwind ends the bootstrap's context and waits up to unwindWait for it to
+// return: the picker has quit, as on Ctrl+C from its loading page, and a
+// restore cut short lowers the restoring flag on its way out, which left
+// raised would stand the saver down until the next command. A bootstrap past
+// the bound is left to the process's exit, as a kill leaves one; either way
+// it writes no latch, so the next command finishes its work.
+func (p *bootstrapProgressPipe) unwind() {
+	p.cancel()
+	select {
+	case <-p.done:
+	case <-time.After(p.unwindWait):
+	}
+}
+
+// failedStep is the step err, a bootstrap's fatal, names, zero for any other.
+func failedStep(err error) int {
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
+		return fatal.Step
+	}
+	return 0
 }
 
 // send abandons the event if ctx is cancelled. Without the guard, a restore
@@ -120,6 +133,7 @@ func (p *bootstrapProgressPipe) receiver() tea.Cmd {
 			Index:    ev.Step.Index,
 			RestoreN: ev.RestoreN,
 			RestoreM: ev.RestoreM,
+			Waiting:  ev.Step.Waiting,
 		}
 	}
 }
@@ -138,9 +152,3 @@ func fatalMsgFromEvent(ev bootstrapProgress) tui.BootstrapFatalMsg {
 		Err:        ev.Fatal,
 	}
 }
-
-func (p *bootstrapProgressPipe) ServerStarted() bool { return p.serverStarted }
-
-func (p *bootstrapProgressPipe) Warnings() []bootstrap.Warning { return p.warnings }
-
-func (p *bootstrapProgressPipe) Err() error { return p.err }

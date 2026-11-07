@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // Wide enough that fitSessionDir renders a temp-dir path whole, so an assertion
@@ -20,17 +19,17 @@ func sizeForDirColumn(t *testing.T, m Model) Model {
 	return pressSettled(t, m, tea.WindowSizeMsg{Width: dirColumnTestWidth, Height: 30})
 }
 
-func dirColumnModel(t *testing.T, deps Deps, sessions []tmux.Session, projects []project.Project) Model {
+func dirColumnModel(t *testing.T, deps Deps, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	// The preview dismissal re-lists, so the lister must answer with the same
 	// fixture rather than emptying the picker mid-test.
-	deps.Lister = &stepListerStub{steps: [][]tmux.Session{sessions}}
+	deps.Lister = &stepListerStub{steps: [][]Session{sessions}}
 	deps.ProjectStore = stubProjectStore{}
 	m := ingestLanding(t, Build(deps), sessions, projects)
 	return sizeForDirColumn(t, m)
 }
 
-func searchColumnModel(t *testing.T, mode prefs.SessionListMode, term string, sessions []tmux.Session, projects []project.Project) Model {
+func searchColumnModel(t *testing.T, mode prefs.SessionListMode, term string, sessions []Session, projects []project.Project) Model {
 	t.Helper()
 	return dirColumnModel(t, Deps{InitialMode: mode, Search: &SearchForm{Term: term}}, sessions, projects)
 }
@@ -81,11 +80,11 @@ func assertDirAbsent(t *testing.T, m Model, dir string) {
 	}
 }
 
-func dirColumnFixture(t *testing.T) (dir string, sessions []tmux.Session, projects []project.Project) {
+func dirColumnFixture(t *testing.T) (dir string, sessions []Session, projects []project.Project) {
 	t.Helper()
 	dir = t.TempDir()
 	return dir,
-		[]tmux.Session{{Name: "portal-abc", Windows: 2, Dir: dir}},
+		[]Session{{Name: "portal-abc", Dir: dir}},
 		[]project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
 }
 
@@ -143,8 +142,7 @@ func TestSearchDirColumn(t *testing.T) {
 	t.Run("it keeps the column after a preview and back", func(t *testing.T) {
 		dir, sessions, projects := dirColumnFixture(t)
 		m := searchColumnModel(t, prefs.ModeFlat, "portal", sessions, projects)
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m.history = newPreviewHistory(keymapParityHistory{})
 
 		m = pressSettled(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 		if m.activePage != pagePreview {
@@ -246,12 +244,11 @@ func TestSearchDirColumn(t *testing.T) {
 	t.Run("it shows no directory for a session whose directory is known only to grouping", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Windows: 1, Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := dirColumnModel(t, Deps{
 			InitialMode: prefs.ModeByProject,
 			Search:      &SearchForm{Term: "portal"},
-			DirReader:   &fakeStamper{path: dir},
 			DirRunner:   &fakeDirRunner{gitRoot: dir},
 		}, sessions, projects)
 
@@ -261,29 +258,28 @@ func TestSearchDirColumn(t *testing.T) {
 		assertDirAbsent(t, m, dir)
 	})
 
-	t.Run("it issues no pane read for the column", func(t *testing.T) {
+	t.Run("it resolves no git root for the column", func(t *testing.T) {
 		dir, sessions, projects := dirColumnFixture(t)
-		reader := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := dirColumnModel(t, Deps{
 			InitialMode: prefs.ModeFlat,
 			Search:      &SearchForm{Term: "portal"},
-			DirReader:   reader,
-			DirRunner:   &fakeDirRunner{gitRoot: dir},
+			DirRunner:   runner,
 		}, sessions, projects)
 
 		assertDirRendered(t, m, dir)
 
-		if len(reader.reads) != 0 {
-			t.Errorf("the column must issue no pane read, got reads for %v", reader.reads)
+		if len(runner.reads) != 0 {
+			t.Errorf("the column must resolve no git root, got queries for %v", runner.reads)
 		}
 	})
 
 	t.Run("it keeps every matching row in the list at a width that drops the directory", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
-		sessions := []tmux.Session{
-			{Name: "portal-abc", Windows: 1, Dir: dir},
-			{Name: "portal-xyz", Windows: 2, Dir: dir},
+		sessions := []Session{
+			{Name: "portal-abc", Dir: dir},
+			{Name: "portal-xyz", Dir: dir},
 		}
 		wide := searchColumnModel(t, prefs.ModeFlat, "portal", sessions, projects)
 

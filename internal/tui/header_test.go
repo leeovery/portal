@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestHeaderBlock_RendersWordmarkCaretSubtitleRule(t *testing.T) {
@@ -235,9 +234,9 @@ func TestViewSessionList_ComposesHeaderFirst(t *testing.T) {
 
 func TestHeaderHeight_SubtractedFromListBudget(t *testing.T) {
 	const w, h = 90, 24
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
@@ -260,9 +259,9 @@ func TestHeaderHeight_SubtractedFromListBudget(t *testing.T) {
 
 func TestHeaderHeight_CountedAtEverySizeApplySite(t *testing.T) {
 	const w, h = 90, 20
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 60 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))

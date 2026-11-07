@@ -1,167 +1,1022 @@
+// Package restore brings back the saved sessions the backend no longer holds:
+// all of them once a bootstrap, and one on demand. Each is made again under
+// its own name, running the hydrate helper, which replays the session's saved
+// transcript and hands the session to its resume hook, its resume panel or
+// its shell.
 package restore
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/nanoid"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-// Orchestrator restores every saved session not already live. Per-session
-// failures are logged and isolated, and nothing is written to stderr.
-type Orchestrator struct {
-	Client   *tmux.Client
+// via is the surface restore's writes to the index record.
+const via = "internal"
+
+// Config is what a Restorer works over.
+type Config struct {
+	// Backend lists the live sessions and makes the restored ones.
+	Backend backend.Backend
+	// StateDir holds sessions.json, the sessions' flags and their transcripts.
 	StateDir string
-	Logger   *slog.Logger
-
-	// Progress is optional; m is the saved-session count, and it fires on every
-	// loop iteration, skips included, so a caller's counter always reaches m/m.
-	Progress func(n, m int)
-
-	// Exe is optional; nil resolves through os.Executable.
-	Exe ExecutableResolver
-
-	// MintToken is optional; nil mints through nanoid.NewPaneTokenGenerator.
-	MintToken nanoid.Generator
+	// Exe is the portal binary every restored session runs as its hydrate
+	// helper, as an absolute path. It has no default: under go test the
+	// running binary is the test binary, which a restored session would run as
+	// the whole suite.
+	Exe string
+	// Logger records the run under its caller's component; nil discards.
+	Logger *slog.Logger
 }
 
-// Restore returns (false, nil) on the happy path and after isolating a
-// per-session failure, and (true, err) wrapping state.ErrCorruptIndex when
-// sessions.json exists but is unparseable.
-func (o *Orchestrator) Restore() (bool, error) {
-	idx, skip, err := state.ReadIndex(o.StateDir)
-	if skip {
-		return o.handleReadIndexSkip(err)
+// Result is what a restore did, for its caller to warn of.
+type Result struct {
+	// IndexErr is why sessions.json couldn't be read: it is unreadable,
+	// malformed, a version 1 index or a newer one. Nothing was restored.
+	IndexErr error
+	// ListErr is why the backend's sessions couldn't be listed. Nothing was
+	// restored.
+	ListErr error
+	// Restored counts the sessions made again. Failed counts those that
+	// couldn't be, retries and all, whose entries stay for the next bootstrap
+	// to retry.
+	Restored, Failed int
+	// Unsupported is why restore stopped short: a session it made speaks a
+	// protocol Portal doesn't support, as every session it made next would.
+	// The backend has tried to end that session, the error saying whether it
+	// went. The sessions it was to try again count as failed, and they and
+	// the entries it didn't reach stay for the next bootstrap.
+	Unsupported error
+}
+
+// Restorer restores the saved sessions. It is not safe for concurrent use.
+type Restorer struct {
+	backend  backend.Backend
+	dir      string
+	exe      string
+	logger   *slog.Logger
+	progress func(n, m int)
+	// claimRule, now and wait are state.ClaimRule over the backend's names,
+	// time.Now and a wait on a timer but in tests.
+	claimRule func(dir string) sessionindex.Rule
+	now       func() time.Time
+	wait      func(ctx context.Context, d time.Duration) error
+}
+
+// exeName is the base name of every portal binary, as the daemon's identity
+// requires of one. A binary named otherwise is none a restored session should
+// run: a test binary runs the whole suite, as a debugger's build or a renamed
+// go test -c build may.
+const exeName = "portal"
+
+// RetryBudget bounds, in all, a restore's retries of the sessions its first
+// pass couldn't make for a reason that may pass, as a pty the burst of
+// creates couldn't have: the waits between them, and every retry started
+// within it. A retry started inside it runs to its end.
+const RetryBudget = 15 * time.Second
+
+// Listings is the most times a Restore lists the sessions: before its first
+// session, after its first pass, and once its retries end.
+const Listings = 3
+
+// retryBackoff is the wait before each round of retries, the last repeating.
+var retryBackoff = []time.Duration{time.Second, 3 * time.Second}
+
+// New returns a Restorer over cfg. It refuses a Config with no Backend or no
+// StateDir, and an Exe that is not an absolute path to a binary named portal.
+func New(cfg Config) (*Restorer, error) {
+	switch {
+	case cfg.Backend == nil:
+		return nil, errors.New("restore: no backend to restore sessions in")
+	case cfg.StateDir == "":
+		return nil, errors.New("restore: no state directory to restore sessions from")
+	case !filepath.IsAbs(cfg.Exe):
+		return nil, fmt.Errorf("restore: the hydrate helper's executable must be an absolute path, not %q", cfg.Exe)
+	case filepath.Base(cfg.Exe) != exeName:
+		return nil, fmt.Errorf("restore: the hydrate helper's executable %q is not named %s", cfg.Exe, exeName)
 	}
+	return &Restorer{
+		backend: cfg.Backend, dir: cfg.StateDir, exe: cfg.Exe, logger: log.OrDiscard(cfg.Logger),
+		claimRule: func(dir string) sessionindex.Rule { return state.ClaimRule(dir, cfg.Backend.ValidateName) },
+		now:       time.Now, wait: backend.Pause,
+	}, nil
+}
 
-	if len(idx.Sessions) == 0 {
-		return false, nil
+// SetProgress has Restore report each session it takes up: the nth of the m
+// it restores.
+func (r *Restorer) SetProgress(fn func(n, m int)) { r.progress = fn }
+
+// MarkOwed marks owed, under the commit lock, every saved entry whose session
+// the backend doesn't list, Portal's own aside. A bootstrap that finds no
+// saver running calls it before any saver can commit: the saver's world ended
+// with those sessions, by a logout, every zmx daemon dying or a crash, so no
+// saver saw them end, and each restore brings them back, this boot's
+// included, until the helper of one restore makes finishes, or a claim finds
+// one live with no restore of it unfinished. It fails, marking nothing,
+// when the backend can't be listed or the marks can't be written. An index it
+// can't read holds nothing a saver could drop, so it marks nothing there and
+// leaves the failure for Restore to report.
+func (r *Restorer) MarkOwed(ctx context.Context) error {
+	if _, err := sessionindex.Read(r.dir); err != nil {
+		return nil
 	}
-
-	liveSet, ok := o.snapshotLiveSessions()
-	if !ok {
-		return false, nil
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
 	}
-
-	sr := o.newSessionRestorer()
-
-	start := time.Now()
-	m := len(idx.Sessions)
-	var restoredSessions, restoredWindows, restoredPanes int
-	for i, sess := range idx.Sessions {
-		// Fires before restoreOne so n advances regardless of the outcome.
-		if o.Progress != nil {
-			o.Progress(i+1, m)
+	listed := names(live)
+	_, err = sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
+		for _, e := range idx.Entries() {
+			if owedWithNoSaver(e, listed) {
+				idx.Owe(e.Name)
+			}
 		}
-		if !o.restoreOne(sr, sess, liveSet) {
+		return nil
+	})
+	return err
+}
+
+// owedWithNoSaver reports whether a bootstrap that finds no saver running
+// marks e owed, as MarkOwed does: no session in listed holds its name, and it
+// isn't one of Portal's own.
+func owedWithNoSaver(e sessionindex.Entry, listed map[string]bool) bool {
+	return !listed[e.Name] && !backend.IsPortalOwned(e.Name)
+}
+
+// Restore makes again, in index order, the session of every saved entry no
+// session the backend lists holds under its name, nor a live one under another
+// spelling of it, Portal's own aside, that is owed a restore or may predate
+// this boot. It skips any other entry from this boot, whose session ended
+// while a saver watched and is the saver's to drop; with no boot time to judge
+// by, every entry may predate the boot. A session it couldn't make for a
+// reason that may pass it tries again, within RetryBudget, once every other
+// has had its first try, with any it made whose helper died before finishing,
+// as a listing after the first pass shows. A listing once the retries end
+// counts restored one it couldn't make that runs its helper all the same, and
+// failed one its retries made whose helper died too. A session it can't make
+// keeps its entry for the next bootstrap. It asks the backend nothing
+// when sessions.json can't be read, makes nothing when the backend can't be
+// listed, and makes no further session once ctx ends or the backend refuses
+// one it made as speaking a protocol Portal doesn't support.
+func (r *Restorer) Restore(ctx context.Context) Result {
+	start := time.Now()
+	pass := &run{Restorer: r, raised: map[string]bool{}}
+	pass.restore(ctx)
+	r.logger.Info("restore complete", "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
+	return pass.res
+}
+
+// Brought is what BringBack found of a kept session under the lock.
+type Brought int
+
+const (
+	// BroughtBack is a session made again, its helper replaying its
+	// transcript, as Restore makes one: attach it.
+	BroughtBack Brought = iota + 1
+	// AlreadyLive is a session that holds the name by now, as a bootstrap's
+	// restore made while the caller waited for the lock: attach it.
+	AlreadyLive
+	// NoLongerKept is an entry gone, or no longer one a restore would make
+	// again: the name resolves as if it had never been kept.
+	NoLongerKept
+)
+
+// BringBack makes again the session of the entry named name, as Restore makes
+// each of the sessions it restores, when the entry is still kept as Kept
+// judges it, the index read and the sessions listed afresh. The caller holds
+// bootstrap.lock, so no bootstrap's restore runs meanwhile. It is one try,
+// with no retry: a failure is returned, the entry left kept, as is a refusal
+// of a session made by a zmx Portal can't talk to, wrapping
+// backend.ErrUnsupportedProtocol. sessions.json unread, or the sessions
+// unlisted, is a failure too: it can't judge the entry.
+func (r *Restorer) BringBack(ctx context.Context, name string) (Brought, error) {
+	start := time.Now()
+	pass := &run{Restorer: r, raised: map[string]bool{}}
+	brought, err := pass.bringBack(ctx, name)
+	r.logger.Info("restore complete", "session", name, "restored", pass.res.Restored, "failed", pass.res.Failed, "anomalous", pass.anomalous, log.Took(start))
+	return brought, err
+}
+
+func (r *run) bringBack(ctx context.Context, name string) (Brought, error) {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		r.logger.Warn("sessions.json unreadable", "error", err)
+		return 0, err
+	}
+	e, ok := idx.Lookup(name)
+	if !ok {
+		r.logger.Debug("session skipped", "session", name, "reason", "its entry is gone")
+		return NoLongerKept, nil
+	}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		r.logger.Warn("list sessions failed", "error", err)
+		return 0, fmt.Errorf("list sessions: %w", err)
+	}
+	r.listing = r.judging(live)
+	if why := r.listing.notKept(ctx, e); why != "" {
+		r.logger.Debug("session skipped", "session", name, "reason", why)
+		if r.listing.listed[name] {
+			return AlreadyLive, nil
+		}
+		return NoLongerKept, nil
+	}
+	if err := r.restoreOne(ctx, e); err != nil {
+		r.res.Failed++
+		r.warn("restore session failed", name, "error", err)
+		return 0, err
+	}
+	return BroughtBack, nil
+}
+
+// run is one Restore: what it did, how many warnings its sessions drew, the
+// sessions whose hydrating flag it raised, its rule over the sessions it
+// listed, which reads each lookup it makes, and the sessions it made.
+type run struct {
+	*Restorer
+	res       Result
+	anomalous int
+	raised    map[string]bool
+	listing   judging
+	made      []made
+}
+
+// made is a session a run made: the entry it read, and the session as it
+// recorded it.
+type made struct {
+	read sessionindex.Entry
+	live backend.Session
+}
+
+// recordedIn reports whether e still records the creation restore recorded
+// of m: the session's, or, for one that reported none, the one restore read.
+func (m made) recordedIn(e sessionindex.Entry) bool {
+	if m.live.Created.IsZero() {
+		return e.RecordsCreationOf(m.read)
+	}
+	return e.SameCreation(m.live.Created, m.live.PID)
+}
+
+// retried is the detail of a failure a retry may clear. It says only that
+// restore may try again: a context ending, or a later session refused as
+// unsupported, stops it before its retries.
+const retried = "may be tried again within this bootstrap"
+
+func (r *run) restore(ctx context.Context) {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		r.logger.Warn("sessions.json unreadable", "error", err)
+		r.res.IndexErr = err
+		return
+	}
+	if idx.Len() == 0 {
+		return
+	}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		r.logger.Warn("list sessions failed", "error", err)
+		r.res.ListErr = err
+		return
+	}
+	r.listing = r.judging(live)
+	due := r.due(ctx, idx.Entries())
+	var again []sessionindex.Entry
+	for i, e := range due {
+		if ctx.Err() != nil {
+			r.cancelled(ctx, fmt.Sprintf("%d of %d sessions left for the next bootstrap", len(due)-i, len(due)))
+			r.res.Failed += len(again)
+			return
+		}
+		if r.progress != nil {
+			r.progress(i+1, len(due))
+		}
+		if r.firstTry(ctx, e) {
+			again = append(again, e)
+		}
+		if r.res.Unsupported != nil {
+			break
+		}
+	}
+	again = append(again, r.helpersDied(ctx)...)
+	firstPass := len(r.made)
+	left := r.retry(ctx, again)
+	r.res.Failed += r.lastListing(ctx, left, r.made[firstPass:])
+}
+
+// errHelperDied is a session restore made that ended before its helper
+// finished restoring it.
+var errHelperDied = errors.New("its session ended before its helper finished restoring it")
+
+// helpersDied is the sessions the first pass made whose helpers died, as a
+// listing taken after it shows, each returned as its entry now reads, to be
+// tried again.
+func (r *run) helpersDied(ctx context.Context) []sessionindex.Entry {
+	if len(r.made) == 0 {
+		return nil
+	}
+	const unchecked = "the sessions restore made are left unchecked"
+	live, ok := r.relisted(ctx, unchecked)
+	if !ok {
+		return nil
+	}
+	return r.died(live, r.made, unchecked, retried)
+}
+
+// leftOwed is the detail of a session whose helper died that no retry is left
+// to make again.
+const leftOwed = "left owed for the next bootstrap"
+
+// lastListing is how many sessions fail, judged once the retries end by one
+// listing taken then. Of left, the sessions restore couldn't make, each fails
+// unless the listing finds it running restore's helper, which counts
+// restored: a Create that timed out under load, its every lookup timing out
+// too, may have made it all the same. Of remade, the sessions the retries
+// made, each whose helper died too fails, its entry left owed. It lists
+// nothing when there is neither.
+func (r *run) lastListing(ctx context.Context, left []sessionindex.Entry, remade []made) int {
+	if len(left) == 0 && len(remade) == 0 {
+		return 0
+	}
+	live, ok := r.relisted(ctx, "the sessions restore couldn't make are counted failed, and those its retries made restored, unchecked")
+	if !ok {
+		return len(left)
+	}
+	failed := len(r.died(live, remade, "the sessions restore's retries made are counted restored unchecked", leftOwed))
+	for _, e := range left {
+		if s, ok := live[e.Name]; ok && r.RunsHelper(s) {
+			r.restored(e, s, startDir(e))
 			continue
 		}
-		restoredSessions++
-		restoredWindows += len(sess.Windows)
-		for _, w := range sess.Windows {
-			restoredPanes += len(w.Panes)
-		}
+		failed++
 	}
-	o.recordMintedTokens(sr)
-	o.logger().Info("skeleton complete",
-		"sessions", restoredSessions,
-		"windows", restoredWindows,
-		"panes", restoredPanes,
-		log.Took(start),
-	)
-	return false, nil
+	return failed
 }
 
-// recordMintedTokens ties each token restore minted to its saved record before
-// any commit can run, so the first commit after restore finds every restored
-// pane's record by its token wherever restore placed the pane. A failure leaves
-// those panes judged at their live addresses; it does not undo the restore.
-func (o *Orchestrator) recordMintedTokens(sr *SessionRestorer) {
-	if err := state.RecordRestoredPaneTokens(o.StateDir, sr.minted); err != nil {
-		o.logger().Warn("record restored pane tokens failed", "error", err)
-	}
-}
-
-func (o *Orchestrator) newSessionRestorer() *SessionRestorer {
-	return &SessionRestorer{
-		Client:    o.Client,
-		StateDir:  o.StateDir,
-		Logger:    o.Logger,
-		Exe:       o.Exe,
-		MintToken: o.MintToken,
-	}
-}
-
-// The final branch is defensive: ReadIndex is contracted to wrap every non-nil
-// error with ErrCorruptIndex.
-func (o *Orchestrator) handleReadIndexSkip(err error) (bool, error) {
-	if err == nil {
-		return false, nil
-	}
-	o.logger().Warn("ReadIndex failed", "error", err)
-	if errors.Is(err, state.ErrCorruptIndex) {
-		return true, fmt.Errorf("restore: %w", err)
-	}
-	return false, nil
-}
-
-func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
-	names, err := o.Client.ListSessionNames()
+// died is those of sessions, made by this run, that live no longer holds,
+// whose restores never finished: each entry still owed, recording the
+// creation restore made. A helper that dies before its claim, on a panic or
+// an exec that fails, ends its session at once. Each is warned of, detail
+// saying what follows, counted restored no more, and returned as its entry
+// now reads. With sessions.json unreadable, it warns so, unchecked saying
+// what that leaves, and returns none.
+func (r *run) died(live map[string]backend.Session, sessions []made, unchecked, detail string) []sessionindex.Entry {
+	idx, err := sessionindex.Read(r.dir)
 	if err != nil {
-		o.logger().Warn("list-sessions failed", "error", err)
+		r.logger.Warn("sessions.json unreadable", "detail", unchecked, "error", err)
+		return nil
+	}
+	var died []sessionindex.Entry
+	for _, m := range sessions {
+		latest, ok := idx.Lookup(m.read.Name)
+		if _, listed := live[m.read.Name]; listed || !ok || !latest.Owed || !m.recordedIn(latest) {
+			continue
+		}
+		r.res.Restored--
+		r.warn("restore session failed", latest.Name, "error", errHelperDied, "detail", detail)
+		died = append(died, latest)
+	}
+	return died
+}
+
+// relisted is the sessions the backend lists now, by name, and whether it
+// could list them, which a context already ended never asks. A listing that
+// fails is warned of, detail saying what it leaves unchecked.
+func (r *run) relisted(ctx context.Context, detail string) (map[string]backend.Session, bool) {
+	if ctx.Err() != nil {
 		return nil, false
 	}
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		set[n] = struct{}{}
+	live, err := r.backend.List(ctx)
+	if err != nil {
+		r.logger.Warn("list sessions failed", "detail", detail, "error", err)
+		return nil, false
 	}
-	return set, true
+	byName := make(map[string]backend.Session, len(live))
+	for _, s := range live {
+		byName[s.Name] = s
+	}
+	return byName, true
 }
 
-// restoreOne reports true only when the session was actually skeleton-restored.
-func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) bool {
-	if strings.HasPrefix(sess.Name, "_") {
-		o.logger().Warn("skipping underscore-prefixed session", "session", sess.Name)
+// firstTry restores e, logging a failure, and reports whether it failed for a
+// reason a retry may clear.
+func (r *run) firstTry(ctx context.Context, e sessionindex.Entry) bool {
+	err := r.restoreOne(ctx, e)
+	switch {
+	case err == nil:
+		return false
+	case isForGood(err):
+		r.res.Failed++
+		r.warn("restore session failed", e.Name, "error", err)
 		return false
 	}
-
-	if _, alive := liveSet[sess.Name]; alive {
-		return false
-	}
-
-	if !o.validateTopology(sess) {
-		return false
-	}
-
-	livePanes, err := sr.Restore(sess)
-	if err != nil {
-		o.logger().Warn("restore session failed", "session", sess.Name, "error", err)
-		return false
-	}
-
-	sr.ApplyWindowGeometry(sess, livePanes)
-	sr.ApplySkeletonMarkers(sess, livePanes)
+	r.warn("restore session failed", e.Name, "error", err, "detail", retried)
 	return true
 }
 
-func (o *Orchestrator) validateTopology(sess state.Session) bool {
-	if len(sess.Windows) == 0 {
-		o.logger().Warn("session has zero windows; skipping", "session", sess.Name)
-		return false
-	}
-	for _, w := range sess.Windows {
-		if len(w.Panes) == 0 {
-			// No attr key exists for the offending window index, and a message
-			// must not interpolate values, so only the session is named.
-			o.logger().Warn("session window has zero panes; skipping session", "session", sess.Name)
-			return false
+// retry tries the sessions left again, in rounds retryBackoff apart, starting
+// a round only while RetryBudget, counted from the first pass's end, has room
+// for its wait, and a session's try only while it lasts. It returns those
+// still unmade but for good, which retryRound counts. It stops once ctx ends,
+// saying so when it leaves sessions unrestored, and tries nothing once the
+// backend has refused a session as unsupported, the first pass's or its own.
+func (r *run) retry(ctx context.Context, left []sessionindex.Entry) []sessionindex.Entry {
+	deadline := r.now().Add(RetryBudget)
+	for round := 0; len(left) > 0 && r.res.Unsupported == nil; round++ {
+		backoff := retryBackoff[min(round, len(retryBackoff)-1)]
+		if !r.now().Add(backoff).Before(deadline) {
+			break
+		}
+		if r.wait(ctx, backoff) == nil {
+			left = r.retryRound(ctx, left, deadline)
+		}
+		if ctx.Err() != nil && len(left) > 0 {
+			r.cancelled(ctx, fmt.Sprintf("%d sessions it was trying again left for the next bootstrap", len(left)))
+			break
 		}
 	}
-	return true
+	return left
+}
+
+// retryRound tries each session left once more, and returns those that failed
+// again for a reason a retry may clear, with those it had no time or context
+// left to try, or that a refusal as unsupported stopped it reaching. One
+// failing for good is counted failed here.
+func (r *run) retryRound(ctx context.Context, left []sessionindex.Entry, deadline time.Time) []sessionindex.Entry {
+	var still []sessionindex.Entry
+	for i, e := range left {
+		if ctx.Err() != nil || !r.now().Before(deadline) || r.res.Unsupported != nil {
+			return append(still, left[i:]...)
+		}
+		err := r.tryAgain(ctx, e)
+		switch {
+		case err == nil:
+			continue
+		case isForGood(err):
+			r.res.Failed++
+		default:
+			still = append(still, e)
+		}
+		r.logger.Debug("restore retry failed", "session", e.Name, "error", err)
+	}
+	return still
+}
+
+// errUnsettled is why a retry's lookup couldn't settle a session an earlier
+// try may have made.
+var errUnsettled = errors.New("an earlier try left it unsettled")
+
+// tryAgain tries e once more, and returns nil once e needs no more tries. It
+// raises e's flag only once its lookup has found the name free: an earlier
+// try may have made the session after all, whose helper may have lowered the
+// flag already, and raised again it would keep the saver off that session for
+// good. A name found free is made again only while its entry is still due and
+// records the creation restore read: one a helper has claimed since, or the
+// user's end dropped, is restore's no more. A session running restore's
+// helper is restored as it stands, and another holding the name fails for
+// good. One that can't be looked up is left for the next round, nothing
+// raised and nothing made.
+func (r *run) tryAgain(ctx context.Context, e sessionindex.Entry) error {
+	live, err := r.listing.session(ctx, e.Name)
+	if !errors.Is(err, backend.ErrNoSuchSession) || heldAs(err) {
+		if live, err = r.judge(e.Name, live, err, errUnsettled); err == nil {
+			r.restored(e, live, startDir(e))
+		}
+		return err
+	}
+	why, err := r.noLongerDue(e)
+	switch {
+	case err != nil:
+		return err
+	case why != "":
+		r.logger.Debug("session skipped", "session", e.Name, "reason", why)
+		return nil
+	}
+	return r.restoreOne(ctx, e)
+}
+
+// noLongerDue says why e, read before restore's first pass, is restore's no
+// more as sessions.json holds it now, and is empty while it is still due and
+// records the creation restore read.
+func (r *run) noLongerDue(e sessionindex.Entry) (string, error) {
+	idx, err := sessionindex.Read(r.dir)
+	if err != nil {
+		return "", fmt.Errorf("read sessions.json again: %w", err)
+	}
+	latest, ok := idx.Lookup(e.Name)
+	switch {
+	case !ok:
+		return "its entry is gone", nil
+	case !latest.RecordsCreationOf(e):
+		return "its entry records another creation", nil
+	}
+	return skipped(latest, nil, r.claimRule(r.dir)), nil
+}
+
+func (r *run) cancelled(ctx context.Context, detail string) {
+	r.logger.Warn("restore cancelled", "detail", detail, "error", context.Cause(ctx))
+}
+
+// due is the entries to restore.
+func (r *run) due(ctx context.Context, entries []sessionindex.Entry) []sessionindex.Entry {
+	var due []sessionindex.Entry
+	for _, e := range entries {
+		if why := r.listing.skips(ctx, e); why != "" {
+			r.logger.Debug("session skipped", "session", e.Name, "reason", why)
+			continue
+		}
+		due = append(due, e)
+	}
+	return due
+}
+
+// judging is restore's rule over the sessions live lists.
+func (r *Restorer) judging(live []backend.Session) judging {
+	return judging{listed: names(live), rule: r.claimRule(r.dir), names: r.backend}
+}
+
+// names is the set of the sessions' names.
+func names(sessions []backend.Session) map[string]bool {
+	set := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		set[s.Name] = true
+	}
+	return set
+}
+
+// skipped says why the entry's session is not restored, and is empty when it
+// is: its session is listed, answering or not, it is one of Portal's own, or
+// it is owed no restore and can't predate this boot, as rule judges it.
+func skipped(e sessionindex.Entry, listed map[string]bool, rule sessionindex.Rule) string {
+	switch {
+	case listed[e.Name]:
+		return "it is live"
+	case backend.IsPortalOwned(e.Name):
+		return "it is one of Portal's own"
+	case !e.Owed && !rule.MayPredateBoot(e):
+		return "it ended this boot"
+	}
+	return ""
+}
+
+// refusedName is why restore never tries an entry under a name the backend's
+// Create refuses.
+const refusedName = "its name is one the backend can never create"
+
+// unmakeable is restoreOne's refusal of an entry whose name the backend's
+// Create, validName, refuses: a failure no retry can clear, never tried.
+func unmakeable(e sessionindex.Entry, validName func(name string) error) error {
+	if err := validName(e.Name); err != nil {
+		return forGood(fmt.Errorf("%s: %w", refusedName, err))
+	}
+	return nil
+}
+
+// Names is the backend as restore asks it about a saved session's name:
+// whether its Create accepts the name, and the live session holding it, a
+// *backend.HeldAsError when one holds it only under another spelling.
+type Names interface {
+	ValidateName(name string) error
+	Session(ctx context.Context, name string) (backend.Session, error)
+}
+
+// judging is restore's one rule over a listing of the live sessions: which
+// saved entries it makes again.
+type judging struct {
+	listed map[string]bool
+	rule   sessionindex.Rule
+	names  Names
+}
+
+// heldElsewhere is why restore skips an entry whose name a live session holds
+// only under another spelling, as a folding filesystem holds foo's socket as
+// Foo's: Create refuses the name while that session lives.
+const heldElsewhere = "another spelling of its name is live"
+
+// skips says why restore skips the entry now, and is empty when it doesn't:
+// why skipped says, or a session the listing holds having its name under
+// another spelling. Such an entry stays as it is, made again once that
+// session ends.
+func (j judging) skips(ctx context.Context, e sessionindex.Entry) string {
+	if why := skipped(e, j.listed, j.rule); why != "" {
+		return why
+	}
+	if j.heldElsewhere(ctx, e.Name) {
+		return heldElsewhere
+	}
+	return ""
+}
+
+// heldElsewhere reports whether a live session holds name under another
+// spelling, as the backend finds it. Only a name the listing holds under
+// another case is asked about. A pair the filesystem folds that case-folding
+// doesn't is tried, and fails as held.
+func (j judging) heldElsewhere(ctx context.Context, name string) bool {
+	if !j.listsAnotherCase(name) {
+		return false
+	}
+	_, err := j.session(ctx, name)
+	return heldAs(err)
+}
+
+// session is the live session holding name, as the backend's Session finds
+// it, its answer settled.
+func (j judging) session(ctx context.Context, name string) (backend.Session, error) {
+	live, err := j.names.Session(ctx, name)
+	return live, j.settled(ctx, err)
+}
+
+// settled is err, a lookup's answer, read by restore's one rule of a name held
+// under another spelling: that spelling holds the name only while it is live,
+// as the listing holds it or answering now. Any other such answer, a stale
+// socket's, which Create replaces, is no session, a failure that may pass.
+func (j judging) settled(ctx context.Context, err error) error {
+	held, ok := errors.AsType[*backend.HeldAsError](err)
+	if !ok || j.listed[held.Held] {
+		return err
+	}
+	if _, answer := j.names.Session(ctx, held.Held); answer == nil {
+		return err
+	}
+	return fmt.Errorf("held as %q, which isn't live: %w", held.Held, backend.ErrNoSuchSession)
+}
+
+// listsAnotherCase reports whether the listing holds name under another case.
+func (j judging) listsAnotherCase(name string) bool {
+	for listed := range j.listed {
+		if listed != name && strings.EqualFold(listed, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// notKept says why the entry isn't kept, and is empty when it is: kept is an
+// entry a restore would make again now, one skips passes under a name
+// unmakeable passes. Restore counts a due entry under a name Create refuses
+// as failed, so such an entry is due but not kept.
+func (j judging) notKept(ctx context.Context, e sessionindex.Entry) string {
+	if why := j.skips(ctx, e); why != "" {
+		return why
+	}
+	if unmakeable(e, j.names.ValidateName) != nil {
+		return refusedName
+	}
+	return ""
+}
+
+// Keeping is what Kept judges the saved entries by, besides the live
+// sessions.
+type Keeping struct {
+	// Rule is the claim rule, judging which entries may predate this boot.
+	Rule sessionindex.Rule
+	// Names is the backend.
+	Names Names
+	// NoSaver judges as the next bootstrap does when it finds no saver
+	// running: every entry it marks owed counts as owed.
+	NoSaver bool
+}
+
+// Kept is the entries, in their order, a restore would make again now: a
+// saved session no session in live holds under its name, nor a live one under
+// another spelling of it, not one of Portal's own, owed a restore or one the
+// rule judges may predate this boot, under a name the backend's Create
+// accepts. x <name> brings back such a session on demand, and doctor names
+// them.
+func Kept(ctx context.Context, entries []sessionindex.Entry, live []backend.Session, k Keeping) []sessionindex.Entry {
+	j := judging{listed: names(live), rule: k.Rule, names: k.Names}
+	var kept []sessionindex.Entry
+	for _, e := range entries {
+		judged := e
+		if k.NoSaver && owedWithNoSaver(e, j.listed) {
+			judged.Owed = true
+		}
+		if j.notKept(ctx, judged) == "" {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+// restoreOne makes the entry's session again, and says why it couldn't,
+// marked forGood when no retry can help. A name Create refuses is never
+// tried. The session's hydrating flag goes up first, keeping the saver off it
+// until the helper has replayed its transcript, and a session whose flag can't
+// be looked for or raised is not made.
+func (r *run) restoreOne(ctx context.Context, e sessionindex.Entry) error {
+	if err := unmakeable(e, r.backend.ValidateName); err != nil {
+		return err
+	}
+	if err := r.raise(e.Name); err != nil {
+		return fmt.Errorf("raise its hydrating flag: %w", err)
+	}
+	dir, argv := startDir(e), r.command(e)
+	s, err := r.backend.Create(ctx, e.Name, dir, argv)
+	switch {
+	case errors.Is(err, backend.ErrUnsupportedProtocol):
+		return r.unsupported(e.Name, err)
+	case err != nil:
+		s, err = r.madeAnyway(ctx, e.Name, err)
+	case s.Created.IsZero():
+		s, err = r.unconfirmed(ctx, e.Name)
+	}
+	if err != nil {
+		return err
+	}
+	r.restored(e, s, dir)
+	return nil
+}
+
+// raise raises the session's hydrating flag, remembered as this run's unless
+// it was up already: one raised before the run is another restore's.
+func (r *run) raise(name string) error {
+	up, err := state.Hydrating.Exists(r.dir, name)
+	if err != nil || up {
+		return err
+	}
+	if err := state.Hydrating.Set(r.dir, name); err != nil {
+		return err
+	}
+	r.raised[name] = true
+	return nil
+}
+
+// madeAnyway looks up the session a Create that failed may have made all the
+// same, as one that timed out waiting for it to answer has, and judges it.
+func (r *run) madeAnyway(ctx context.Context, name string, createErr error) (backend.Session, error) {
+	live, err := r.holder(context.WithoutCancel(ctx), name)
+	return r.judge(name, live, err, createErr)
+}
+
+// errUnconfirmed is a Create that said it made its session but read no
+// creation of it.
+var errUnconfirmed = errors.New("zmx reported the session made, but it never answered")
+
+// unconfirmed looks up again the session a Create reported made but read no
+// creation of, and judges it. zmx reports a session made before its daemon
+// has the session's pty, so one that couldn't have it was never made.
+func (r *run) unconfirmed(ctx context.Context, name string) (backend.Session, error) {
+	live, err := backend.AskAgain(ctx, r.backend, name, r.wait)
+	return r.judge(name, live, r.listing.settled(context.WithoutCancel(ctx), err), errUnconfirmed)
+}
+
+// judge settles a session a Create may have made, by the session the lookup
+// found holding its name, live, or the error it gave, settled, cause saying
+// why the Create alone couldn't. A session running restore's helper for the
+// name is restored, its flag the helper's to lower. Any other session holding
+// the name, under it or under another spelling, is not restore's, so that is
+// a failure for good, and its flag comes down whoever raised it: left up, it
+// would keep the saver off that session for good. With no session under the
+// name the failure may pass, and only a flag this run raised comes down. A
+// session that can't be looked up may be the helper's, so its flag stays.
+func (r *run) judge(name string, live backend.Session, err, cause error) (backend.Session, error) {
+	switch {
+	case err == nil && r.RunsHelper(live):
+		return live, nil
+	case err == nil:
+		r.lowerHydrating(name)
+		return backend.Session{}, forGood(fmt.Errorf("%w; the session holding its name runs %q, not restore's helper", cause, live.Command))
+	case heldAs(err):
+		r.lowerHydrating(name)
+		return backend.Session{}, forGood(fmt.Errorf("%w; %w", cause, err))
+	case errors.Is(err, backend.ErrNoSuchSession):
+		if r.raised[name] {
+			r.lowerHydrating(name)
+		}
+		return backend.Session{}, cause
+	}
+	return backend.Session{}, fmt.Errorf("%w; can't tell whether it was made: %w", cause, err)
+}
+
+// unsupported stops the run on a Create the backend refused because the
+// session it made speaks a protocol Portal doesn't support: every Create
+// after it would make another. It is a failure for good, never looked up
+// again: a retry would remake the name, or restore a session the backend
+// couldn't end. Only a flag this run raised comes down, as for a session that
+// isn't there.
+func (r *run) unsupported(name string, err error) error {
+	if r.raised[name] {
+		r.lowerHydrating(name)
+	}
+	r.res.Unsupported = err
+	return forGood(err)
+}
+
+// holder is the session holding the name, asked for a second time a probe's
+// ceiling after a first answer of none: a Create cut short once zmx has forked
+// the session's daemon, before its socket listens, leaves a session that
+// answers to no one yet.
+func (r *run) holder(ctx context.Context, name string) (backend.Session, error) {
+	live, err := r.listing.session(ctx, name)
+	if errors.Is(err, backend.ErrNoSuchSession) && !heldAs(err) {
+		_ = r.wait(ctx, backend.RecheckAfter)
+		live, err = r.listing.session(ctx, name)
+	}
+	return live, err
+}
+
+// forGoodError marks a failure no retry within the bootstrap can clear: a name
+// Create refuses, one another session holds, or a session of a protocol Portal
+// doesn't support.
+type forGoodError struct{ error }
+
+func (e forGoodError) Unwrap() error { return e.error }
+
+func forGood(err error) error { return forGoodError{err} }
+
+func isForGood(err error) bool {
+	_, ok := errors.AsType[forGoodError](err)
+	return ok
+}
+
+// heldAs reports whether err, a lookup's answer as settled reads it, is that a
+// live session holds the name only under another spelling.
+func heldAs(err error) bool {
+	_, ok := errors.AsType[*backend.HeldAsError](err)
+	return ok
+}
+
+// restored records the session's creation as the entry's own, under the
+// commit lock every writer of the index holds, still owed a restore until its
+// helper finishes. A session reporting no creation records none: the hydrate
+// helper's claim records it.
+func (r *run) restored(e sessionindex.Entry, s backend.Session, dir string) {
+	r.res.Restored++
+	r.made = append(r.made, made{read: e, live: s})
+	if _, err := sessionindex.Update(r.dir, via, func(idx *sessionindex.Index) error {
+		idx.Restored(e, s.Created, s.PID)
+		return nil
+	}); err != nil {
+		r.warn("record session creation failed", e.Name, "error", err)
+	}
+	r.logger.Debug("session restored", "session", e.Name, "path", dir)
+}
+
+func (r *run) lowerHydrating(name string) {
+	if _, err := state.Hydrating.Clear(r.dir, name); err != nil {
+		r.warn("clear hydrating flag failed", name, "error", err)
+	}
+}
+
+// warn logs a warning about the named session, which the run's summary
+// counts as anomalous.
+func (r *run) warn(msg, name string, attrs ...any) {
+	r.anomalous++
+	r.logger.Warn(msg, append([]any{"session", name}, attrs...)...)
+}
+
+// command is the hydrate helper's argv for the entry's session, resuming it
+// lazily when the entry asks it to, and naming its transcript only when it
+// has one to replay.
+func (r *run) command(e sessionindex.Entry) []string {
+	argv := r.helper(e.Name)
+	if e.ResumeLazy {
+		argv = append(argv, lazyFlag)
+	}
+	if file, ok := r.transcript(e); ok {
+		argv = append(argv, fileFlag, file)
+	}
+	return argv
+}
+
+const (
+	// lazyFlag has the hydrate helper resume its session lazily, whatever
+	// mode its hook registers.
+	lazyFlag = "--lazy"
+	// fileFlag names the transcript the hydrate helper replays.
+	fileFlag = "--file"
+)
+
+// trailingFlags are the flags that may follow the helper's argv, each the
+// first of what follows when present: lazyFlag comes before fileFlag.
+var trailingFlags = []string{lazyFlag, fileFlag}
+
+// helper is the hydrate helper's argv for the named session, before the
+// transcript it may name.
+func (r *Restorer) helper(name string) []string {
+	return helperAt(r.exe, name)
+}
+
+// helperAt is the hydrate helper's argv for the named session run by the
+// portal at exe, before the transcript it may name.
+func helperAt(exe, name string) []string {
+	return []string{exe, "state", "hydrate", "--session", name}
+}
+
+// RunsHelper reports whether s was made running the hydrate helper restore
+// gives every session it restores, for s's own name, with a transcript or
+// without: such a session's hydrating flag is its helper's to lower, never
+// restore's or a sweep's. Any binary named portal counts, wherever it is: a
+// session restored by one at another path, a dev build or another install,
+// keeps its flag under this one. The path is read from s's command as
+// reported, as the words before one of its spaces, and counts only when the
+// helper run from it would be reported as s's command is: so the words
+// `env X=1 /x/portal`, which that path's own argument would show quoted, name
+// no portal. zmx reports a session's command as it was made, so a helper that
+// has handed the session to its shell still counts.
+func (r *Restorer) RunsHelper(s backend.Session) bool {
+	for end := 0; end <= len(s.Command); end++ {
+		if end < len(s.Command) && s.Command[end] != ' ' {
+			continue
+		}
+		if path, ok := portalPath(s.Command[:end]); ok && r.showsHelper(s.Command, helperAt(path, s.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// portalPath is the path word, one argument as the backend shows it, names,
+// quoted or not, and whether that path is a binary named portal.
+func portalPath(word string) (string, bool) {
+	path := word
+	if quoted, ok := strings.CutPrefix(word, "'"); ok {
+		path = strings.ReplaceAll(strings.TrimSuffix(quoted, "'"), `'\''`, "'")
+	}
+	return path, filepath.Base(path) == exeName
+}
+
+// showsHelper reports whether shown is the command the backend reports of a
+// session made running argv, a hydrate helper, followed by its trailing
+// flags or not. zmx cuts the command it reports before the first argument
+// that would take it past 256 bytes, marking the cut with "..." where that
+// fits: a cut within argv shows as argv alone does, flags or not, and one
+// after it shows argv whole, then what fits of the flags, or the mark alone
+// when even the first of them doesn't.
+func (r *Restorer) showsHelper(shown string, argv []string) bool {
+	alone := r.backend.DisplayCommand(argv)
+	switch {
+	case shown == alone:
+		return true
+	case alone != r.uncut(argv):
+		return false
+	case strings.HasPrefix(shown, alone+" "):
+		return true
+	}
+	return slices.ContainsFunc(trailingFlags, func(first string) bool {
+		return shown == r.backend.DisplayCommand(slices.Concat(argv, []string{first}))
+	})
+}
+
+// uncut is argv as the backend shows each of its arguments, joined by
+// spaces, however long that is.
+func (r *Restorer) uncut(argv []string) string {
+	words := make([]string, len(argv))
+	for i, arg := range argv {
+		words[i] = r.backend.DisplayCommand([]string{arg})
+	}
+	return strings.Join(words, " ")
+}
+
+// transcript is the file holding the entry's saved transcript, and whether
+// the helper should replay it: it exists, or can't be looked for, a failure
+// the helper records when it opens it. A file the entry names that is no
+// transcript of its session is never read.
+func (r *run) transcript(e sessionindex.Entry) (string, bool) {
+	if e.ScrollbackFile == "" {
+		return "", false
+	}
+	path, err := state.ScrollbackPath(r.dir, e)
+	if err != nil {
+		r.warn("scrollback file refused", e.Name, "path", e.ScrollbackFile, "error", err)
+		return "", false
+	}
+	_, err = os.Stat(path)
+	return path, !errors.Is(err, fs.ErrNotExist)
+}
+
+// startDir is where the entry's session starts: its last working directory,
+// else the one Portal made it in, else HOME, each only while it is a directory
+// the session can start in, else the root.
+func startDir(e sessionindex.Entry) string {
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{e.Cwd, e.Dir, home} {
+		if enterable(dir) {
+			return dir
+		}
+	}
+	return "/"
+}
+
+// enterable reports whether dir is an absolute path to a directory this
+// process may search.
+func enterable(dir string) bool {
+	if !filepath.IsAbs(dir) {
+		return false
+	}
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir() && unix.Access(dir, unix.X_OK) == nil
 }

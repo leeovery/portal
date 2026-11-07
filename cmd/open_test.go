@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"image/color"
 	"log/slog"
 	"maps"
@@ -15,14 +14,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/commandertest"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/spawn"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -72,9 +69,7 @@ func (t *testSessionLister) ListSessionNames() ([]string, error) {
 }
 
 func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(stubTmuxCommander())})
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	resetRootCmd()
 	buf := new(bytes.Buffer)
@@ -94,9 +89,7 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 }
 
 func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
-	// The session-domain pre-check reads the tmux client from context before
-	// path resolution runs.
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}, Client: tmux.NewClient(stubTmuxCommander())})
+	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "file.txt")
@@ -213,7 +206,7 @@ func TestOpenCommand_SessionNameHit_RoutesToSessionConnector(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -258,7 +251,7 @@ func TestOpenCommand_SessionPin_ExactHit_RoutesToConnector(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -431,7 +424,7 @@ func TestOpenCommand_SessionPin_Miss_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -514,7 +507,7 @@ func TestOpenCommand_PathPin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -582,7 +575,7 @@ func TestOpenCommand_PathPin_Miss_HardFailsNoPicker(t *testing.T) {
 	missDir := filepath.Join(t.TempDir(), "does-not-exist")
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -702,7 +695,7 @@ func TestOpenCommand_AliasPin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -735,7 +728,7 @@ func TestOpenCommand_AliasPin_UnknownKey_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -855,7 +848,7 @@ func TestOpenCommand_ZoxidePin_Mints_NoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -888,7 +881,7 @@ func TestOpenCommand_ZoxidePin_NotInstalled_ErrorsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -928,7 +921,7 @@ func TestOpenCommand_ZoxidePin_NoMatch_HardFailsNoPicker(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1021,341 +1014,6 @@ func TestOpenCommand_ZoxidePin_EmitsNoResolveLine(t *testing.T) {
 	if recs := sink.Records().Matching("resolve", "resolved"); len(recs) != 0 {
 		t.Fatalf("expected no resolve records for a -z pin, got %d", len(recs))
 	}
-}
-
-func TestOpenSession_DelegatesToBuildSessionConnector(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/fake-socket,1,0")
-
-	cmder := commandertest.Quiet()
-	client := tmux.NewClient(cmder)
-	cmd := cmdWithClient(client)
-
-	if err := openSession(cmd, "api-x7Kd9a"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	wantCall := []string{"switch-client", "-t", "=api-x7Kd9a:"}
-	found := false
-	for _, c := range cmder.Calls() {
-		if slices.Equal(c, wantCall) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected switch-client call %v, got calls %v", wantCall, cmder.Calls())
-	}
-}
-
-type mockSwitchClient struct {
-	switchedTo string
-	err        error
-}
-
-func (m *mockSwitchClient) SwitchClient(name string) error {
-	m.switchedTo = name
-	return m.err
-}
-
-func TestSwitchConnector(t *testing.T) {
-	t.Run("calls SwitchClient with session name", func(t *testing.T) {
-		mock := &mockSwitchClient{}
-		connector := &SwitchConnector{client: mock}
-
-		err := connector.Connect("my-session")
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if mock.switchedTo != "my-session" {
-			t.Errorf("SwitchClient called with %q, want %q", mock.switchedTo, "my-session")
-		}
-	})
-
-	t.Run("returns error when SwitchClient fails", func(t *testing.T) {
-		mock := &mockSwitchClient{err: fmt.Errorf("session not found")}
-		connector := &SwitchConnector{client: mock}
-
-		err := connector.Connect("nonexistent")
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-}
-
-type mockSessionCreator struct {
-	createdDir     string
-	createdCommand []string
-	sessionName    string
-	err            error
-}
-
-func (m *mockSessionCreator) CreateFromDir(dir string, command []string) (string, error) {
-	m.createdDir = dir
-	m.createdCommand = command
-	return m.sessionName, m.err
-}
-
-type mockQuickStarter struct {
-	ranPath    string
-	ranCommand []string
-	result     *session.QuickStartResult
-	err        error
-}
-
-func (m *mockQuickStarter) Run(path string, command []string) (*session.QuickStartResult, error) {
-	m.ranPath = path
-	m.ranCommand = command
-	return m.result, m.err
-}
-
-type mockExecer struct {
-	calledPath string
-	calledArgs []string
-	calledEnv  []string
-	err        error
-}
-
-func (m *mockExecer) Exec(argv0 string, argv []string, envv []string) error {
-	m.calledPath = argv0
-	m.calledArgs = argv
-	m.calledEnv = envv
-	return m.err
-}
-
-func TestPathOpener(t *testing.T) {
-	t.Run("inside tmux creates session detached then switches", func(t *testing.T) {
-		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
-		switcher := &mockSwitchClient{}
-		qs := &mockQuickStarter{}
-		execer := &mockExecer{}
-
-		opener := &PathOpener{
-			insideTmux: true,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         qs,
-			execer:     execer,
-		}
-
-		err := opener.Open("/home/user/project", nil)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if creator.createdDir != "/home/user/project" {
-			t.Errorf("CreateFromDir called with %q, want %q", creator.createdDir, "/home/user/project")
-		}
-
-		if switcher.switchedTo != "myproject-abc123" {
-			t.Errorf("SwitchClient called with %q, want %q", switcher.switchedTo, "myproject-abc123")
-		}
-
-		if execer.calledPath != "" {
-			t.Errorf("exec was called with %q, expected no exec inside tmux", execer.calledPath)
-		}
-	})
-
-	t.Run("outside tmux creates session with exec handoff", func(t *testing.T) {
-		creator := &mockSessionCreator{}
-		switcher := &mockSwitchClient{}
-		qs := &mockQuickStarter{
-			result: &session.QuickStartResult{
-				SessionName: "myproject-abc123",
-				Dir:         "/home/user/project",
-				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
-			},
-		}
-		execer := &mockExecer{}
-
-		opener := &PathOpener{
-			insideTmux: false,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         qs,
-			execer:     execer,
-			tmuxPath:   "/usr/bin/tmux",
-		}
-
-		err := opener.Open("/home/user/project", nil)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if qs.ranPath != "/home/user/project" {
-			t.Errorf("QuickStart.Run called with %q, want %q", qs.ranPath, "/home/user/project")
-		}
-
-		if execer.calledPath != "/usr/bin/tmux" {
-			t.Errorf("exec path = %q, want %q", execer.calledPath, "/usr/bin/tmux")
-		}
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"}
-		if len(execer.calledArgs) != len(wantArgs) {
-			t.Fatalf("exec args = %v, want %v", execer.calledArgs, wantArgs)
-		}
-		for i, arg := range execer.calledArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("exec args[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
-		}
-
-		if creator.createdDir != "" {
-			t.Errorf("CreateFromDir should not be called outside tmux, but was called with %q", creator.createdDir)
-		}
-	})
-
-	t.Run("inside tmux switch-client called with correct session name", func(t *testing.T) {
-		creator := &mockSessionCreator{sessionName: "portal-z9y8x7"}
-		switcher := &mockSwitchClient{}
-
-		opener := &PathOpener{
-			insideTmux: true,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         &mockQuickStarter{},
-			execer:     &mockExecer{},
-		}
-
-		err := opener.Open("/some/dir", nil)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if switcher.switchedTo != "portal-z9y8x7" {
-			t.Errorf("SwitchClient called with %q, want %q", switcher.switchedTo, "portal-z9y8x7")
-		}
-	})
-
-	t.Run("inside tmux returns error when session creation fails", func(t *testing.T) {
-		creator := &mockSessionCreator{err: fmt.Errorf("tmux error")}
-		switcher := &mockSwitchClient{}
-
-		opener := &PathOpener{
-			insideTmux: true,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         &mockQuickStarter{},
-			execer:     &mockExecer{},
-		}
-
-		err := opener.Open("/some/dir", nil)
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-
-		if switcher.switchedTo != "" {
-			t.Errorf("SwitchClient should not be called when creation fails, but was called with %q", switcher.switchedTo)
-		}
-	})
-
-	t.Run("inside tmux returns error when switch-client fails", func(t *testing.T) {
-		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
-		switcher := &mockSwitchClient{err: fmt.Errorf("switch failed")}
-
-		opener := &PathOpener{
-			insideTmux: true,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         &mockQuickStarter{},
-			execer:     &mockExecer{},
-		}
-
-		err := opener.Open("/some/dir", nil)
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-
-	t.Run("inside tmux passes command to session creator", func(t *testing.T) {
-		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
-		switcher := &mockSwitchClient{}
-
-		opener := &PathOpener{
-			insideTmux: true,
-			creator:    creator,
-			switcher:   switcher,
-			qs:         &mockQuickStarter{},
-			execer:     &mockExecer{},
-		}
-
-		command := []string{"claude", "--resume"}
-		err := opener.Open("/home/user/project", command)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(creator.createdCommand) != len(command) {
-			t.Fatalf("command = %v, want %v", creator.createdCommand, command)
-		}
-		for i, arg := range creator.createdCommand {
-			if arg != command[i] {
-				t.Errorf("command[%d] = %q, want %q", i, arg, command[i])
-			}
-		}
-	})
-
-	t.Run("outside tmux passes command to quickstart", func(t *testing.T) {
-		qs := &mockQuickStarter{
-			result: &session.QuickStartResult{
-				SessionName: "myproject-abc123",
-				Dir:         "/home/user/project",
-				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project", "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"},
-			},
-		}
-		execer := &mockExecer{}
-
-		opener := &PathOpener{
-			insideTmux: false,
-			creator:    &mockSessionCreator{},
-			switcher:   &mockSwitchClient{},
-			qs:         qs,
-			execer:     execer,
-			tmuxPath:   "/usr/bin/tmux",
-		}
-
-		command := []string{"claude", "--resume"}
-		err := opener.Open("/home/user/project", command)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(qs.ranCommand) != len(command) {
-			t.Fatalf("command = %v, want %v", qs.ranCommand, command)
-		}
-		for i, arg := range qs.ranCommand {
-			if arg != command[i] {
-				t.Errorf("command[%d] = %q, want %q", i, arg, command[i])
-			}
-		}
-	})
-
-	t.Run("outside tmux returns error when quickstart fails", func(t *testing.T) {
-		qs := &mockQuickStarter{err: fmt.Errorf("git error")}
-
-		opener := &PathOpener{
-			insideTmux: false,
-			creator:    &mockSessionCreator{},
-			switcher:   &mockSwitchClient{},
-			qs:         qs,
-			execer:     &mockExecer{},
-			tmuxPath:   "/usr/bin/tmux",
-		}
-
-		err := opener.Open("/some/dir", nil)
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-
 }
 
 func newTestOpenCmd() (*cobra.Command, *cobra.Command) {
@@ -1553,9 +1211,9 @@ type stubSessionKiller struct{}
 
 func (s *stubSessionKiller) KillSession(_ string) error { return nil }
 
-type stubSessionRenamer struct{}
+type stubSessionLabeller struct{}
 
-func (s *stubSessionRenamer) RenameSession(_, _ string) error { return nil }
+func (s *stubSessionLabeller) SetLabel(_, _ string) error { return nil }
 
 type stubTUISessionCreator struct{}
 
@@ -1596,17 +1254,11 @@ func (s *stubAliasEditor) DeleteAndSave(name, _ string) (bool, error) {
 	return true, nil
 }
 
-// stubTmuxCommander answers the session enumeration with one stub row and
-// stays quiet for every other tmux call.
-func stubTmuxCommander() *commandertest.Scripted {
-	return commandertest.Quiet(commandertest.Returns("stub|1|0|", "list-sessions"))
-}
-
 func defaultTestTUIConfig() tuiConfig {
 	return tuiConfig{
-		lister:         &mockSessionLister{},
+		lister:         fakePickerLister(),
 		killer:         &stubSessionKiller{},
-		renamer:        &stubSessionRenamer{},
+		labeller:       &stubSessionLabeller{},
 		projectStore:   &stubProjectStore{},
 		sessionCreator: &stubTUISessionCreator{},
 		cwd:            "/home/user",
@@ -1628,8 +1280,8 @@ func TestBuildTUIModel(t *testing.T) {
 		if m.CommandPending() {
 			t.Error("CommandPending() = true, want false")
 		}
-		if m.InsideTmux() {
-			t.Error("InsideTmux() = true, want false")
+		if m.CurrentSession() != "" {
+			t.Errorf("CurrentSession() = %q, want empty", m.CurrentSession())
 		}
 		if m.ActivePage() != tui.PageSessions {
 			t.Errorf("ActivePage() = %d, want PageSessions (0)", m.ActivePage())
@@ -1688,16 +1340,12 @@ func TestBuildTUIModel(t *testing.T) {
 		}
 	})
 
-	t.Run("inside tmux detection passes session name to model", func(t *testing.T) {
+	t.Run("the current session name passes to the model", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.insideTmux = true
 		cfg.currentSession = "my-session"
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
-		if !m.InsideTmux() {
-			t.Error("InsideTmux() = false, want true")
-		}
 		if m.CurrentSession() != "my-session" {
 			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "my-session")
 		}
@@ -1746,36 +1394,22 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 }
 
-func TestBuildTUIModel_ServerStarted(t *testing.T) {
-	t.Run("serverStarted true starts on loading page", func(t *testing.T) {
+func TestBuildTUIModel_Bootstrapping(t *testing.T) {
+	t.Run("bootstrapping starts on loading page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.serverStarted = true
+		cfg.progressReceiver = idleBootstrap
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
 		if m.ActivePage() != tui.PageLoading {
 			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)
 		}
-		if !m.ServerStarted() {
-			t.Error("ServerStarted() = false, want true")
+		if !m.Bootstrapping() {
+			t.Error("Bootstrapping() = false, want true")
 		}
 	})
 
-	t.Run("serverStarted false starts on sessions page", func(t *testing.T) {
-		cfg := defaultTestTUIConfig()
-		cfg.serverStarted = false
-
-		m := buildTUIModel(cfg, pickerLanding{}, nil)
-
-		if m.ActivePage() != tui.PageSessions {
-			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
-		}
-		if m.ServerStarted() {
-			t.Error("ServerStarted() = true, want false")
-		}
-	})
-
-	t.Run("default serverStarted starts on sessions page", func(t *testing.T) {
+	t.Run("not bootstrapping starts on sessions page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
@@ -1783,21 +1417,30 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 		if m.ActivePage() != tui.PageSessions {
 			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
 		}
+		if m.Bootstrapping() {
+			t.Error("Bootstrapping() = true, want false")
+		}
 	})
 
-	t.Run("serverStarted true preserves other options", func(t *testing.T) {
+	t.Run("by default starts on sessions page", func(t *testing.T) {
 		cfg := defaultTestTUIConfig()
-		cfg.insideTmux = true
+
+		m := buildTUIModel(cfg, pickerLanding{}, nil)
+
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
+		}
+	})
+
+	t.Run("bootstrapping preserves other options", func(t *testing.T) {
+		cfg := defaultTestTUIConfig()
 		cfg.currentSession = "dev"
-		cfg.serverStarted = true
+		cfg.progressReceiver = idleBootstrap
 
 		m := buildTUIModel(cfg, pickerLanding{}, nil)
 
-		if !m.ServerStarted() {
-			t.Error("ServerStarted() = false, want true")
-		}
-		if !m.InsideTmux() {
-			t.Error("InsideTmux() = false, want true")
+		if !m.Bootstrapping() {
+			t.Error("Bootstrapping() = false, want true")
 		}
 		if m.CurrentSession() != "dev" {
 			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "dev")
@@ -1807,7 +1450,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 func TestProcessTUIResult(t *testing.T) {
 	t.Run("clean exit without selection returns nil", func(t *testing.T) {
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(fakePickerLister())
 		connector := &mockSessionConnector{}
 
 		err := processTUIResult(m, connector)
@@ -1821,8 +1464,8 @@ func TestProcessTUIResult(t *testing.T) {
 	})
 
 	t.Run("selected session name forwarded to connector", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 3},
+		sessions := []tui.Session{
+			{Name: "dev"},
 		}
 		m := tui.NewModelWithSessions(sessions)
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -1854,7 +1497,7 @@ func TestOpenCommand_TotalMiss_HardFails(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -1978,7 +1621,7 @@ func TestOpenCommand_ResolveLog_GlobEmitsNoLine(t *testing.T) {
 		DirValidator:  &testDirValidator{existing: map[string]bool{}},
 	})
 
-	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ []string) error { return nil })
+	withFuncSeam(t, &runOpenBurstFunc, func(_ *cobra.Command, _ []spawn.Surface, _ resolver.QueryResult, _ []string) error { return nil })
 
 	withFuncSeam(t, &openRawArgs, func() []string { return []string{"portal", "open", "dev*"} })
 
@@ -2017,36 +1660,6 @@ func TestEmitResolveDecision_Helper(t *testing.T) {
 
 		if recs := sink.Records().Matching("resolve", "resolved"); len(recs) != 0 {
 			t.Fatalf("expected no resolve records for a glob target, got %d", len(recs))
-		}
-	})
-}
-
-func TestLogExecHandoff_Helper(t *testing.T) {
-	t.Run("strips argv[0] and joins the rest under target=tmux", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		logExecHandoff([]string{"tmux", "attach-session", "-t", "=foo:"})
-
-		rec := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-		if rec.Level != slog.LevelInfo {
-			t.Errorf("exec marker level = %v, want INFO", rec.Level)
-		}
-		if target := rec.AttrString(t, "target"); target != "tmux" {
-			t.Errorf("target attr = %q, want %q", target, "tmux")
-		}
-		if gotArgs := rec.AttrString(t, "args"); gotArgs != "attach-session -t =foo:" {
-			t.Errorf("args attr = %q, want %q", gotArgs, "attach-session -t =foo:")
-		}
-	})
-
-	t.Run("defensive: empty argv does not panic and logs empty args", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		logExecHandoff(nil)
-
-		rec := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-		if gotArgs := rec.AttrString(t, "args"); gotArgs != "" {
-			t.Errorf("args attr = %q, want empty", gotArgs)
 		}
 	})
 }
@@ -2120,28 +1733,6 @@ func TestOpenCommand_CommandThreadsIntoMintedTarget(t *testing.T) {
 	}
 }
 
-func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
-	runner := &recordingRunner{started: true}
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-	var capturedServerStarted bool
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
-		capturedServerStarted = serverStarted
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open"})
-	err := rootCmd.Execute()
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !capturedServerStarted {
-		t.Error("direct TUI path passed serverStarted=false; expected true when server was just started")
-	}
-}
-
 type recordingFilterLister struct {
 	names  []string
 	called bool
@@ -2166,7 +1757,7 @@ func TestOpenCommand_Filter_OpensPickerPrefilteredAndSkipsResolution(t *testing.
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -2205,7 +1796,7 @@ func TestOpenCommand_Filter_WithPositionalTarget_UsageError(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -2256,7 +1847,7 @@ func TestOpenCommand_Filter_WithPin_UsageError(t *testing.T) {
 			})
 
 			tuiCalled := false
-			withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+			withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 				tuiCalled = true
 				return nil
 			})
@@ -2312,7 +1903,7 @@ func TestOpenCommand_Filter_WithMultiplePins_UsageError(t *testing.T) {
 	})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -2343,7 +1934,7 @@ func TestOpenCommand_Filter_EmptyValue_UsageError(t *testing.T) {
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
 
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, _ pickerLanding, _ []string) error {
 		tuiCalled = true
 		return nil
 	})
@@ -2372,7 +1963,7 @@ func TestOpenCommand_NoArgs_NoFilter_LaunchesPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, _ []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, _ []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		return nil
@@ -2406,7 +1997,7 @@ func TestOpenCommand_CommandNoTarget_ExecFlag_OpensProjectsPicker(t *testing.T) 
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -2463,7 +2054,7 @@ func TestOpenCommand_CommandNoTarget_DashDash_OpensProjectsPicker(t *testing.T) 
 	var gotLanding pickerLanding
 	var gotCommand []string
 	tuiCalled := false
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		tuiCalled = true
 		gotLanding = landing
 		gotCommand = command
@@ -2511,7 +2102,7 @@ func TestOpenCommand_Filter_ThreadsCommandToPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	var gotCommand []string
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		gotLanding = landing
 		gotCommand = command
 		return nil
@@ -2537,7 +2128,7 @@ func TestOpenCommand_Filter_ThreadsDashDashCommandToPicker(t *testing.T) {
 
 	var gotLanding pickerLanding
 	var gotCommand []string
-	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string, _ bool) error {
+	withFuncSeam(t, &openTUIFunc, func(_ *cobra.Command, landing pickerLanding, command []string) error {
 		gotLanding = landing
 		gotCommand = command
 		return nil
@@ -2558,286 +2149,10 @@ func TestOpenCommand_Filter_ThreadsDashDashCommandToPicker(t *testing.T) {
 	}
 }
 
-func TestBuildSessionConnector(t *testing.T) {
-	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
-
-		client := tmux.NewClient(&tmux.RealCommander{})
-		connector := buildSessionConnector(client)
-
-		if _, ok := connector.(*SwitchConnector); !ok {
-			t.Errorf("expected *SwitchConnector, got %T", connector)
-		}
-	})
-
-	t.Run("returns AttachConnector when outside tmux", func(t *testing.T) {
-		t.Setenv("TMUX", "")
-
-		client := tmux.NewClient(&tmux.RealCommander{})
-		connector := buildSessionConnector(client)
-
-		if _, ok := connector.(*AttachConnector); !ok {
-			t.Errorf("expected *AttachConnector, got %T", connector)
-		}
-	})
-}
-
-// Captures the argv without the real syscall.Exec, which would replace the
-// test process.
-type recordingExecer struct {
-	argv0 string
-	argv  []string
-}
-
-func (r *recordingExecer) Exec(argv0 string, argv []string, _ []string) error {
-	r.argv0 = argv0
-	r.argv = argv
-	return nil
-}
-
-func TestAttachConnectorConnectArgv(t *testing.T) {
-	t.Run("it attaches through CoordTargetExact", func(t *testing.T) {
-		rec := &recordingExecer{}
-		ac := &AttachConnector{
-			execer:   rec,
-			tmuxPath: "/usr/bin/tmux",
-		}
-
-		if err := ac.Connect("foo"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if rec.argv0 != "/usr/bin/tmux" {
-			t.Errorf("argv0 = %q, want %q", rec.argv0, "/usr/bin/tmux")
-		}
-		want := []string{"tmux", "attach-session", "-t", "=foo:"}
-		if !slices.Equal(rec.argv, want) {
-			t.Errorf("argv = %v, want %v", rec.argv, want)
-		}
-	})
-
-	// The argv is exec'd rather than run through the client, so it spends its
-	// target as a plain string — the pinning must still come from the typed
-	// constructor rather than from a second spelling of the same prefix.
-	t.Run("it pins a hand-composed exec-chain target through the typed constructor", func(t *testing.T) {
-		rec := &recordingExecer{}
-		ac := &AttachConnector{
-			execer:   rec,
-			tmuxPath: "/usr/bin/tmux",
-		}
-
-		if err := ac.Connect("foo"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		want := []string{"tmux", "attach-session", "-t", string(tmux.CoordTargetExact("foo"))}
-		if !slices.Equal(rec.argv, want) {
-			t.Errorf("argv = %v, want %v", rec.argv, want)
-		}
-	})
-}
-
 func assertResolveAttr(t *testing.T, rec logtest.Record, key, want string) {
 	t.Helper()
 	if got := rec.AttrString(t, key); got != want {
 		t.Errorf("resolve record %q = %q, want %q", key, got, want)
-	}
-}
-
-// Reads the captured records at Exec time, so the exec marker's emission can be
-// placed before the handoff.
-type orderingExecer struct {
-	sink           *logtest.Sink
-	argv0          string
-	argv           []string
-	execMarkerSeen bool
-}
-
-func (e *orderingExecer) Exec(argv0 string, argv []string, _ []string) error {
-	e.argv0 = argv0
-	e.argv = argv
-	if len(e.sink.Records().Matching("process", "exec")) > 0 {
-		e.execMarkerSeen = true
-	}
-	return nil
-}
-
-func TestAttachConnector_EmitsExecMarkerBeforeExec(t *testing.T) {
-	t.Run("emits process: exec target=tmux args before exec", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		ex := &orderingExecer{sink: sink}
-		ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
-
-		if err := ac.Connect("foo"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		r := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-
-		if r.Level != slog.LevelInfo {
-			t.Errorf("exec marker level = %v, want INFO", r.Level)
-		}
-		if target := r.AttrString(t, "target"); target != "tmux" {
-			t.Errorf("target attr = %q, want %q", target, "tmux")
-		}
-		gotArgs := r.AttrString(t, "args")
-		wantArgs := "attach-session -t =foo:"
-		if gotArgs != wantArgs {
-			t.Errorf("args attr = %q, want %q", gotArgs, wantArgs)
-		}
-	})
-
-	t.Run("marker emitted before the exec call (ordering)", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		ex := &orderingExecer{sink: sink}
-		ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
-
-		if err := ac.Connect("foo"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !ex.execMarkerSeen {
-			t.Fatal("process: exec marker was not present in the records captured at Exec invocation time — it must be emitted BEFORE syscall.Exec")
-		}
-	})
-}
-
-func TestPathOpener_EmitsExecMarkerBeforeExec_OutsideTmux(t *testing.T) {
-	t.Run("emits process: exec target=tmux args=joined ExecArgs before exec", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		ex := &orderingExecer{sink: sink}
-		opener := &PathOpener{
-			insideTmux: false,
-			creator:    &mockSessionCreator{},
-			switcher:   &mockSwitchClient{},
-			qs: &mockQuickStarter{
-				result: &session.QuickStartResult{
-					SessionName: "myproject-abc123",
-					Dir:         "/home/user/project",
-					ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
-				},
-			},
-			execer:   ex,
-			tmuxPath: "/usr/bin/tmux",
-		}
-
-		if err := opener.Open("/home/user/project", nil); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		r := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-
-		if r.Level != slog.LevelInfo {
-			t.Errorf("exec marker level = %v, want INFO", r.Level)
-		}
-		if target := r.AttrString(t, "target"); target != "tmux" {
-			t.Errorf("target attr = %q, want %q", target, "tmux")
-		}
-		gotArgs := r.AttrString(t, "args")
-		wantArgs := "new-session -A -s myproject-abc123 -c /home/user/project"
-		if gotArgs != wantArgs {
-			t.Errorf("args attr = %q, want %q", gotArgs, wantArgs)
-		}
-	})
-
-	t.Run("marker emitted before the exec call (ordering)", func(t *testing.T) {
-		sink := logtest.Install(t)
-
-		ex := &orderingExecer{sink: sink}
-		opener := &PathOpener{
-			insideTmux: false,
-			creator:    &mockSessionCreator{},
-			switcher:   &mockSwitchClient{},
-			qs: &mockQuickStarter{
-				result: &session.QuickStartResult{
-					ExecArgs: []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
-				},
-			},
-			execer:   ex,
-			tmuxPath: "/usr/bin/tmux",
-		}
-
-		if err := opener.Open("/home/user/project", nil); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if !ex.execMarkerSeen {
-			t.Fatal("process: exec marker was not present in the records captured at Exec invocation time — it must be emitted BEFORE syscall.Exec")
-		}
-	})
-}
-
-func TestExecMarker_ArgsLoggedVerbatim(t *testing.T) {
-	// Privacy posture: args land in portal.log verbatim (single-user threat
-	// model), so a multi-word command tail must survive unredacted.
-	sink := logtest.Install(t)
-
-	ex := &orderingExecer{sink: sink}
-	shellCmd := "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"
-	opener := &PathOpener{
-		insideTmux: false,
-		creator:    &mockSessionCreator{},
-		switcher:   &mockSwitchClient{},
-		qs: &mockQuickStarter{
-			result: &session.QuickStartResult{
-				ExecArgs: []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project", shellCmd},
-			},
-		},
-		execer:   ex,
-		tmuxPath: "/usr/bin/tmux",
-	}
-
-	if err := opener.Open("/home/user/project", nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	rec := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-	gotArgs := rec.AttrString(t, "args")
-	wantArgs := "new-session -A -s myproject-abc123 -c /home/user/project " + shellCmd
-	if gotArgs != wantArgs {
-		t.Errorf("args attr = %q, want %q (verbatim)", gotArgs, wantArgs)
-	}
-}
-
-func TestSwitchConnector_EmitsNoExecMarker(t *testing.T) {
-	sink := logtest.Install(t)
-
-	mock := &mockSwitchClient{}
-	connector := &SwitchConnector{client: mock}
-
-	if err := connector.Connect("my-session"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if recs := sink.Records().Matching("process", "exec"); len(recs) != 0 {
-		t.Errorf("SwitchConnector must emit no process: exec marker, got %d", len(recs))
-	}
-}
-
-func TestPathOpener_InsideTmux_EmitsNoExecMarker(t *testing.T) {
-	sink := logtest.Install(t)
-
-	ex := &orderingExecer{sink: sink}
-	opener := &PathOpener{
-		insideTmux: true,
-		creator:    &mockSessionCreator{sessionName: "myproject-abc123"},
-		switcher:   &mockSwitchClient{},
-		qs:         &mockQuickStarter{},
-		execer:     ex,
-	}
-
-	if err := opener.Open("/home/user/project", nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if recs := sink.Records().Matching("process", "exec"); len(recs) != 0 {
-		t.Errorf("PathOpener inside-tmux must emit no process: exec marker, got %d", len(recs))
-	}
-	if ex.argv0 != "" {
-		t.Errorf("execer must not be called inside tmux, got argv0 %q", ex.argv0)
 	}
 }
 
@@ -2916,20 +2231,16 @@ func TestExecMarker_VisibleAtWARN(t *testing.T) {
 	// into the sink, so the records still read back through the Sink API.
 	h, sink := newWARNBypassHandler()
 	log.SetTestHandler(t, h)
+	_, rec := stageAttach(t, "api-x7Kd9a")
+	rec.answer(runResult{err: runner.ErrNoTerminal})
 
-	ex := &recordingExecer{}
-	ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
-
-	if err := ac.Connect("foo"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := openSession(contextCommand(), "api-x7Kd9a"); err != nil {
+		t.Fatalf("openSession: %v", err)
 	}
 
 	r := sink.Records().Matching("process", "exec").Only(t, "process exec record")
-	if target := r.AttrString(t, "target"); target != "tmux" {
-		t.Errorf("target attr = %q, want %q", target, "tmux")
-	}
-	if gotArgs := r.AttrString(t, "args"); gotArgs != "attach-session -t =foo:" {
-		t.Errorf("args attr = %q, want %q", gotArgs, "attach-session -t =foo:")
+	if target := r.AttrString(t, "target"); target != "zmx" {
+		t.Errorf("target attr = %q, want %q", target, "zmx")
 	}
 }
 
@@ -2943,233 +2254,74 @@ func (c *countingSessionLister) ListSessionNames() ([]string, error) {
 	return c.names, nil
 }
 
-func TestOpenCommand_Ack_MalformedValue_UsageErrorBeforeTmux(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+// A malformed --ack is a usage error ahead of resolution and any connect: a
+// window that can't write its receipt must not open a session the burst then
+// counts as failed.
+func TestOpenCommand_Ack_MalformedIsAUsageError(t *testing.T) {
+	for _, value := range []string{"notcolon", "b1:", ":t1", "", "../b1:t1", "b1:t1/x", "b-1:t1"} {
+		t.Run(value, func(t *testing.T) {
+			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+			lister := &countingSessionLister{names: []string{"dev"}}
+			withOpenDeps(t, OpenDeps{
+				SessionLister: lister,
+				AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+				Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+				DirValidator:  &testDirValidator{existing: map[string]bool{"/tmp": true}},
+			})
+			withFuncSeam(t, &openSessionFunc, func(*cobra.Command, string) error {
+				t.Error("open attached a session for a malformed --ack")
+				return nil
+			})
 
-	lister := &countingSessionLister{names: []string{"dev"}}
-	withOpenDeps(t, OpenDeps{
-		SessionLister: lister,
-		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator:  &testDirValidator{existing: map[string]bool{}},
-	})
+			resetRootCmd()
+			rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", value})
+			err := rootCmd.Execute()
 
-	sessionCalled := false
-	withFuncSeam(t, &openSessionFunc, func(_ *cobra.Command, _ string) error {
-		sessionCalled = true
-		return nil
-	})
-
-	pathCalled := false
-	withFuncSeam(t, &openPathFunc, func(_ *cobra.Command, _ string, _ []string) error {
-		pathCalled = true
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "dev", "--ack", "notcolon"})
-
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Fatal("expected a UsageError for a malformed --ack value, got nil")
-	}
-	if _, ok := errors.AsType[*UsageError](err); !ok {
-		t.Errorf("error %v (%T) does not match *cmd.UsageError", err, err)
-	}
-	want := "open: --ack must be <batch>:<token>"
-	if err.Error() != want {
-		t.Errorf("error = %q, want %q", err.Error(), want)
-	}
-	if lister.calls != 0 {
-		t.Errorf("ListSessionNames called %d times for a malformed --ack, want 0 (reject before tmux)", lister.calls)
-	}
-	if sessionCalled {
-		t.Error("openSessionFunc must not be called for a malformed --ack")
-	}
-	if pathCalled {
-		t.Error("openPathFunc must not be called for a malformed --ack")
+			if usage, ok := errors.AsType[*UsageError](err); !ok || usage.Error() != "open: --ack must be <batch>:<token>" {
+				t.Errorf("error = %v, want the --ack usage error", err)
+			}
+			if lister.calls != 0 {
+				t.Errorf("sessions listed %d times, want none: --ack is refused before resolution", lister.calls)
+			}
+		})
 	}
 }
 
-func TestOpenCommand_Ack_MarkerWrittenBeforeSessionAttach(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+// A window a burst spawned names one surface: a line acking more than one
+// would ack one and drop the rest.
+func TestOpenCommand_Ack_BesideMoreThanOneTargetIsAUsageError(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"two positionals":           {"dev", "api", "--ack", "b1:t1"},
+		"two session pins":          {"-s", "dev", "-s", "api", "--ack", "b1:t1"},
+		"a positional and a pin":    {"dev", "-s", "api", "--ack", "b1:t1"},
+		"a pin and a glob":          {"-s", "dev", "-s", "a*", "--ack", "b1:t1"},
+		"a positional, acked first": {"--ack", "b1:t1", "dev", "api"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
+			lister := &countingSessionLister{names: []string{"dev", "api"}}
+			withOpenDeps(t, OpenDeps{
+				SessionLister: lister,
+				AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
+				Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
+				DirValidator:  &testDirValidator{existing: map[string]bool{}},
+			})
+			withFuncSeam(t, &openRawArgs, func() []string { return append([]string{"portal", "open"}, argv...) })
+			withFuncSeam(t, &openSessionFunc, func(*cobra.Command, string) error {
+				t.Error("open attached a session for --ack beside more than one target")
+				return nil
+			})
+			withFuncSeam(t, &runOpenBurstFunc, func(*cobra.Command, []spawn.Surface, resolver.QueryResult, []string) error {
+				t.Error("open burst for --ack beside more than one target")
+				return nil
+			})
 
-	var order []string
-	ackWriter := &mockAckWriter{order: &order}
-	withOpenDeps(t, OpenDeps{
-		SessionLister: &testSessionLister{names: []string{"dev"}},
-		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator:  &testDirValidator{existing: map[string]bool{}},
-		AckWriter:     ackWriter,
-	})
+			executeOpenExpectingUsage(t, "open: cannot use --ack with more than one target", argv...)
 
-	var connectedTo string
-	withFuncSeam(t, &openSessionFunc, func(_ *cobra.Command, name string) error {
-		connectedTo = name
-		order = append(order, "session")
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", "b:t"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(ackWriter.calls) != 1 {
-		t.Fatalf("Write call count = %d, want 1", len(ackWriter.calls))
-	}
-	if got := ackWriter.calls[0]; got.batch != "b" || got.token != "t" {
-		t.Errorf("Write(%q, %q), want (%q, %q)", got.batch, got.token, "b", "t")
-	}
-	if connectedTo != "dev" {
-		t.Errorf("openSessionFunc called with %q, want %q", connectedTo, "dev")
-	}
-	wantOrder := []string{"write", "session"}
-	if !slices.Equal(order, wantOrder) {
-		t.Errorf("call order = %v, want %v (write strictly before attach)", order, wantOrder)
-	}
-}
-
-func TestOpenCommand_Ack_MarkerWrittenBeforePathMint(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-	var order []string
-	ackWriter := &mockAckWriter{order: &order}
-	withOpenDeps(t, OpenDeps{
-		SessionLister: &testSessionLister{},
-		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator:  &testDirValidator{existing: map[string]bool{}},
-		AckWriter:     ackWriter,
-	})
-
-	dir := t.TempDir()
-
-	var mintedPath string
-	withFuncSeam(t, &openPathFunc, func(_ *cobra.Command, path string, _ []string) error {
-		mintedPath = path
-		order = append(order, "path")
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "-p", dir, "--ack", "b:t"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(ackWriter.calls) != 1 {
-		t.Fatalf("Write call count = %d, want 1", len(ackWriter.calls))
-	}
-	if got := ackWriter.calls[0]; got.batch != "b" || got.token != "t" {
-		t.Errorf("Write(%q, %q), want (%q, %q)", got.batch, got.token, "b", "t")
-	}
-	if mintedPath != dir {
-		t.Errorf("openPathFunc minted %q, want %q", mintedPath, dir)
-	}
-	wantOrder := []string{"write", "path"}
-	if !slices.Equal(order, wantOrder) {
-		t.Errorf("call order = %v, want %v (write strictly before mint)", order, wantOrder)
-	}
-}
-
-func TestOpenCommand_Ack_WriteFailureStillConnects(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-	t.Run("session attach", func(t *testing.T) {
-		ackWriter := &mockAckWriter{err: fmt.Errorf("set-option failed")}
-		withOpenDeps(t, OpenDeps{
-			SessionLister: &testSessionLister{names: []string{"dev"}},
-			AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-			Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-			DirValidator:  &testDirValidator{existing: map[string]bool{}},
-			AckWriter:     ackWriter,
+			if lister.calls != 0 {
+				t.Errorf("sessions listed %d times, want none: the line is refused before resolution", lister.calls)
+			}
 		})
-
-		var connectedTo string
-		withFuncSeam(t, &openSessionFunc, func(_ *cobra.Command, name string) error {
-			connectedTo = name
-			return nil
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"open", "-s", "dev", "--ack", "b:t"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("expected no error on best-effort write failure, got %v", err)
-		}
-
-		if len(ackWriter.calls) != 1 {
-			t.Errorf("Write call count = %d, want 1", len(ackWriter.calls))
-		}
-		if connectedTo != "dev" {
-			t.Errorf("openSessionFunc called with %q, want %q (best-effort must still connect)", connectedTo, "dev")
-		}
-	})
-
-	t.Run("path mint", func(t *testing.T) {
-		ackWriter := &mockAckWriter{err: fmt.Errorf("set-option failed")}
-		withOpenDeps(t, OpenDeps{
-			SessionLister: &testSessionLister{},
-			AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-			Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-			DirValidator:  &testDirValidator{existing: map[string]bool{}},
-			AckWriter:     ackWriter,
-		})
-
-		dir := t.TempDir()
-
-		var mintedPath string
-		withFuncSeam(t, &openPathFunc, func(_ *cobra.Command, path string, _ []string) error {
-			mintedPath = path
-			return nil
-		})
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"open", "-p", dir, "--ack", "b:t"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("expected no error on best-effort write failure, got %v", err)
-		}
-
-		if len(ackWriter.calls) != 1 {
-			t.Errorf("Write call count = %d, want 1", len(ackWriter.calls))
-		}
-		if mintedPath != dir {
-			t.Errorf("openPathFunc minted %q, want %q (best-effort must still mint)", mintedPath, dir)
-		}
-	})
-}
-
-func TestOpenCommand_Ack_CommandAttachGuardFiresBeforeWrite(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: &nopRunner{}})
-
-	ackWriter := &mockAckWriter{}
-	withOpenDeps(t, OpenDeps{
-		SessionLister: &testSessionLister{names: []string{"dev"}},
-		AliasLookup:   &testAliasLookup{aliases: map[string]string{}},
-		Zoxide:        &testZoxideQuerier{err: resolver.ErrNoMatch},
-		DirValidator:  &testDirValidator{existing: map[string]bool{}},
-		AckWriter:     ackWriter,
-	})
-
-	withFuncSeam(t, &openSessionFunc, func(_ *cobra.Command, _ string) error {
-		t.Error("openSessionFunc must not be called: a command targeting an existing session is a usage error")
-		return nil
-	})
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"open", "-s", "dev", "-e", "claude", "--ack", "b:t"})
-
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Fatal("expected a UsageError for a command targeting an attach session, got nil")
-	}
-	if _, ok := errors.AsType[*UsageError](err); !ok {
-		t.Errorf("error %v (%T) does not match *cmd.UsageError", err, err)
-	}
-	if len(ackWriter.calls) != 0 {
-		t.Errorf("marker written %d times despite the command+attach guard, want 0", len(ackWriter.calls))
 	}
 }
 

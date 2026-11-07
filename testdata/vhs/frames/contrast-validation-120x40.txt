@@ -1,0 +1,40 @@
+CONTRAST VALIDATION — canvas #0B0C14
+
+bg.selection  #28243A
+portal · search work  ~/code/portal  ~/code/atelier  ●●
+fg-on-tint: text.on-selection · text.secondary · text.tertiary · state.positive · accent.attention
+
+bg.attention  #241B10
+⚠ state saver is not running — restore may be incomplete
+fg-on-tint: text.on-attention (⚠ message)
+
+bg.subtle  #26283A
+
+bar: accent.primary over the track
+
+border  #292E42
+────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

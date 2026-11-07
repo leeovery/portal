@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +43,7 @@ func runDeferredSearch(t *testing.T, sc *searchFormCapture, term string) func() 
 func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	t.Run("it takes no count when a bootstrap is in flight", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+		sc.live("portal-a1b2")
 
 		runDeferredSearch(t, sc, "port")
 
@@ -68,7 +68,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 	t.Run("it returns the single matching session from the deferred closure", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+		sc.live("portal-a1b2", "blog-c3d4")
 
 		decide := runDeferredSearch(t, sc, "port")
 
@@ -84,16 +84,16 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	t.Run("it returns no session for zero matches and for two or more", func(t *testing.T) {
 		tests := []struct {
 			name     string
-			sessions []tmux.Session
+			sessions []string
 		}{
-			{name: "zero matches", sessions: []tmux.Session{{Name: "blog-c3d4"}}},
-			{name: "two matches", sessions: []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}},
+			{name: "zero matches", sessions: []string{"blog-c3d4"}},
+			{name: "two matches", sessions: []string{"portal-a1b2", "port-agent"}},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				sc := installSearchFormSeams(t)
-				sc.source.sessions = tt.sessions
+				sc.live(tt.sessions...)
 
 				decide := runDeferredSearch(t, sc, "port")
 
@@ -111,7 +111,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 	t.Run("it returns the enumeration error from the deferred closure", func(t *testing.T) {
 		readErr := errors.New("no server running")
 		sc := installSearchFormSeams(t)
-		sc.source.listErr = readErr
+		sc.fake.Fail(backendtest.OpList, readErr)
 
 		decide := runDeferredSearch(t, sc, "port")
 
@@ -126,8 +126,8 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 
 	t.Run("it excludes the current session from the deferred closure's candidates", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
-		sc.source.current = "portal-a1b2"
+		sc.live("portal-a1b2", "blog-c3d4")
+		sc.fake.SetCurrent("portal-a1b2")
 
 		decide := runDeferredSearch(t, sc, "port")
 
@@ -149,7 +149,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 		for name, ctx := range routes {
 			t.Run(name, func(t *testing.T) {
 				sc := installSearchFormSeams(t)
-				sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}}
+				sc.live("portal-a1b2")
 
 				if err := runSearchForm(searchCommand(ctx), ""); err != nil {
 					t.Fatalf("runSearchForm(\"\") = %v, want nil", err)
@@ -159,9 +159,8 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 				if got != want {
 					t.Errorf("landing = %+v, want %+v", got, want)
 				}
-				if sc.source.listCalls != 0 || sc.source.currentCalls != 0 {
-					t.Errorf("term-less form read the session set: ListSessionsProbe=%d CurrentSessionName=%d, want 0 and 0",
-						sc.source.listCalls, sc.source.currentCalls)
+				if n := len(sc.fake.CallsTo(backendtest.OpList)); n != 0 {
+					t.Errorf("term-less form listed the sessions %d times, want 0", n)
 				}
 			})
 		}
@@ -171,7 +170,7 @@ func TestSearchForm_DeferredBootstrap_DefersTheCount(t *testing.T) {
 func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 	t.Run("it counts up front with no closure on a warm invocation", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "port-agent"}}
+		sc.live("portal-a1b2", "port-agent")
 
 		if err := runSearchForm(searchCommand(context.Background()), "port"); err != nil {
 			t.Fatalf("runSearchForm: %v", err)
@@ -188,7 +187,7 @@ func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 
 	t.Run("it attaches the single match up front on a warm invocation", func(t *testing.T) {
 		sc := installSearchFormSeams(t)
-		sc.source.sessions = []tmux.Session{{Name: "portal-a1b2"}, {Name: "blog-c3d4"}}
+		sc.live("portal-a1b2", "blog-c3d4")
 
 		if err := runSearchForm(searchCommand(context.Background()), "port"); err != nil {
 			t.Fatalf("runSearchForm: %v", err)
@@ -205,7 +204,7 @@ func TestSearchForm_WarmInvocation_CountsUpFront(t *testing.T) {
 	t.Run("it returns the enumeration error up front on a warm invocation", func(t *testing.T) {
 		readErr := errors.New("no server running")
 		sc := installSearchFormSeams(t)
-		sc.source.listErr = readErr
+		sc.fake.Fail(backendtest.OpList, readErr)
 
 		err := runSearchForm(searchCommand(context.Background()), "port")
 
@@ -226,8 +225,7 @@ func searchDecisionTUI(t *testing.T, decide func() (string, error)) tui.Model {
 
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
 	var model tea.Model = tui.Build(tui.Deps{
-		Lister:           &mockSessionLister{},
-		ServerStarted:    true,
+		Lister:           fakePickerLister(),
 		ProgressReceiver: receiver,
 		Search:           &tui.SearchForm{Term: "port", Decide: decide},
 	})

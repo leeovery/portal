@@ -5,8 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/leeovery/portal/internal/shellquote"
 )
 
 // Duplicated rather than taken from internal/state: internal/log must not
@@ -23,7 +24,7 @@ var startTime time.Time
 // may still be using. The returned error is advisory: on a writer-open failure
 // Init installs a stderr fallback handler and reports it.
 func Init(stateDir, version, processRole string) error {
-	level, source, raw := resolveLevel(os.Getenv("PORTAL_LOG_LEVEL"))
+	level, source, raw := resolveLevel(os.Getenv(levelVar))
 
 	pid := os.Getpid()
 	startTime = time.Now()
@@ -43,7 +44,7 @@ func emitLifecycleMarkers(level slog.Level, source, raw string) {
 	process := For(processComponent)
 	process.Info("start",
 		"cmd", filepath.Base(os.Args[0]),
-		"args", strings.Join(os.Args[1:], " "),
+		"args", shellquote.Readable(os.Args[1:]),
 	)
 	process.Info("log-level resolved",
 		"resolved", levelString(level),
@@ -59,7 +60,7 @@ func emitLifecycleMarkers(level slog.Level, source, raw string) {
 }
 
 func openLogWriter(stateDir string) (io.Writer, error) {
-	rotateSize, _ := resolveRotateSize(os.Getenv("PORTAL_LOG_ROTATE_SIZE"))
+	rotateSize, _ := resolveRotateSize(os.Getenv(rotateSizeVar))
 	sink := newRotatingSink(stateDir, rotateSize)
 	if err := sink.probe(); err != nil {
 		return os.Stderr, err
