@@ -259,10 +259,18 @@ func stillWaiting(t *testing.T, done chan error, what string) {
 	}
 }
 
-// openFDs is how many descriptors this process has open.
+// openFDs is how many descriptors this process has open, the listing's own
+// among them. It reads names alone: before Go 1.27 os.ReadDir lstats each
+// entry, and lstat of a kqueue's /dev/fd entry, the runtime's poller's
+// included, fails with EBADF (go.dev/issue/80143).
 func openFDs(t *testing.T) int {
 	t.Helper()
-	fds, err := os.ReadDir("/dev/fd")
+	d, err := os.Open("/dev/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	fds, err := d.Readdirnames(-1)
 	if err != nil {
 		t.Fatal(err)
 	}

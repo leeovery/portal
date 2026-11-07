@@ -45,7 +45,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-help", page: tui.PageSessions, present: []string{"Keybindings", "Filter sessions"}},
 		{fixture: "sessions-filtering", page: tui.PageSessions, present: []string{"/ relay", "relayx-3RJDWA"}, absent: []string{sessionRow}},
 		{fixture: "sessions-kill-confirm", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone."}, absent: []string{"tmux", "No sessions yet"}},
-		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "⏎ attach"}, absent: []string{"tmux", "No sessions yet"}},
+		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "d detach"}, absent: []string{"tmux", "No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-terminal", page: tui.PageSessions, present: []string{sessionRow, "unsupported terminal", "com.apple.Terminal"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-null", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet", "unsupported terminal"}},
@@ -79,6 +79,9 @@ func capturedStates() []capturedStateWant {
 		// zmx's rows end at its cursor's CUP, so nothing it writes after them,
 		// the pending-wrap reprint or the cwd, is drawn.
 		{fixture: "preview-zmx-history", present: []string{"tessera-proxy-Vb3kQw", "gap     after-tab", "wide 中文 end", "last row 000"}, absent: []string{"(history unavailable)", "example-host"}},
+		// A waiting session previews the transcript it was restored from, never
+		// its History, which holds only the resume panel's screen.
+		{fixture: "preview-waiting-transcript", present: []string{"tessera-proxy-Vb3kQw", "seeding 14 orchards", "ledger balanced at 48,310 entries"}, absent: []string{"resume panel's screen", "kubectl rollout"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
 		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to remove the bootstrapped latch"}},
 	}

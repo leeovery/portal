@@ -36,7 +36,7 @@ Portal folds that into two shell functions and a picker:
 - **Commands come back when you ask.** Per-session commands return via resume hooks: each session comes back holding a panel showing its command, which runs when you answer it, so a reboot doesn't start every dev server you ever left open.
 - **A keyboard-driven picker.** A colourful picker that owns its own canvas, with an in-app `?` keymap on every page. Six themes ship — Tokyo Night, Tokyo Night Day, Nord, Nord Wave, GitLab Dark Grey, and Horizon — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
 - **Session grouping and tags.** Flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
-- **Scrollback preview.** Hit `Space` for a read-only peek at any session's screen and scrollback, read live, without attaching.
+- **Scrollback preview.** Hit `Space` for a read-only peek at any session's screen and scrollback, read live, without attaching; a session waiting on its resume panel shows the transcript it was restored from.
 - **Multi-window open.** Name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 
 ## Install
@@ -372,7 +372,9 @@ A session row ends in up to two status dots, packed to the right: the attached d
 
 `Space` on the highlighted session opens a Quick Look-style preview of that
 session's screen and scrollback, read live from the session, so you can tell
-similarly-named sessions apart without attaching. The preview is read-only:
+similarly-named sessions apart without attaching. A session waiting on its
+[resume panel](#resume-panel) shows the transcript it was restored from instead,
+since its own screen holds only the panel. The preview is read-only:
 opening and closing it changes nothing about the session.
 
 | Key | Action |
@@ -437,8 +439,8 @@ reaches the session untouched.
 | `Alt+Shift+D` | Detach, straight to the shell |
 | `Alt+Q` | Ask to kill the session: the picker opens on its kill prompt |
 
-On that prompt `y` kills the session and stays in the picker, `Esc` keeps it and stays in the
-picker, and `Enter` keeps it and attaches it again, so a stray `Alt+Q` costs a key, never a
+On that prompt `y` kills the session and stays in the picker, `d` keeps it and stays in the
+picker, and `Esc` keeps it and goes back into it, so a stray `Alt+Q` costs a key, never a
 session. When Portal can't be sure the terminal still shows the session (a `zmx attach` typed
 inside it switched it), the picker opens without the prompt and says why.
 

@@ -60,7 +60,7 @@ type pickerLanding struct {
 	// failed to do what was asked.
 	flash string
 	// kill is the session the kill key asked to kill from inside it: the
-	// picker opens on its kill prompt, which offers to attach it again.
+	// picker opens on its kill prompt, whose Esc attaches it again.
 	kill string
 }
 

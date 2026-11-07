@@ -20,7 +20,7 @@
                                         │                                      │
                                         │  Ends the session. Can't be undone.  │
                                         ├──────────────────────────────────────┤
-                                        │  y kill   ⏎ attach   esc cancel      │
+                                        │  y kill   d detach   esc cancel      │
                                         ╰──────────────────────────────────────╯
 
 

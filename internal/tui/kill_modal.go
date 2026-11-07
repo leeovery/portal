@@ -11,17 +11,18 @@ const (
 	killKeyConfirm   = "y"
 	killLabelConfirm = "kill"
 
-	killKeyAttach   = "⏎"
-	killLabelAttach = "attach"
+	killKeyDetach   = "d"
+	killLabelDetach = "detach"
 )
 
-func renderKillModalContent(name string, offersAttach bool, th theme.Theme, colourless bool) string {
-	return renderDestructiveConfirm(killModalSpec(name, offersAttach), th, colourless)
+func renderKillModalContent(name string, fromInside bool, th theme.Theme, colourless bool) string {
+	return renderDestructiveConfirm(killModalSpec(name, fromInside), th, colourless)
 }
 
-// offersAttach adds Enter's choice, for the prompt the kill key asked for
-// from inside the session: keep it and attach it again.
-func killModalSpec(name string, offersAttach bool) destructiveConfirmSpec {
+// fromInside is the prompt the kill key asked for from inside the session,
+// whose cancel goes back into it: d's choice is added, keeping it and staying
+// in the picker.
+func killModalSpec(name string, fromInside bool) destructiveConfirmSpec {
 	spec := destructiveConfirmSpec{
 		title:        killTitle,
 		targetName:   name,
@@ -29,8 +30,8 @@ func killModalSpec(name string, offersAttach bool) destructiveConfirmSpec {
 		confirmKey:   killKeyConfirm,
 		confirmLabel: killLabelConfirm,
 	}
-	if offersAttach {
-		spec.keep = footerHintGroup{key: killKeyAttach, label: killLabelAttach}
+	if fromInside {
+		spec.keep = footerHintGroup{key: killKeyDetach, label: killLabelDetach}
 	}
 	return spec
 }

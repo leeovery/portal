@@ -47,10 +47,16 @@ const root = "/tmp"
 const settle = 5 * time.Second
 
 // passedEnv names the variables of the test's environment a session sees;
-// LANG and LC_* pass too. Nothing else does: HOME is a temp dir and SHELL is
-// /bin/sh, so no session reads the developer's shell config. TMUX_TMPDIR is
-// the TestMain's poison.
-var passedEnv = []string{"PATH", "TERM", "USER", "TMPDIR", "TMUX_TMPDIR"}
+// LANG and LC_* pass too. Nothing else does: HOME is a temp dir, SHELL is
+// /bin/sh and TERM is sessionTerm, so no session reads the developer's shell
+// config or depends on their terminal. TMUX_TMPDIR is the TestMain's poison.
+var passedEnv = []string{"PATH", "USER", "TMPDIR", "TMUX_TMPDIR"}
+
+// sessionTerm is the TERM every session gets, one every macOS terminfo
+// carries. The caller's may need a TERMINFO no session sees (Ghostty's
+// xterm-ghostty does), or be unset or dumb on a CI runner, and vim or less
+// then draws otherwise.
+const sessionTerm = "xterm-256color"
 
 // Option configures New.
 type Option func(*options)
@@ -194,7 +200,7 @@ func sessionEnv(environ []string, home string) []string {
 			env = append(env, kv)
 		}
 	}
-	return append(env, "HOME="+home, "SHELL=/bin/sh")
+	return append(env, "HOME="+home, "SHELL=/bin/sh", "TERM="+sessionTerm)
 }
 
 // teardown kills every session in the Backend's directory and waits for the

@@ -27,6 +27,9 @@ type Deps struct {
 	ProjectEditor ProjectEditor
 	AliasEditor   AliasEditor
 	History       HistoryReader
+	// Transcripts reads the transcript a waiting session was restored from,
+	// which its preview shows. Nil previews its History.
+	Transcripts TranscriptReader
 	// DirRunner resolves the git root of a session's cwd, which grouping falls
 	// back to for a session with no recorded directory.
 	DirRunner resolver.CommandRunner
@@ -55,8 +58,8 @@ type Deps struct {
 	// failed to do what was asked.
 	Flash string
 	// KillAsk is the session the kill key asked to kill from inside it: the
-	// picker opens on its kill prompt once its row is listed, which Enter
-	// answers by attaching it again. Keys typed before then are dropped.
+	// picker opens on its kill prompt once its row is listed, whose Esc
+	// attaches it again. Keys typed before then are dropped.
 	KillAsk string
 	// AskedKiller kills on y at the prompt KillAsk opens; without one, no
 	// prompt opens.
@@ -146,6 +149,9 @@ func Build(deps Deps) Model {
 	}
 	if deps.History != nil {
 		opts = append(opts, WithHistory(deps.History))
+	}
+	if deps.Transcripts != nil {
+		opts = append(opts, WithTranscripts(deps.Transcripts))
 	}
 	if deps.DirRunner != nil {
 		opts = append(opts, WithDirRunner(deps.DirRunner))

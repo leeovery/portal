@@ -14,6 +14,7 @@ import (
 
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -84,12 +85,14 @@ func TestWithEnv(t *testing.T) {
 		home := t.TempDir()
 		b := zmxtest.New(t, zmxtest.WithEnv("PORTAL_SECRET_PROBE=passed", "HOME="+home))
 
-		got := echoed(t, b, `echo "probe=${PORTAL_SECRET_PROBE-unset}"; echo "home=$HOME"`)
+		// The shell compares HOME itself: printed, a long TMPDIR's path wraps
+		// at the session's width.
+		got := echoed(t, b, `echo "probe=${PORTAL_SECRET_PROBE-unset}"; if [ "$HOME" = `+shellquote.Single(home)+` ]; then echo home=given; else echo "home=other:$HOME"; fi`)
 
 		if !bytes.Contains(got, []byte("probe=passed\r\n")) {
 			t.Errorf("history = %q, want the variable passed", got)
 		}
-		if !bytes.Contains(got, []byte("home="+home+"\r\n")) {
+		if !bytes.Contains(got, []byte("home=given\r\n")) {
 			t.Errorf("history = %q, want HOME as the option gave it", got)
 		}
 	})

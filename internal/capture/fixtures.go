@@ -66,8 +66,11 @@ type Fixture struct {
 	command             []string
 	history             string
 	historyFile         string
-	loadingEvents       []tui.BootstrapProgressMsg
-	fatalEvent          tui.BootstrapFatalMsg
+	// transcripts are saved transcripts by session name, which a waiting
+	// session's preview shows in place of its History.
+	transcripts   map[string]string
+	loadingEvents []tui.BootstrapProgressMsg
+	fatalEvent    tui.BootstrapFatalMsg
 	// Tapes are scaffolding and do not live in the repository, so the post-load
 	// key script is declared here.
 	captureKeys []tea.KeyPressMsg
@@ -96,6 +99,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		ProjectEditor: f.projectEditor,
 		AliasEditor:   f.aliasEditor,
 		History:       fakeHistory{content: f.history, file: f.historyFile},
+		Transcripts:   f.transcriptReader(),
 		// DirRunner stays nil, so the git-root fallback resolves nothing and a
 		// fixture session carrying no recorded directory groups into the
 		// catch-all; ModePersister stays nil so an `s`-toggle writes nowhere.
@@ -141,6 +145,14 @@ func (f *Fixture) pendingReader() tui.PendingResumeReader {
 		return nil
 	}
 	return fakePendingReader{sessions: f.pendingSessions}
+}
+
+// Nil rather than an empty reader: Build wires any non-nil one.
+func (f *Fixture) transcriptReader() tui.TranscriptReader {
+	if len(f.transcripts) == 0 {
+		return nil
+	}
+	return fakeTranscripts{transcripts: f.transcripts}
 }
 
 func loadingReceiverOrNil(events []tui.BootstrapProgressMsg, fatal tui.BootstrapFatalMsg) tea.Cmd {
@@ -200,6 +212,7 @@ func fixtureBuilders() []func() *Fixture {
 		previewScreenFixture,
 		previewLongScrollbackFixture,
 		previewZmxHistoryFixture,
+		previewWaitingTranscriptFixture,
 		loadingScreenFixture,
 		loadingErrorFixture,
 	}
@@ -1007,6 +1020,24 @@ func previewZmxHistoryFixture() *Fixture {
 	fx := previewScreenFixture()
 	fx.name = "preview-zmx-history"
 	fx.historyFile = zmxHistoryFile()
+	return fx
+}
+
+// tessera waits on its resume panel, so its History is the panel's alternate
+// screen and its preview is the transcript it was restored from.
+func previewWaitingTranscriptFixture() *Fixture {
+	fx := previewScreenFixture()
+	fx.name = "preview-waiting-transcript"
+	fx.pendingSessions = []string{"tessera-proxy-Vb3kQw"}
+	fx.history = "(the resume panel's screen, never previewed)\n"
+	fx.transcripts = map[string]string{
+		"tessera-proxy-Vb3kQw": "$ ./scripts/seed-fixtures --region north\r\n" +
+			"seeding 14 orchards · 212 rows\r\n" +
+			"rows written: 212 · skipped: 0\r\n" +
+			"$ ./scripts/verify-ledger\r\n" +
+			"ledger balanced at 48,310 entries\r\n" +
+			"$ ",
+	}
 	return fx
 }
 

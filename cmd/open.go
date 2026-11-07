@@ -410,6 +410,7 @@ type tuiConfig struct {
 	aliasEditor      tui.AliasEditor
 	sessionCreator   tui.SessionCreator
 	history          tui.HistoryReader
+	transcripts      tui.TranscriptReader
 	dirRunner        resolver.CommandRunner
 	pendingReader    tui.PendingResumeReader
 	hydrating        tui.HydratingReader
@@ -470,6 +471,14 @@ func themeResolution(keys prefs.ThemeKeys, loader theme.Loader) (theme.Resolutio
 	return resolution, raw, nil
 }
 
+// wireStateReads wires the picker's reads of the state dir: the sessions
+// waiting on their resume panel, the settle after a restore, and a waiting
+// session's transcript, which its preview shows.
+func (cfg *tuiConfig) wireStateReads() {
+	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
+	cfg.transcripts = pickerTranscripts()
+}
+
 func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
 	deps := tui.Deps{
 		Lister:           cfg.lister,
@@ -482,6 +491,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ProjectEditor:    cfg.projectEditor,
 		AliasEditor:      cfg.aliasEditor,
 		History:          cfg.history,
+		Transcripts:      cfg.transcripts,
 		DirRunner:        cfg.dirRunner,
 		PendingReader:    cfg.pendingReader,
 		Hydrating:        cfg.hydrating,
@@ -655,7 +665,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 	}
 
 	cfg.currentSession = b.Current()
-	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
+	cfg.wireStateReads()
 
 	m := buildTUIModel(cfg, launch.landing, launch.command)
 	// Staged rather than written: a direct write while the TUI holds the screen

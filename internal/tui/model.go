@@ -223,9 +223,9 @@ type Model struct {
 	// helpScroll is how far the help modal's keys are scrolled, from the top.
 	helpScroll  int
 	pendingKill Session
-	// killOffersAttach is set while the kill prompt is the one the kill key
-	// asked for from inside the session, which Enter attaches again.
-	killOffersAttach bool
+	// killFromInside is set while the kill prompt is the one the kill key
+	// asked for from inside the session, whose Esc attaches it again.
+	killFromInside bool
 	// killAsk is the session the kill key asked to kill, whose prompt opens
 	// as the first listing lands; empty once it has.
 	killAsk string
@@ -278,7 +278,10 @@ type Model struct {
 	originalBg string
 
 	history previewHistory
-	preview previewModel
+	// transcripts reads the transcript a waiting session was restored from,
+	// which its preview shows; nil previews its History.
+	transcripts TranscriptReader
+	preview     previewModel
 	// previewGen counts preview opens, so a read that lands after its preview
 	// has stepped on or closed is told apart from the one now showing.
 	previewGen uint64
@@ -1523,7 +1526,7 @@ func (m *Model) applyKillAsk() {
 	m.reanchorSessionCursor(name)
 	m.modal = modalKillConfirm
 	m.pendingKill = m.sessions[i]
-	m.killOffersAttach = true
+	m.killFromInside = true
 }
 
 // Re-fetched on preview dismissal so an externally killed session disappears.
@@ -1559,7 +1562,7 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	} else {
 		var open context.Context
 		open, m.endPreviewRead = context.WithCancel(context.Background())
-		cmd = m.history.read(open, s.Name, m.previewGen)
+		cmd = m.previewRead(open, s.Name, m.previewGen)
 	}
 	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
 	m.preview.th = m.themeState.active
@@ -3108,20 +3111,22 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	name, offersAttach := m.pendingKill.Name, m.killOffersAttach
+	name, fromInside := m.pendingKill.Name, m.killFromInside
 	switch {
 	case isRuneKey(keyMsg, "y"):
 		killer := m.sessionKiller
-		if offersAttach {
+		if fromInside {
 			killer = m.askedKiller
 		}
 		m = m.closeKillConfirm()
 		return m, m.actAndRefresh(func() error { return killer.KillSession(name) })
-	case keyIsCode(keyMsg, tea.KeyEscape):
-		// Cancel is Esc only; `n` falls through to the ignore-all tail.
-		return m.closeKillConfirm(), nil
-	case offersAttach && keyIsCode(keyMsg, tea.KeyEnter):
+	case fromInside && keyIsCode(keyMsg, tea.KeyEscape):
+		// Cancel puts the user back where they were: in the session.
 		return m.closeKillConfirm().openSession(name)
+	case keyIsCode(keyMsg, tea.KeyEscape), fromInside && isRuneKey(keyMsg, killKeyDetach):
+		// k's cancel and the kill key's d both stay in the picker; `n` falls
+		// through to the ignore-all tail.
+		return m.closeKillConfirm(), nil
 	}
 	return m, nil
 }
@@ -3129,7 +3134,7 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) closeKillConfirm() Model {
 	m.modal = modalNone
 	m.pendingKill = Session{}
-	m.killOffersAttach = false
+	m.killFromInside = false
 	return m
 }
 
@@ -3736,7 +3741,7 @@ func (m Model) renderProjectsFooterForFilterState() string {
 func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
-		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.killOffersAttach, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.killFromInside, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:

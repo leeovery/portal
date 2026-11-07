@@ -93,7 +93,7 @@ func waitingRows(t *testing.T, noColor bool, sessions ...backend.Session) string
 	cfg := defaultTestTUIConfig()
 	cfg.lister = fakePickerLister(sessions...)
 	cfg.noColor = noColor
-	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
+	cfg.wireStateReads()
 	m := update(t, buildTUIModel(cfg, pickerLanding{}, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
 	for _, msg := range drainCmd(t, m.Init()) {
 		m = update(t, m, msg)
