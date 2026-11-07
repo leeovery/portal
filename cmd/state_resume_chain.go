@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ const (
 	resumeFlagScreen        = "screen"
 	resumeFlagDropInput     = "drop-input"
 	resumeFlagInputArriving = "input-arriving"
+	resumeFlagTyped         = "typed"
 )
 
 // The screens one draw of the waiting session can put up. The panel is the
@@ -60,13 +62,47 @@ type resumeChainPayload struct {
 	DropInput bool
 
 	// InputArriving tells a waiter its session was handed over while input
-	// was still arriving, as a draw whose input drop failed hands it over, so
-	// what arrives first belongs to that input and answers nothing.
+	// was still arriving, as a draw whose input drop failed hands it over, or
+	// one that read more than a key of it, so what arrives first belongs to
+	// that input and answers nothing.
 	InputArriving bool
+
+	// Typed is the key a draw read while it asked the terminal its background,
+	// handed to the waiter as the first byte of an arrival, so it answers as
+	// it would have had it been typed after the draw. A draw hands on one byte
+	// at most here, and more as InputArriving, so nothing pasted is ever
+	// carried in the waiter's argv.
+	Typed string
 }
 
 func (p resumeChainPayload) logAttrs(attrs ...any) []any {
 	return resumeLogAttrs(p.Session, attrs...)
+}
+
+// carryTyped hands the waiter what a draw read as typed: a key alone as Typed,
+// and any more as input still arriving, which answers nothing, as a paste
+// read whole would not.
+func (p *resumeChainPayload) carryTyped(typed []byte) {
+	switch {
+	case len(typed) == 1:
+		p.Typed = string(typed)
+	case len(typed) > 1:
+		p.InputArriving = true
+	}
+}
+
+// typedFromFlag reads the typed flag's hex. A value that isn't one byte's is
+// input the waiter can't name, so it is taken as input still arriving and
+// answers nothing.
+func typedFromFlag(hexed string) (typed string, arriving bool) {
+	if hexed == "" {
+		return "", false
+	}
+	key, err := hex.DecodeString(hexed)
+	if err != nil || len(key) != 1 {
+		return "", true
+	}
+	return string(key), false
 }
 
 // resumeLogAttrs is how the chain's records name the waiting session.
@@ -99,6 +135,9 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	}
 	if p.InputArriving {
 		argv = append(argv, flagArg(resumeFlagInputArriving))
+	}
+	if p.Typed != "" {
+		argv = append(argv, flagArg(resumeFlagTyped), hex.EncodeToString([]byte(p.Typed)))
 	}
 	return argv
 }

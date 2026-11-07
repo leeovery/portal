@@ -162,10 +162,10 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 	cfg.Size = p.size
 	cfg.DisableEcho = func() error { return nil }
 	cfg.DropInputQueue = func() error { return nil }
-	cfg.ResolveTheme = func(bool, func() error) (theme.Theme, error) {
+	cfg.ResolveTheme = func(bool, func() error) (theme.Theme, []byte, error) {
 		p.recordSelf(termEventDraw)
 		p.holdDraw()
-		return th, nil
+		return th, nil, nil
 	}
 	cfg.ExecSelf = p.execSelf
 	cfg.CatchSIGTERM = p.holdingCatch(termEventDraw, cfg.CatchSIGTERM)

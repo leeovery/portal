@@ -68,13 +68,13 @@ func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropD
 		Size:               fixedSize(100, 30),
 		CatchSIGTERM:       func() {},
 		DisableEcho:        func() error { return nil },
-		ResolveTheme: func(_ bool, dropInput func() error) (theme.Theme, error) {
+		ResolveTheme: func(_ bool, dropInput func() error) (theme.Theme, []byte, error) {
 			d.calls = append(d.calls, "appearance-query")
 			d.handed = append(d.handed, dropInput != nil)
 			if dropInput == nil {
-				return th, nil
+				return th, nil, nil
 			}
-			return th, dropInput()
+			return th, nil, dropInput()
 		},
 		DropInputQueue: func() error {
 			d.calls = append(d.calls, "drop")
@@ -389,7 +389,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, err := sessionDrawTheme(true, func() error {
+		_, _, err := sessionDrawTheme(true, func() error {
 			calls++
 			return refused
 		})
@@ -402,7 +402,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, err := sessionDrawTheme(true, nil); err != nil {
+		if _, _, err := sessionDrawTheme(true, nil); err != nil {
 			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})

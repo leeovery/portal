@@ -31,8 +31,9 @@ type resumeDrawConfig struct {
 	DisableEcho func() error
 
 	// ResolveTheme runs dropInput, when handed one, after the appearance query
-	// and before it returns, answering the drop's error beside the palette.
-	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, error)
+	// and before it returns, answering the drop's error beside the palette and
+	// what the query read of the input that wasn't the terminal's reply.
+	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, []byte, error)
 	DropInputQueue func() error
 }
 
@@ -58,10 +59,13 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	if cfg.DropInput {
 		dropInput = cfg.DropInputQueue
 	}
-	th, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
+	th, typed, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
 
 	shown := cfg.resumeChainPayload
 	shown.DropInput = false
+	// A key typed while the query was out was read with it; the waiter judges
+	// it as if typed after the draw.
+	shown.carryTyped(typed)
 	// Input the drop could not discard may still answer the confirmation, so it
 	// is never put up over that input, and the waiter is told the input is its
 	// own to swallow.
@@ -98,7 +102,7 @@ func renderResumeScreen(s tui.ResumeScreen, screen string) string {
 // non-migrating prefs route: the migrating one performs the one-shot appearance
 // translation and writes, and a boot's worth of sessions taking it at once is
 // a write storm over one file for a value none of them is setting.
-func sessionDrawTheme(colourless bool, dropInput func() error) (theme.Theme, error) {
+func sessionDrawTheme(colourless bool, dropInput func() error) (theme.Theme, []byte, error) {
 	nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
 	return tui.ResolvePaneTheme(nomination, colourless, dropInput)
 }

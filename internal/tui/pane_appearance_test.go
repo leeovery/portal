@@ -198,7 +198,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		constant := themetest.DefaultLight(t)
 
-		got, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
+		got, _, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
 
 		if got != constant {
 			t.Errorf("resolved %q, want the constant nomination's palette %q", got.Canvas.Value, constant.Canvas.Value)
@@ -211,7 +211,7 @@ func TestResolvePaneTheme(t *testing.T) {
 	t.Run("it returns the zero theme for a zero nomination", func(t *testing.T) {
 		h := newProbeHarness(t)
 
-		got, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
+		got, _, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
 
 		if got != (theme.Theme{}) {
 			t.Errorf("resolved a theme with canvas %q for a zero nomination, want the zero theme", got.Canvas.Value)
@@ -238,7 +238,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, lightReply)
 
-				got, err := resolvePaneTheme(tc.n, true, nil, h.probe())
+				got, _, err := resolvePaneTheme(tc.n, true, nil, h.probe())
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q under NO_COLOR, want %q", got.Canvas.Value, tc.want.Canvas.Value)
@@ -268,7 +268,7 @@ func TestResolvePaneTheme(t *testing.T) {
 					h.reply(t, tc.reply)
 				}
 
-				got, err := resolvePaneTheme(pair, false, nil, h.probe())
+				got, _, err := resolvePaneTheme(pair, false, nil, h.probe())
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q, want %q", got.Canvas.Value, tc.want.Canvas.Value)
@@ -295,7 +295,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				tc.arrange(h)
 
-				_, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
+				_, _, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
 
 				if !slices.Equal(h.events, tc.want) {
 					t.Errorf("ran %v with %s, want %v — the query waits on a ready read, and a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
@@ -322,7 +322,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, darkReply)
 
-				_, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
+				_, _, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
 
 				if h.drops != 1 {
 					t.Errorf("ran the drop %d times for a %s resolution, want exactly 1 — every pane draw owes one drop", h.drops, tc.name)
@@ -354,8 +354,8 @@ func TestResolvePaneTheme(t *testing.T) {
 				bare.reply(t, lightReply)
 				dropping.reply(t, lightReply)
 
-				got, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
-				want, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
+				got, _, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
+				want, _, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
 
 				if got != want {
 					t.Errorf("resolved canvas %q with no drop and %q with one, want a draw that owes no drop to paint what it paints today", got.Canvas.Value, want.Canvas.Value)
@@ -370,7 +370,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, lightReply)
 
-		got, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		got, _, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
 
 		if got != light {
 			t.Errorf("resolved canvas %q after a failed drop, want the probe's own answer %q — the caller still has a fallback screen to paint", got.Canvas.Value, light.Canvas.Value)
@@ -380,12 +380,53 @@ func TestResolvePaneTheme(t *testing.T) {
 		}
 	})
 
+	t.Run("it hands back the key the probe read for a pair, and none for a nomination it doesn't probe", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+			typed      string
+		}{
+			{"adaptive pair", pair, false, "\r"},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, ""},
+			{"zero", theme.Nomination{}, false, ""},
+			{"colourless", pair, true, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.reply(t, "\r"+darkReply)
+
+				_, typed, _ := resolvePaneTheme(tc.n, tc.colourless, nil, h.probe())
+
+				if string(typed) != tc.typed {
+					t.Errorf("handed back %q as typed, want %q", typed, tc.typed)
+				}
+			})
+		}
+	})
+
+	t.Run("it hands back nothing typed when it drops the input", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		for _, dropErr := range []error{nil, errSeam} {
+			h := newProbeHarness(t)
+			h.reply(t, "\r"+darkReply)
+
+			_, typed, _ := resolvePaneTheme(pair, false, h.dropInput(dropErr), h.probe())
+
+			if typed != nil {
+				t.Errorf("handed back %q as typed beside a drop failing with %v, want nothing: the drop discards it with the rest", typed, dropErr)
+			}
+		}
+	})
+
 	t.Run("it returns the drop's own error", func(t *testing.T) {
 		pair, _, _ := adaptivePair(t)
 		h := newProbeHarness(t)
 		h.reply(t, darkReply)
 
-		_, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		_, _, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
 
 		if err != errSeam {
 			t.Errorf("returned %v, want the drop's own error %v unchanged — nothing here wraps it, retries it or swallows it", err, errSeam)
@@ -407,7 +448,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, lightReply)
 
-		if got := h.probe().detect(); got != theme.MemberLight {
+		if got, _ := h.probe().detect(); got != theme.MemberLight {
 			t.Errorf("classified a light reply as %v, want %v", got, theme.MemberLight)
 		}
 	})
@@ -419,7 +460,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, reply)
 
-				if got := h.probe().detect(); got != theme.MemberDark {
+				if got, _ := h.probe().detect(); got != theme.MemberDark {
 					t.Errorf("classified a dark reply as %v, want %v", got, theme.MemberDark)
 				}
 			})
@@ -430,7 +471,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 
 		start := time.Now()
-		got := h.probe().detect()
+		got, _ := h.probe().detect()
 		elapsed := time.Since(start)
 
 		if got != theme.MemberDark {
@@ -467,7 +508,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, reply)
 
-				if got := h.probe().detect(); got != theme.MemberDark {
+				if got, _ := h.probe().detect(); got != theme.MemberDark {
 					t.Errorf("classified %q as %v, want %v", reply, got, theme.MemberDark)
 				}
 				h.assertWroteQuery(t)
@@ -479,7 +520,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reader.readErr = errSeam
 
-		if got := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(); got != theme.MemberDark {
 			t.Errorf("resolved %v after a read failure, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteQuery(t)
@@ -490,7 +531,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.terminal = false
 		h.reply(t, lightReply)
 
-		if got := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(); got != theme.MemberDark {
 			t.Errorf("resolved %v off a terminal, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
@@ -502,7 +543,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.rawErr = errSeam
 		h.reply(t, lightReply)
 
-		if got := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(); got != theme.MemberDark {
 			t.Errorf("resolved %v with raw mode refused, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
@@ -517,7 +558,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		// Off the test goroutine, so a probe that hangs fails this subtest rather
 		// than hanging the package.
 		answers := make(chan theme.Member, 1)
-		go func() { answers <- h.probe().detect() }()
+		go func() { member, _ := h.probe().detect(); answers <- member }()
 
 		select {
 		case got := <-answers:
@@ -542,11 +583,50 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			close(late)
 		}()
 
-		got := h.probe().detect()
+		got, _ := h.probe().detect()
 		<-late
 
 		if got != theme.MemberDark {
 			t.Errorf("resolved %v, want %v — a reply that lost the race must never flip the answer", got, theme.MemberDark)
+		}
+	})
+
+	t.Run("it hands back what was typed around the reply, and never the reply", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			input string
+			want  theme.Member
+			typed string
+		}{
+			{"a BEL-terminated reply alone", darkReply, theme.MemberDark, ""},
+			{"an ST-terminated reply alone", stTerminatedDark, theme.MemberDark, ""},
+			{"a light reply alone", lightReply, theme.MemberLight, ""},
+			{"Enter before the reply", "\r" + lightReply, theme.MemberLight, "\r"},
+			{"d after the reply", darkReply + "d", theme.MemberDark, "d"},
+			{"Escape after an ST-terminated reply", stTerminatedDark + "\x1b", theme.MemberDark, "\x1b"},
+			{"keys on both sides", "x" + lightReply + "y", theme.MemberLight, "xy"},
+			{"Escape and no reply", "\x1b", theme.MemberDark, "\x1b"},
+			{"a paste and no reply", "echo hi\r", theme.MemberDark, "echo hi\r"},
+			{"a truncated reply alone", truncatedReply, theme.MemberDark, ""},
+			{"a key before a truncated reply", "d" + truncatedReply, theme.MemberDark, "d"},
+			{"a key and a reply cut off two bytes in", "q\x1b]", theme.MemberDark, "q"},
+			{"a key and a reply cut off four bytes in", "q\x1b]11", theme.MemberDark, "q"},
+			{"something that is no reply at all", "garbage\a", theme.MemberDark, "garbage\a"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.reply(t, tc.input)
+
+				got, typed := h.probe().detect()
+
+				if got != tc.want {
+					t.Errorf("resolved %v for %q, want %v", got, tc.input, tc.want)
+				}
+				if string(typed) != tc.typed {
+					t.Errorf("handed back %q as typed for %q, want %q", typed, tc.input, tc.typed)
+				}
+			})
 		}
 	})
 

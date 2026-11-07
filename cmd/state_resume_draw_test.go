@@ -36,6 +36,10 @@ type resumeDrawProbe struct {
 	echoOffErr        error
 	echoOffsAtResolve int
 	execsAtEchoOff    int
+
+	// typed is what the appearance query read of the input that wasn't its
+	// reply; a drop discards it, as the real query's does.
+	typed []byte
 }
 
 func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPayload, size func() (int, int, error)) resumeDrawConfig {
@@ -52,14 +56,14 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 			p.execsAtEchoOff = p.execCalls
 			return p.echoOffErr
 		},
-		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, error) {
+		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, []byte, error) {
 			p.colourless = append(p.colourless, colourless)
 			p.paintedAtResolve = p.stdout.Len()
 			p.echoOffsAtResolve = p.echoOffCalls
 			if dropInput == nil {
-				return th, nil
+				return th, p.typed, nil
 			}
-			return th, dropInput()
+			return th, nil, dropInput()
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.execProg = prog

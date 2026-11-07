@@ -79,7 +79,7 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 		h.done <- runResumeWait(cfg)
 		close(h.ended)
 	}()
-	if payload.InputArriving {
+	if payload.InputArriving || payload.Typed != "" {
 		h.live = h.awaitListen("a listen for input still arriving at start-up")
 	}
 	return h

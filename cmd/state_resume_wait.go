@@ -213,7 +213,10 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 	signalled := false
 	redrawDue := false
 	arrival := resumeArrival{carried: cfg.InputArriving}
-	cfg.InputArriving = false
+	for _, b := range []byte(cfg.Typed) {
+		arrival.add(b)
+	}
+	cfg.InputArriving, cfg.Typed = false, ""
 	outstanding := false
 	for {
 		if !outstanding {
@@ -505,6 +508,8 @@ var stateResumeWaitCmd = &cobra.Command{
 		height, _ := cmd.Flags().GetInt(resumeFlagHeight)
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
+		typedHex, _ := cmd.Flags().GetString(resumeFlagTyped)
+		typed, unnamed := typedFromFlag(typedHex)
 
 		return resumeWaitRunFunc(resumeWaitConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -515,7 +520,8 @@ var stateResumeWaitCmd = &cobra.Command{
 				Height:  height,
 				Screen:  screen,
 
-				InputArriving: inputArriving,
+				InputArriving: inputArriving || unnamed,
+				Typed:         typed,
 			},
 			Stdout:              os.Stdout,
 			In:                  os.Stdin,
@@ -546,6 +552,7 @@ func init() {
 	stateResumeWaitCmd.Flags().Int(resumeFlagHeight, 0, "Height the screen the session is showing was drawn at")
 	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the session is showing: discard for the confirmation, else the panel")
 	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
+	stateResumeWaitCmd.Flags().String(resumeFlagTyped, "", "The key, in hex, the draw read while it asked the terminal its background")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagSession)
 

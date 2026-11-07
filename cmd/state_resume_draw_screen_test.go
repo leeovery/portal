@@ -101,9 +101,9 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 					calls = append(calls, "size")
 					return 100, 30, nil
 				},
-				ResolveTheme: func(bool, func() error) (theme.Theme, error) {
+				ResolveTheme: func(bool, func() error) (theme.Theme, []byte, error) {
 					calls = append(calls, "theme")
-					return th, nil
+					return th, nil, nil
 				},
 				ExecSelf: func(string, []string) {
 					calls = append(calls, "exec")
