@@ -403,6 +403,8 @@ type Model struct {
 	// The row a pointer press landed on, awaiting its release (pointer.go).
 	tapPress   tapTarget
 	tapPressed bool
+	// The wheel gesture under way and the surface it began on (pointer.go).
+	wheel wheelGesture
 
 	// A non-blanking overlay, unlike the modals above. While closed, the composed
 	// frame is byte-identical to a model with no panel at all.

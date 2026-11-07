@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 )
@@ -50,6 +52,9 @@ func (m Model) updatePointer(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // Wrapping past either end is the arrow's: the session and project lists scroll
 // infinitely, so a swipe off the bottom carries on from the top.
 func (m Model) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if !m.wheel.admit(m.wheelSurface()) {
+		return m, nil
+	}
 	var code rune
 	switch msg.Button {
 	case tea.MouseWheelUp:
@@ -79,6 +84,58 @@ func (m Model) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.Update(tea.KeyPressMsg{Code: code})
+}
+
+// wheelSettle is how long the wheel must be quiet before its next step starts a
+// fresh gesture. A trackpad goes on sending momentum steps for about a second
+// after the fingers lift, and a slow render queues more; without the settle
+// they would land on whatever surface a key brought up meanwhile.
+const wheelSettle = 250 * time.Millisecond
+
+// wheelSurface is what a wheel step would reach: each field one thing whose
+// change swaps the surface beneath the pointer.
+type wheelSurface struct {
+	page            page
+	modal           modalState
+	burstPending    bool
+	themePanel      bool
+	themeConfirming bool
+	previewHelpOpen bool
+}
+
+func (m Model) wheelSurface() wheelSurface {
+	return wheelSurface{
+		page:            m.activePage,
+		modal:           m.modal,
+		burstPending:    m.burstPending,
+		themePanel:      m.themePanel.open,
+		themeConfirming: m.themePanel.open && m.themePanel.confirming(),
+		previewHelpOpen: m.activePage == pagePreview && m.preview.helpOpen,
+	}
+}
+
+// wheelGesture holds a wheel gesture to the surface it began on. Every step,
+// dropped or not, extends the gesture, so a momentum stream that outlives its
+// surface is dropped until it stops; the first step after wheelSettle of quiet
+// begins a new gesture on whatever surface is up then.
+type wheelGesture struct {
+	owner wheelSurface
+	last  time.Time
+	// nil reads the wall clock; tests stage their own.
+	now func() time.Time
+}
+
+func (g *wheelGesture) admit(surface wheelSurface) bool {
+	now := time.Now
+	if g.now != nil {
+		now = g.now
+	}
+	at := now()
+	if at.Sub(g.last) >= wheelSettle {
+		g.owner = surface
+	}
+	g.last = at
+	return g.owner == surface
 }
 
 // The theme panel, a modal and the burst input-lock each own the input, so a
