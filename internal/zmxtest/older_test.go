@@ -57,21 +57,13 @@ func TestFindOlder(t *testing.T) {
 	t.Run("it takes the build OlderBinaryEnv names", func(t *testing.T) {
 		named := older(t)
 
-		if got, err := findOlder(env(map[string]string{OlderBinaryEnv: named, "GITHUB_ACTIONS": "true"}), older(t), t.TempDir()); err != nil || got != named {
+		if got, err := findOlder(env(map[string]string{OlderBinaryEnv: named}), older(t), t.TempDir()); err != nil || got != named {
 			t.Errorf("findOlder = %q, %v; want %q", got, err, named)
 		}
 	})
 
 	t.Run("a build OlderBinaryEnv names that isn't 0.8.1 fails the test", func(t *testing.T) {
 		_, err := findOlder(env(map[string]string{OlderBinaryEnv: newer(t)}), older(t), t.TempDir())
-
-		if err == nil || errors.Is(err, errNoOlder) {
-			t.Errorf("findOlder = %v, want a failure, not a skip", err)
-		}
-	})
-
-	t.Run("on GitHub Actions without one named it fails the test, Homebrew's unasked", func(t *testing.T) {
-		_, err := findOlder(env(map[string]string{"GITHUB_ACTIONS": "true"}), older(t), t.TempDir())
 
 		if err == nil || errors.Is(err, errNoOlder) {
 			t.Errorf("findOlder = %v, want a failure, not a skip", err)

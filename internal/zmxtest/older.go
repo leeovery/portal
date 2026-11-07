@@ -11,8 +11,7 @@ import (
 )
 
 // OlderBinaryEnv names a build of zmx 0.8.1, the release before the protocol
-// Portal speaks, for the tests of how Portal treats one. The weekly zmx check
-// builds it and names it here.
+// Portal speaks, for the tests of how Portal treats one.
 const OlderBinaryEnv = "PORTAL_TEST_ZMX_OLDER_BINARY"
 
 // homebrewZmx is where Homebrew installs zmx, whose tap shipped 0.8.1.
@@ -26,10 +25,10 @@ var errNoOlder = errors.New("no zmx " + olderVersion)
 
 // OlderBinary is the path of a zmx 0.8.1 build: the one OlderBinaryEnv names,
 // or else Homebrew's zmx when it reports 0.8.1. It skips the test when
-// neither is one, and fails it when the build OlderBinaryEnv names isn't, as
-// it does on GitHub Actions without one named, outside the integration lane,
-// when ZMX_DIR or TMUX_TMPDIR is not poisoned, and when the weekly zmx check
-// doesn't run the test.
+// neither is one, as on the weekly zmx check, which tests zmx's newest builds
+// only. It fails the test when the build OlderBinaryEnv names isn't one,
+// outside the integration lane, when ZMX_DIR or TMUX_TMPDIR is not poisoned,
+// and when the weekly zmx check doesn't run the test.
 func OlderBinary(t *testing.T) string {
 	t.Helper()
 	if !integrationLane {
@@ -51,17 +50,13 @@ func OlderBinary(t *testing.T) string {
 
 // findOlder is OlderBinary's zmx 0.8.1 in the environment getenv reads, with
 // homebrew the path Homebrew's zmx would have, each checked with dir as its
-// directory and home. Only off GitHub Actions, where the weekly check must
-// name one, may it find none, failing with errNoOlder.
+// directory and home. Finding none fails with errNoOlder.
 func findOlder(getenv func(string) string, homebrew, dir string) (string, error) {
 	if binary := getenv(OlderBinaryEnv); binary != "" {
 		if err := olderBuild(binary, dir); err != nil {
 			return "", fmt.Errorf("%s=%q: %w", OlderBinaryEnv, binary, err)
 		}
 		return binary, nil
-	}
-	if getenv("GITHUB_ACTIONS") != "" {
-		return "", fmt.Errorf("%s is unset on GitHub Actions: the weekly zmx check builds zmx %s and names it there", OlderBinaryEnv, olderVersion)
 	}
 	if err := olderBuild(homebrew, dir); err != nil {
 		return "", fmt.Errorf("%w: %s is unset, and Homebrew's zmx is none: %w", errNoOlder, OlderBinaryEnv, err)
