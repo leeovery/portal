@@ -141,6 +141,42 @@ func TestRun_Requests(t *testing.T) {
 		}
 	})
 
+	t.Run("a take of the attach's session detaches with ctrl+\\, ending it as taken, saying where it went", func(t *testing.T) {
+		sink := logtest.Install(t)
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests))
+		h.ready(t)
+
+		send(t, requests, runner.Request{Take: "fake", By: "SSH from 192.0.2.20"})
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Taken: true, By: "SSH from 192.0.2.20"}) {
+			t.Fatalf("Run = %+v, %v; want the attach taken", out, err)
+		}
+		if !out.Picker() || out.AsksKill() {
+			t.Errorf("Picker() = %v, AsksKill() = %v; want the picker to follow, asking no kill", out.Picker(), out.AsksKill())
+		}
+		assertDetachedCleanly(t, h, sink)
+		rec := sink.Records().Matching("attach", "outcome").AtExactLevel(slog.LevelInfo).Only(t, "outcome record")
+		if got := rec.AttrString(t, "reason"); got != "take" {
+			t.Errorf("outcome reason = %q, want take", got)
+		}
+		if got := rec.AttrString(t, "detail"); got != "SSH from 192.0.2.20" {
+			t.Errorf("outcome detail = %q, want where the session went", got)
+		}
+	})
+
+	t.Run("a take of another session is refused, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		h := attach(t, modeZmx, withRequests(requests))
+		h.ready(t)
+
+		if err := ask(t, requests, runner.Request{Take: "blog-c3d4", By: "Ghostty on this Mac"}); err == nil || !strings.Contains(err.Error(), "shows fake") {
+			t.Errorf("Run answered %v, want a refusal naming the session it shows", err)
+		}
+		h.detach(t)
+	})
+
 	t.Run("a request to confirm another session is refused, and the attach goes on", func(t *testing.T) {
 		requests := make(chan runner.Request)
 		h := attach(t, modeZmx, withRequests(requests))

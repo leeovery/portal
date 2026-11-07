@@ -171,6 +171,25 @@ func TestListing(t *testing.T) {
 		}
 	})
 
+	t.Run("a take reaches the attach as a request naming the session and where it went", func(t *testing.T) {
+		runnerreg.SetSelf(t, 0)
+		r := runnerreg.New(stateDir(t))
+		a := begun(listing(t, r), "api-x7Kd9a")
+
+		taken := make(chan int, 1)
+		go func() {
+			n, _ := r.Take(t.Context(), "api-x7Kd9a", "SSH from 192.0.2.20")
+			taken <- n
+		}()
+
+		if req := a.take(t, nil); req.Take != "api-x7Kd9a" || req.By != "SSH from 192.0.2.20" || req.Switch != "" || req.Confirm != "" || req.Deadline.IsZero() {
+			t.Errorf("the attach took %+v, want a take of api-x7Kd9a by SSH from 192.0.2.20, with a deadline", req)
+		}
+		if n := <-taken; n != 1 {
+			t.Errorf("Take = %d, want the attach's acceptance", n)
+		}
+	})
+
 	t.Run("a request the attach never takes is refused once it ends", func(t *testing.T) {
 		r := runnerreg.New(stateDir(t))
 		l := listing(t, r)

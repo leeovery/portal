@@ -163,12 +163,19 @@ func NewPreviewModel(session Session, body string, width, height int) previewMod
 	return m
 }
 
-// setBody shows body anchored at its bottom, where the session's cursor is.
+// setBody shows body where the user left the last: anchored at its bottom,
+// where the session's cursor is, while the last was there, as the first body
+// always is, and otherwise at the row the user scrolled to.
 func (m *previewModel) setBody(body string) {
+	following, offset := m.viewport.AtBottom(), m.viewport.YOffset()
 	m.viewport.SetContent(body)
 	// viewport.SetContent auto-jumps to the bottom only when the previous YOffset
 	// overshoots, so the explicit jump is what anchors.
-	m.viewport.GotoBottom()
+	if following {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(offset)
+	}
 }
 
 // Plain ↑/↓ belong to the preview's session step, so the viewport's line scroll

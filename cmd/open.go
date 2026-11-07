@@ -515,8 +515,10 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		SpawnLogger:      cfg.spawnLogger,
 		Flash:            landing.flash,
 		KillAsk:          landing.kill,
+		Taken:            landing.taken,
 	}
 	deps.PendingSettleBound = pendingSettleBound
+	deps.PreviewRefresh = tui.PreviewRefreshEvery
 	if landing.search != nil {
 		deps.Search = landing.search
 	} else {

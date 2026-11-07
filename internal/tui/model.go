@@ -229,6 +229,15 @@ type Model struct {
 	// killAsk is the session the kill key asked to kill, whose prompt opens
 	// as the first listing lands; empty once it has.
 	killAsk string
+	// takenAsk is the session another terminal took, whose modal opens as the
+	// first listing lands; empty once it has.
+	takenAsk Taken
+	// takenSession is the session the taken modal shows, and takenBy where it
+	// went. watchingTaken is set while its preview, opened from the modal, is
+	// up: closing it goes back to the modal.
+	takenSession  Session
+	takenBy       string
+	watchingTaken bool
 	// askedKiller kills on y at the prompt the kill key asked for.
 	askedKiller       SessionKiller
 	renameInput       textinput.Model
@@ -285,9 +294,14 @@ type Model struct {
 	// previewGen counts preview opens, so a read that lands after its preview
 	// has stepped on or closed is told apart from the one now showing.
 	previewGen uint64
-	// endPreviewRead ends the current open's read, so a superseded one neither
-	// dials nor draws; nil when no read is under way.
+	// previewOpen lasts as long as the current open, whose reads it bounds,
+	// and endPreviewRead ends it, so a superseded read neither dials nor
+	// draws; nil when no read is under way.
+	previewOpen    context.Context
 	endPreviewRead context.CancelFunc
+	// previewRefresh is how long an open preview shows a body before it reads
+	// its session again; zero reads it once, as it opens.
+	previewRefresh time.Duration
 
 	// dirRunner resolves the git root grouping falls back to. The derived
 	// directory is never written anywhere — a session's cwd can drift from the
@@ -739,6 +753,14 @@ func WithHistory(r HistoryReader) Option {
 	}
 }
 
+// WithPreviewRefresh has an open preview read its session again every on,
+// so it shows the session live.
+func WithPreviewRefresh(every time.Duration) Option {
+	return func(m *Model) {
+		m.previewRefresh = every
+	}
+}
+
 // WithDirRunner resolves the git root of a session's cwd, which grouping falls
 // back to for a session with no recorded directory.
 func WithDirRunner(runner resolver.CommandRunner) Option {
@@ -772,6 +794,14 @@ func WithInitialFlash(text string) Option {
 func WithKillAsk(name string) Option {
 	return func(m *Model) {
 		m.killAsk = name
+	}
+}
+
+// WithTaken opens the picker on the modal for the session another terminal
+// took from this one, once its row is listed.
+func WithTaken(taken Taken) Option {
+	return func(m *Model) {
+		m.takenAsk = taken
 	}
 }
 
@@ -1512,6 +1542,18 @@ func (m *Model) applyInitialCursor() {
 	m.initialCursor = ""
 }
 
+// applyLanding opens the modal the picker was opened on, as the first listing
+// lands: the kill key's prompt, or a taken session's.
+func (m *Model) applyLanding() {
+	m.applyKillAsk()
+	m.applyTakenAsk()
+}
+
+// landingPending reports whether a modal waits for the first listing to open.
+func (m Model) landingPending() bool {
+	return m.killAsk != "" || m.takenAsk.Session != ""
+}
+
 // Runs as the first listing lands, not once the page is decided, so no key
 // waits on the projects: the asked session's row takes the cursor and the
 // prompt opens at once. A session no longer listed is gone, and nothing is
@@ -1519,14 +1561,37 @@ func (m *Model) applyInitialCursor() {
 func (m *Model) applyKillAsk() {
 	name := m.killAsk
 	m.killAsk = ""
-	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
-	if i < 0 || m.activePage != PageSessions || m.askedKiller == nil {
+	if m.askedKiller == nil {
 		return
 	}
+	if s, ok := m.landingRow(name); ok {
+		m.modal = modalKillConfirm
+		m.pendingKill = s
+		m.killFromInside = true
+	}
+}
+
+// The taken modal lands as the kill key's prompt does, and a session gone
+// meanwhile shows none.
+func (m *Model) applyTakenAsk() {
+	ask := m.takenAsk
+	m.takenAsk = Taken{}
+	if s, ok := m.landingRow(ask.Session); ok {
+		m.modal = modalTaken
+		m.takenSession, m.takenBy = s, ask.By
+	}
+}
+
+// landingRow is the listed session name, whose row takes the cursor, for a
+// modal opening on it as the first listing lands: none for a session no
+// longer listed, or off the sessions page.
+func (m *Model) landingRow(name string) (Session, bool) {
+	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
+	if i < 0 || m.activePage != PageSessions {
+		return Session{}, false
+	}
 	m.reanchorSessionCursor(name)
-	m.modal = modalKillConfirm
-	m.pendingKill = m.sessions[i]
-	m.killFromInside = true
+	return m.sessions[i], true
 }
 
 // Re-fetched on preview dismissal so an externally killed session disappears.
@@ -1560,9 +1625,8 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	if s.NotAnswering {
 		body = previewNotAnswering
 	} else {
-		var open context.Context
-		open, m.endPreviewRead = context.WithCancel(context.Background())
-		cmd = m.previewRead(open, s.Name, m.previewGen)
+		m.previewOpen, m.endPreviewRead = context.WithCancel(context.Background())
+		cmd = m.previewRead(m.previewOpen, s.Name, m.previewGen)
 	}
 	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
 	m.preview.th = m.themeState.active
@@ -1601,19 +1665,26 @@ func (m *Model) stepPreviewSession(delta int) tea.Cmd {
 }
 
 // Capture preserveName before calling: m.preview is zeroed in place, so reading
-// m.preview.session afterwards yields an empty string.
+// m.preview.session afterwards yields an empty string. A preview watched from
+// the taken modal goes back to it, the cursor on the taken session's row.
 func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
 	m.endRead()
 	m.activePage = PageSessions
 	m.preview = previewModel{}
+	if m.watchingTaken {
+		m.watchingTaken = false
+		m.modal = modalTaken
+		preserveName = m.takenSession.Name
+		m.reanchorSessionCursor(preserveName)
+	}
 	return m.refreshSessionsAfterPreviewCmd(preserveName)
 }
 
-// endRead ends the preview's read under way, if any.
+// endRead ends the preview's reads, if any are under way.
 func (m *Model) endRead() {
 	if m.endPreviewRead != nil {
 		m.endPreviewRead()
-		m.endPreviewRead = nil
+		m.previewOpen, m.endPreviewRead = nil, nil
 	}
 }
 
@@ -1744,7 +1815,7 @@ func (m Model) applySessionsMsg(msg SessionsMsg) (tea.Model, tea.Cmd) {
 
 	m.sessionsLoaded = true
 	m.evaluateDefaultPage()
-	m.applyKillAsk()
+	m.applyLanding()
 	detectCmd := m.maybeDispatchDetectionCmd()
 	var settleCmd tea.Cmd
 	if msg.afterRestore {
@@ -1997,8 +2068,16 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		m.preview.setBody(msg.body)
-		return m, nil
+		return m, previewTick(msg.gen, m.previewRefresh)
+	case previewTickMsg:
+		if m.activePage != pagePreview || msg.gen != m.previewGen || m.previewOpen == nil {
+			return m, nil
+		}
+		return m, m.previewRead(m.previewOpen, m.preview.session, msg.gen)
 	case previewOpenMsg:
+		// Opening a session from the watch takes it back, so the taken modal
+		// is done with, and a refusal flashes on the list.
+		m = m.closeTaken()
 		if !m.answering(msg.Session) {
 			// The refusal flashes on the list, where it can be read.
 			refresh := m.exitPreviewToSessions(msg.Session)
@@ -2056,10 +2135,10 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, nil
 	}
 
-	// Until the first listing opens the kill key's prompt, or finds its session
-	// gone, a key would act on rows the user hasn't seen, Enter on the wrong
-	// one: typed ahead of the prompt, it is dropped.
-	if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey && m.killAsk != "" {
+	// Until the first listing opens the kill key's prompt or a taken session's
+	// modal, or finds its session gone, a key would act on rows the user hasn't
+	// seen, Enter on the wrong one: typed ahead of the modal, it is dropped.
+	if keyMsg, isKey := msg.(tea.KeyPressMsg); isKey && m.landingPending() {
 		if keyIsCtrlC(keyMsg) {
 			return m, tea.Quit
 		}
@@ -3051,6 +3130,8 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.modal {
 	case modalKillConfirm:
 		return m.updateKillConfirmModal(msg)
+	case modalTaken:
+		return m.updateTakenModal(msg)
 	case modalRename:
 		return m.updateRenameModal(msg)
 	case modalDeleteProject:
@@ -3135,6 +3216,45 @@ func (m Model) closeKillConfirm() Model {
 	m.modal = modalNone
 	m.pendingKill = Session{}
 	m.killFromInside = false
+	return m
+}
+
+// Enter takes the session back, attaching it here; Space watches it in the
+// preview, attaching nothing; Esc leaves it where it went, the cursor still on
+// its row. Every other key is ignored.
+func (m Model) updateTakenModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil
+	}
+	switch {
+	case keyIsCode(keyMsg, tea.KeyEnter):
+		name := m.takenSession.Name
+		return m.closeTaken().openSession(name)
+	case keyIsCode(keyMsg, tea.KeySpace):
+		return m.watchTaken()
+	case keyIsCode(keyMsg, tea.KeyEscape):
+		return m.closeTaken(), nil
+	}
+	return m, nil
+}
+
+// watchTaken opens the preview on the taken session, which closes back to
+// the modal. With no preview to open, the modal stays.
+func (m Model) watchTaken() (tea.Model, tea.Cmd) {
+	cmd, ok := m.openSessionPreview(m.takenSession)
+	if !ok {
+		return m, nil
+	}
+	m.modal, m.watchingTaken = modalNone, true
+	m.activePage = pagePreview
+	return m, cmd
+}
+
+// closeTaken closes the taken modal, and the watch of it with the modal.
+func (m Model) closeTaken() Model {
+	m.modal, m.watchingTaken = modalNone, false
+	m.takenSession, m.takenBy = Session{}, ""
 	return m
 }
 
@@ -3742,6 +3862,8 @@ func (m Model) viewSessionList() string {
 	switch m.modal {
 	case modalKillConfirm:
 		return renderKillModalOnClearedCanvas(m.pendingKill.DisplayName(), m.killFromInside, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
+	case modalTaken:
+		return renderTakenModalOnClearedCanvas(m.takenSession.DisplayName(), m.takenBy, m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalRename:
 		return renderRenameModalOnClearedCanvas(m.renameInput, m.renameTarget.DisplayName(), m.contentWidth(), m.contentHeight(), m.themeState.active, m.colourless)
 	case modalHelp:

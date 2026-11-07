@@ -285,6 +285,33 @@ func TestRun_Unsure(t *testing.T) {
 		h.detach(t)
 	})
 
+	t.Run("a take asks Confirm as it comes, and lets go once it confirms", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		calls := new(atomic.Int32)
+		h := unsure(t, withRequests(requests), confirming(calls, nil))
+
+		send(t, requests, runner.Request{Take: "fake", By: "Ghostty on this Mac"})
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Taken: true, By: "Ghostty on this Mac"}) {
+			t.Errorf("Run = %+v, %v; want the attach taken", out, err)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("Confirm was asked %d times, want once, for the take", n)
+		}
+	})
+
+	t.Run("a take Confirm refuses is refused, saying why, and the attach goes on", func(t *testing.T) {
+		requests := make(chan runner.Request)
+		doubt := errors.New("another client leads the session")
+		h := unsure(t, withRequests(requests), confirming(new(atomic.Int32), doubt))
+
+		if err := ask(t, requests, runner.Request{Take: "fake", By: "Ghostty on this Mac"}); !errors.Is(err, runner.ErrUnconfirmed) || !errors.Is(err, doubt) {
+			t.Errorf("Run answered the take with %v, want ErrUnconfirmed carrying Confirm's why", err)
+		}
+		h.detach(t)
+	})
+
 	t.Run("a request to confirm asks Confirm each time, and is accepted while it confirms, ending nothing", func(t *testing.T) {
 		requests := make(chan runner.Request)
 		calls := new(atomic.Int32)

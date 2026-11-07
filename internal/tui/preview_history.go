@@ -46,6 +46,26 @@ type previewBodyMsg struct {
 	body string
 }
 
+// PreviewRefreshEvery is how long an open preview shows a body before it
+// reads its session again, so it shows the session live.
+const PreviewRefreshEvery = time.Second
+
+// previewTickMsg asks the open gen for its next read. Each is sent only once
+// the read before it has landed, so no two reads of a preview are ever in
+// flight at once.
+type previewTickMsg struct {
+	gen uint64
+}
+
+// previewTick asks for gen's next read every on, and for none when every is
+// zero.
+func previewTick(gen uint64, every time.Duration) tea.Cmd {
+	if every <= 0 {
+		return nil
+	}
+	return tea.Tick(every, func(time.Time) tea.Msg { return previewTickMsg{gen: gen} })
+}
+
 // read is the command that reads and draws session's body off the update
 // loop, where a 10,000-line history or a wedged session would hold every key.
 // It returns no message once open ends, as the next open or the preview's

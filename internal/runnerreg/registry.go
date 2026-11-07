@@ -150,6 +150,42 @@ func (r Registry) askOn(ctx context.Context, rn registered, session string, req 
 // proved gone as it was asked included, and otherwise every refusal and
 // failure. A read-only registry refuses, asking no runner.
 func (r Registry) DetachToPicker(ctx context.Context, session string) (int, error) {
+	return r.askEvery(ctx, session, broadcast{
+		msg:    "detach to picker",
+		undone: "detached to the picker",
+		req:    request{Request: reqDetachToPicker},
+	})
+}
+
+// Take asks every runner registered on session but this process's own to let
+// it go to another terminal, by, ending its attach as taken, all at once, and
+// returns how many accepted, as DetachToPicker does. A runner that refuses or
+// fails, as one that doesn't know the request does, is left for the
+// backend's detach. A read-only registry refuses, asking no runner.
+func (r Registry) Take(ctx context.Context, session, by string) (int, error) {
+	return r.askEvery(ctx, session, broadcast{
+		msg:    "take",
+		undone: "let it go",
+		req:    request{Request: reqTake, Session: session, By: by},
+		skip:   func(rn registered) bool { return rn.PID == selfPID },
+	})
+}
+
+// broadcast is a request asked of every runner on a session at once: the
+// INFO line each result logs, what none accepting failed to do, and which
+// runners not to ask, none when skip is nil.
+type broadcast struct {
+	msg, undone string
+	req         request
+	skip        func(registered) bool
+}
+
+// askEvery asks b's request of every runner registered on session that b
+// doesn't skip, all at once, and returns how many accepted. With none
+// accepting it returns runnertoken.ErrNoRunner when no runner was there to
+// ask, a runner proved gone as it was asked included, and otherwise every
+// refusal and failure. A read-only registry refuses, asking no runner.
+func (r Registry) askEvery(ctx context.Context, session string, b broadcast) (int, error) {
 	if r.readOnly {
 		return 0, errReadOnly
 	}
@@ -157,12 +193,15 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 	if err != nil {
 		return 0, err
 	}
+	if b.skip != nil {
+		runners = slices.DeleteFunc(runners, b.skip)
+	}
 	if len(runners) == 0 {
-		report("detach to picker", runnertoken.ErrNoRunner, "session", session)
+		report(b.msg, runnertoken.ErrNoRunner, "session", session)
 	}
 	accepted, reasons := 0, []error{}
-	for i, err := range r.askAll(ctx, runners, request{Request: reqDetachToPicker}) {
-		report("detach to picker", err, "session", session, "target_pid", runners[i].PID)
+	for i, err := range r.askAll(ctx, runners, b.req) {
+		report(b.msg, err, "session", session, "target_pid", runners[i].PID)
 		switch {
 		case err == nil:
 			accepted++
@@ -174,7 +213,7 @@ func (r Registry) DetachToPicker(ctx context.Context, session string) (int, erro
 	case accepted > 0:
 		return accepted, nil
 	case len(reasons) > 0:
-		return 0, fmt.Errorf("no runner on %s detached to the picker: %w", session, errors.Join(reasons...))
+		return 0, fmt.Errorf("no runner on %s %s: %w", session, b.undone, errors.Join(reasons...))
 	}
 	return 0, fmt.Errorf("%w on %s", runnertoken.ErrNoRunner, session)
 }

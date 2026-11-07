@@ -30,6 +30,9 @@ type Deps struct {
 	// Transcripts reads the transcript a waiting session was restored from,
 	// which its preview shows. Nil previews its History.
 	Transcripts TranscriptReader
+	// PreviewRefresh is how long an open preview shows a body before it reads
+	// its session again, so it shows the session live; zero reads it once.
+	PreviewRefresh time.Duration
 	// DirRunner resolves the git root of a session's cwd, which grouping falls
 	// back to for a session with no recorded directory.
 	DirRunner resolver.CommandRunner
@@ -58,12 +61,16 @@ type Deps struct {
 	// failed to do what was asked.
 	Flash string
 	// KillAsk is the session the kill key asked to kill from inside it: the
-	// picker opens on its kill prompt once its row is listed, which Enter
-	// answers by attaching it again. Keys typed before then are dropped.
+	// picker opens on its kill prompt once its row is listed, whose Esc
+	// attaches it again. Keys typed before then are dropped.
 	KillAsk string
 	// AskedKiller kills on y at the prompt KillAsk opens; without one, no
 	// prompt opens.
 	AskedKiller SessionKiller
+	// Taken is the session another terminal took from this one: the picker
+	// opens on its modal once its row is listed, whose Enter takes it back.
+	// Keys typed before then are dropped.
+	Taken Taken
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -148,7 +155,7 @@ func Build(deps Deps) Model {
 		opts = append(opts, WithAliasEditor(deps.AliasEditor))
 	}
 	if deps.History != nil {
-		opts = append(opts, WithHistory(deps.History))
+		opts = append(opts, WithHistory(deps.History), WithPreviewRefresh(deps.PreviewRefresh))
 	}
 	if deps.Transcripts != nil {
 		opts = append(opts, WithTranscripts(deps.Transcripts))
@@ -191,6 +198,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithSpawnLogger(deps.SpawnLogger))
 	opts = append(opts, WithOpeningFlash(deps.Flash))
 	opts = append(opts, WithKillAsk(deps.KillAsk))
+	opts = append(opts, WithTaken(deps.Taken))
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.

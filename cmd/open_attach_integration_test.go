@@ -114,9 +114,15 @@ func (w *portalWorld) start(t *testing.T, argv ...string) *portalTerm {
 // startIn runs argv on a terminal of its own, in env.
 func (w *portalWorld) startIn(t *testing.T, env []string, argv ...string) *portalTerm {
 	t.Helper()
+	return w.startSized(t, pty.Winsize{Rows: portalTermRows, Cols: portalTermCols}, env, argv...)
+}
+
+// startSized runs argv on a terminal of its own, size, in env.
+func (w *portalWorld) startSized(t *testing.T, size pty.Winsize, env []string, argv ...string) *portalTerm {
+	t.Helper()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env
-	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: portalTermRows, Cols: portalTermCols})
+	tty, err := pty.StartWithSize(cmd, &size)
 	if err != nil {
 		t.Fatalf("start %s on a terminal: %v", argv[0], err)
 	}

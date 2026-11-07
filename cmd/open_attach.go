@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/leeovery/portal/internal/attachkeys"
 	"github.com/leeovery/portal/internal/backend"
@@ -14,19 +15,21 @@ import (
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnertoken"
 	"github.com/leeovery/portal/internal/spawn"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 var attachLogger = log.For("attach")
 
 // attachConnector attaches the terminal to a session through the attach
-// runner, listed in the runner registry while it is attached. Each time the
-// attach ends asking for the picker, it opens the plain picker, on the kill
-// prompt for the session when the kill key asked, and attaches its pick; each
-// time a switch ends it, it attaches the session switched to; until the
-// picker is quit or an attach ends any other way. Inside a session it
-// switches instead: through the registry when a runner's terminal leads the
-// session.
+// runner, listed in the runner registry while it is attached, taking the
+// session from every other terminal first. Each time the attach ends asking
+// for the picker, it opens the plain picker, on the kill prompt for the
+// session when the kill key asked, or on the screen saying another terminal
+// took it, and attaches its pick; each time a switch ends it, it attaches the
+// session switched to; until the picker is quit or an attach ends any other
+// way. Inside a session it switches instead: through the registry when a
+// runner's terminal leads the session.
 type attachConnector struct {
 	cmd     *cobra.Command
 	backend backend.Backend
@@ -36,10 +39,13 @@ type attachConnector struct {
 	// acked writes the receipt --ack asks for, once: as the first attach
 	// begins, or just before an exec takes the attach's place.
 	acked func()
+	// takeWait bounds each take's wait for the session to have no other
+	// client.
+	takeWait time.Duration
 }
 
 func newSessionConnector(cmd *cobra.Command, b backend.Backend) attachConnector {
-	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd)}
+	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd), takeWait: takeWait}
 	if openDeps != nil && openDeps.Execer != nil {
 		c.execer = openDeps.Execer
 	}
@@ -95,7 +101,8 @@ func (c attachConnector) attachOrPicker(name string, listing runnerListing) (run
 
 // next is the session to attach after the attach of name ended with out
 // other than by a switch: the picker's pick, the picker opening on the kill
-// prompt for name when the kill key asked. It is empty when Portal exits
+// prompt for name when the kill key asked, and on the taken screen for name
+// when another terminal took it. It is empty when Portal exits
 // instead, with the error to exit with. The runner is unlisted meanwhile.
 func (c attachConnector) next(name string, out runner.Outcome, listing runnerListing) (string, error) {
 	listing.Close()
@@ -106,11 +113,15 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 	if out.AsksKill() {
 		landing.kill = name
 	}
+	if out.Taken {
+		landing.taken = tui.Taken{Session: name, By: out.By}
+	}
 	return reopenPickerFunc(c.cmd, c.backend, landing)
 }
 
-// attach runs one attach. An exec returns only if it fails, so beside its
-// error the outcome is the zero one.
+// attach runs one attach, once the take has left the session no other
+// client. An exec returns only if it fails, so beside its error the outcome
+// is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
@@ -141,11 +152,13 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 		c.acked()
 	}
 	defer listing.Ended()
+	c.take(ctx, name)
+	began := time.Now()
 	out, err := c.run(ctx, cfg)
 	if errors.Is(err, runner.ErrNoTerminal) {
 		return runner.Outcome{}, c.exec(command)
 	}
-	return out, err
+	return c.takenAway(name, out, began), err
 }
 
 // switchTo moves the terminal this command was typed in to name, from inside

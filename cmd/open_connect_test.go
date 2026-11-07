@@ -162,7 +162,21 @@ type runnersFake struct {
 	events    []string
 	listed    bool
 	backend   runnerreg.Backend
+	// takes and records are each take asked and recorded; onTake, if set,
+	// answers each take, as the runners on its session would, and none
+	// answering is no runner to ask. onRecord, if set, runs as each take is
+	// recorded.
+	takes     []takeCall
+	records   []takeCall
+	onTake    func(session string) (int, error)
+	onRecord  func()
+	recordErr error
+	// takenBy answers every TakenBy, which takenSince records.
+	takenBy    string
+	takenSince []time.Time
 }
+
+type takeCall struct{ session, by string }
 
 // runnerToken is the token runnersFake lists every runner under.
 const runnerToken = "tok123"
@@ -177,6 +191,27 @@ func (f *runnersFake) Listing(b runnerreg.Backend) runnerListing {
 func (f *runnersFake) Switch(_ context.Context, token, current, target string) error {
 	f.switches = append(f.switches, switchCall{token, current, target})
 	return f.switchErr
+}
+
+func (f *runnersFake) Take(_ context.Context, session, by string) (int, error) {
+	f.takes = append(f.takes, takeCall{session, by})
+	if f.onTake == nil {
+		return 0, runnertoken.ErrNoRunner
+	}
+	return f.onTake(session)
+}
+
+func (f *runnersFake) RecordTake(session, by string) error {
+	f.records = append(f.records, takeCall{session, by})
+	if f.onRecord != nil {
+		f.onRecord()
+	}
+	return f.recordErr
+}
+
+func (f *runnersFake) TakenBy(_ string, since time.Time) string {
+	f.takenSince = append(f.takenSince, since)
+	return f.takenBy
 }
 
 func (f *runnersFake) Attach(cfg *runner.Config) {

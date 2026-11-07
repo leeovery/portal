@@ -25,6 +25,17 @@ func SetRunning(t testing.TB, f func(pid int, running func(int) bool) bool) {
 	t.Cleanup(func() { running = old })
 }
 
+// SetSelf has a take judge pid this process's own for the rest of t.
+func SetSelf(t testing.TB, pid int) {
+	t.Helper()
+	old := selfPID
+	selfPID = pid
+	t.Cleanup(func() { selfPID = old })
+}
+
+// TakePath is where the last take's record lives.
+func (r Registry) TakePath() string { return r.takePath() }
+
 // SetBootID has the registry read the current boot's id through read for the
 // rest of t.
 func SetBootID(t testing.TB, read func() (string, error)) {
