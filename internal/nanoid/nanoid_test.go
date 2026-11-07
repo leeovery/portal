@@ -8,16 +8,47 @@ import (
 )
 
 func TestAlphabet_MatchesExpectedCharset(t *testing.T) {
-	// The absence of "-" is load-bearing for the "<batch>-<token>" marker split.
+	// The absence of "-" and ":" is load-bearing for a spawn ack's file name
+	// and flag.
 	const want = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	if nanoid.Alphabet != want {
 		t.Errorf("Alphabet = %q, want %q", nanoid.Alphabet, want)
 	}
 	for _, forbidden := range []rune{'.', ':', '-', ' '} {
 		if strings.ContainsRune(nanoid.Alphabet, forbidden) {
-			t.Errorf("Alphabet contains forbidden rune %q; the option-name-safe marker scheme requires its absence", forbidden)
+			t.Errorf("Alphabet contains forbidden rune %q; the spawn ack's file name and flag require its absence", forbidden)
 		}
 	}
+}
+
+func TestIsIDShaped(t *testing.T) {
+	t.Run("it accepts every rune of the alphabet, and an id of any width up to the bound", func(t *testing.T) {
+		for _, r := range nanoid.Alphabet {
+			if !nanoid.IsIDShaped(string(r)) {
+				t.Errorf("IsIDShaped(%q) = false, want every rune of the alphabet", r)
+			}
+		}
+		for _, id := range []string{"tok123", "b1abcd", strings.Repeat("a", 32)} {
+			if !nanoid.IsIDShaped(id) {
+				t.Errorf("IsIDShaped(%q) = false, want true", id)
+			}
+		}
+	})
+
+	t.Run("it rejects an empty id, one over the bound, and one carrying a character outside the alphabet", func(t *testing.T) {
+		for _, id := range []string{"", strings.Repeat("a", 33), "a-b", "a:b", "a.b", "../a", "a/b", "a b", "a_b", "é"} {
+			if nanoid.IsIDShaped(id) {
+				t.Errorf("IsIDShaped(%q) = true, want false", id)
+			}
+		}
+	})
+
+	t.Run("every id a generator mints is one", func(t *testing.T) {
+		id, err := nanoid.NewGenerator()()
+		if err != nil || !nanoid.IsIDShaped(id) {
+			t.Errorf("minted %q, %v; want an id", id, err)
+		}
+	})
 }
 
 func TestNewGenerator(t *testing.T) {
@@ -91,47 +122,6 @@ func TestIsTokenShaped_Rejects(t *testing.T) {
 			if nanoid.IsTokenShaped(key) {
 				t.Errorf("IsTokenShaped(%q) = true, want false", key)
 			}
-		}
-	})
-}
-
-func TestNewPaneTokenGenerator(t *testing.T) {
-	t.Run("it recognises every token the pane-token mint produces", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		for range 200 {
-			token, err := gen()
-			if err != nil {
-				t.Fatalf("mint pane token: %v", err)
-			}
-			if !nanoid.IsTokenShaped(token) {
-				t.Fatalf("IsTokenShaped(%q) = false for a minted pane token, want true", token)
-			}
-		}
-	})
-
-	t.Run("it rejects a key one byte short of the pane-token width", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		token, err := gen()
-		if err != nil {
-			t.Fatalf("mint pane token: %v", err)
-		}
-		if short := token[:len(token)-1]; nanoid.IsTokenShaped(short) {
-			t.Errorf("IsTokenShaped(%q) = true for a token one byte short, want false", short)
-		}
-	})
-
-	t.Run("it mints a distinct token per call", func(t *testing.T) {
-		gen := nanoid.NewPaneTokenGenerator()
-		seen := map[string]struct{}{}
-		for range 200 {
-			token, err := gen()
-			if err != nil {
-				t.Fatalf("mint pane token: %v", err)
-			}
-			if _, dup := seen[token]; dup {
-				t.Fatalf("pane-token mint produced %q twice in 200 calls", token)
-			}
-			seen[token] = struct{}{}
 		}
 	})
 }

@@ -14,6 +14,9 @@ type FakeAckChannel struct {
 	Cleaned []string
 	// FailCollect, when non-nil, is returned by Collect with a nil map.
 	FailCollect error
+	// FailClean, when non-nil, is returned by Clean, which still records the
+	// batch and removes nothing.
+	FailClean error
 
 	mu    sync.Mutex
 	store map[string]map[string]struct{}
@@ -54,6 +57,9 @@ func (f *FakeAckChannel) Clean(batch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Cleaned = append(f.Cleaned, batch)
+	if f.FailClean != nil {
+		return f.FailClean
+	}
 	delete(f.store, batch)
 	return nil
 }

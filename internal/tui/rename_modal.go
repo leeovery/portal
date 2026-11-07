@@ -23,10 +23,16 @@ const (
 )
 
 func renderRenameModalContent(input textinput.Model, oldName string, th theme.Theme, colourless bool) string {
+	return renderJoinedPanel(renameModalLayout(input, oldName, th, colourless).compartments, th.Border, th, colourless)
+}
+
+// renameModalLayout is the modal's panel: its title and key hints hold still,
+// and its body scrolls.
+func renameModalLayout(input textinput.Model, oldName string, th theme.Theme, colourless bool) panelLayout {
 	header := []string{renameModalHeaderRow(th, colourless)}
 	body := renameModalBodyRows(input, oldName, th, colourless)
 	footer := []string{renameModalFooterRow(th, colourless)}
-	return renderJoinedPanel([][]string{header, body, footer}, th.Border, th, colourless)
+	return panelLayout{compartments: [][]string{header, body, footer}, head: 1, foot: 1}
 }
 
 // Always editing — there is no navigate state — so the badge always shows.

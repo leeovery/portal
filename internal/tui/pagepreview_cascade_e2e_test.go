@@ -9,15 +9,8 @@ import (
 )
 
 func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
-	const windowName = "nvim-editor"
-	body := []byte("\x1b[41mhello\nworld\n")
-
-	counters := "Window 1/1 · Pane 1/1"
-	session := "work"
-	headerFullW := lipgloss.Width(previewMarker) + 1 + lipgloss.Width(session) + 1 + lipgloss.Width(counters)
-	tier1Term := headerFullW + previewFrameOverhead
-	headerNoCounters := lipgloss.Width(previewMarker) + 1 + lipgloss.Width(session)
-	tier3Term := headerNoCounters + previewFrameOverhead
+	const body = "\x1b[41mhello\r\nworld"
+	labelledFooter := "↑↓ session  ⏎ attach  ␣ back"
 
 	tests := []struct {
 		name   string
@@ -25,37 +18,25 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 		assert func(t *testing.T, stripped string)
 	}{
 		{
-			name:  "tier 1 — marker + full session + counters; full labelled footer",
-			width: tier1Term + 30,
+			name:  "wide — marker and full session; full labelled footer",
+			width: lipgloss.Width(labelledFooter) + previewFrameOverhead + 10,
 			assert: func(t *testing.T, stripped string) {
-				if !strings.Contains(stripped, "◉ preview work Window 1/1 · Pane 1/1") {
-					t.Errorf("tier 1: expected full header; stripped=%q", stripped)
-				}
-				if !strings.Contains(stripped, "←→ window  ⇥ pane  ⏎ attach  ␣ back") {
-					t.Errorf("tier 1: expected full labelled footer; stripped=%q", stripped)
-				}
-			},
-		},
-		{
-			name:  "tier 3 — drops counters, keeps session",
-			width: tier3Term,
-			assert: func(t *testing.T, stripped string) {
-				if strings.Contains(stripped, "Window 1/1") {
-					t.Errorf("tier 3: expected NO counters; stripped=%q", stripped)
-				}
 				if !strings.Contains(stripped, "◉ preview work") {
-					t.Errorf("tier 3: expected marker + session; stripped=%q", stripped)
+					t.Errorf("wide: expected full header; stripped=%q", stripped)
+				}
+				if !strings.Contains(stripped, labelledFooter) {
+					t.Errorf("wide: expected full labelled footer; stripped=%q", stripped)
 				}
 			},
 		},
 		{
 			name:  "narrow — footer compacts to glyphs only",
-			width: 25,
+			width: 20,
 			assert: func(t *testing.T, stripped string) {
-				if !strings.Contains(stripped, "←→  ⇥  ⏎  ␣") {
+				if !strings.Contains(stripped, "↑↓  ⏎  ␣") {
 					t.Errorf("narrow: expected compact glyph-only footer; stripped=%q", stripped)
 				}
-				if strings.Contains(stripped, "window") || strings.Contains(stripped, "attach") {
+				if strings.Contains(stripped, "session ") || strings.Contains(stripped, "attach") {
 					t.Errorf("narrow: expected footer labels dropped; stripped=%q", stripped)
 				}
 			},
@@ -64,7 +45,7 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newFramePreviewModelAt(t, windowName, body, tc.width, 30)
+			m := newTestPreview(t, body, tc.width, 30)
 			m, _ = m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
 
 			raw := m.View()

@@ -1,51 +1,53 @@
-# Portal cold-boot / resurrection demo. The container starts with a baked restore
-# seed and NO running tmux server, so `x` triggers a real cold boot: the honest
-# loading screen, a live restore of every saved session (with its scrollback),
-# then the repopulated picker. Fully sandboxed (see demo/README.md).
+# The README's lead clip: Portal's first launch after a reboot. capturetool
+# plays the portal-cold scenario (internal/capture/scenarios.go) through the
+# real picker, in real time, with every seam faked; the keys below are timed to
+# its cues.
 #
-# Re-record:  vhs demo/portal-cold.tape   (after demo/build.sh)
-# VHS renders the colour-accurate master MP4; demo/finalize.sh grades it to the
-# vivid delivery formats (portal-cold-vivid.{mp4,gif}).
-Output demo/out/portal-cold.mp4
-Require docker
+# The loading page checks zmx, starts the saver and restores the twelve
+# sessions, 8 of 12 at 1.95s, then lands on them at 2.9s, three waiting to
+# resume. ↓↓ at 4.5s to kiln-relayx-explore, ␣ at 5.5s to preview its replayed
+# scrollback, and ↓ at 8.5s to loom-p84cXa's. It ends in the preview, at 10.5s.
+#
+# Record it, and make art/portal-cold.webp and art/portal-cold.mp4:
+#   demo/record.sh portal-cold
 
-Set Shell "zsh"
-Set FontFamily "JetBrainsMono Nerd Font"
-Set FontSize 16
-Set Width 1280
-Set Height 800
-Set Padding 20
-Set TypingSpeed 110ms
+Output "demo/out/portal-cold/"
 
-# --- hidden: boot the cold container and clear to a fresh prompt ---
+Set Shell "bash"
+Set FontFamily "JetBrains Mono"
+Set FontSize 17
+Set LetterSpacing 0
+Set LineHeight 1
+# 120 × 40 cells of 10 × 22 px, and the margins about them.
+Set Width 1260
+Set Height 924
+Set Padding 16
+Set CursorBlink false
+Set Framerate 30
+Set Theme { "name": "tokyo-night", "background": "#0B0C14", "foreground": "#C0CAF5", "cursor": "#0B0C14", "selection": "#28243A", "black": "#15161E", "red": "#F7768E", "green": "#9ECE6A", "yellow": "#E0AF68", "blue": "#7AA2F7", "magenta": "#BB9AF7", "cyan": "#7DCFFF", "white": "#A9B1D6", "brightBlack": "#414868", "brightRed": "#F7768E", "brightGreen": "#9ECE6A", "brightYellow": "#E0AF68", "brightBlue": "#7AA2F7", "brightMagenta": "#BB9AF7", "brightCyan": "#7DCFFF", "brightWhite": "#C0CAF5" }
+Set WaitTimeout 2m
+
 Hide
-Type "docker run --rm -it -e DEMO_COLD=1 portal-demo" Enter
-Sleep 5s
-Type "clear" Enter
-Sleep 800ms
+# In UTC, as the frames are drawn, whatever the recording machine's zone.
+Type "TZ=UTC demo/out/capturetool --theme tokyo-night --scenario portal-cold"
+Enter
+Wait+Screen /Checking zmx/
 Show
 
-# cold boot: x -> loading screen (restoring N/M) -> repopulated picker
+# Restored at 2.9s, the waiting sessions' dots shown.
+Sleep 4500ms
+Down 2
 Sleep 900ms
-Type "x" Sleep 300ms Enter
-Sleep 600ms
-Screenshot demo/out/c1-loading.png
-Sleep 2600ms
-Screenshot demo/out/c2-landed.png
+# kiln-relayx-explore's scrollback, at 5.5s.
+Space
+Sleep 2950ms
+# The next session's, loom-p84cXa's, at 8.5s.
+Down
+Sleep 1950ms
 
-# cold boot lands on Projects; switch to the restored Sessions list
-Type "x"
-Sleep 1600ms
-Screenshot demo/out/c3-sessions.png
-
-# attach a restored session — its scrollback came back too
-Type "/"
-Sleep 300ms
-Type "portal-a3"
-Sleep 900ms
-Enter
-Sleep 1000ms
-Enter
-Sleep 2500ms
-Screenshot demo/out/c4-attached.png
-Sleep 1500ms
+Hide
+Sleep 500ms
+Escape
+# A beat, past the escape timeout, so the q reads as its own key.
+Sleep 200ms
+Type "q"

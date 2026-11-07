@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const (
@@ -112,9 +111,9 @@ func TestFooterRevision_MultiLabelIsShort(t *testing.T) {
 
 func footerRevisionSessionsModel(t *testing.T, colourless bool) Model {
 	t.Helper()
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 	m.termWidth = referenceFooterWidth + 2*Hinset
 	m.termHeight = 30 + 2*Vinset

@@ -1,21 +1,28 @@
-// The hook-staleness cycle's own test vocabulary: the seam fake the cycle
-// reads through, the enumeration rows it answers with, and the hooks.json
-// bodies a fixture stages. The seed keys themselves are named once in
-// internal/hookstest, so no suite can re-point a name at a different key.
+// The hook-staleness cycle's own test vocabulary: the world a cycle reads —
+// the backend's listing, a state directory holding sessions.json and the
+// restoring flag, and a hooks.json — and the bodies a fixture stages. The seed
+// keys themselves are named once in internal/hookstest, so no suite can
+// re-point a name at a different key.
 package hooksweep
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/logtest"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 )
 
 // hooksBody renders a hooks.json body registering one on-resume entry per key,
@@ -33,60 +40,110 @@ func hooksBody(keys ...string) string {
 	return "{\n" + strings.Join(entries, ",\n") + "\n}"
 }
 
-// tokenRows models the enumeration's answer for stamped panes, and
-// unstampedRows for panes carrying no token. The location half is display-only,
-// so these fabricate a distinct one per row rather than asserting on it.
-func tokenRows(tokens ...string) []tmux.PaneHookRow {
-	rows := make([]tmux.PaneHookRow, 0, len(tokens))
-	for i, token := range tokens {
-		rows = append(rows, tmux.PaneHookRow{Token: token, Location: fmt.Sprintf("stamped%d:0.0", i)})
+// world is what one cycle judges against: the backend's sessions and a state
+// directory of the test's own. during, when set, runs as the listing is
+// taken, so a test can land a concurrent writer's mutation in the window
+// between the cycle's snapshot and its deletion; lists counts the listings.
+type world struct {
+	backend *backendtest.Fake
+	dir     string
+	during  func()
+	lists   int
+}
+
+// newWorld lists the named sessions, each answering, over an empty state
+// directory.
+func newWorld(t *testing.T, listed ...string) *world {
+	t.Helper()
+	w := &world{backend: backendtest.New(), dir: t.TempDir()}
+	for _, name := range listed {
+		w.backend.Add(backend.Session{Name: name})
 	}
-	return rows
+	return w
 }
 
-func unstampedRows(n int) []tmux.PaneHookRow {
-	rows := make([]tmux.PaneHookRow, 0, n)
-	for i := range n {
-		rows = append(rows, tmux.PaneHookRow{Location: fmt.Sprintf("bare%d:0.0", i)})
+func (w *world) list(ctx context.Context) ([]backend.Session, error) {
+	w.lists++
+	if w.during != nil {
+		w.during()
 	}
-	return rows
+	return w.backend.List(ctx)
 }
 
-// stubReader answers the cycle's two seams with fixed values: a fixed row set
-// (or failure) for the pane-token enumeration, and a fixed @portal-restoring
-// read. It counts the enumeration reads, so a test can assert the cycle stood
-// down before enumerating as well as what it read. The optional during hook
-// runs at the top of the enumeration, so a test can land a concurrent writer's
-// mutation inside it — in the window between the cycle's snapshot and the token
-// set that snapshot is weighed against.
-type stubReader struct {
-	rows         []tmux.PaneHookRow
-	err          error
-	restoring    bool
-	restoringErr error
-	during       func()
-	calls        int
+func (w *world) sources() Sources {
+	return Sources{List: w.list, StateDir: w.dir}
 }
 
-func (s *stubReader) ListAllPaneHookKeys() ([]tmux.PaneHookRow, error) {
-	s.calls++
-	if s.during != nil {
-		s.during()
+// index writes a sessions.json holding an entry for each of names.
+func (w *world) index(t *testing.T, names ...string) {
+	t.Helper()
+	entries := make([]map[string]string, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, map[string]string{"name": name, "dir": "/srv/" + name})
 	}
-	return s.rows, s.err
+	w.writeIndex(t, map[string]any{"version": sessionindex.SchemaVersion, "sessions": entries})
 }
 
-func (s *stubReader) TryGetServerOption(string) (string, bool, error) {
-	switch {
-	case s.restoringErr != nil:
-		return "", false, s.restoringErr
-	case !s.restoring:
-		return "", false, nil
+// writeIndex writes body as sessions.json, whatever it says.
+func (w *world) writeIndex(t *testing.T, body any) {
+	t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode sessions.json: %v", err)
 	}
-	return "1", true, nil
+	w.writeIndexBytes(t, data)
 }
 
-var _ Reader = (*stubReader)(nil)
+func (w *world) writeIndexBytes(t *testing.T, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(sessionindex.Path(w.dir), data, 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+}
+
+// besideMigration moves w's state dir into a root of its own, beside
+// state-tmux/ and a migration's staging dir, which stage then fills.
+func (w *world) besideMigration(t *testing.T, stage func(staging string)) {
+	t.Helper()
+	w.dir = filepath.Join(t.TempDir(), "state")
+	for _, dir := range []string{w.dir, state.TmuxStateDir(w.dir), state.MigrationStagingDir(w.dir)} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stage(state.MigrationStagingDir(w.dir))
+}
+
+// writeFileAt writes body at path.
+func writeFileAt(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (w *world) raiseRestoring(t *testing.T) {
+	t.Helper()
+	if err := state.Restoring.Set(w.dir); err != nil {
+		t.Fatalf("raise the restoring flag: %v", err)
+	}
+}
+
+// makeUnreadableAt replaces whatever is at path with a directory no read can
+// get through, so a file read there fails rather than reading as absent.
+func makeUnreadableAt(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0o000 directory permissions")
+	}
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatalf("clear %s: %v", path, err)
+	}
+	if err := os.Mkdir(path, 0o000); err != nil {
+		t.Fatalf("stage an unreadable directory at %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o700) })
+}
 
 // keysOf names the entries a loaded store holds, for a failure message that
 // says which keys survived a cycle rather than dumping the whole file.
@@ -100,32 +157,25 @@ func keysOf(snapshot hooks.Snapshot) []string {
 
 // runErr drives one cycle and keeps only its error, for the cases that assert
 // on hooks.json or on the log rather than on what the cycle reported.
-func runErr(reader Reader, store *hooks.Store) error {
-	_, err := Run(reader, store)
+func runErr(t *testing.T, src Sources, store *hooks.Store) error {
+	t.Helper()
+	_, err := Run(t.Context(), src, store)
 	return err
 }
 
-// assertStandDown pins the stand-down breadcrumb at the level the cycle is
-// expected to report it, and returns it for per-case attr assertions. The level
-// picks the record set the count is taken over: a DEBUG stand-down is the only
-// line the sink holds, so anything at WARN or above is itself a failure, while a
-// WARN stand-down shares the sink with the degraded pre-read's own DEBUG
-// breadcrumb and can only be counted among the WARNs.
-func assertStandDown(t *testing.T, sink *logtest.Sink, level slog.Level, reason Reason) logtest.Record {
+// assertStandDown pins the stand-down breadcrumb, at DEBUG whatever its
+// reason, as the cycle's only record at or above DEBUG beside the degraded
+// pre-read's own breadcrumb, and returns it for per-case attr assertions.
+func assertStandDown(t *testing.T, sink *logtest.Sink, reason Reason) logtest.Record {
 	t.Helper()
 
-	var rec logtest.Record
-	if level < slog.LevelWarn {
-		for _, r := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
-			t.Errorf("stand-down emitted at %v: %+v", r.Level, r)
-		}
-		rec = sink.Records().Only(t, "log record")
-	} else {
-		rec = sink.Records().AtOrAboveLevel(level).Only(t, "record at or above level")
+	for _, r := range sink.Records().AtOrAboveLevel(slog.LevelInfo) {
+		t.Errorf("stand-down cycle emitted at %v: %+v", r.Level, r)
 	}
+	rec := sink.Records().WithMessage(standDownMsg).Only(t, "stand-down record")
 
 	logtest.AssertRecord(t, rec, logtest.RecordWant{
-		Level:     level,
+		Level:     slog.LevelDebug,
 		Msg:       standDownMsg,
 		Component: "hooks",
 		Op:        standDownMsg,
@@ -141,9 +191,12 @@ func assertStandDown(t *testing.T, sink *logtest.Sink, level slog.Level, reason 
 // enough to be a real wait, short enough that a suite can afford one.
 const lockBound = 60 * time.Millisecond
 
-// errTmuxDead is the transient tmux failure a seam is armed with when the case
-// is about what the cycle does with a failed read, not about which read failed.
-var errTmuxDead = errors.New("tmux dead")
+// portalSaver is the session the sweeping daemon runs in, one of Portal's own.
+const portalSaver = "_portal-saver"
+
+// errZmxDown is the listing failure a backend is armed with when the case is
+// about what the cycle does with a failed read, not about which read failed.
+var errZmxDown = errors.New("zmx directory unreadable")
 
 // dirListing is the directory's entry names, so a test can assert a cycle that
 // had nothing to do added nothing to it.

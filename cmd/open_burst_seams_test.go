@@ -4,11 +4,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -16,8 +16,8 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 	t.Run("injected fields win, unset fields defaulted", func(t *testing.T) {
 		isolateTerminalsFile(t)
 
-		client := tmux.NewClient(commandertest.Quiet())
-		cmd := cmdWithClient(client)
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		cmd := &cobra.Command{}
 
 		injectedAdapter := &spawntest.FakeAdapter{}
 		injectedResolve := func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
@@ -44,7 +44,10 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 			return nil
 		})
 
-		deps := buildOpenBurstDeps(cmd)
+		deps, err := buildOpenBurstDeps(cmd, &resolver.SessionResult{Name: "api"})
+		if err != nil {
+			t.Fatalf("buildOpenBurstDeps: %v", err)
+		}
 
 		gotAdapter, gotResolution := deps.Resolve(spawn.Identity{})
 		if gotAdapter != spawn.Adapter(injectedAdapter) || gotResolution != spawn.ResolutionConfig {
@@ -63,21 +66,21 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 			t.Error("LocalMint overwritten: routed to openPathFunc instead of the injected sentinel")
 		}
 
-		if _, ok := deps.Ack.(*spawn.ServerOptionAckChannel); !ok {
-			t.Errorf("Ack not defaulted from shared builder: got %T, want *spawn.ServerOptionAckChannel", deps.Ack)
+		if _, ok := deps.Ack.(stateAcks); !ok {
+			t.Errorf("Ack not defaulted from shared builder: got %T, want the state directory's stateAcks", deps.Ack)
 		}
 		if deps.ExePath == nil {
 			t.Error("ExePath not defaulted from shared builder")
 		}
-		if deps.Getenv == nil {
-			t.Error("Getenv not defaulted from shared builder")
+		if deps.Env == nil {
+			t.Fatal("Env not defaulted from shared builder")
 		}
-		if got, want := deps.Getenv("PATH"), os.Getenv("PATH"); got != want {
-			t.Errorf("defaulted Getenv(PATH) = %q, want os.Getenv value %q", got, want)
+		if env, err := deps.Env(); err != nil || len(env.Set) == 0 || env.Set[0] != "PATH="+os.Getenv("PATH") {
+			t.Errorf("defaulted Env() = %q, %v; want the window environment, this process's PATH first", env, err)
 		}
 
 		if deps.Detector == nil {
-			t.Error("Detector default missing (should route through spawnDetector)")
+			t.Error("Detector not defaulted from shared builder")
 		}
 		if deps.Connector == nil {
 			t.Error("Connector default missing")
@@ -90,8 +93,8 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 	t.Run("unset LocalMint defaults to openPathFunc", func(t *testing.T) {
 		isolateTerminalsFile(t)
 
-		client := tmux.NewClient(commandertest.Quiet())
-		cmd := cmdWithClient(client)
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		cmd := &cobra.Command{}
 
 		// LocalMint deliberately absent so it takes the production default.
 		withOpenBurstDeps(t, OpenBurstDeps{
@@ -106,7 +109,10 @@ func TestBuildOpenBurstDeps_PartialInjectionKeepsInjectedFillsRest(t *testing.T)
 			return nil
 		})
 
-		deps := buildOpenBurstDeps(cmd)
+		deps, err := buildOpenBurstDeps(cmd, &resolver.SessionResult{Name: "api"})
+		if err != nil {
+			t.Fatalf("buildOpenBurstDeps: %v", err)
+		}
 
 		if deps.LocalMint == nil {
 			t.Fatal("LocalMint default missing")

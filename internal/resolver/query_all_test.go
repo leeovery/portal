@@ -1,6 +1,7 @@
 package resolver_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/leeovery/portal/internal/resolver"
@@ -279,6 +280,26 @@ func TestQueryResolver_ResolveSessionPinAll(t *testing.T) {
 		}
 		if miss.Target != "api-*" {
 			t.Errorf("miss.Target = %q, want %q", miss.Target, "api-*")
+		}
+	})
+
+	t.Run("a glob over a failed listing is a collected miss, not an error", func(t *testing.T) {
+		qr := resolver.NewQueryResolver(
+			&mockSessionLister{err: errors.New("listing failed")},
+			&mockAliasLookup{aliases: map[string]string{}},
+			&mockZoxideQuerier{err: resolver.ErrNoMatch},
+			&mockDirValidator{existing: map[string]bool{}},
+		)
+
+		results, err := qr.ResolveSessionPinAll("api-*")
+		if err != nil {
+			t.Fatalf("expected a collected miss, not an error, got: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("results = %#v, want one miss", results)
+		}
+		if miss, ok := results[0].(*resolver.MissResult); !ok || miss.Target != "api-*" {
+			t.Errorf("result[0] = %#v, want a miss for api-*", results[0])
 		}
 	})
 }

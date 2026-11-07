@@ -1,0 +1,40 @@
+
+
+
+
+
+
+
+
+
+
+
+
+                                        █████ █████ █████ █████ █████ █       █
+                                        █   █ █   █ █   █   █   █   █ █       █
+                                        █████ █   █ █████   █   █████ █       █
+                                        █     █   █ █  █    █   █   █ █       █
+                                        █     █████ █   █   █   █   █ █████   █
+
+
+                                        ███████████████████████████████████████
+
+
+                                                 ✓   Checking zmx
+                                                 ✗   Starting the saver
+                                                 ·   Restoring sessions
+
+                           Portal failed to remove the bootstrapped latch: permission denied
+                                                   q quit · esc quit
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,405 +1,408 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"os/exec"
+	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/saverhost"
+	"github.com/leeovery/portal/internal/state"
+	"golang.org/x/sys/unix"
 )
 
-// newExitError returns a real *exec.ExitError, the shape tmux's has-session
-// produces for a genuinely absent session. An absent-saver mock must return
-// this: a bare errors.New would be misclassified as a transient fault.
-func newExitError(t *testing.T) error {
-	t.Helper()
-	err := exec.Command("sh", "-c", "exit 1").Run()
-	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
-		t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
-	}
-	return err
+// removal is uninstall's second line, whatever it did.
+const removal = "To remove Portal completely, uninstall the binary and delete that directory.\n"
+
+// stopperFake is a stop that finds a saver when stopped, failing with err,
+// which it hands to orElse, and counts the stops asked of it. One whose saver
+// is theirs, another state directory's, fails with it, orElse unasked, as
+// saverhost's does.
+type stopperFake struct {
+	stopped bool
+	err     error
+	theirs  *saverhost.OtherStateDirError
+	stops   int
 }
 
-func installUninstallDeps(t *testing.T, deps *UninstallDeps) {
-	t.Helper()
-	withUninstallDeps(t, *deps)
+func (s *stopperFake) StopOr(ctx context.Context, orElse func(context.Context, error) (bool, error)) (bool, error) {
+	s.stops++
+	switch {
+	case s.theirs != nil:
+		return s.stopped, fmt.Errorf("pid %d isn't confirmed as the save daemon, so nothing was sent to it: %w", s.theirs.PID, s.theirs)
+	case s.err != nil:
+		return orElse(ctx, s.err)
+	}
+	return s.stopped, nil
 }
 
-// wantCompletionMessage is hard-coded rather than referenced from production,
-// so a drift in the production string fails the test.
-const wantCompletionMessage = "Portal's tmux runtime removed. Your saved sessions and config are untouched at ~/.config/portal/.\n" +
-	"To remove Portal completely, uninstall the binary and delete that directory.\n"
+// daemonFake is the saver's daemon, one Portal can't use when unusable,
+// whose end fails with endErr, counting the judgements and ends asked of it.
+// onAsk runs at each judgement and each end, handed which it is.
+type daemonFake struct {
+	isUnusable bool
+	endErr     error
+	asks, ends int
+	onAsk      func(what string)
+}
 
-func TestUninstall_KillsPortalSaverBeforeRemovingHooks(t *testing.T) {
-	raw := "session-created[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n"
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Returns("", "has-session"),
-		commandertest.Returns("", "kill-session"),
-		commandertest.Returns(raw, "show-hooks"),
-		commandertest.Returns("", "set-hook"),
-	)
-	installUninstallDeps(t, &UninstallDeps{Client: tmux.NewClient(cmder)})
+func (d *daemonFake) unusable(context.Context) bool {
+	d.asks++
+	d.asked("the judgement")
+	return d.isUnusable
+}
 
-	out, _, err := runRootCmd(t, "uninstall")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+func (d *daemonFake) End(context.Context) error {
+	d.ends++
+	d.asked("the end")
+	return d.endErr
+}
 
-	hasSessionIdx := cmder.CallsMatching("has-session", tmux.PortalSaverName).FirstIndex()
-	killIdx := cmder.CallsMatching("kill-session", tmux.PortalSaverName).FirstIndex()
-	showHooksIdx := cmder.CallsMatching("show-hooks").FirstIndex()
-	setHookIdx := cmder.CallsMatching("set-hook", "-gu").FirstIndex()
-
-	if hasSessionIdx < 0 {
-		t.Fatalf("expected has-session %s call, got calls=%v", tmux.PortalSaverName, cmder.Calls())
-	}
-	if killIdx < 0 {
-		t.Fatalf("expected kill-session %s call, got calls=%v", tmux.PortalSaverName, cmder.Calls())
-	}
-	if showHooksIdx < 0 {
-		t.Fatalf("expected show-hooks call, got calls=%v", cmder.Calls())
-	}
-	if setHookIdx < 0 {
-		t.Fatalf("expected set-hook -gu call, got calls=%v", cmder.Calls())
-	}
-	if hasSessionIdx >= killIdx || killIdx >= showHooksIdx || showHooksIdx >= setHookIdx {
-		t.Errorf("expected order has-session(%d) < kill-session(%d) < show-hooks(%d) < set-hook(%d); calls=%v",
-			hasSessionIdx, killIdx, showHooksIdx, setHookIdx, cmder.Calls())
-	}
-	if anchorKillIdx := cmder.CallsMatching("kill-session", tmux.PortalBootstrapName).FirstIndex(); anchorKillIdx >= 0 {
-		t.Errorf("kill-session must never target %s (the load-bearing anchor); calls=%v", tmux.PortalBootstrapName, cmder.Calls())
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message mismatch:\n got %q\nwant %q", out.String(), wantCompletionMessage)
+func (d *daemonFake) asked(what string) {
+	if d.onAsk != nil {
+		d.onAsk(what)
 	}
 }
 
-func TestUninstall_NoServerRunningIsGracefulNoOpAndPrintsMessage(t *testing.T) {
-	// Nothing beyond the server probe is scripted: any further call fails the
-	// test, which is the "graceful no-op" claim.
-	cmder := commandertest.New(t,
-		commandertest.Fails(errors.New("no server running on /tmp/tmux-501/default"), "info"),
-	)
-	installUninstallDeps(t, &UninstallDeps{Client: tmux.NewClient(cmder)})
+func TestUninstall(t *testing.T) {
+	t.Run("it stops the saver and says where the saved sessions and config are", func(t *testing.T) {
+		stop := &stopperFake{stopped: true}
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: stop, Daemon: daemon})
 
-	out, _, err := runRootCmd(t, "uninstall")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		stdout, _, err := runRootCmd(t, "uninstall")
 
-	for _, c := range cmder.Calls() {
-		switch c[0] {
-		case "has-session", "kill-session", "show-hooks", "set-hook":
-			t.Errorf("expected no %q call when server down, got %v", c[0], c)
-		}
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message mismatch on down server:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-}
-
-func TestUninstall_IsIdempotentWhenSaverAbsent(t *testing.T) {
-	// kill-session is deliberately unscripted: invoking it when the saver is
-	// absent fails the test through the unmatched default.
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Fails(newExitError(t), "has-session"),
-		commandertest.Returns("", "show-hooks"),
-	)
-	installUninstallDeps(t, &UninstallDeps{Client: tmux.NewClient(cmder)})
-
-	out, _, err := runRootCmd(t, "uninstall")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	for _, c := range cmder.Calls() {
-		if len(c) >= 1 && c[0] == "kill-session" {
-			t.Errorf("kill-session must not be invoked when saver absent, got %v", c)
-		}
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message mismatch:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-}
-
-func TestUninstall_PrintsExactCompletionMessage(t *testing.T) {
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Fails(newExitError(t), "has-session"),
-		commandertest.Returns("", "show-hooks"),
-	)
-	installUninstallDeps(t, &UninstallDeps{Client: tmux.NewClient(cmder)})
-
-	out, errBuf, err := runRootCmd(t, "uninstall")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("stdout mismatch:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-	if errBuf.Len() != 0 {
-		t.Errorf("expected no stderr, got %q", errBuf.String())
-	}
-}
-
-func TestUninstall_AccumulatesHookRemovalFailureWithoutSkippingKill(t *testing.T) {
-	sentinel := errors.New("show-hooks blew up")
-	stub := func(_ *tmux.Client) error {
-		return sentinel
-	}
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Returns("", "has-session"),
-		commandertest.Returns("", "kill-session"),
-	)
-	installUninstallDeps(t, &UninstallDeps{
-		Client:     tmux.NewClient(cmder),
-		Unregister: stub,
-	})
-
-	out, _, err := runRootCmd(t, "uninstall")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
-	}
-	if !strings.Contains(err.Error(), "hook removal") {
-		t.Errorf("error %q does not contain 'hook removal'", err.Error())
-	}
-	if cmder.CallsMatching("kill-session", tmux.PortalSaverName).FirstIndex() < 0 {
-		t.Errorf("expected kill-session %s despite hook removal failure, got calls=%v", tmux.PortalSaverName, cmder.Calls())
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message must print on partial failure:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-}
-
-func TestUninstall_TransientProbeFaultSurfacesErrorNotSilentRemoval(t *testing.T) {
-	// An OS-layer fault does not unwrap to *exec.ExitError, so the probe reports
-	// present-with-error. Folding it into the returned error is what stops
-	// uninstall exiting 0 with a false "removed" claim.
-	probeFault := errors.New(`exec: "tmux": executable file not found in $PATH`)
-	logger, sink := newCaptureLoggerForComponent(t, "daemon")
-	// kill-session is deliberately unscripted: running it on a transient probe
-	// fault fails the test through the unmatched default.
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Fails(probeFault, "has-session"),
-	)
-	installUninstallDeps(t, &UninstallDeps{
-		Client:     tmux.NewClient(cmder),
-		Unregister: func(*tmux.Client) error { return nil },
-		Logger:     logger,
-	})
-
-	out, _, err := runRootCmd(t, "uninstall")
-	if err == nil {
-		t.Fatal("expected an error from the transient probe fault, got nil (false silent 'removed')")
-	}
-	if !strings.Contains(err.Error(), "daemon kill") {
-		t.Errorf("error %q does not contain the 'daemon kill' wrap", err.Error())
-	}
-	if !errors.Is(err, probeFault) {
-		t.Errorf("error %v does not wrap the underlying probe fault %v", err, probeFault)
-	}
-
-	logged := sink.Body()
-	if strings.Contains(logged, "killed _portal-saver") {
-		t.Errorf("must NOT claim saver removal on a probe fault; log:\n%s", logged)
-	}
-	if !strings.Contains(logged, "WARN") {
-		t.Errorf("expected a WARN log for the probe fault; log:\n%s", logged)
-	}
-
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message must print on a probe fault:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-}
-
-func TestUninstall_RegisteredInSkipTmuxCheck(t *testing.T) {
-	if !skipTmuxCheck["uninstall"] {
-		t.Fatal("uninstall must be registered in skipTmuxCheck (bootstrap-exempt)")
-	}
-}
-
-func TestUninstall_KillSessionOtherFailureContributesJoinedErrorAndStillRunsUnregister(t *testing.T) {
-	unregisterCalled := false
-	stub := func(_ *tmux.Client) error {
-		unregisterCalled = true
-		return nil
-	}
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Returns("", "has-session"),
-		commandertest.Fails(errors.New("permission denied"), "kill-session"),
-	)
-	installUninstallDeps(t, &UninstallDeps{
-		Client:     tmux.NewClient(cmder),
-		Unregister: stub,
-	})
-
-	out, _, err := runRootCmd(t, "uninstall")
-	if err == nil {
-		t.Fatal("expected non-nil error from kill failure")
-	}
-	if !strings.Contains(err.Error(), "daemon kill") {
-		t.Errorf("error %q does not contain 'daemon kill'", err.Error())
-	}
-	if !strings.Contains(err.Error(), "permission denied") {
-		t.Errorf("error %q does not propagate underlying tmux error", err.Error())
-	}
-	if !unregisterCalled {
-		t.Error("hook removal must still be invoked after KillSession failure")
-	}
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message must print on kill failure:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-}
-
-func TestUninstall_LogsInfoWhenSaverKilledSuccessfully(t *testing.T) {
-	logger, sink := newCaptureLoggerForComponent(t, "daemon")
-
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Returns("", "has-session"),
-		commandertest.Returns("", "kill-session"),
-		commandertest.Returns("", "show-hooks"),
-	)
-	installUninstallDeps(t, &UninstallDeps{
-		Client: tmux.NewClient(cmder),
-		Logger: logger,
-	})
-
-	if _, _, err := runRootCmd(t, "uninstall"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	logged := sink.Body()
-	if !strings.Contains(logged, "INFO") {
-		t.Errorf("log missing INFO level entry: %q", logged)
-	}
-	if !strings.Contains(logged, "daemon") {
-		t.Errorf("log missing %q component: %q", "daemon", logged)
-	}
-	if !strings.Contains(logged, "killed _portal-saver") {
-		t.Errorf("log missing kill confirmation: %q", logged)
-	}
-	if !strings.Contains(logged, "SIGHUP") {
-		t.Errorf("log missing SIGHUP wording: %q", logged)
-	}
-}
-
-func TestUninstall_DoesNotInvokeBootstrap(t *testing.T) {
-	withBootstrapDeps(t, BootstrapDeps{Orchestrator: panicRunner{}})
-
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Fails(newExitError(t), "has-session"),
-		commandertest.Returns("", "show-hooks"),
-	)
-	installUninstallDeps(t, &UninstallDeps{Client: tmux.NewClient(cmder)})
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("PersistentPreRunE invoked bootstrap: %v", r)
-		}
-	}()
-
-	if _, _, err := runRootCmd(t, "uninstall"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// killSaverOutcome runs uninstall against a scripted tmux whose kill-session
-// fails with killErr, and reports what the user was told: the captured
-// daemon-component log and the returned error.
-func killSaverOutcome(t *testing.T, killErr error) (string, error) {
-	t.Helper()
-	logger, sink := newCaptureLoggerForComponent(t, "daemon")
-	cmder := commandertest.New(t,
-		commandertest.Returns("", "info"),
-		commandertest.Returns("", "has-session"),
-		commandertest.Fails(killErr, "kill-session"),
-	)
-	installUninstallDeps(t, &UninstallDeps{
-		Client:     tmux.NewClient(cmder),
-		Unregister: func(*tmux.Client) error { return nil },
-		Logger:     logger,
-	})
-
-	out, _, err := runRootCmd(t, "uninstall")
-	if out.String() != wantCompletionMessage {
-		t.Errorf("completion message mismatch:\n got %q\nwant %q", out.String(), wantCompletionMessage)
-	}
-	return sink.Body(), err
-}
-
-func TestUninstall_ClassifiesKillSessionFailureBySentinel(t *testing.T) {
-	t.Run("it reports a clean removal when the saver session is genuinely absent", func(t *testing.T) {
-		// The shape a real tmux exit carries: only a *CommandError reaches the
-		// client's ErrNoSuchSession wrap.
-		absent := &tmux.CommandError{Stderr: "can't find session: _portal-saver", Err: newExitError(t)}
-
-		logged, err := killSaverOutcome(t, absent)
 		if err != nil {
-			t.Fatalf("expected a clean removal, got error: %v", err)
+			t.Fatalf("uninstall: %v", err)
 		}
-		if !strings.Contains(logged, killSaverInfoMessage) {
-			t.Errorf("log missing the removal message %q; log:\n%s", killSaverInfoMessage, logged)
+		if want := "Portal's save daemon stopped. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
-	})
-
-	t.Run("it reports a failure when the kill failed on an unaddressable saver name", func(t *testing.T) {
-		// tmux answers an unaddressable target with the very same stderr a
-		// vanished session produces; only the classification tells them apart.
-		unaddressable := fmt.Errorf("%w: can't find session: _portal-saver", tmux.ErrUnaddressableSessionName)
-
-		logged, err := killSaverOutcome(t, unaddressable)
-		if err == nil {
-			t.Fatal("expected an error for an unaddressable saver name, got nil (false 'removed')")
+		if stop.stops != 1 {
+			t.Errorf("stops = %d, want one", stop.stops)
 		}
-		if !errors.Is(err, tmux.ErrUnaddressableSessionName) {
-			t.Errorf("error %v does not wrap tmux.ErrUnaddressableSessionName", err)
-		}
-		if strings.Contains(logged, killSaverInfoMessage) {
-			t.Errorf("must not log a removal for a saver it did not kill; log:\n%s", logged)
-		}
-		if !strings.Contains(logged, "WARN") {
-			t.Errorf("expected a WARN for the failed kill; log:\n%s", logged)
+		if daemon.asks != 0 || daemon.ends != 0 {
+			t.Errorf("the daemon was judged %d times and ended %d, want neither past a stop that worked", daemon.asks, daemon.ends)
 		}
 	})
 
-	t.Run("it surfaces any other kill failure as an error", func(t *testing.T) {
-		sentinel := errors.New("permission denied")
+	t.Run("with no saver running it says so, and succeeds", func(t *testing.T) {
+		stop := &stopperFake{}
+		withUninstallDeps(t, UninstallDeps{Saver: stop})
 
-		logged, err := killSaverOutcome(t, sentinel)
-		if err == nil {
-			t.Fatal("expected an error from the kill failure, got nil")
-		}
-		if !errors.Is(err, sentinel) {
-			t.Errorf("error %v does not wrap the underlying kill failure %v", err, sentinel)
-		}
-		if strings.Contains(logged, killSaverInfoMessage) {
-			t.Errorf("must not log a removal for a failed kill; log:\n%s", logged)
-		}
-	})
+		stdout, _, err := runRootCmd(t, "uninstall")
 
-	t.Run("it matches on the sentinel rather than tmux's stderr wording", func(t *testing.T) {
-		// Absence classified by the client, worded differently: the sentinel is
-		// the whole contract, tmux's phrasing is not.
-		reworded := fmt.Errorf("%w: session vanished", tmux.ErrNoSuchSession)
-
-		logged, err := killSaverOutcome(t, reworded)
 		if err != nil {
-			t.Fatalf("expected a clean removal on the sentinel alone, got error: %v", err)
+			t.Fatalf("uninstall: %v", err)
 		}
-		if !strings.Contains(logged, killSaverInfoMessage) {
-			t.Errorf("log missing the removal message %q; log:\n%s", killSaverInfoMessage, logged)
+		if want := "Portal's save daemon isn't running. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
 	})
+
+	t.Run("it names a config directory outside the home whole", func(t *testing.T) {
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{stopped: true}})
+		t.Setenv("XDG_CONFIG_HOME", "/srv/config")
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if want := "Portal's save daemon stopped. Saved sessions and config are untouched at /srv/config/portal/.\n" + removal; err != nil || stdout.String() != want {
+			t.Errorf("uninstall = %q, %v; want %q", stdout, err, want)
+		}
+	})
+
+	refused := errors.New("pid 4242 isn't confirmed as the save daemon, so nothing was sent to it")
+	for name, fake := range map[string]*stopperFake{
+		"a stop that fails":                  {stopped: true, err: refused},
+		"a saver whose daemon can't be read": {err: refused},
+	} {
+		t.Run(name+" fails the command with its reason, printing nothing", func(t *testing.T) {
+			daemon := &daemonFake{}
+			withUninstallDeps(t, UninstallDeps{Saver: fake, Daemon: daemon})
+
+			stdout, _, err := runRootCmd(t, "uninstall")
+
+			if !errors.Is(err, refused) {
+				t.Fatalf("uninstall = %v, want the failure", err)
+			}
+			if want := "couldn't stop Portal's save daemon: " + refused.Error(); err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+			if daemon.ends != 0 {
+				t.Errorf("ends = %d, want none of a daemon Portal can use", daemon.ends)
+			}
+		})
+	}
+
+	// Decision 68: a saver whose daemon speaks a zmx protocol Portal can't
+	// use can't be read to stop, and is ended as the bootstrap ends one.
+	t.Run("a saver it can't read for its daemon's protocol is ended, and reported stopped", func(t *testing.T) {
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+		if want := "Portal's save daemon stopped. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
+		}
+		if daemon.ends != 1 {
+			t.Errorf("ends = %d, want one", daemon.ends)
+		}
+	})
+
+	t.Run("a saver another state directory's is refused in the bootstrap's terms, nothing judged or ended, printing nothing", func(t *testing.T) {
+		theirs := &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other: "/srv/portal/state", PID: 4242}
+		daemon := &daemonFake{isUnusable: true}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{stopped: true, theirs: theirs}, Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if !errors.Is(err, theirs) {
+			t.Fatalf("uninstall = %v, want the refusal", err)
+		}
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.OtherStateDir(theirs).UserMessage; err.Error() != want {
+			t.Errorf("error = %q, want %q", err, want)
+		}
+		if daemon.asks != 0 || daemon.ends != 0 {
+			t.Errorf("the daemon was judged %d times and ended %d, want neither", daemon.asks, daemon.ends)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
+	t.Run("one it can't end fails the command with the way out of it and both reasons, printing nothing", func(t *testing.T) {
+		unproved := errors.New("no one process is proved the session's zmx daemon")
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: &daemonFake{isUnusable: true, endErr: unproved}})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if !errors.Is(err, refused) || !errors.Is(err, unproved) {
+			t.Fatalf("uninstall = %v, want the stop's and the end's failures", err)
+		}
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.SaverLeftMessage + " ("; !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("error = %q, want it to begin %q", err, want)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
+	// The stop can't read a daemon on a protocol Portal can't use, so only
+	// the end finds it another state directory's: SaverLeftMessage would have
+	// the user end that state's saver.
+	t.Run("one the end finds another state directory's is refused in the bootstrap's terms, printing nothing", func(t *testing.T) {
+		theirs := &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other: "/srv/portal/state", PID: 4242}
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{err: refused}, Daemon: &daemonFake{isUnusable: true, endErr: theirs}})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if want := "couldn't stop Portal's save daemon: " + bootstrap.OtherStateDir(theirs).UserMessage; err == nil || err.Error() != want {
+			t.Errorf("uninstall = %v, want %q", err, want)
+		}
+		if _, fatal := errors.AsType[*bootstrap.FatalError](err); !fatal {
+			t.Errorf("uninstall = %v, want the bootstrap's fatal, which Execute prints alone", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
+	// Decision 68: the judgement and the end hold saver.lock as the stop
+	// does, so neither can reach a saver a bootstrap makes meanwhile.
+	t.Run("unstaged, it judges and ends a saver it can't stop under saver.lock", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: 4242})
+		fake.SetReachEnv([]string{"ZMX_DIR=/tmp/zx-uninstall"})
+		fake.StopAnswering(saver.SessionName)
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		var free []string
+		daemon := &daemonFake{isUnusable: true}
+		daemon.onAsk = func(what string) {
+			if !saverLockHeld(t, dir) {
+				free = append(free, what)
+			}
+		}
+		withUninstallDeps(t, UninstallDeps{Daemon: daemon})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+		if !strings.HasPrefix(stdout.String(), "Portal's save daemon stopped.") {
+			t.Errorf("stdout = %q, want the saver reported stopped", stdout)
+		}
+		if daemon.asks != 1 || daemon.ends != 1 {
+			t.Errorf("the daemon was judged %d times and ended %d, want once each", daemon.asks, daemon.ends)
+		}
+		if len(free) != 0 {
+			t.Errorf("%v ran with saver.lock free, want every judgement and end under it", free)
+		}
+	})
+
+	t.Run("a session backend that can't be bound fails the command the same way", func(t *testing.T) {
+		t.Setenv("ZMX_DIR", "relative/zmx")
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "couldn't stop Portal's save daemon: ") {
+			t.Errorf("uninstall = %v, want it to begin \"couldn't stop Portal's save daemon: \"", err)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("stdout = %q, want nothing", stdout)
+		}
+	})
+
+	t.Run("a session backend whose reach names no directory fails the command, reading nothing", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: 4242})
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		_, _, err := runRootCmd(t, "uninstall")
+
+		if err == nil || !strings.HasPrefix(err.Error(), "couldn't stop Portal's save daemon: ") {
+			t.Errorf("uninstall = %v, want it to begin \"couldn't stop Portal's save daemon: \"", err)
+		}
+		if calls := fake.Calls(); len(calls) != 0 {
+			t.Errorf("backend calls = %+v, want none", calls)
+		}
+	})
+
+	t.Run("it keeps the latch, and writes nothing to the state directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		if err := state.WriteLatch(dir, state.Latch{BootID: "4DAA6ADD-0334-49EC-9FC6-8323D691249E", Version: "0.13.0"}); err != nil {
+			t.Fatal(err)
+		}
+		before := dirContents(t, dir)
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{stopped: true}})
+
+		if _, _, err := runRootCmd(t, "uninstall"); err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+
+		if after := dirContents(t, dir); !maps.Equal(before, after) {
+			t.Errorf("state directory = %v, want it as it was, %v", after, before)
+		}
+	})
+
+	t.Run("it runs no bootstrap", func(t *testing.T) {
+		withBootstrapDeps(t, BootstrapDeps{Orchestrator: panicRunner{}})
+		withUninstallDeps(t, UninstallDeps{Saver: &stopperFake{}})
+
+		if _, _, err := runRootCmd(t, "uninstall"); err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+	})
+
+	t.Run("unstaged, it reads the session backend's saver under saver.lock in the state directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		fake := backendtest.New()
+		fake.SetReachEnv([]string{"ZMX_DIR=/tmp/zx-uninstall"})
+		withBackendDeps(t, BackendDeps{Backend: fake})
+		const held = 150 * time.Millisecond
+		release := holdSaverLock(t, dir)
+		time.AfterFunc(held, release)
+		start := time.Now()
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if err != nil {
+			t.Fatalf("uninstall: %v", err)
+		}
+		if took := time.Since(start); took < held {
+			t.Errorf("uninstall took %s, want it waiting out saver.lock, held %s", took, held)
+		}
+		if want := "Portal's save daemon isn't running. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; stdout.String() != want {
+			t.Errorf("stdout = %q, want %q", stdout, want)
+		}
+		calls := fake.Calls()
+		if len(calls) != 1 || calls[0].Op != backendtest.OpSession || calls[0].Name != saver.SessionName {
+			t.Errorf("backend calls = %+v, want one read of %s", calls, saver.SessionName)
+		}
+	})
+
+	t.Run("unstaged with no state directory, it finds no saver and creates nothing", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "state")
+		t.Setenv("PORTAL_STATE_DIR", dir)
+		fake := backendtest.New()
+		fake.SetReachEnv([]string{"ZMX_DIR=/tmp/zx-uninstall"})
+		withBackendDeps(t, BackendDeps{Backend: fake})
+
+		stdout, _, err := runRootCmd(t, "uninstall")
+
+		if want := "Portal's save daemon isn't running. Saved sessions and config are untouched at ~/.config/portal/.\n" + removal; err != nil || stdout.String() != want {
+			t.Errorf("uninstall = %q, %v; want %q", stdout, err, want)
+		}
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat %s = %v, want it still absent", dir, err)
+		}
+	})
+}
+
+// saverLockHeld reports whether a descriptor holds saver.lock in dir.
+func saverLockHeld(t *testing.T, dir string) bool {
+	t.Helper()
+	f, err := os.Open(saverhost.LockPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	return errors.Is(unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB), unix.EWOULDBLOCK)
+}
+
+// holdSaverLock takes saver.lock in dir as another process would, until the
+// returned release or the test's end.
+func holdSaverLock(t *testing.T, dir string) (release func()) {
+	t.Helper()
+	f, err := os.OpenFile(saverhost.LockPath(dir), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatalf("flock saver.lock: %v", err)
+	}
+	return func() { _ = f.Close() }
+}
+
+func TestUninstall_IsBootstrapExempt(t *testing.T) {
+	if !bootstrapExempt["uninstall"] {
+		t.Fatal("uninstall must be registered in bootstrapExempt")
+	}
+}
+
+// dirContents is every file under dir and its bytes.
+func dirContents(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		files[path] = string(data)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }

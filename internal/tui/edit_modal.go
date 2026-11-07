@@ -111,13 +111,33 @@ func renderEditableValue(value string, cursor int, th theme.Theme, colourless bo
 }
 
 func (m Model) renderEditProjectContent() string {
+	th := m.themeState.active
+	return renderJoinedPanel(m.editModalLayout().compartments, th.Border, th, m.colourless)
+}
+
+// editModalLayout is the modal's panel: its title and key hints hold still,
+// and its fields scroll.
+func (m Model) editModalLayout() panelLayout {
 	th, colourless := m.themeState.active, m.colourless
 
 	header := []string{m.editModalHeaderRow(th, colourless)}
 	body := m.editModalBodyRows(th, colourless)
 	footer := []string{m.editModalFooterRow(th, colourless)}
 
-	return renderJoinedPanel([][]string{header, body, footer}, th.Border, th, colourless)
+	return panelLayout{compartments: [][]string{header, body, footer}, head: 1, foot: 1}
+}
+
+// editModalOffset is how far the fields scroll for room rows of them to show
+// the focused field whole, or its top where it's taller than the room: as
+// little as that takes, from the top.
+func (m Model) editModalOffset(room int) int {
+	fields := m.editModalFields(m.themeState.active, m.colourless)
+	start := 0
+	for _, f := range fields[:m.editFocus] {
+		start += len(f) + 1
+	}
+	end := start + len(fields[m.editFocus])
+	return min(start, max(end-room, 0))
 }
 
 // Computed from state-independent constants so toggling navigate↔edit never
@@ -172,16 +192,26 @@ func renderHeaderWithBadge(left string, contentWidth int, showBadge bool, badgeT
 // Every appended element must be a single line — a multi-line row would defeat
 // panelInsetRow's per-line padding and overrun the panel frame.
 func (m Model) editModalBodyRows(th theme.Theme, colourless bool) []string {
-	var rows []string
-	rows = append(rows, m.editFieldLabelRow(editLabelName, editFieldName, th, colourless))
-	rows = append(rows, m.editNameInputRows(th, colourless)...)
-	rows = append(rows, editFieldGap)
-	rows = append(rows, m.editFieldLabelRow(editLabelAliases, editFieldAliases, th, colourless))
-	rows = append(rows, m.editChipFieldRows(editFieldAliases, m.editAliases, m.editAliasCursor, th, colourless)...)
-	rows = append(rows, editFieldGap)
-	rows = append(rows, m.editFieldLabelRow(editLabelTags, editFieldTags, th, colourless))
-	rows = append(rows, m.editChipFieldRows(editFieldTags, m.editTags, m.editTagCursor, th, colourless)...)
+	fields := m.editModalFields(th, colourless)
+	rows := fields[0]
+	for _, f := range fields[1:] {
+		rows = append(rows, editFieldGap)
+		rows = append(rows, f...)
+	}
 	return rows
+}
+
+// editModalFields are each field's rows, its label's and its box's, indexed
+// by editField.
+func (m Model) editModalFields(th theme.Theme, colourless bool) [][]string {
+	return [][]string{
+		editFieldName: append([]string{m.editFieldLabelRow(editLabelName, editFieldName, th, colourless)},
+			m.editNameInputRows(th, colourless)...),
+		editFieldAliases: append([]string{m.editFieldLabelRow(editLabelAliases, editFieldAliases, th, colourless)},
+			m.editChipFieldRows(editFieldAliases, m.editAliases, m.editAliasCursor, th, colourless)...),
+		editFieldTags: append([]string{m.editFieldLabelRow(editLabelTags, editFieldTags, th, colourless)},
+			m.editChipFieldRows(editFieldTags, m.editTags, m.editTagCursor, th, colourless)...),
+	}
 }
 
 func (m Model) editFieldLabelRow(label string, field editField, th theme.Theme, colourless bool) string {

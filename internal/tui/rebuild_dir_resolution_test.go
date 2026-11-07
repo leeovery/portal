@@ -1,60 +1,37 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
 
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/session"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-type fakeStamper struct {
-	path string
-	err  error
-
-	setErr   error
-	setCalls []stamperSetCall
-	reads    []string
-}
-
-type stamperSetCall struct {
-	session string
-	name    string
-	value   string
-}
-
-func (f *fakeStamper) ActivePaneCurrentPath(sess string) (string, error) {
-	f.reads = append(f.reads, sess)
-	return f.path, f.err
-}
-
-func (f *fakeStamper) SetSessionOption(sess, name, value string) error {
-	f.setCalls = append(f.setCalls, stamperSetCall{session: sess, name: name, value: value})
-	return f.setErr
-}
-
-var _ session.PaneCurrentPathReader = (*fakeStamper)(nil)
-
+// fakeDirRunner answers git's root query with gitRoot, recording the directory
+// each query asked about.
 type fakeDirRunner struct {
 	gitRoot string
+	reads   []string
 }
 
 func (r *fakeDirRunner) Run(name string, args ...string) (string, error) {
+	r.reads = append(r.reads, args[1])
 	return r.gitRoot, nil
 }
 
 func TestRebuildSessionListDirResolution(t *testing.T) {
-	t.Run("By Project: an empty-Dir session resolving via the reader appears under its project, not Unknown", func(t *testing.T) {
+	t.Run("By Project: an empty-Dir session resolving via its cwd's git root appears under its project, not Unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = &fakeStamper{path: dir}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
@@ -84,10 +61,9 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 	t.Run("By Tag: an empty-Dir session resolving to a tagged project appears under its tags, not Untagged", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
-		m.dirReader = &fakeStamper{path: dir}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
@@ -112,22 +88,59 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("caches the derived directory outside the recorded one and never stamps tmux", func(t *testing.T) {
+	t.Run("it asks git for the root of the row's own cwd", func(t *testing.T) {
+		dir := t.TempDir()
+		cwd := filepath.Join(dir, "internal")
+		if err := os.Mkdir(cwd, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []Session{{Name: "portal-abc", Cwd: cwd}}
+
+		runner := &fakeDirRunner{gitRoot: dir}
+		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
+		m.dirRunner = runner
+
+		m.rebuildSessionList()
+
+		if !slices.Equal(runner.reads, []string{cwd}) {
+			t.Errorf("git-root queries = %v, want one for the cwd %q", runner.reads, cwd)
+		}
+		if rows := sessionRows(m.sessionList.Items()); len(rows) != 1 || rows[0].GroupHeading != "Portal" {
+			t.Errorf("rows = %+v, want the session under its cwd's project", rows)
+		}
+	})
+
+	t.Run("it never resolves a session whose directory the index records", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []Session{{Name: "portal-abc", Dir: dir, Cwd: t.TempDir()}}
+
+		runner := &fakeDirRunner{gitRoot: t.TempDir()}
+		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
+		m.dirRunner = runner
+
+		m.rebuildSessionList()
+
+		if len(runner.reads) != 0 {
+			t.Errorf("git-root queries = %v, want none for a session with a recorded directory", runner.reads)
+		}
+		if rows := sessionRows(m.sessionList.Items()); len(rows) != 1 || rows[0].GroupHeading != "Portal" {
+			t.Errorf("rows = %+v, want the session under its recorded directory's project", rows)
+		}
+	})
+
+	t.Run("caches the derived directory outside the recorded one", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
-		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = reader
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
 
-		if len(reader.setCalls) != 0 {
-			t.Fatalf("expected 0 stamp writes (no freezing), got %d: %v", len(reader.setCalls), reader.setCalls)
-		}
 		if m.sessions[0].Dir != "" {
 			t.Errorf("m.sessions[0].Dir = %q, want \"\" (the recorded directory stays untouched)", m.sessions[0].Dir)
 		}
@@ -136,39 +149,37 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("second rebuild reuses the cache and performs no further pane read", func(t *testing.T) {
+	t.Run("second rebuild reuses the cache and asks git nothing more", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
-		reader := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = reader
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
-		if len(reader.reads) != 1 {
-			t.Fatalf("first rebuild reads = %d, want 1", len(reader.reads))
+		if len(runner.reads) != 1 {
+			t.Fatalf("first rebuild reads = %d, want 1", len(runner.reads))
 		}
 
-		reader.reads = nil
+		runner.reads = nil
 		m.rebuildSessionList()
-		if len(reader.reads) != 0 {
-			t.Errorf("second rebuild performed %d pane reads, want 0 (cache fast-path)", len(reader.reads))
+		if len(runner.reads) != 0 {
+			t.Errorf("second rebuild asked git %d times, want 0 (cache fast-path)", len(runner.reads))
 		}
 	})
 
-	// The exact pair tmux gives for a session no pane answers to: display-message
-	// exits 0 with an empty expansion, so the reader returns ("", nil) and the
-	// grouped render must read that as unresolved rather than as a directory.
-	t.Run("it treats an empty current path as unresolved in the grouped render", func(t *testing.T) {
+	// A session that did not answer, or whose backend names no cwd, reaches the
+	// picker with an empty one.
+	t.Run("it treats an empty cwd as unresolved in the grouped render", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc"}}
 
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = &fakeStamper{path: "", err: nil}
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.rebuildSessionList()
 
@@ -177,7 +188,7 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 			t.Fatalf("len(session rows) = %d, want 1", len(rows))
 		}
 		if !rows[0].CatchAll {
-			t.Fatalf("an empty-and-nil pane read must route the session to the Unknown catch-all")
+			t.Fatalf("an empty cwd must route the session to the Unknown catch-all")
 		}
 		if rows[0].GroupHeading != unknownHeading {
 			t.Errorf("GroupHeading = %q, want %q (nothing was resolved)", rows[0].GroupHeading, unknownHeading)
@@ -188,34 +199,36 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		if got, ok := m.derivedDirs["portal-abc"]; ok {
 			t.Errorf("m.derivedDirs[%q] = %q, want absent (unresolvable sessions are not negative-cached)", "portal-abc", got)
 		}
+		if len(runner.reads) != 0 {
+			t.Errorf("git-root queries = %v, want none for an empty cwd", runner.reads)
+		}
 	})
 
 	t.Run("it discards derived values when the session list is refreshed", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
-		reader := &fakeStamper{path: dir}
+		runner := &fakeDirRunner{gitRoot: dir}
 		m := newRebuildTestModel(t, prefs.ModeByProject, nil, projects)
-		m.dirReader = reader
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+		m.dirRunner = runner
 
 		m.applySessions(sessions, nil)
-		if len(reader.reads) != 1 {
-			t.Fatalf("first refresh reads = %d, want 1", len(reader.reads))
+		if len(runner.reads) != 1 {
+			t.Fatalf("first refresh reads = %d, want 1", len(runner.reads))
 		}
 
-		reader.reads = nil
+		runner.reads = nil
 		m.applySessions(sessions, nil)
-		if len(reader.reads) != 1 {
-			t.Errorf("second refresh performed %d pane reads, want 1 (the refresh discards the derived value)", len(reader.reads))
+		if len(runner.reads) != 1 {
+			t.Errorf("second refresh asked git %d times, want 1 (the refresh discards the derived value)", len(runner.reads))
 		}
 	})
 
 	t.Run("nil seam does not panic and routes an empty-Dir session to Unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
 
@@ -234,10 +247,9 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+		sessions := []Session{{Name: "portal-abc", Cwd: dir}}
 
 		m := newRebuildTestModel(t, prefs.ModeByProject, sessions, projects)
-		m.dirReader = &fakeStamper{path: dir}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()

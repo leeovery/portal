@@ -9,14 +9,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const sectionHeaderWidth = 90
 
 func TestSectionHeader_LabelCyanCountGreen(t *testing.T) {
 	forEachBuiltinTheme(t, func(t *testing.T, th theme.Theme) {
-		header := renderSectionHeader(prefs.ModeFlat, false, "", 7, sectionHeaderWidth, th, false)
+		header := renderSectionHeader(prefs.ModeFlat, "", 7, sectionHeaderWidth, th, false)
 
 		if !strings.Contains(header, "Sessions") {
 			t.Errorf("section header missing the %q label:\n%s", "Sessions", header)
@@ -35,12 +34,12 @@ func TestSectionHeader_LabelCyanCountGreen(t *testing.T) {
 
 func TestSectionHeader_ModeSuffixFromTitleFn(t *testing.T) {
 	for _, mode := range []prefs.SessionListMode{prefs.ModeByProject, prefs.ModeByTag} {
-		title := sessionListTitleForMode(mode, false, "")
+		title := sessionListTitleForMode(mode, "", 0)
 		suffix := strings.TrimPrefix(title, "Sessions")
 		if suffix == "" {
 			t.Fatalf("expected a non-empty mode suffix for %v, got title %q", mode, title)
 		}
-		header := renderSectionHeader(mode, false, "", 3, sectionHeaderWidth, testDarkTheme(t), false)
+		header := renderSectionHeader(mode, "", 3, sectionHeaderWidth, testDarkTheme(t), false)
 		if !strings.Contains(header, strings.TrimSpace(suffix)) {
 			t.Errorf("section header for %v missing the suffix %q from sessionListTitleForMode:\n%s", mode, suffix, header)
 		}
@@ -52,7 +51,7 @@ func TestSectionHeader_ModeSuffixFromTitleFn(t *testing.T) {
 
 func TestSectionHeader_RightAlignedFilterHint(t *testing.T) {
 	for _, mode := range []prefs.SessionListMode{prefs.ModeFlat, prefs.ModeByProject, prefs.ModeByTag} {
-		header := renderSectionHeader(mode, false, "", 4, sectionHeaderWidth, testDarkTheme(t), false)
+		header := renderSectionHeader(mode, "", 4, sectionHeaderWidth, testDarkTheme(t), false)
 		if !strings.Contains(header, sectionFilterHint) {
 			t.Errorf("section header for %v missing the %q hint:\n%s", mode, sectionFilterHint, header)
 		}
@@ -68,29 +67,29 @@ func TestSectionHeader_RightAlignedFilterHint(t *testing.T) {
 }
 
 func TestSectionHeader_NoSwitchViewHint(t *testing.T) {
-	header := renderSectionHeader(prefs.ModeByTag, false, "", 4, sectionHeaderWidth, testDarkTheme(t), false)
+	header := renderSectionHeader(prefs.ModeByTag, "", 4, sectionHeaderWidth, testDarkTheme(t), false)
 	if strings.Contains(header, "switch view") {
 		t.Errorf("section header must NOT duplicate the footer %q hint:\n%s", "s switch view", header)
 	}
 }
 
-func TestSectionHeader_PreservesInsideTmuxDecoration(t *testing.T) {
+func TestSectionHeader_PreservesCurrentSessionDecoration(t *testing.T) {
 	const current = "my-project-x7k2m9"
-	header := renderSectionHeader(prefs.ModeFlat, true, current, 2, sectionHeaderWidth, testDarkTheme(t), false)
+	header := renderSectionHeader(prefs.ModeFlat, current, 2, sectionHeaderWidth, testDarkTheme(t), false)
 	want := "(current: " + current + ")"
 	if !strings.Contains(header, want) {
-		t.Errorf("section header dropped the inside-tmux decoration %q:\n%s", want, header)
+		t.Errorf("section header dropped the current-session decoration %q:\n%s", want, header)
 	}
 }
 
 func TestSectionHeader_NarrowDegradeDropsHint(t *testing.T) {
-	wide := renderSectionHeader(prefs.ModeFlat, false, "", 5, sectionHeaderWidth, testDarkTheme(t), false)
+	wide := renderSectionHeader(prefs.ModeFlat, "", 5, sectionHeaderWidth, testDarkTheme(t), false)
 	if !strings.Contains(wide, sectionFilterHint) {
 		t.Fatalf("wide section header missing the hint:\n%s", wide)
 	}
 
 	const narrow = 14
-	narrowHeader := renderSectionHeader(prefs.ModeFlat, false, "", 5, narrow, testDarkTheme(t), false)
+	narrowHeader := renderSectionHeader(prefs.ModeFlat, "", 5, narrow, testDarkTheme(t), false)
 	if strings.Contains(narrowHeader, sectionFilterHint) {
 		t.Errorf("narrow section header at width %d still shows the %q hint (degrade failed):\n%s", narrow, sectionFilterHint, narrowHeader)
 	}
@@ -110,8 +109,8 @@ func TestSectionHeader_CountValueAndSuffixByteIdentical(t *testing.T) {
 		{prefs.ModeByProject, 8},
 		{prefs.ModeByTag, 15},
 	} {
-		header := renderSectionHeader(tc.mode, false, "", tc.count, sectionHeaderWidth, testDarkTheme(t), false)
-		title := sessionListTitleForMode(tc.mode, false, "")
+		header := renderSectionHeader(tc.mode, "", tc.count, sectionHeaderWidth, testDarkTheme(t), false)
+		title := sessionListTitleForMode(tc.mode, "", 0)
 		if suffix := strings.TrimSpace(strings.TrimPrefix(title, "Sessions")); suffix != "" && !strings.Contains(header, suffix) {
 			t.Errorf("section header for %v missing the parity suffix %q from title %q:\n%s", tc.mode, suffix, title, header)
 		}
@@ -123,7 +122,7 @@ func TestSectionHeader_CountValueAndSuffixByteIdentical(t *testing.T) {
 }
 
 func TestSectionHeader_ColourlessDropsHueAndCanvas(t *testing.T) {
-	header := renderSectionHeader(prefs.ModeByTag, false, "", 6, sectionHeaderWidth, testDarkTheme(t), true)
+	header := renderSectionHeader(prefs.ModeByTag, "", 6, sectionHeaderWidth, testDarkTheme(t), true)
 
 	if !strings.Contains(header, "Sessions") || !strings.Contains(header, "6") || !strings.Contains(header, sectionFilterHint) {
 		t.Errorf("colourless section header dropped structure:\n%s", header)
@@ -140,7 +139,7 @@ func TestSectionHeader_ColourlessDropsHueAndCanvas(t *testing.T) {
 
 func TestSectionHeader_PaintsCanvasNoEdgeBleed(t *testing.T) {
 	for _, mode := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
-		header := renderSectionHeader(prefs.ModeFlat, false, "", 3, sectionHeaderWidth, mode, false)
+		header := renderSectionHeader(prefs.ModeFlat, "", 3, sectionHeaderWidth, mode, false)
 		if seq := canvasSeq(t, mode); !strings.Contains(header, seq) {
 			t.Errorf("section header does not paint the canvas background sequence %q:\n%s", seq, header)
 		}
@@ -167,20 +166,20 @@ func TestViewSessionList_ReplacesTitleWithSectionHeader(t *testing.T) {
 }
 
 func TestViewSessionList_SectionHeaderCountMatchesVisible(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: true},
-		{Name: "bravo", Windows: 1},
-		{Name: "charlie", Windows: 1},
+	sessions := []Session{
+		{Name: "alpha", Attached: true},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	}
-	m := NewModelWithSessions(sessions).WithInsideTmux("alpha")
+	m := NewModelWithSessions(sessions).WithCurrentSession("alpha")
 	view := m.viewSessionList()
 
 	twoRun := headerStyle(testDarkTheme(t).StatePositive, testDarkTheme(t), false).Render("2")
 	if !strings.Contains(view, twoRun) {
-		t.Errorf("composed view section-header count should be 2 (alpha excluded inside tmux):\n%s", view)
+		t.Errorf("composed view section-header count should be 2 (alpha excluded as the current session):\n%s", view)
 	}
 	if !strings.Contains(view, "current: alpha") {
-		t.Errorf("composed view dropped the inside-tmux decoration:\n%s", view)
+		t.Errorf("composed view dropped the current-session decoration:\n%s", view)
 	}
 }
 
@@ -209,7 +208,7 @@ func TestSectionHeader_AlignsWithHeaderWordmark(t *testing.T) {
 			t.Fatalf("PORTAL wordmark leading column = %d, want 0 (flush at the content edge)", wordmarkCol)
 		}
 
-		section := renderSectionHeader(prefs.ModeFlat, false, "", 3, w, th, false)
+		section := renderSectionHeader(prefs.ModeFlat, "", 3, w, th, false)
 		sectionCol := leadingPrintableCol(section)
 		if sectionCol != 0 {
 			t.Errorf("section header `Sessions` leading column = %d, want 0 (no extra indent; must align with the PORTAL wordmark at the content edge)", sectionCol)

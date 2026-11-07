@@ -8,13 +8,12 @@ import (
 	"charm.land/bubbles/v2/list"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 func TestSessionItem(t *testing.T) {
 	t.Run("it returns the session name alone when the session carries no recorded directory", func(t *testing.T) {
-		item := tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: true}}
+		item := tui.SessionItem{Session: tui.Session{Name: "dev", Attached: true}}
 
 		got := item.FilterValue()
 
@@ -25,8 +24,7 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("it returns the name, one space and the abbreviated directory", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
-		item := tui.SessionItem{Session: tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}}
+		item := tui.SessionItem{Session: tui.Session{Name: "api-work", Dir: home + "/Code/portal"}, Home: home}
 
 		got := item.FilterValue()
 
@@ -37,26 +35,25 @@ func TestSessionItem(t *testing.T) {
 
 	t.Run("FilterValue is the SearchFields slice joined by a single space", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
-		session := tmux.Session{Name: "api-work", Windows: 3, Dir: home + "/Code/portal"}
-		item := tui.SessionItem{Session: session}
+		session := tui.Session{Name: "api-work", Dir: home + "/Code/portal"}
+		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.SearchSubject()), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the search fields joined)", got, want)
 		}
 	})
 
 	t.Run("FilterValue for a session with no recorded directory has no trailing separator", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		session := tmux.Session{Name: "dev", Windows: 3}
-		item := tui.SessionItem{Session: session}
+		home := t.TempDir()
+		session := tui.Session{Name: "dev"}
+		item := tui.SessionItem{Session: session, Home: home}
 
 		got := item.FilterValue()
 
-		want := strings.Join(resolver.SearchFields(session.Name, session.Dir), " ")
+		want := strings.Join(resolver.SearchFields(home, session.SearchSubject()), " ")
 		if got != want {
 			t.Errorf("FilterValue() = %q, want %q (the one-element slice joins to the bare name)", got, want)
 		}
@@ -72,7 +69,7 @@ func TestSessionItem(t *testing.T) {
 
 func TestSessionItemGroupMetadata(t *testing.T) {
 	t.Run("leaves Flat items with empty group metadata", func(t *testing.T) {
-		item := tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: true}}
+		item := tui.SessionItem{Session: tui.Session{Name: "dev", Attached: true}}
 
 		if item.GroupKey != "" {
 			t.Errorf("GroupKey = %q, want empty", item.GroupKey)
@@ -87,7 +84,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("returns the session name from FilterValue regardless of group fields", func(t *testing.T) {
 		item := tui.SessionItem{
-			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true},
+			Session:      tui.Session{Name: "dev", Attached: true},
 			GroupKey:     "work",
 			GroupHeading: "work",
 			CatchAll:     false,
@@ -100,9 +97,9 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("returns the name and abbreviated directory from FilterValue regardless of group fields", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
 		item := tui.SessionItem{
-			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true, Dir: home + "/Code/portal"},
+			Session:      tui.Session{Name: "dev", Attached: true, Dir: home + "/Code/portal"},
+			Home:         home,
 			GroupKey:     "work",
 			GroupHeading: "work",
 			CatchAll:     false,
@@ -115,7 +112,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 
 	t.Run("the live render emits the session name regardless of group fields", func(t *testing.T) {
 		item := tui.SessionItem{
-			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true},
+			Session:      tui.Session{Name: "dev", Attached: true},
 			GroupKey:     "/home/me/project",
 			GroupHeading: "project",
 			CatchAll:     true,
@@ -132,7 +129,7 @@ func TestSessionItemGroupMetadata(t *testing.T) {
 	})
 
 	t.Run("builds two instances of one session sharing the same underlying Session.Name", func(t *testing.T) {
-		session := tmux.Session{Name: "dev", Windows: 3, Attached: true}
+		session := tui.Session{Name: "dev", Attached: true}
 		work := tui.SessionItem{Session: session, GroupKey: "work", GroupHeading: "work"}
 		personal := tui.SessionItem{Session: session, GroupKey: "personal", GroupHeading: "personal"}
 
@@ -179,10 +176,10 @@ func TestSessionDelegate(t *testing.T) {
 		}
 	})
 
-	t.Run("renders session name and window count", func(t *testing.T) {
+	t.Run("renders the session name", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "dev", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -193,50 +190,12 @@ func TestSessionDelegate(t *testing.T) {
 		if !strings.Contains(output, "dev") {
 			t.Errorf("render output missing session name 'dev': %q", output)
 		}
-		if !strings.Contains(output, "3 windows") {
-			t.Errorf("render output missing '3 windows': %q", output)
-		}
-	})
-
-	t.Run("renders singular window for count of 1", func(t *testing.T) {
-		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "single", Windows: 1, Attached: false}},
-		}
-		m := list.New(items, d, 80, 10)
-
-		var buf bytes.Buffer
-		d.Render(&buf, m, 0, items[0])
-
-		output := buf.String()
-		if !strings.Contains(output, "1 window") {
-			t.Errorf("render output missing '1 window': %q", output)
-		}
-		if strings.Contains(output, "1 windows") {
-			t.Errorf("render output should not contain '1 windows': %q", output)
-		}
-	})
-
-	t.Run("renders plural windows for count > 1", func(t *testing.T) {
-		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "multi", Windows: 5, Attached: false}},
-		}
-		m := list.New(items, d, 80, 10)
-
-		var buf bytes.Buffer
-		d.Render(&buf, m, 0, items[0])
-
-		output := buf.String()
-		if !strings.Contains(output, "5 windows") {
-			t.Errorf("render output missing '5 windows': %q", output)
-		}
 	})
 
 	t.Run("renders attached badge for attached session", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "attached-session", Windows: 2, Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "attached-session", Attached: true}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -244,7 +203,7 @@ func TestSessionDelegate(t *testing.T) {
 		d.Render(&buf, m, 0, items[0])
 
 		output := buf.String()
-		if !strings.HasSuffix(output, "2 windows   ●  ") {
+		if !strings.HasSuffix(output, " ●  ") {
 			t.Errorf("render output must end with the bare '●' indicator: %q", output)
 		}
 	})
@@ -252,7 +211,7 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("does not render attached badge for detached session", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "detached-session", Windows: 2, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "detached-session", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -268,8 +227,8 @@ func TestSessionDelegate(t *testing.T) {
 	t.Run("highlights selected item", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 1, Attached: false}},
-			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 2, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -293,7 +252,7 @@ func TestSessionDelegate(t *testing.T) {
 		name := "my-project"
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: name, Windows: 3, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: name, Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -331,7 +290,7 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 
 	t.Run("a SessionItem renders only its own row, never a heading line", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		item := tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"}
+		item := tui.SessionItem{Session: tui.Session{Name: "a"}, GroupKey: "/p/portal", GroupHeading: "Portal"}
 		m := list.New([]list.Item{item}, d, 80, 10)
 
 		var buf bytes.Buffer
@@ -388,8 +347,8 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 	t.Run("injects no heading for flat items (byte-identical to today)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 2, Attached: true}},
-			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 1, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(items, d, 80, 10)
 
@@ -429,19 +388,19 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 	projectItems := func() []list.Item {
 		return []list.Item{
 			tui.HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tui.Session{Name: "a"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tui.Session{Name: "b"}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 			tui.HeaderItem{Heading: "Work", Count: 1, Key: "/p/work"},
-			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+			tui.SessionItem{Session: tui.Session{Name: "c"}, GroupKey: "/p/work", GroupHeading: "Work"},
 		}
 	}
 
 	tagItems := func() []list.Item {
 		return []list.Item{
 			tui.HeaderItem{Heading: "personal", Count: 1, Key: "personal"},
-			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "personal", GroupHeading: "personal"},
+			tui.SessionItem{Session: tui.Session{Name: "dev"}, GroupKey: "personal", GroupHeading: "personal"},
 			tui.HeaderItem{Heading: "work", Count: 1, Key: "work"},
-			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "work", GroupHeading: "work"},
+			tui.SessionItem{Session: tui.Session{Name: "dev"}, GroupKey: "work", GroupHeading: "work"},
 		}
 	}
 
@@ -516,8 +475,8 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 	t.Run("leaves Flat-mode filtering unchanged (no headers ever)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
 		flat := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 2, Attached: true}},
-			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 1, Attached: false}},
+			tui.SessionItem{Session: tui.Session{Name: "first", Attached: true}},
+			tui.SessionItem{Session: tui.Session{Name: "second", Attached: false}},
 		}
 		m := list.New(flat, d, 80, 10)
 		m.SetFilterText("first")
@@ -569,11 +528,11 @@ func TestSessionDelegateFlattenOnFilter(t *testing.T) {
 }
 
 func TestToListItems(t *testing.T) {
-	t.Run("converts tmux sessions to list items", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 3, Attached: true},
-			{Name: "work", Windows: 5, Attached: false},
-			{Name: "misc", Windows: 1, Attached: false},
+	t.Run("converts sessions to list items", func(t *testing.T) {
+		sessions := []tui.Session{
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
+			{Name: "misc", Attached: false},
 		}
 
 		items := tui.ToListItems(sessions)
@@ -587,22 +546,16 @@ func TestToListItems(t *testing.T) {
 			if !ok {
 				t.Fatalf("items[%d] is not a SessionItem", i)
 			}
-			if si.Session.Name != s.Name {
-				t.Errorf("items[%d].Session.Name = %q, want %q", i, si.Session.Name, s.Name)
-			}
-			if si.Session.Windows != s.Windows {
-				t.Errorf("items[%d].Session.Windows = %d, want %d", i, si.Session.Windows, s.Windows)
-			}
-			if si.Session.Attached != s.Attached {
-				t.Errorf("items[%d].Session.Attached = %v, want %v", i, si.Session.Attached, s.Attached)
+			if si.Session != s {
+				t.Errorf("items[%d].Session = %+v, want %+v", i, si.Session, s)
 			}
 		}
 	})
 
 	t.Run("keeps producing flat items with no group metadata", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 3, Attached: true},
-			{Name: "work", Windows: 5, Attached: false},
+		sessions := []tui.Session{
+			{Name: "dev", Attached: true},
+			{Name: "work", Attached: false},
 		}
 
 		items := tui.ToListItems(sessions)
@@ -625,7 +578,7 @@ func TestToListItems(t *testing.T) {
 	})
 
 	t.Run("empty sessions returns empty items", func(t *testing.T) {
-		items := tui.ToListItems([]tmux.Session{})
+		items := tui.ToListItems([]tui.Session{})
 
 		if len(items) != 0 {
 			t.Errorf("ToListItems([]) returned %d items, want 0", len(items))

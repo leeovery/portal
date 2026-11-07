@@ -1,0 +1,40 @@
+
+  P O R T A L ▌                                                                                        session manager
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+  Sessions 8 — by project                                                                                  / to filter
+
+    kiln ··· 3
+    ▌ kiln-aws-migration
+      spike
+      spike
+    orchard-pipeline ··· 3
+      api · user search
+      orchard-pipeline-codify
+      release checklist                                                                                            ●
+    Unknown ··· 2
+      notes on the outage
+      scratch-Ue9fLr
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ⏎ attach · / filter · ␣ preview · s switch view · x projects · t theme · m multi                              ? help
+

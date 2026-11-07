@@ -20,15 +20,6 @@ func TestRogue(t *testing.T) {
 }
 `
 
-	fixtureDiscardSilencer = `package cmd
-
-import "testing"
-
-func initTestLogToStateDirAs(t *testing.T, dir, version, processRole string) {
-	log.SetTestHandler(t, log.Discard().Handler())
-}
-`
-
 	fixtureLevelGateHandler = `package cmd
 
 import "testing"
@@ -88,10 +79,9 @@ func TestHandlerRuleFlagsAHandInstalledCaptureHandler(t *testing.T) {
 	}
 }
 
-func TestHandlerRuleAllowsTheThreeSanctionedHandlersAndInstall(t *testing.T) {
+func TestHandlerRuleAllowsTheTwoSanctionedHandlersAndInstall(t *testing.T) {
 	var installs []handlerInstall
 	for _, staged := range []struct{ rel, src string }{
-		{filepath.Join("cmd", "logging_capture_test.go"), fixtureDiscardSilencer},
 		{filepath.Join("cmd", "open_test.go"), fixtureLevelGateHandler},
 		{filepath.Join("internal", "hooks", "store_test.go"), fixtureJSONRenderingHandler},
 		{filepath.Join("internal", "logtest", "install.go"), fixtureInstallItself},
@@ -101,11 +91,11 @@ func TestHandlerRuleAllowsTheThreeSanctionedHandlersAndInstall(t *testing.T) {
 
 	scanned, defects := auditHandlerInstalls(installs)
 
-	if scanned != 4 {
-		t.Fatalf("scanned = %d, want 4", scanned)
+	if scanned != 3 {
+		t.Fatalf("scanned = %d, want 3", scanned)
 	}
 	if len(defects) != 0 {
-		t.Fatalf("defects = %v, want none — the discard silencer, the level gate and the JSON renderer are each sanctioned", defects)
+		t.Fatalf("defects = %v, want none — the level gate and the JSON renderer are each sanctioned", defects)
 	}
 	if unmatched := unmatchedSanctions(installs); len(unmatched) != 0 {
 		t.Errorf("unmatchedSanctions = %v, want none over installs at every sanctioned site", unmatched)
@@ -117,10 +107,10 @@ func TestHandlerRuleReportsASanctionedSiteThatNoLongerInstallsAHandler(t *testin
 
 	unmatched := unmatchedSanctions(installs)
 
-	if len(unmatched) != 3 {
-		t.Fatalf("unmatchedSanctions = %v, want the three sanctioned sites making no install", unmatched)
+	if len(unmatched) != 2 {
+		t.Fatalf("unmatchedSanctions = %v, want the two sanctioned sites making no install", unmatched)
 	}
-	for _, want := range []string{"logging_capture_test.go", "open_test.go", "store_test.go"} {
+	for _, want := range []string{"open_test.go", "store_test.go"} {
 		if !containsSubstring(unmatched, want) {
 			t.Errorf("unmatchedSanctions = %v, want one naming %s", unmatched, want)
 		}

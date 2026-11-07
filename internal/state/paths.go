@@ -4,30 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/xdg"
 )
 
 const (
-	sessionsJSONName  = "sessions.json"
-	saveRequestedName = "save.requested"
 	daemonPIDName     = "daemon.pid"
 	daemonVersionName = "daemon.version"
 	daemonLockName    = "daemon.lock"
 	portalLogName     = "portal.log"
-	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
-
-	// pendingScrollbackPrefix opens the token-derived scrollback name. The
-	// namespaces are disjoint: a positional key always ends "__<window>.<pane>".
-	pendingScrollbackPrefix = "pane-"
+	tmuxStateName     = "state-tmux"
+	stagingName       = "state-migrating"
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
-// verbatim when set, otherwise <XDG config base>/portal/state.
+// when set, made absolute against the working directory, otherwise
+// <XDG config base>/portal/state.
 func Dir() (string, error) {
 	return xdg.ConfigDirPath(xdg.OSEnv, xdg.StateDir)
 }
@@ -53,27 +46,6 @@ func EnsureDir() (string, error) {
 	return dir, nil
 }
 
-func SessionsJSON(dir string) string { return filepath.Join(dir, sessionsJSONName) }
-
-// SaveRequested is the dirty-flag file `portal state notify` touches.
-func SaveRequested(dir string) string { return filepath.Join(dir, saveRequestedName) }
-
-// TouchSaveRequested's mtime bump is best-effort and its error swallowed: the
-// daemon's tick only checks the file's presence.
-func TouchSaveRequested(dir string) error {
-	path := SaveRequested(dir)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("touch save.requested: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("touch save.requested: %w", err)
-	}
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
-	return nil
-}
-
 func DaemonPID(dir string) string { return filepath.Join(dir, daemonPIDName) }
 
 func DaemonVersion(dir string) string { return filepath.Join(dir, daemonVersionName) }
@@ -82,44 +54,26 @@ func DaemonLock(dir string) string { return filepath.Join(dir, daemonLockName) }
 
 func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }
 
-func PortalLogOld(dir string) string { return filepath.Join(dir, portalLogOldName) }
-
 func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubdir) }
 
-func ScrollbackFile(dir, paneKey string) string {
-	return filepath.Join(dir, scrollbackSubdir, paneKey+".bin")
+// TmuxStateDir is where the migration from the tmux version moves that
+// version's state: state-tmux, beside the state directory dir. It exists only
+// once that migration has run. dir is cleaned first: filepath.Dir of a path
+// ending in a separator is that path itself.
+func TmuxStateDir(dir string) string {
+	return sibling(dir, tmuxStateName)
 }
 
-// positionalScrollbackFile is ScrollbackFile(dir, paneKey) in the relative
-// forward-slashed shape a Pane record stores.
-func positionalScrollbackFile(paneKey string) string {
-	return filepath.ToSlash(filepath.Join(scrollbackSubdir, paneKey+".bin"))
+// MigrationStagingDir is where the migration from the tmux version builds the
+// zmx version's state before swapping it in: state-migrating, beside the
+// state directory dir. It exists only while a migration is under way, or
+// after one cut short.
+func MigrationStagingDir(dir string) string {
+	return sibling(dir, stagingName)
 }
 
-// PendingScrollbackFile is the token-derived name a frozen pane's scrollback is
-// re-filed under, in the relative forward-slashed shape a Pane record stores.
-func PendingScrollbackFile(token string) string {
-	return filepath.ToSlash(filepath.Join(scrollbackSubdir, pendingScrollbackPrefix+token+".bin"))
-}
-
-// PendingScrollbackPath is PendingScrollbackFile(token) under dir. ok is false
-// for a token the pane-token rule refuses, which also keeps a token from naming
-// a path outside the scrollback directory.
-func PendingScrollbackPath(dir, token string) (path string, ok bool) {
-	if !nanoid.IsTokenShaped(token) {
-		return "", false
-	}
-	return joinStored(dir, PendingScrollbackFile(token)), true
-}
-
-func FIFOPath(dir, paneKey string) string {
-	return filepath.Join(dir, "hydrate-"+paneKey+".fifo")
-}
-
-// PaneKeyFromFIFOPath accepts a full FIFO path or a bare basename.
-func PaneKeyFromFIFOPath(path string) string {
-	name := filepath.Base(path)
-	name = strings.TrimSuffix(name, ".fifo")
-	name = strings.TrimPrefix(name, "hydrate-")
-	return name
+// sibling is name beside the directory dir. dir is cleaned first:
+// filepath.Dir of a path ending in a separator is that path itself.
+func sibling(dir, name string) string {
+	return filepath.Join(filepath.Dir(filepath.Clean(dir)), name)
 }

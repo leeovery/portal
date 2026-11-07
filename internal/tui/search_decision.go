@@ -34,9 +34,9 @@ type searchDecisionMsg struct {
 }
 
 // searchDecisionCmd runs the classification off the update goroutine. The
-// closure is supplied by the caller and reads tmux, so its duration is
+// closure is supplied by the caller and reads the backend, so its duration is
 // unbounded from here: running it inline would freeze the loading page — and
-// its Ctrl-C — for as long as the server takes to answer.
+// its Ctrl-C — for as long as the sessions take to answer.
 func (m Model) searchDecisionCmd() tea.Cmd {
 	decide := m.searchDecide
 	return func() tea.Msg {

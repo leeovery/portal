@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func canvasSeq(t *testing.T, th theme.Theme) string {
@@ -103,9 +102,9 @@ func TestOuterFill_RePadsToTermHOnVerticalChange(t *testing.T) {
 func TestOuterFill_PaginationInvariantPreserved(t *testing.T) {
 	const w, h = 90, 14
 
-	var sessions []tmux.Session
+	var sessions []Session
 	for i := range 40 {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i)})
 	}
 	m := New(fakeLister{}, WithCanvasMode(theme.MemberDark))
 	m.termWidth = w
@@ -143,10 +142,10 @@ func TestOuterFill_ZeroSizeFallback(t *testing.T) {
 
 func newCanvasTestModel(t *testing.T, w, h int, appearance theme.Member) Model {
 	t.Helper()
-	sessions := []tmux.Session{
-		{Name: "alpha", Windows: 3, Attached: true},
-		{Name: "bravo", Windows: 1, Attached: false},
-		{Name: "charlie", Windows: 2, Attached: false},
+	sessions := []Session{
+		{Name: "alpha", Attached: true},
+		{Name: "bravo", Attached: false},
+		{Name: "charlie", Attached: false},
 	}
 	m := New(fakeLister{}, WithThemeNomination(testBuiltinPair(t)), WithCanvasMode(appearance))
 	m.termWidth = w

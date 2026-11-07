@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -13,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/hookstest"
+	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/resumemode"
 )
 
@@ -50,33 +48,39 @@ const groupSignalDeadline = 30 * time.Second
 func TestParkedResumeChain_GroupSignal(t *testing.T) {
 	for _, signal := range []string{"INT", "QUIT"} {
 		t.Run("a SIG"+signal+" to the whole group while the draw runs ends in the recovery tail", func(t *testing.T) {
-			exe := filepath.Join(t.TempDir(), "portal")
+			dir := t.TempDir()
+			exe := filepath.Join(dir, "portal")
 			if err := os.WriteFile(exe, []byte(stubChainExe), 0o700); err != nil {
 				t.Fatalf("stage the stub executable: %v", err)
 			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), groupSignalDeadline)
-			defer cancel()
-			parked := exec.CommandContext(ctx, "/bin/sh", "-c", parkedResumeChain(exe, samplePayload()))
-			parked.Env = append(os.Environ(), "CHAIN_SIGNAL="+signal)
-			parked.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			// The whole group, not the shell alone: the draw it started would
-			// outlive it. A shell already reaped answers ErrProcessDone, and its
-			// pid is then nobody's to signal.
-			parked.Cancel = func() error {
-				if err := parked.Process.Signal(syscall.Signal(0)); err != nil {
-					return err
-				}
-				return syscall.Kill(-parked.Process.Pid, syscall.SIGKILL)
-			}
-			parked.WaitDelay = time.Second
-			out, err := parked.Output()
-
-			if ctx.Err() != nil {
-				t.Fatalf("the parked shell was still running after %v; its group was killed (output %q)", groupSignalDeadline, out)
-			}
+			// A file, not a pipe, so the output can be read while the shell is
+			// held unreaped.
+			outPath := filepath.Join(dir, "out")
+			outFile, err := os.Create(outPath)
 			if err != nil {
-				t.Fatalf("the parked shell died: %v (output %q)", err, out)
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = outFile.Close() })
+
+			parked := exec.Command("/bin/sh", "-c", parkedResumeChain(parkedChain{Exe: exe, Flag: filepath.Join(dir, "flag")}, samplePayload()))
+			parked.Env = append(os.Environ(), "CHAIN_SIGNAL="+signal)
+			parked.Stdout = outFile
+			// The group's own: the draw's group signal reaches nothing of the
+			// test's, and the cleanup ends the draw the shell started too.
+			parked.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			held := proctest.Start(t, parked, "")
+
+			select {
+			case <-held.Exited():
+			case <-time.After(groupSignalDeadline):
+				t.Fatalf("the parked shell was still running after %v", groupSignalDeadline)
+			}
+			out, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status := held.Status(t); !status.Exited() || status.ExitStatus() != 0 {
+				t.Fatalf("the parked shell ended %v, want a clean exit (output %q)", status, out)
 			}
 			if !strings.Contains(string(out), "RECOVER-RAN") {
 				t.Errorf("the recovery tail did not run; output %q", out)
@@ -89,14 +93,14 @@ func TestParkedResumeChain_GroupSignal(t *testing.T) {
 }
 
 func TestHydrateLazy_ClearsSignalGenerationBeforeTheFirstDraw(t *testing.T) {
-	for _, tail := range lazyTails() {
+	for _, tail := range hydrateTails() {
 		t.Run(tail.name, func(t *testing.T) {
 			stub := &stubExecShell{}
 			var seam signalsSeam
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
-			opts.DisableTTYSignals = seam.record(stub)
+			cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+			cfg.DisableTTYSignals = seam.record(stub)
 
-			lazyRun(t, tail, opts)
+			lazyRun(t, tail, cfg)
 
 			if seam.calls != 1 {
 				t.Fatalf("signal generation cleared %d times, want exactly 1", seam.calls)
@@ -113,9 +117,9 @@ func TestHydrateLazy_ClearsSignalGenerationBeforeTheFirstDraw(t *testing.T) {
 
 func TestHydrateLazy_ParksTheChainBehindACaughtTrap(t *testing.T) {
 	stub := &stubExecShell{}
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+	cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
 
-	lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, hydrateTails()[0], cfg)
 
 	if len(stub.args) != 3 || !strings.HasPrefix(stub.args[2], "trap : INT QUIT TERM; ") {
 		t.Errorf("parked chain = %q, want it to open with a caught trap on INT, QUIT and TERM", stub.args)
@@ -125,53 +129,52 @@ func TestHydrateLazy_ParksTheChainBehindACaughtTrap(t *testing.T) {
 func TestHydrateLazy_ParksTheChainWhenSignalGenerationCannotBeCleared(t *testing.T) {
 	stub := &stubExecShell{}
 	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-	opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
-	opts.Logger = logger
-	opts.DisableTTYSignals = func() error { return errors.New("inappropriate ioctl for device") }
+	cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+	cfg.Logger = logger
+	cfg.DisableTTYSignals = func() error { return errors.New("inappropriate ioctl for device") }
 
-	paneKey := lazyRun(t, lazyTails()[0], opts)
+	lazyRun(t, hydrateTails()[0], cfg)
 
-	if want := lazyChainArgs("echo hi", paneKey); !slices.Equal(stub.args, want) {
+	if want := lazyChainArgs(t, "echo hi"); !slices.Equal(stub.args, want) {
 		t.Errorf("exec args = %q, want the parked chain %q", stub.args, want)
 	}
 	warn := execLogLine(t, sink.Body(), "WARN", "disable terminal signals failed")
-	if !strings.Contains(warn, "pane_key="+paneKey) || !strings.Contains(warn, "inappropriate ioctl") {
-		t.Errorf("WARN = %q, want it to name the pane and the error", warn)
+	if !strings.Contains(warn, "session="+hydrateSession) || !strings.Contains(warn, "inappropriate ioctl") {
+		t.Errorf("WARN = %q, want it to name the session and the error", warn)
 	}
-	if !strings.Contains(warn, "hook_key="+lazyHookKey) {
-		t.Errorf("WARN = %q, want it to name the pane by its durable token hook_key=%s", warn, lazyHookKey)
+	if strings.Contains(warn, "pane_key=") || strings.Contains(warn, "hook_key=") {
+		t.Errorf("WARN = %q, want the session alone to name what waits", warn)
 	}
 }
 
-func TestHydrateLazy_LeavesSignalGenerationAloneOnAPaneThatNeverWaits(t *testing.T) {
+func TestHydrateLazy_LeavesSignalGenerationAloneOnASessionThatNeverWaits(t *testing.T) {
 	cases := []struct {
 		name  string
-		stage func(t *testing.T, stub *stubExecShell) hydrateCfgOpts
+		stage func(t *testing.T, stub *stubExecShell) hydrateConfig
 	}{
-		{name: "an eager registration", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			return lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Eager), lazyPrefs(t, ""), stub)
+		{name: "an eager registration", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			return lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Eager), lazyPrefs(t, ""), stub)
 		}},
-		{name: "no registration", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			store, _ := hookstest.StageStore(t, hookstest.Staging{Dir: t.TempDir(), SidecarAbsent: true, Body: map[string]map[string]string{}})
-			return lazyOpts(t, store, lazyPrefs(t, ""), stub)
+		{name: "no registration", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			return lazyConfig(t, emptyHookStore(t), lazyPrefs(t, ""), stub)
 		}},
-		{name: "a pending marker that could not be written", stage: func(t *testing.T, stub *stubExecShell) hydrateCfgOpts {
-			opts := lazyOpts(t, hydrateStoreWithMode(t, lazyHookKey, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
-			opts.Commander = commandertest.Quiet(commandertest.Fails(errors.New("tmux refused"), "set-option", "-p"))
-			return opts
+		{name: "a flag that could not be raised", stage: func(t *testing.T, stub *stubExecShell) hydrateConfig {
+			cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), stub)
+			unwritableStateDir(t)
+			return cfg
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubExecShell{}
 			var seam signalsSeam
-			opts := tc.stage(t, stub)
-			opts.DisableTTYSignals = seam.record(stub)
+			cfg := tc.stage(t, stub)
+			cfg.DisableTTYSignals = seam.record(stub)
 
-			lazyRun(t, lazyTails()[0], opts)
+			lazyRun(t, hydrateTails()[0], cfg)
 
 			if seam.calls != 0 {
-				t.Errorf("signal generation cleared %d times on a pane that never waits, want 0", seam.calls)
+				t.Errorf("signal generation cleared %d times on a session that never waits, want 0", seam.calls)
 			}
 		})
 	}
@@ -185,7 +188,7 @@ func (s *signalsSeam) record(stub *stubExecShell) func() error {
 	}
 }
 
-func TestResumeWait_SignalGenerationOnHandingThePaneOn(t *testing.T) {
+func TestResumeWait_SignalGenerationOnHandingTheSessionOn(t *testing.T) {
 	answers := []struct {
 		name    string
 		payload resumeChainPayload
@@ -215,7 +218,7 @@ func TestResumeWait_SignalGenerationOnHandingThePaneOn(t *testing.T) {
 			}
 		})
 
-		t.Run(a.name+" still hands the pane on when signal generation cannot be turned on", func(t *testing.T) {
+		t.Run(a.name+" still hands the session on when signal generation cannot be turned on", func(t *testing.T) {
 			var probe resumeWaitProbe
 			probe.signalsOnErr = errors.New("inappropriate ioctl for device")
 			if err := runResumeWait(newResumeWaitConfig(t, &probe, a.payload, keystrokes(t, a.keys))); err != nil {
@@ -223,14 +226,11 @@ func TestResumeWait_SignalGenerationOnHandingThePaneOn(t *testing.T) {
 			}
 
 			if probe.execCalls != 1 {
-				t.Errorf("ExecSelf called %d times, want the pane handed on", probe.execCalls)
+				t.Errorf("ExecSelf called %d times, want the session handed on", probe.execCalls)
 			}
 			warn := probe.sink.Records().WithMessage("enable terminal signals failed").Only(t, "the failed enable")
-			if got := warn.AttrOrEmpty("pane_key"); got != a.payload.PaneKey {
-				t.Errorf("WARN pane_key = %q, want %q", got, a.payload.PaneKey)
-			}
-			if got := warn.AttrOrEmpty("hook_key"); got != a.payload.HookKey {
-				t.Errorf("WARN hook_key = %q, want %q", got, a.payload.HookKey)
+			if got := warn.AttrOrEmpty("session"); got != a.payload.Session {
+				t.Errorf("WARN session = %q, want %q", got, a.payload.Session)
 			}
 		})
 	}
@@ -245,10 +245,10 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 	}{
 		{name: "d opening the confirmation", payload: samplePayload(), keys: "d"},
 		{name: "a refused clear on Enter", payload: samplePayload(), keys: "\r", prepare: func(p *resumeWaitProbe) {
-			p.clearErr = errors.New("can't find pane: %7")
+			p.clearErr = errors.New("permission denied")
 		}},
 		{name: "a refused clear on a confirmed discard", payload: confirmationPayload(), keys: "y", prepare: func(p *resumeWaitProbe) {
-			p.clearErr = errors.New("can't find pane: %7")
+			p.clearErr = errors.New("permission denied")
 		}},
 		{name: "a refused discard", payload: confirmationPayload(), keys: "y", prepare: func(p *resumeWaitProbe) {
 			p.discardErr = errors.New("hooks.json: permission denied")
@@ -321,7 +321,7 @@ func heldInput(t *testing.T, typed string) io.Reader {
 	return r
 }
 
-// quietAtOnce is a pane on which nothing follows the key just read.
+// quietAtOnce is a session on which nothing follows the key just read.
 func quietAtOnce(time.Duration) (bool, error) { return false, nil }
 
 func elapsedAtOnce(time.Duration) <-chan time.Time {
@@ -331,9 +331,9 @@ func elapsedAtOnce(time.Duration) <-chan time.Time {
 }
 
 func TestRunResumeRecover_SignalGeneration(t *testing.T) {
-	t.Run("it turns signal generation back on before it hands the pane its shell", func(t *testing.T) {
+	t.Run("it turns signal generation back on before it hands the session its shell", func(t *testing.T) {
 		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+		probe.raised = true
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {
 			t.Fatalf("runResumeRecover() error = %v", err)
@@ -350,9 +350,9 @@ func TestRunResumeRecover_SignalGeneration(t *testing.T) {
 		}
 	})
 
-	t.Run("it still hands the pane its shell when signal generation cannot be turned on", func(t *testing.T) {
+	t.Run("it still hands the session its shell when signal generation cannot be turned on", func(t *testing.T) {
 		var probe resumeRecoverProbe
-		probe.markerValue = "1"
+		probe.raised = true
 		probe.signalsOnErr = errors.New("inappropriate ioctl for device")
 		logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 		cfg := newResumeRecoverConfig(t, &probe)
@@ -366,15 +366,12 @@ func TestRunResumeRecover_SignalGeneration(t *testing.T) {
 			t.Errorf("ExecShell called %d times, want 1", probe.execCalls)
 		}
 		warn := sink.Records().WithMessage("enable terminal signals failed").Only(t, "the failed enable")
-		if got := warn.AttrOrEmpty("pane_key"); got != cfg.PaneKey {
-			t.Errorf("WARN pane_key = %q, want %q", got, cfg.PaneKey)
-		}
-		if got := warn.AttrOrEmpty("hook_key"); got != cfg.HookKey {
-			t.Errorf("WARN hook_key = %q, want %q", got, cfg.HookKey)
+		if got := warn.AttrOrEmpty("session"); got != cfg.Session {
+			t.Errorf("WARN session = %q, want %q", got, cfg.Session)
 		}
 	})
 
-	t.Run("it leaves signal generation alone on a pane already answered", func(t *testing.T) {
+	t.Run("it leaves signal generation alone on a session already answered", func(t *testing.T) {
 		var probe resumeRecoverProbe
 
 		if err := runResumeRecover(newResumeRecoverConfig(t, &probe)); err != nil {

@@ -1,848 +1,1394 @@
 package restore_test
 
 import (
+	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/commandertest"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/restore"
-	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-type orchestratorRunFunc struct {
-	listSessionsOut string
-	listSessionsErr error
-	listPanesOut    string
-	listPanesErr    error
-	onCmd           map[string]func(args ...string) (string, error)
-}
-
-func (o *orchestratorRunFunc) run(args ...string) (string, error) {
-	if len(args) == 0 {
-		return "", nil
-	}
-	cmd := args[0]
-	if o.onCmd != nil {
-		if hook, ok := o.onCmd[cmd]; ok && hook != nil {
-			return hook(args...)
-		}
-	}
-	switch cmd {
-	case "list-sessions":
-		return o.listSessionsOut, o.listSessionsErr
-	case "list-panes":
-		return o.listPanesOut, o.listPanesErr
-	}
-	return "", nil
-}
-
-func writeValidIndex(t *testing.T, dir string, sessions []state.Session) {
-	t.Helper()
-	idx := state.Index{
-		Version:  state.SchemaVersion,
-		SavedAt:  time.Now().UTC(),
-		Sessions: sessions,
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("encode sessions.json: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(dir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
-}
-
-func writeRawIndex(t *testing.T, dir string, raw []byte) {
-	t.Helper()
-	if err := os.WriteFile(state.SessionsJSON(dir), raw, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
-}
-
-func newOrchestrator(t *testing.T, mock *commandertest.Scripted, dir string, logger *slog.Logger) *restore.Orchestrator {
-	t.Helper()
-	return restoretest.NewFakeExeOrchestrator(t, tmux.NewClient(mock), dir, logger)
-}
-
-func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {
-	dir := t.TempDir()
-	mock := commandertest.FromFunc(defaultRunFunc)
-	logger, sink := logtest.NewCaptureLogger(t)
-
-	o := newOrchestrator(t, mock, dir, logger)
-	corrupt, err := o.Restore()
-	if err != nil {
-		t.Fatalf("Restore returned error: %v", err)
-	}
-	if corrupt {
-		t.Error("expected corrupt=false on happy path (absent sessions.json); got true")
-	}
-
-	if len(mock.Calls()) != 0 {
-		t.Errorf("expected no tmux calls when sessions.json absent; got %v", mock.Calls())
-	}
-
-	body := []byte(sink.Body())
-	if len(body) != 0 {
-		t.Errorf("expected empty log; got %q", string(body))
-	}
-}
-
-func TestOrchestrator_ReturnsWrappedErrCorruptIndexAndLogsWhenSessionsJSONCorrupt(t *testing.T) {
-	dir := t.TempDir()
-	writeRawIndex(t, dir, []byte("{not json"))
-
-	mock := commandertest.FromFunc(defaultRunFunc)
-	logger, sink := logtest.NewCaptureLogger(t)
-
-	o := newOrchestrator(t, mock, dir, logger)
-	corrupt, err := o.Restore()
-	if err == nil {
-		t.Fatal("expected Restore to return wrapped ErrCorruptIndex; got nil")
-	}
-	if !corrupt {
-		t.Error("expected corrupt=true on corrupt-index path; got false")
-	}
-	if !errors.Is(err, state.ErrCorruptIndex) {
-		t.Errorf("errors.Is(err, state.ErrCorruptIndex) = false; want true. err=%v", err)
-	}
-
-	bodyStr := sink.Body()
-	if !strings.Contains(bodyStr, "WARN") || !strings.Contains(bodyStr, "ReadIndex") {
-		t.Errorf("log %q lacks WARN/ReadIndex entry", bodyStr)
-	}
-
-	for _, c := range mock.Calls() {
-		if len(c) > 0 && c[0] == "list-sessions" {
-			t.Errorf("did not expect list-sessions when sessions.json corrupt; got %v", mock.Calls())
-		}
-		if len(c) > 0 && c[0] == "new-session" {
-			t.Errorf("did not expect new-session when sessions.json corrupt; got %v", mock.Calls())
-		}
-	}
-}
-
-func TestOrchestrator_OnlyListsSessionsWhenIndexEmpty(t *testing.T) {
-	dir := t.TempDir()
-	writeValidIndex(t, dir, []state.Session{})
-
-	mock := commandertest.FromFunc(defaultRunFunc)
-	logger, _ := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0", got)
-	}
-	if got := len(findAllCalls(mock.Calls(), "list-panes")); got != 0 {
-		t.Errorf("list-panes calls = %d, want 0", got)
-	}
-}
-
-func TestOrchestrator_SkeletonRestoresSingleMissingSession(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name:        "work",
-		Environment: map[string]string{"LANG": "en_US.UTF-8"},
-		Windows: []state.Window{
-			{
-				Index: 0,
-				Name:  "main",
-				Panes: []state.Pane{
-					{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
-				},
-			},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		listPanesOut:    "0:0",
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, _ := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 1 {
-		t.Errorf("new-session calls = %d, want 1", got)
-	}
-	if got := len(findAllCalls(mock.Calls(), "set-environment")); got != 1 {
-		t.Errorf("set-environment calls = %d, want 1", got)
-	}
-	wantMarker := "@portal-skeleton-" + state.SanitizePaneKey("work", 0, 0)
-	found := false
-	for _, c := range mock.Calls() {
-		if len(c) >= 4 && c[0] == "set-option" && c[2] == wantMarker {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected set-option for marker %q; calls: %v", wantMarker, mock.Calls())
-	}
-}
-
-func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "work",
-		Windows: []state.Window{
-			{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/x.bin"}}},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "work|1|0|",
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0 (live session must be skipped)", got)
-	}
-
-	body := []byte(sink.Body())
-	if strings.Contains(string(body), "WARN") {
-		t.Errorf("expected no log entries on silent live-skip; got %q", string(body))
-	}
-}
-
-func TestOrchestrator_SkipsUnderscorePrefixedSessions(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "_portal-saver",
-		Windows: []state.Window{
-			{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/x.bin"}}},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{listSessionsOut: ""}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0 (underscore-prefixed must be skipped)", got)
-	}
-
-	body := []byte(sink.Body())
-	if !strings.Contains(string(body), "underscore-prefixed") {
-		t.Errorf("expected log entry mentioning underscore-prefixed; got %q", string(body))
-	}
-}
-
-func TestOrchestrator_LogsAndSkipsZeroWindowSession(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{Name: "work", Windows: []state.Window{}}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{listSessionsOut: ""}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0 (zero-window must be skipped)", got)
-	}
-
-	body := []byte(sink.Body())
-	bodyStr := string(body)
-	if !strings.Contains(bodyStr, "zero windows") {
-		t.Errorf("expected log entry mentioning zero windows; got %q", bodyStr)
-	}
-}
-
-func TestOrchestrator_LogsAndSkipsZeroPaneWindow(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "work",
-		Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{}},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{listSessionsOut: ""}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0 (zero-pane window must be skipped)", got)
-	}
-
-	body := []byte(sink.Body())
-	bodyStr := string(body)
-	if !strings.Contains(bodyStr, "zero panes") {
-		t.Errorf("expected log entry mentioning zero panes; got %q", bodyStr)
-	}
-}
-
-func TestOrchestrator_NoGeometrySummaryForZeroPaneSession(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "work",
-		Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{}},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{listSessionsOut: ""}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if strings.Contains(sink.Body(), "geometry complete") {
-		t.Errorf("zero-pane session must not emit a geometry-complete summary; got %q", sink.Body())
-	}
-}
-
-func TestOrchestrator_IsolatesPerSessionErrors(t *testing.T) {
-	dir := t.TempDir()
-	stateOK := dir
-	sessBroken := state.Session{
-		Name: "broken",
-		Windows: []state.Window{
-			{Index: 0, Name: "m", Panes: []state.Pane{{Index: 0, CWD: "/x", ScrollbackFile: "scrollback/x.bin"}}},
-		},
-	}
-	sessOK := state.Session{
-		Name: "ok",
-		Windows: []state.Window{
-			{Index: 0, Name: "m", Panes: []state.Pane{{Index: 0, CWD: "/y", ScrollbackFile: "scrollback/y.bin"}}},
-		},
-	}
-	writeValidIndex(t, stateOK, []state.Session{sessBroken, sessOK})
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		listPanesOut:    "0:0",
-		onCmd: map[string]func(args ...string) (string, error){
-			"new-session": func(args ...string) (string, error) {
-				for i, a := range args {
-					if a == "-s" && i+1 < len(args) && args[i+1] == "broken" {
-						return "", errors.New("new-session boom")
-					}
-				}
-				return "", nil
-			},
-		},
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-
-	o := newOrchestrator(t, mock, stateOK, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 2 {
-		t.Errorf("new-session calls = %d, want 2 (broken + ok)", got)
-	}
-	wantMarker := "@portal-skeleton-" + state.SanitizePaneKey("ok", 0, 0)
-	foundOK := false
-	for _, c := range mock.Calls() {
-		if len(c) >= 4 && c[0] == "set-option" && c[2] == wantMarker {
-			foundOK = true
-			break
-		}
-	}
-	if !foundOK {
-		t.Errorf("expected ok-session marker %q to be set despite broken-session failure; calls: %v", wantMarker, mock.Calls())
-	}
-
-	body := []byte(sink.Body())
-	if !strings.Contains(string(body), "broken") {
-		t.Errorf("expected log to mention broken session; got %q", string(body))
-	}
-}
-
-func TestOrchestrator_LogsAndReturnsNilWhenListSessionsFails(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "work",
-		Windows: []state.Window{
-			{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/x.bin"}}},
-		},
-	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "malformed-line",
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore returned error: %v", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 0 {
-		t.Errorf("new-session calls = %d, want 0 when list-sessions fails", got)
-	}
-
-	body := []byte(sink.Body())
-	bodyStr := string(body)
-	if !strings.Contains(bodyStr, "list-sessions") {
-		t.Errorf("expected log entry mentioning list-sessions; got %q", bodyStr)
-	}
-}
-
-func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{Name: "a", Windows: []state.Window{{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/a", ScrollbackFile: "scrollback/a.bin"}}}}},
-		{Name: "b", Windows: []state.Window{{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/b", ScrollbackFile: "scrollback/b.bin"}}}}},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		onCmd: map[string]func(args ...string) (string, error){
-			"new-session": func(args ...string) (string, error) {
-				return "", errors.New("always-fail")
-			},
-		},
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, _ := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore returned error %v, expected nil even when every session errors", err)
-	}
-
-	if got := len(findAllCalls(mock.Calls(), "new-session")); got != 2 {
-		t.Errorf("new-session calls = %d, want 2 (per-session isolation)", got)
-	}
-}
-
-func skeletonSummaryLine(t *testing.T, sink *logtest.Sink) string {
-	t.Helper()
-	var found []string
-	for _, line := range sink.Lines() {
-		if strings.Contains(line, "skeleton complete") {
-			found = append(found, line)
-		}
-	}
-	if len(found) > 1 {
-		t.Fatalf("expected at most one skeleton-complete summary; got %d: %v", len(found), found)
-	}
-	if len(found) == 0 {
-		return ""
-	}
-	return found[0]
-}
-
-func TestOrchestrator_EmitsSkeletonCompleteSummaryAfterRestoringSessions(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{
-			Name: "work",
-			Windows: []state.Window{
-				{Index: 0, Name: "main", Panes: []state.Pane{
-					{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
-				}},
-			},
-		},
-		{
-			Name: "side",
-			Windows: []state.Window{
-				{Index: 0, Name: "a", Panes: []state.Pane{
-					{Index: 0, CWD: "/side", ScrollbackFile: "scrollback/side__0.0.bin", Active: true},
-					{Index: 1, CWD: "/side", ScrollbackFile: "scrollback/side__0.1.bin"},
-				}},
-				{Index: 1, Name: "b", Panes: []state.Pane{
-					{Index: 0, CWD: "/side", ScrollbackFile: "scrollback/side__1.0.bin"},
-				}},
-			},
-		},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		listPanesOut:    "0:0",
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	line := skeletonSummaryLine(t, sink)
-	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
-	}
-	if !strings.HasPrefix(line, "INFO ") {
-		t.Errorf("summary level = %q, want INFO. line=%q", line, line)
-	}
-	for _, want := range []string{"sessions=2", "windows=3", "panes=4", "took="} {
-		if !strings.Contains(line, want) {
-			t.Errorf("summary %q missing %q", line, want)
-		}
-	}
-}
-
-func TestOrchestrator_SkeletonSummaryExcludesLiveSkippedSession(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{Name: "work", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{
-				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
-			}},
-		}},
-		{Name: "live", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{
-				{Index: 0, CWD: "/live", ScrollbackFile: "scrollback/live__0.0.bin"},
-				{Index: 1, CWD: "/live", ScrollbackFile: "scrollback/live__0.1.bin"},
-			}},
-		}},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "live|1|0|",
-		listPanesOut:    "0:0",
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	line := skeletonSummaryLine(t, sink)
-	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
-	}
-	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("summary %q missing %q (live session must be excluded)", line, want)
-		}
-	}
-}
-
-func TestOrchestrator_SkeletonSummaryExcludesUnderscorePrefixedSession(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{Name: "work", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{
-				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
-			}},
-		}},
-		{Name: "_portal-saver", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{
-				{Index: 0, CWD: "/x", ScrollbackFile: "scrollback/x.bin"},
-			}},
-		}},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{listSessionsOut: "", listPanesOut: "0:0"}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	line := skeletonSummaryLine(t, sink)
-	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
-	}
-	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("summary %q missing %q (underscore session must be excluded)", line, want)
-		}
-	}
-}
-
-func TestOrchestrator_SkeletonSummaryExcludesInvalidTopologySessions(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{Name: "work", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{
-				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
-			}},
-		}},
-		{Name: "nowin", Windows: []state.Window{}},
-		{Name: "nopane", Windows: []state.Window{
-			{Index: 0, Name: "main", Panes: []state.Pane{}},
-		}},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{listSessionsOut: "", listPanesOut: "0:0"}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	line := skeletonSummaryLine(t, sink)
-	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
-	}
-	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("summary %q missing %q (invalid-topology sessions must be excluded)", line, want)
-		}
-	}
-}
-
-func TestOrchestrator_SkeletonSummaryExcludesRestoreErroredSessionButKeepsWarn(t *testing.T) {
-	dir := t.TempDir()
-	sessions := []state.Session{
-		{Name: "broken", Windows: []state.Window{
-			{Index: 0, Name: "m", Panes: []state.Pane{
-				{Index: 0, CWD: "/x", ScrollbackFile: "scrollback/x.bin"},
-			}},
-		}},
-		{Name: "ok", Windows: []state.Window{
-			{Index: 0, Name: "m", Panes: []state.Pane{
-				{Index: 0, CWD: "/y", ScrollbackFile: "scrollback/y.bin"},
-			}},
-		}},
-	}
-	writeValidIndex(t, dir, sessions)
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		listPanesOut:    "0:0",
-		onCmd: map[string]func(args ...string) (string, error){
-			"new-session": func(args ...string) (string, error) {
-				for i, a := range args {
-					if a == "-s" && i+1 < len(args) && args[i+1] == "broken" {
-						return "", errors.New("new-session boom")
-					}
-				}
-				return "", nil
-			},
-		},
-	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	line := skeletonSummaryLine(t, sink)
-	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
-	}
-	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("summary %q missing %q (errored session must be excluded)", line, want)
-		}
-	}
-	body := sink.Body()
-	if !strings.Contains(body, "WARN") || !strings.Contains(body, "broken") {
-		t.Errorf("expected per-session WARN for broken session; body:\n%s", body)
-	}
-}
-
-func TestOrchestrator_EmitsNoSkeletonSummaryOnPreLoopEarlyReturns(t *testing.T) {
-	cases := []struct {
-		name  string
-		setup func(t *testing.T, dir string) *orchestratorRunFunc
-	}{
-		{
-			name: "sessions.json absent",
-			setup: func(_ *testing.T, _ string) *orchestratorRunFunc {
-				return &orchestratorRunFunc{}
-			},
-		},
-		{
-			name: "zero saved sessions",
-			setup: func(t *testing.T, dir string) *orchestratorRunFunc {
-				writeValidIndex(t, dir, []state.Session{})
-				return &orchestratorRunFunc{listSessionsOut: ""}
-			},
-		},
-		{
-			name: "list-sessions fails",
-			setup: func(t *testing.T, dir string) *orchestratorRunFunc {
-				writeValidIndex(t, dir, []state.Session{
-					{Name: "work", Windows: []state.Window{
-						{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/x.bin"}}},
-					}},
-				})
-				return &orchestratorRunFunc{listSessionsOut: "malformed-line"}
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			rf := tc.setup(t, dir)
-			mock := commandertest.FromFunc(rf.run)
-			logger, sink := logtest.NewCaptureLogger(t)
-			o := newOrchestrator(t, mock, dir, logger)
-			if _, err := o.Restore(); err != nil {
-				t.Fatalf("Restore: %v", err)
+var (
+	errRefused  = errors.New("zmx attach: refused")
+	errTimedOut = fmt.Errorf("create session: %w", backend.ErrTimeout)
+)
+
+func TestNew(t *testing.T) {
+	for name, change := range map[string]func(*restore.Config){
+		"it refuses no backend":                       func(c *restore.Config) { c.Backend = nil },
+		"it refuses no state directory":               func(c *restore.Config) { c.StateDir = "" },
+		"it refuses an empty exe, having no default":  func(c *restore.Config) { c.Exe = "" },
+		"it refuses a relative exe":                   func(c *restore.Config) { c.Exe = "portal" },
+		"it refuses a test binary":                    func(c *restore.Config) { c.Exe = "/var/folders/x/go-build1/b001/restore.test" },
+		"it refuses a debugger's build":               func(c *restore.Config) { c.Exe = "/work/portal/__debug_bin3721882" },
+		"it refuses a test binary built under a name": func(c *restore.Config) { c.Exe = "/tmp/build/x" },
+		"it refuses a name that only starts portal":   func(c *restore.Config) { c.Exe = "/opt/portal/bin/portal-dev" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}
+			change(&cfg)
+
+			if r, err := restore.New(cfg); err == nil || r != nil {
+				t.Errorf("New(%+v) = %v, %v; want a refusal", cfg, r, err)
 			}
-			if line := skeletonSummaryLine(t, sink); line != "" {
-				t.Errorf("expected no skeleton-complete summary on early return; got %q", line)
+		})
+	}
+
+	t.Run("it takes an absolute exe named portal, wherever it lives", func(t *testing.T) {
+		cfg := restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: "/opt/tools.test/bin/portal"}
+
+		if r, err := restore.New(cfg); err != nil || r == nil {
+			t.Errorf("New(%+v) = %v, %v; want a Restorer", cfg, r, err)
+		}
+	})
+}
+
+// The one test that hands New the running binary, which the exe guard keeps
+// from every other: New must refuse it on whatever route it arrives.
+func TestNew_RefusesTheRunningTestBinary(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, exe := range map[string]string{"os.Args[0]": os.Args[0], "os.Executable": self} {
+		t.Run("it refuses "+name, func(t *testing.T) {
+			if !filepath.IsAbs(exe) {
+				t.Skipf("%s = %q is relative, so its refusal would prove nothing of the name rule", name, exe)
+			}
+
+			if r, err := restore.New(restore.Config{Backend: backendtest.New(), StateDir: t.TempDir(), Exe: exe}); err == nil || r != nil {
+				t.Errorf("New(Exe: %q) = %v, %v; want a refusal", exe, r, err)
 			}
 		})
 	}
 }
 
-func TestOrchestrator_EmitsNoSkeletonSummaryOnCorruptIndex(t *testing.T) {
-	dir := t.TempDir()
-	writeRawIndex(t, dir, []byte("{not json"))
+func TestRestore_RestoresEachSavedSession(t *testing.T) {
+	w := newWorld(t)
+	work, notes := entry(t, "work"), entry(t, "notes")
+	notes.CreatedAt, notes.PID = time.Time{}, 0
+	w.save(t, work, notes)
 
-	mock := commandertest.FromFunc(defaultRunFunc)
-	logger, sink := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	corrupt, err := o.Restore()
-	if err == nil {
-		t.Fatal("expected wrapped ErrCorruptIndex; got nil")
-	}
-	if !corrupt {
-		t.Error("expected corrupt=true; got false")
-	}
-	if !errors.Is(err, state.ErrCorruptIndex) {
-		t.Errorf("errors.Is(err, ErrCorruptIndex) = false; want true. err=%v", err)
-	}
-	if line := skeletonSummaryLine(t, sink); line != "" {
-		t.Errorf("expected no skeleton-complete summary on corrupt index; got %q", line)
-	}
-}
+	res := w.r.Restore(t.Context())
 
-func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *testing.T) {
-	dir := t.TempDir()
-	sess := state.Session{
-		Name: "work",
-		Windows: []state.Window{
-			{Index: 0, Name: "main", Layout: "broken-layout", Active: true,
-				Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/x.bin", Active: true}}},
-		},
+	if want := (restore.Result{Restored: 2}); res != want {
+		t.Errorf("Restore = %+v, want %+v", res, want)
 	}
-	writeValidIndex(t, dir, []state.Session{sess})
-
-	rf := &orchestratorRunFunc{
-		listSessionsOut: "",
-		listPanesOut:    "0:0",
-		onCmd: map[string]func(args ...string) (string, error){
-			"select-layout": func(args ...string) (string, error) {
-				return "", errors.New("layout failed")
-			},
-		},
+	if got, want := w.created(), []string{"work", "notes"}; !slices.Equal(got, want) {
+		t.Errorf("created %q, want %q, in index order, an entry recording no creation among them", got, want)
 	}
-	mock := commandertest.FromFunc(rf.run)
-	logger, _ := logtest.NewCaptureLogger(t)
-	o := newOrchestrator(t, mock, dir, logger)
-	if _, err := o.Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	newSessionAt := callsAt(mock.Calls(), "new-session")
-	listPanesIdxs := findAllCalls(mock.Calls(), "list-panes")
-	layoutAt := callsAt(mock.Calls(), "select-layout")
-	setOptAt := skeletonMarkerCallAt(mock.Calls())
-
-	if newSessionAt < 0 || len(listPanesIdxs) != 1 || layoutAt < 0 || setOptAt < 0 {
-		t.Fatalf("expected calls present (with exactly 1 list-panes): new-session=%d list-panes=%v select-layout=%d set-option=%d; calls: %v",
-			newSessionAt, listPanesIdxs, layoutAt, setOptAt, mock.Calls())
-	}
-	armListPanesAt := listPanesIdxs[0]
-	if newSessionAt >= armListPanesAt || armListPanesAt >= layoutAt || layoutAt >= setOptAt {
-		t.Errorf("ordering violated: new-session(%d) < list-panes-arm(%d) < select-layout(%d) < set-option(%d) failed",
-			newSessionAt, armListPanesAt, layoutAt, setOptAt)
-	}
-}
-
-func skeletonMarkerCallAt(calls [][]string) int {
-	for i, c := range calls {
-		if len(c) >= 3 && c[0] == "set-option" && strings.HasPrefix(c[2], state.SkeletonMarkerPrefix) {
-			return i
+	for _, name := range []string{"work", "notes"} {
+		if !w.witness.raised[name] {
+			t.Errorf("%s was created before its hydrating flag was raised", name)
+		}
+		if !w.hydrating(t, name) {
+			t.Errorf("%s's hydrating flag is down: the helper lowers it once its replay is done, never restore", name)
 		}
 	}
-	return -1
+	summary := w.sink.Records().WithMessage("restore complete").AtExactLevel(slog.LevelInfo).Only(t, "restore summary")
+	if summary.IntAttr(t, "restored") != 2 || summary.IntAttr(t, "failed") != 0 || summary.IntAttr(t, "anomalous") != 0 {
+		t.Errorf("summary = %v, want 2 sessions restored, none failed and nothing anomalous", summary.Attrs)
+	}
+	summary.RequireDuration(t, "took")
 }
 
-func TestOrchestrator_RebuildsEverySavedSessionWhenListSessionsFails(t *testing.T) {
-	dir := t.TempDir()
-	saved := []state.Session{
-		newSession("work", nil, state.Window{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/work__0.0.bin", Active: true}}}),
-		newSession("notes", nil, state.Window{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/n", ScrollbackFile: "scrollback/notes__0.0.bin", Active: true}}}),
-	}
-	writeValidIndex(t, dir, saved)
-	listErr := &tmux.CommandError{Args: []string{"list-sessions"}, Stderr: "server exited unexpectedly", Err: errors.New("exit status 1")}
-	rf := &orchestratorRunFunc{listSessionsErr: listErr, listPanesOut: "0:0"}
-	mock := commandertest.FromFunc(rf.run)
-	logger, _ := logtest.NewCaptureLogger(t)
-	client := tmux.NewClient(mock)
+func TestRestore_Skips(t *testing.T) {
+	t.Run("a session the listing holds, answering", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "work"})
+		w.save(t, entry(t, "work"))
 
-	if _, err := restoretest.NewFakeExeOrchestrator(t, client, dir, logger).Restore(); err != nil {
-		t.Fatalf("Restore: %v", err)
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it is live")
+	})
+
+	t.Run("a session the listing holds, not answering", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "work"})
+		w.fake.StopAnswering("work")
+		w.save(t, entry(t, "work"))
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it is live")
+	})
+
+	t.Run("one of Portal's own", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "_portal-saver"))
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "_portal-saver", "it is one of Portal's own")
+	})
+
+	// decision 55: a session of this boot that is gone ended this boot while
+	// a saver watched, by the user or otherwise. A bootstrap again within the
+	// boot, as a version change runs, must not bring it back.
+	t.Run("an entry created this boot", func(t *testing.T) {
+		w := newWorld(t)
+		e := thisBoot(t, "work")
+		w.save(t, e)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "it ended this boot")
+		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
+			t.Errorf("entry = %+v, %v; want it left for the saver to drop, %+v", got, ok, e)
+		}
+	})
+
+	// zmx finds a session by statting its socket, so on a filesystem that
+	// folds case the live Work holds work's name: Create refuses it.
+	t.Run("a session another spelling of its name holds, its entry left to be made once that ends", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		e := owing(entry(t, "work"))
+		w.save(t, e)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+		if got, ok := w.lookup(t, "work"); !ok || !sameEntry(got, e) {
+			t.Errorf("entry = %+v, %v; want it as saved, %+v", got, ok, e)
+		}
+
+		w.fake.Remove("Work")
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore once Work ended = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work"}) {
+			t.Errorf("created %q, want work made once Work ended", got)
+		}
+	})
+
+	for name, answer := range otherSpellingAnswers {
+		t.Run("a lookup that "+name+" skips nothing", func(t *testing.T) {
+			w := newWorld(t, backend.Session{Name: "WORK"})
+			w.save(t, entry(t, "work"))
+			w.answerSession("work", answer)
+
+			w.r.Restore(t.Context())
+
+			w.assertTried(t, "work")
+		})
 	}
 
-	var created []string
-	for _, i := range findAllCalls(mock.Calls(), "new-session") {
-		call := mock.Calls()[i]
-		for j := 0; j+1 < len(call); j++ {
-			if call[j] == "-s" {
-				created = append(created, call[j+1])
+	t.Run("a listed session another spelling of its name holds skips it, answering or not", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.fake.StopAnswering("Work")
+		w.save(t, owing(entry(t, "work")))
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
+	// The session listed as Work has ended since, and WORK holds the name now.
+	t.Run("a lookup finding a spelling made since the listing, answering, skips it", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "Work"})
+		w.save(t, entry(t, "work"))
+		w.answerSession("work", errHeldUnderWORK)
+		w.answerSession("WORK", nil)
+
+		w.assertSkipped(t, w.r.Restore(t.Context()), "work", "another spelling of its name is live")
+	})
+
+	t.Run("an entry no listed session spells another way costs no lookup", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "api"})
+		w.save(t, entry(t, "work"))
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if asks := w.fake.CallsTo(backendtest.OpSession); len(asks) != 0 {
+			t.Errorf("Session calls = %+v, want none", asks)
+		}
+	})
+}
+
+// otherSpellingAnswers are the answers to a lookup of work, a listed session
+// spelling it WORK, that are no live session holding it under another
+// spelling: a failure that may pass, and the spelling of a stale socket, which
+// no listing holds.
+var otherSpellingAnswers = map[string]error{
+	"fails":                             fmt.Errorf("read session %q: %w", "work", backend.ErrTimeout),
+	"finds a spelling no listing holds": fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "Work"}),
+}
+
+// errHeldUnderWORK is a lookup of work answered as held under WORK: a session
+// of that spelling while one is live, else a socket a session gone left,
+// which Create replaces.
+var errHeldUnderWORK = fmt.Errorf("read session %q: %w", "work", &backend.HeldAsError{Held: "WORK"})
+
+// sessionAnswer is a backend with Session answering name with err, a nil err
+// a session that answers.
+type sessionAnswer struct {
+	backend.Backend
+	name string
+	err  error
+}
+
+func (s sessionAnswer) Session(ctx context.Context, name string) (backend.Session, error) {
+	if name == s.name {
+		return backend.Session{Name: name, Answered: s.err == nil}, s.err
+	}
+	return s.Backend.Session(ctx, name)
+}
+
+// answerSession has the world's backend, as it stands, answer a lookup of
+// name with err.
+func (w *world) answerSession(name string, err error) {
+	w.witness.Backend = sessionAnswer{Backend: w.witness.Backend, name: name, err: err}
+}
+
+// assertTried checks restore tried to make name, skipping nothing.
+func (w *world) assertTried(t *testing.T, name string) {
+	t.Helper()
+	if created := w.created(); !slices.Contains(created, name) {
+		t.Errorf("created %q, want %s tried", created, name)
+	}
+	if skips := w.sink.Records().WithMessage("session skipped"); len(skips) != 0 {
+		t.Errorf("skips = %v, want none", skips)
+	}
+}
+
+// thisBoot is a saved session's entry created after booted.
+func thisBoot(t *testing.T, name string) sessionindex.Entry {
+	t.Helper()
+	e := entry(t, name)
+	e.CreatedAt = booted.Add(time.Hour)
+	return e
+}
+
+// owing is e marked owed a restore.
+func owing(e sessionindex.Entry) sessionindex.Entry {
+	e.Owed = true
+	return e
+}
+
+// decisions 58 and 62: with no saver running, none saw the sessions end, so
+// the bootstrap marks this boot's owed, and they come back with the rest.
+func TestMarkOwed(t *testing.T) {
+	t.Run("it marks owed every entry not live but Portal's own, under the commit lock", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "live"})
+		w.save(t, thisBoot(t, "since"), entry(t, "before"), thisBoot(t, "live"), thisBoot(t, "_portal-saver"))
+
+		if err := w.r.MarkOwed(t.Context()); err != nil {
+			t.Fatalf("MarkOwed: %v", err)
+		}
+
+		for name, want := range map[string]bool{"since": true, "before": true, "live": false, "_portal-saver": false} {
+			if got, _ := w.lookup(t, name); got.Owed != want {
+				t.Errorf("%s owed = %v, want %v", name, got.Owed, want)
 			}
 		}
+	})
+
+	t.Run("it marks nothing, and fails, when the sessions can't be listed", func(t *testing.T) {
+		w := newWorld(t)
+		listing := errors.New("read zmx dir: permission denied")
+		w.fake.Fail(backendtest.OpList, listing)
+		w.save(t, thisBoot(t, "since"))
+
+		if err := w.r.MarkOwed(t.Context()); !errors.Is(err, listing) {
+			t.Errorf("MarkOwed = %v, want the listing's failure", err)
+		}
+		if got, _ := w.lookup(t, "since"); got.Owed {
+			t.Errorf("since = %+v, want it unmarked", got)
+		}
+	})
+
+	t.Run("it fails when the commit lock can't be had", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, thisBoot(t, "since"))
+		commitlock.SetTimeoutForTest(t, 50*time.Millisecond)
+		commitlock.HoldForTest(t, w.dir)
+
+		if err := w.r.MarkOwed(t.Context()); !errors.Is(err, commitlock.ErrHeld) {
+			t.Errorf("MarkOwed = %v, want ErrHeld", err)
+		}
+	})
+
+	t.Run("it marks nothing in an index it can't read, and leaves that for Restore to report", func(t *testing.T) {
+		w := newWorld(t)
+		if err := os.WriteFile(sessionindex.Path(w.dir), []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := w.r.MarkOwed(t.Context()); err != nil {
+			t.Errorf("MarkOwed = %v, want nil", err)
+		}
+		if calls := w.fake.CallsTo(backendtest.OpList); len(calls) != 0 {
+			t.Errorf("listed %d times, want none for an index with nothing to mark", len(calls))
+		}
+	})
+}
+
+func TestRestore_OwedEntries(t *testing.T) {
+	// decision 72: a restore completes at its helper's claim, so until then
+	// the mark keeps the entry from a drop and brings it back should the
+	// helper die. An entry from before the boot records a creation of this
+	// boot once restore has made it, so it is marked too.
+	t.Run("it restores an owed entry of this boot with the rest, each owed until its helper finishes", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, owing(thisBoot(t, "since")), entry(t, "before"))
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 2}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"since", "before"}) {
+			t.Errorf("created %q, want both", got)
+		}
+		for _, name := range []string{"since", "before"} {
+			if got, _ := w.lookup(t, name); !got.Owed {
+				t.Errorf("%s = %+v, want it owed until its helper's claim", name, got)
+			}
+		}
+	})
+
+	t.Run("a session whose helper never finished is made again by the next restore once it has ended", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.r.Restore(t.Context())
+		w.fake.Remove("work")
+		if _, err := state.Hydrating.Clear(w.dir, "work"); err != nil {
+			t.Fatal(err)
+		}
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"work", "work"}) {
+			t.Errorf("created %q, want work made by each restore", got)
+		}
+		made, _ := w.fake.Held("work")
+		if got, _ := w.lookup(t, "work"); !got.Owed || got.PID != made.PID || !got.CreatedAt.Equal(made.Created) {
+			t.Errorf("work = %+v, want the second creation, %+v, recorded and owed until its helper's claim", got, made)
+		}
+	})
+
+	t.Run("an owed entry whose Create fails stays owed for the next restore", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+		w.save(t, owing(thisBoot(t, "since")))
+
+		if res := w.r.Restore(t.Context()); res.Failed != 1 {
+			t.Errorf("Restore = %+v, want one failed", res)
+		}
+		if got, _ := w.lookup(t, "since"); !got.Owed {
+			t.Errorf("since = %+v, want it owed still", got)
+		}
+	})
+
+	t.Run("it still skips an owed entry live, and Portal's own", func(t *testing.T) {
+		w := newWorld(t, backend.Session{Name: "work"})
+		w.save(t, owing(thisBoot(t, "work")), owing(thisBoot(t, "_portal-saver")))
+
+		if res := w.r.Restore(t.Context()); res != (restore.Result{}) {
+			t.Errorf("Restore = %+v, want nothing", res)
+		}
+		if created := w.created(); len(created) > 0 {
+			t.Errorf("created %q, want nothing", created)
+		}
+	})
+}
+
+// assertSkipped checks the restore made nothing and raised no flag for name,
+// saying why at DEBUG.
+func (w *world) assertSkipped(t *testing.T, res restore.Result, name, reason string) {
+	t.Helper()
+	if res != (restore.Result{}) {
+		t.Errorf("Restore = %+v, want nothing restored and nothing failed", res)
 	}
-	if strings.Join(created, ",") != "work,notes" {
-		t.Errorf("sessions created = %v, want every saved session [work notes]", created)
+	if created := w.created(); len(created) > 0 {
+		t.Errorf("created %q, want nothing", created)
 	}
-	sessionsBefore, err := os.ReadFile(state.SessionsJSON(dir))
-	if err != nil {
-		t.Fatalf("read sessions.json as restore left it: %v", err)
+	if w.hydrating(t, name) {
+		t.Errorf("%s's hydrating flag was raised for a session restore skips", name)
+	}
+	skip := w.sink.Records().WithMessage("session skipped").AtExactLevel(slog.LevelDebug).Only(t, "skip")
+	if got := skip.AttrString(t, "session"); got != name {
+		t.Errorf("skip names %q, want %q", got, name)
+	}
+	if got := skip.AttrString(t, "reason"); got != reason {
+		t.Errorf("skip reason = %q, want %q", got, reason)
+	}
+}
+
+// decision 56: Create's name rules are zmx's, and the saver saves no session
+// under a name they refuse, but an index from before that rule may hold one.
+func TestRestore_NameCreateRefuses(t *testing.T) {
+	w := newWorld(t)
+	w.save(t, entry(t, "logs"), entry(t, "-x"), entry(t, "foo*"), entry(t, "work"))
+
+	res := w.r.Restore(t.Context())
+
+	if want := (restore.Result{Restored: 1, Failed: 3}); res != want {
+		t.Errorf("Restore = %+v, want %+v", res, want)
+	}
+	if got := w.created(); !slices.Equal(got, []string{"work"}) {
+		t.Errorf("created %q, want work alone: a name Create refuses is never tried", got)
+	}
+	failures := w.sink.Records().WithMessage("restore session failed").AtExactLevel(slog.LevelWarn)
+	var named []string
+	for _, rec := range failures {
+		named = append(named, rec.AttrString(t, "session"))
+		if !errors.Is(rec.ErrorAttr(t, "error"), backend.ErrInvalidName) {
+			t.Errorf("%s's failure = %v, want it to say the name can never be created", named[len(named)-1], rec.Attrs)
+		}
+	}
+	if !slices.Equal(named, []string{"logs", "-x", "foo*"}) {
+		t.Errorf("failures name %q, want each refused name", named)
+	}
+	for _, name := range []string{"logs", "foo*"} {
+		if w.hydrating(t, name) {
+			t.Errorf("%s's hydrating flag was raised for a name Create refuses", name)
+		}
+	}
+	summary := w.sink.Records().WithMessage("restore complete").Only(t, "restore summary")
+	if summary.IntAttr(t, "restored") != 1 || summary.IntAttr(t, "failed") != 3 || summary.IntAttr(t, "anomalous") != 3 {
+		t.Errorf("summary = %v, want 1 restored, 3 failed and 3 anomalous", summary.Attrs)
+	}
+}
+
+func TestRestore_ListingFails(t *testing.T) {
+	w := newWorld(t)
+	w.save(t, entry(t, "work"))
+	failure := errors.New("read zmx dir: permission denied")
+	w.fake.Fail(backendtest.OpList, failure)
+
+	res := w.r.Restore(t.Context())
+
+	if !errors.Is(res.ListErr, failure) || res.Restored != 0 || res.Failed != 0 {
+		t.Errorf("Restore = %+v, want the listing's failure and nothing else", res)
+	}
+	if created := w.created(); len(created) > 0 {
+		t.Errorf("created %q, want nothing", created)
+	}
+	if _, err := os.Stat(filepath.Join(w.dir, string(state.Hydrating))); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("hydrating flags were written for a listing that failed: %v", err)
+	}
+}
+
+func TestRestore_IndexUnusable(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		is         error
+	}{
+		{name: "corrupt", body: `{"version": 2, "sessions": [`},
+		{name: "version 1", body: `{"version": 1, "sessions": []}`, is: sessionindex.ErrLegacyIndex},
+		{name: "newer", body: `{"version": 3, "sessions": [{"name": "work"}]}`},
+	} {
+		t.Run("a "+tc.name+" index restores nothing", func(t *testing.T) {
+			w := newWorld(t)
+			w.writeIndex(t, tc.body)
+
+			res := w.r.Restore(t.Context())
+
+			if res.IndexErr == nil || res.Restored != 0 || res.Failed != 0 {
+				t.Errorf("Restore = %+v, want the index's error and nothing else", res)
+			}
+			if tc.is != nil && !errors.Is(res.IndexErr, tc.is) {
+				t.Errorf("IndexErr = %v, want %v", res.IndexErr, tc.is)
+			}
+			if calls := w.fake.Calls(); len(calls) > 0 {
+				t.Errorf("backend calls %+v, want none", calls)
+			}
+		})
+	}
+}
+
+func TestRestore_NoIndexAsksNothing(t *testing.T) {
+	w := newWorld(t)
+
+	if res := w.r.Restore(t.Context()); res != (restore.Result{}) {
+		t.Errorf("Restore = %+v, want nothing", res)
+	}
+	if calls := w.fake.Calls(); len(calls) > 0 {
+		t.Errorf("backend calls %+v, want none: nothing is saved, so nothing is listed", calls)
+	}
+}
+
+func TestRestore_FlagCantBeRaised(t *testing.T) {
+	for name, block := range map[string]func(t *testing.T, flags string){
+		"a file where the flags' directory goes": func(t *testing.T, flags string) {
+			if err := os.WriteFile(flags, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a flags directory it can search but not write to": func(t *testing.T, flags string) {
+			if err := os.Mkdir(flags, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(flags, 0o700) })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.save(t, entry(t, "work"))
+			block(t, filepath.Join(w.dir, string(state.Hydrating)))
+
+			res := w.r.Restore(t.Context())
+
+			if want := (restore.Result{Failed: 1}); res != want {
+				t.Errorf("Restore = %+v, want %+v", res, want)
+			}
+			if created := w.created(); len(created) > 0 {
+				t.Errorf("created %q without its hydrating flag raised", created)
+			}
+			w.failureLogged(t, "work")
+		})
+	}
+}
+
+// A Create that failed may have made the session all the same, so restore
+// looks the name up before it settles the session's flag and its count.
+func TestRestore_FailedCreate(t *testing.T) {
+	type outcome struct {
+		res restore.Result
+		// keepsOwn and keepsEarlier say whether the hydrating flag is still up
+		// after, raised by this run or before it.
+		keepsOwn, keepsEarlier bool
+	}
+	var (
+		restored = outcome{res: restore.Result{Restored: 1}, keepsOwn: true, keepsEarlier: true}
+		other    = outcome{res: restore.Result{Failed: 1}}
+		none     = outcome{res: restore.Result{Failed: 1}, keepsEarlier: true}
+		unknown  = outcome{res: restore.Result{Failed: 1}, keepsOwn: true, keepsEarlier: true}
+	)
+	makes := func(w *world, then func(name string) error) {
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				return backend.Session{}, err
+			}
+			return backend.Session{}, then(name)
+		})
+	}
+	first := func(w *world, made func(ctx context.Context, name, dir string, command []string)) {
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			made(ctx, name, dir, command)
+			return w.fake.Create(ctx, name, dir, command)
+		})
 	}
 
-	if _, err := state.RunCommitCycle(state.CommitCycle{
-		Client:   client,
-		Dir:      dir,
-		LoadPrev: func() *state.Index { return &state.Index{} },
-	}); !errors.Is(err, listErr) {
-		t.Errorf("commit cycle after restore: error = %v, want one wrapping the failed list-sessions", err)
+	for _, tc := range []struct {
+		name  string
+		stage func(w *world)
+		want  outcome
+	}{
+		{
+			name: "a session restore's helper runs, though Create timed out, is restored",
+			stage: func(w *world) {
+				makes(w, func(string) error { return errTimedOut })
+			},
+			want: restored,
+		},
+		{
+			name: "a session a concurrent restore made first, running restore's helper, is restored",
+			stage: func(w *world) {
+				first(w, func(ctx context.Context, name, dir string, command []string) {
+					_, _ = w.fake.Create(ctx, name, dir, command)
+				})
+			},
+			want: restored,
+		},
+		{
+			name: "a session made since the listing, running anything else, fails",
+			stage: func(w *world) {
+				first(w, func(_ context.Context, name, _ string, _ []string) {
+					w.fake.Add(backend.Session{Name: name, Command: "vim notes.md"})
+				})
+			},
+			want: other,
+		},
+		{
+			name: "a session made since the listing, running the user's shell, fails",
+			stage: func(w *world) {
+				first(w, func(_ context.Context, name, _ string, _ []string) { w.fake.Add(backend.Session{Name: name}) })
+			},
+			want: other,
+		},
+		// zmx finds a session by statting its socket, so on a filesystem that
+		// folds case one held as WORK answers for work.
+		{
+			name: "a session made since the listing under another spelling fails",
+			stage: func(w *world) {
+				first(w, func(context.Context, string, string, []string) { w.fake.Add(backend.Session{Name: "WORK"}) })
+			},
+			want: other,
+		},
+		{
+			name:  "a refusal leaving no session fails",
+			stage: func(w *world) { w.fake.Fail(backendtest.OpCreate, errRefused) },
+			want:  none,
+		},
+		{
+			name: "a refusal as held that names no holder, and holds nothing, fails",
+			stage: func(w *world) {
+				w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+					return backend.Session{}, &backend.SessionExistsError{Name: name}
+				})
+			},
+			want: none,
+		},
+		{
+			name: "a session that can't be looked up fails, as one that may be the helper's",
+			stage: func(w *world) {
+				makes(w, func(name string) error {
+					w.fake.StopAnswering(name)
+					return errTimedOut
+				})
+			},
+			want: unknown,
+		},
+	} {
+		for _, earlier := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s (flag raised before: %v)", tc.name, earlier), func(t *testing.T) {
+				w := newWorld(t)
+				saved := entry(t, "work")
+				w.save(t, saved)
+				if earlier {
+					if err := state.Hydrating.Set(w.dir, "work"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				tc.stage(w)
+
+				res := w.r.Restore(t.Context())
+
+				if res != tc.want.res {
+					t.Errorf("Restore = %+v, want %+v", res, tc.want.res)
+				}
+				if up, want := w.hydrating(t, "work"), tc.want.keepsOwn && !earlier || tc.want.keepsEarlier && earlier; up != want {
+					t.Errorf("hydrating flag up = %v, want %v", up, want)
+				}
+				if tc.want.res.Restored == 0 {
+					w.assertFailedKeepingEntry(t, saved)
+					return
+				}
+				w.assertRestoredWithoutWarning(t, saved)
+			})
+		}
 	}
-	sessionsAfter, err := os.ReadFile(state.SessionsJSON(dir))
-	if err != nil {
-		t.Fatalf("read sessions.json: %v", err)
+}
+
+func (w *world) assertFailedKeepingEntry(t *testing.T, saved sessionindex.Entry) {
+	t.Helper()
+	w.failureLogged(t, saved.Name)
+	if e, ok := w.lookup(t, saved.Name); !ok || !sameEntry(e, saved) {
+		t.Errorf("entry = %+v, %v; want it kept as saved for the next bootstrap, %+v", e, ok, saved)
 	}
-	if string(sessionsAfter) != string(sessionsBefore) {
-		t.Errorf("sessions.json rewritten after restore:\nbefore %s\nafter  %s", sessionsBefore, sessionsAfter)
+}
+
+func (w *world) assertRestoredWithoutWarning(t *testing.T, saved sessionindex.Entry) {
+	t.Helper()
+	live, ok := w.fake.Held(saved.Name)
+	if !ok {
+		t.Fatalf("%s is not held", saved.Name)
+	}
+	if got, _ := w.lookup(t, saved.Name); !sameEntry(got, restoredAs(saved, live)) {
+		t.Errorf("entry = %+v, want the helper's creation recorded, owed until it finishes, %+v", got, restoredAs(saved, live))
+	}
+	if warnings := w.warnings(); len(warnings) > 0 {
+		t.Errorf("a session restore made logged %v, want no warning", warnings)
+	}
+}
+
+// restoredAs is saved as restore records it once it has made live: live's
+// creation, owed a restore until live's helper finishes it.
+func restoredAs(saved sessionindex.Entry, live backend.Session) sessionindex.Entry {
+	saved.CreatedAt, saved.PID, saved.Owed = live.Created, live.PID, true
+	return saved
+}
+
+// failureLogged checks one WARN names the session that failed and the summary
+// counts it, and returns that WARN.
+func (w *world) failureLogged(t *testing.T, name string) logtest.Record {
+	t.Helper()
+	rec := w.sink.Records().WithMessage("restore session failed").AtExactLevel(slog.LevelWarn).Only(t, "failure")
+	if got := rec.AttrString(t, "session"); got != name {
+		t.Errorf("failure names session %q, want %q", got, name)
+	}
+	if got := w.anomalous(t); got != 1 {
+		t.Errorf("anomalous = %d, want the one failure", got)
+	}
+	return rec
+}
+
+// A Create cut short once zmx has forked the session's daemon, before its
+// socket listens, leaves a session no one can reach yet: the first ask finds
+// none, though the helper is about to start.
+func TestRestore_AsksAgainBeforeJudgingNoSession(t *testing.T) {
+	t.Run("a session that answers on the second ask, running restore's helper, is restored", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.asleep = func() {
+				if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return backend.Session{}, errTimedOut
+		})
+
+		if res, want := w.r.Restore(t.Context()), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if !w.hydrating(t, "work") {
+			t.Error("the hydrating flag came down under a helper about to start")
+		}
+		w.assertRestoredWithoutWarning(t, saved)
+		if !slices.Equal(w.slept, []time.Duration{time.Second}) {
+			t.Errorf("waited %v, want one probe ceiling, a second", w.slept)
+		}
+	})
+
+	t.Run("a session no ask finds fails once both have, on each try", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.fake.Fail(backendtest.OpCreate, errRefused)
+
+		w.r.Restore(t.Context())
+
+		var asks []string
+		for _, call := range w.fake.Calls() {
+			if call.Op == backendtest.OpCreate || call.Op == backendtest.OpSession {
+				asks = append(asks, string(call.Op))
+			}
+		}
+		create, ask := string(backendtest.OpCreate), string(backendtest.OpSession)
+		tries := len(w.created())
+		want := []string{create, ask, ask}
+		for range tries - 1 {
+			want = append(want, ask, create, ask, ask)
+		}
+		if !slices.Equal(asks, want) {
+			t.Errorf("calls = %q, want each of the %d tries' Create followed by two asks, each retry asking first", asks, tries)
+		}
+		if len(w.slept) == 0 || w.slept[0] != time.Second {
+			t.Errorf("waited %v, want the first try's asks a second apart", w.slept)
+		}
+		if w.hydrating(t, "work") {
+			t.Error("the hydrating flag this run raised is left up")
+		}
+	})
+
+	// The second ask's wait outlives a cancelled bootstrap, which leaves
+	// nothing to try again.
+	t.Run("New's restorer waits out the second", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(context.Context, string, string, []string) (backend.Session, error) {
+			cancel(errors.New("bootstrap abandoned"))
+			return backend.Session{}, errRefused
+		})
+		r, err := restore.New(restore.Config{Backend: w.witness, StateDir: w.dir, Exe: exe})
+		if err != nil {
+			t.Fatal(err)
+		}
+		restore.JudgeByBoot(r, booted)
+		start := time.Now()
+
+		r.Restore(ctx)
+
+		if took := time.Since(start); took < time.Second {
+			t.Errorf("Restore took %v, want at least the second between the asks", took)
+		}
+	})
+
+	t.Run("a holder found on the first ask is not asked for again", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.fake.Add(backend.Session{Name: "WORK"})
+			return w.fake.Create(ctx, name, dir, command)
+		})
+
+		w.r.Restore(t.Context())
+
+		if asks := w.asksFor("work"); asks != 1 || len(w.slept) > 0 {
+			t.Errorf("work asked for %d times, waiting %v; want once, with no wait", asks, w.slept)
+		}
+	})
+}
+
+// asksFor is how many times restore looked name up.
+func (w *world) asksFor(name string) int {
+	var asks int
+	for _, call := range w.fake.CallsTo(backendtest.OpSession) {
+		if call.Name == name {
+			asks++
+		}
+	}
+	return asks
+}
+
+func TestRestore_RefusedCreateNamesItsCause(t *testing.T) {
+	w := newWorld(t)
+	w.save(t, entry(t, "work"))
+	w.fake.Fail(backendtest.OpCreate, errRefused)
+
+	w.r.Restore(t.Context())
+
+	if cause := w.failureLogged(t, "work").ErrorAttr(t, "error"); !errors.Is(cause, errRefused) {
+		t.Errorf("logged cause %v, want Create's refusal", cause)
+	}
+}
+
+func TestRestore_CountsEveryWarningAsAnomalous(t *testing.T) {
+	t.Run("a creation it can't record", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		commitlock.SetTimeoutForTest(t, 50*time.Millisecond)
+		commitlock.HoldForTest(t, w.dir)
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v: the session was made", res, want)
+		}
+		w.warnedOnce(t, "record session creation failed")
+	})
+
+	t.Run("a flag it can't lower", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+		flags := filepath.Join(w.dir, string(state.Hydrating))
+		w.createWith(func(_ context.Context, name, _ string, _ []string) (backend.Session, error) {
+			if err := os.Chmod(flags, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(flags, 0o700) })
+			w.fake.Add(backend.Session{Name: name, Command: "vim notes.md"})
+			return backend.Session{}, errRefused
+		})
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Failed: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		w.sink.Records().WithMessage("clear hydrating flag failed").AtExactLevel(slog.LevelWarn).Only(t, "clear failure")
+		if got := w.anomalous(t); got != 2 {
+			t.Errorf("anomalous = %d, want the failure and the flag left up", got)
+		}
+	})
+
+	t.Run("a transcript file it refuses", func(t *testing.T) {
+		w := newWorld(t)
+		e, _ := w.saveTranscript(t, entry(t, "notes"))
+		e.Name = "work"
+		w.save(t, e)
+
+		res := w.r.Restore(t.Context())
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		w.warnedOnce(t, "scrollback file refused")
+	})
+}
+
+// warnedOnce checks the run's one warning is msg, naming work, and the summary
+// counts it.
+func (w *world) warnedOnce(t *testing.T, msg string) {
+	t.Helper()
+	rec := w.warnings().Only(t, "warning")
+	if rec.Msg != msg || rec.AttrString(t, "session") != "work" {
+		t.Errorf("warning = %q %v, want %q naming work", rec.Msg, rec.Attrs, msg)
+	}
+	if got := w.anomalous(t); got != 1 {
+		t.Errorf("anomalous = %d, want 1", got)
+	}
+}
+
+func TestRestore_StopsOnceItsContextEnds(t *testing.T) {
+	cause := errors.New("bootstrap abandoned")
+
+	t.Run("it makes no session after the one it was making", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "a"), entry(t, "b"), entry(t, "c"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			s, err := w.fake.Create(ctx, name, dir, command)
+			cancel(cause)
+			return s, err
+		})
+
+		res := w.r.Restore(ctx)
+
+		if want := (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v: the rest neither made nor failed", res, want)
+		}
+		if got := w.created(); !slices.Equal(got, []string{"a"}) {
+			t.Errorf("created %q, want a alone", got)
+		}
+		w.assertCancelled(t, cause)
+		for _, name := range []string{"b", "c"} {
+			if w.hydrating(t, name) {
+				t.Errorf("%s's hydrating flag was raised after the context ended", name)
+			}
+		}
+	})
+
+	t.Run("it still looks up a session the Create it cut short made, and restores it", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "a")
+		w.save(t, saved, entry(t, "b"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			if _, err := w.fake.Create(ctx, name, dir, command); err != nil {
+				return backend.Session{}, err
+			}
+			cancel(cause)
+			return backend.Session{}, cause
+		})
+
+		if res, want := w.r.Restore(ctx), (restore.Result{Restored: 1}); res != want {
+			t.Errorf("Restore = %+v, want %+v", res, want)
+		}
+		if !w.hydrating(t, "a") {
+			t.Error("a's hydrating flag is down: its helper runs, and lowers it")
+		}
+		live, _ := w.fake.Held("a")
+		if got, _ := w.lookup(t, "a"); !sameEntry(got, restoredAs(saved, live)) {
+			t.Errorf("entry = %+v, want the helper's creation recorded, %+v", got, restoredAs(saved, live))
+		}
+		w.assertCancelled(t, cause)
+	})
+
+	t.Run("it makes none once it has ended before the run", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "a"))
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cancel(cause)
+
+		if res := w.r.Restore(ctx); res != (restore.Result{}) {
+			t.Errorf("Restore = %+v, want nothing", res)
+		}
+		if created := w.created(); len(created) > 0 {
+			t.Errorf("created %q, want nothing", created)
+		}
+		w.assertCancelled(t, cause)
+	})
+}
+
+func (w *world) assertCancelled(t *testing.T, cause error) {
+	t.Helper()
+	rec := w.warnings().Only(t, "warning")
+	if rec.Msg != "restore cancelled" || !errors.Is(rec.ErrorAttr(t, "error"), cause) {
+		t.Errorf("warning = %q %v, want the cancellation, once, with its cause", rec.Msg, rec.Attrs)
+	}
+}
+
+func TestRestore_StartDir(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	// An executable file passes the search check a directory must, so only
+	// being no directory refuses it.
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sealed := t.TempDir()
+	if err := os.Chmod(sealed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o700) })
+	cwd, dir, home := t.TempDir(), t.TempDir(), t.TempDir()
+
+	for _, tc := range []struct {
+		name, cwd, dir, home, want string
+	}{
+		{name: "its last working directory", cwd: cwd, dir: dir, want: cwd},
+		{name: "the directory it was made in, its last one gone", cwd: gone, dir: dir, want: dir},
+		{name: "the directory it was made in, its last one a file", cwd: file, dir: dir, want: dir},
+		{name: "the directory it was made in, its last one not searchable", cwd: sealed, dir: dir, want: dir},
+		{name: "the directory it was made in, its last one relative", cwd: ".", dir: dir, want: dir},
+		{name: "the directory it was made in, recording no last one", dir: dir, want: dir},
+		{name: "HOME, both gone", cwd: gone, dir: gone, want: home},
+		{name: "HOME, both relative", cwd: ".", dir: ".", want: home},
+		{name: "the root, HOME gone as well", cwd: gone, dir: gone, home: gone, want: "/"},
+		{name: "the root, HOME not searchable", cwd: gone, dir: gone, home: sealed, want: "/"},
+		{name: "the root, HOME relative", cwd: gone, dir: gone, home: ".", want: "/"},
+	} {
+		t.Run("it starts in "+tc.name, func(t *testing.T) {
+			t.Setenv("HOME", cmp.Or(tc.home, home))
+			w := newWorld(t)
+			e := entry(t, "work")
+			e.Cwd, e.Dir = tc.cwd, tc.dir
+			w.save(t, e)
+
+			w.r.Restore(t.Context())
+
+			if got := w.onlyCreate(t).Dir; got != tc.want {
+				t.Errorf("started in %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRestore_HelperArgv(t *testing.T) {
+	bare := []string{exe, "state", "hydrate", "--session", "work"}
+
+	t.Run("it names the transcript saved", func(t *testing.T) {
+		w := newWorld(t)
+		e, path := w.saveTranscript(t, entry(t, "work"))
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--file", path); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it names none for a session that saved none", func(t *testing.T) {
+		w := newWorld(t)
+		w.save(t, entry(t, "work"))
+
+		w.r.Restore(t.Context())
+
+		if got := w.onlyCreate(t).Command; !slices.Equal(got, bare) {
+			t.Errorf("command = %q, want %q", got, bare)
+		}
+		if warnings := w.warnings(); len(warnings) > 0 {
+			t.Errorf("a session that saved no transcript logged %v, want nothing amiss", warnings)
+		}
+	})
+
+	t.Run("it names none whose file is gone", func(t *testing.T) {
+		w := newWorld(t)
+		e, path := w.saveTranscript(t, entry(t, "work"))
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got := w.onlyCreate(t).Command; !slices.Equal(got, bare) {
+			t.Errorf("command = %q, want %q", got, bare)
+		}
+	})
+
+	t.Run("it names one it can't look for, for the helper to say why", func(t *testing.T) {
+		w := newWorld(t)
+		e, path := w.saveTranscript(t, entry(t, "work"))
+		w.save(t, e)
+		sealed := filepath.Dir(path)
+		if err := os.Chmod(sealed, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(sealed, 0o700) })
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--file", path); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	// decision 6: a session portal migrate made waits on its resume panel at
+	// its first restore, whatever its hook's mode.
+	t.Run("it resumes an entry marked lazy lazily, ahead of its transcript", func(t *testing.T) {
+		w := newWorld(t)
+		e, path := w.saveTranscript(t, entry(t, "work"))
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy", "--file", path); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it resumes an entry marked lazy lazily with no transcript", func(t *testing.T) {
+		w := newWorld(t)
+		e := entry(t, "work")
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it brings back a kept entry marked lazy lazily", func(t *testing.T) {
+		w := newWorld(t)
+		e := entry(t, "work")
+		e.ResumeLazy = true
+		w.save(t, e)
+
+		if _, err := w.r.BringBack(t.Context(), "work"); err != nil {
+			t.Fatalf("BringBack: %v", err)
+		}
+
+		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
+			t.Errorf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it names none that is no transcript of the session", func(t *testing.T) {
+		w := newWorld(t)
+		e, _ := w.saveTranscript(t, entry(t, "notes"))
+		e.Name = "work"
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		if got := w.onlyCreate(t).Command; !slices.Equal(got, bare) {
+			t.Errorf("command = %q, want %q", got, bare)
+		}
+		rec := w.sink.Records().WithMessage("scrollback file refused").AtExactLevel(slog.LevelWarn).Only(t, "refusal")
+		if !errors.Is(rec.ErrorAttr(t, "error"), state.ErrForeignScrollback) {
+			t.Errorf("refusal = %v, want the foreign file named", rec.Attrs)
+		}
+	})
+}
+
+func TestRunsHelper(t *testing.T) {
+	t.Run("it counts each session restore made, with a transcript or without", func(t *testing.T) {
+		w := newWorld(t)
+		withFile, _ := w.saveTranscript(t, entry(t, "work"))
+		w.save(t, withFile, entry(t, "notes"))
+
+		w.r.Restore(t.Context())
+
+		for _, name := range []string{"work", "notes"} {
+			s, ok := w.fake.Held(name)
+			if !ok {
+				t.Fatalf("%s was not restored", name)
+			}
+			if !w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = false, want restore's own session counted", s)
+			}
+		}
+	})
+
+	// A replay that failed keeps its session's flag up; a bootstrap run by a
+	// portal at another path, a dev build or another install, must not lower
+	// it.
+	for _, tc := range []struct {
+		name    string
+		command []string
+	}{
+		{"a portal at another path", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
+		{"a portal at another path, replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--file", "/tmp/work.vt"}},
+		{"a portal at another path, resuming lazily", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy"}},
+		{"a portal at another path, resuming lazily and replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy", "--file", "/tmp/work.vt"}},
+		{"a portal at a path the shell would read specially", []string{"/Users/lee/My Apps/it's/portal", "state", "hydrate", "--session", "work"}},
+	} {
+		t.Run("it counts the helper run by "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = false, want the helper counted", s)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name    string
+		command []string
+	}{
+		{"the helper for another name", []string{exe, "state", "hydrate", "--session", "work-2"}},
+		{"a binary not named portal", []string{"/usr/local/bin/portal-dev", "state", "hydrate", "--session", "work"}},
+		{"another program, given the helper's arguments", []string{"/bin/echo", "state", "hydrate", "--session", "work"}},
+		{"another of portal's commands", []string{exe, "state", "resume-wait", "--session", "work"}},
+		{"another program, running a portal it names", []string{"env", "X=1", "/x/portal", "state", "hydrate", "--session", "work"}},
+		{"another program, reading as the helper cut short, then going on", []string{portalPathOf(237), "state", "hydrate...", "x"}},
+		{"another program", []string{"vim", "notes.md"}},
+		{"the user's shell", nil},
+	} {
+		t.Run("it counts no session running "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if w.r.RunsHelper(s) {
+				t.Errorf("RunsHelper(%+v) = true, want false", s)
+			}
+		})
+	}
+
+	t.Run("it counts no session that didn't answer, known by its name alone", func(t *testing.T) {
+		if newWorld(t).r.RunsHelper(backend.Session{Name: "work"}) {
+			t.Error("RunsHelper = true for a session that told nothing of its command")
+		}
+	})
+
+	// zmx cuts the command it reports before the first argument past 256
+	// bytes, marking the cut with "..." where that fits. The helper's own
+	// arguments, with "work", run to 29 bytes past its path.
+	transcript := []string{"--file", "/tmp/work.vt"}
+	lazily := slices.Concat([]string{"--lazy"}, transcript)
+	for _, tc := range []struct {
+		name    string
+		command []string
+		counted bool
+	}{
+		{"the helper, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), transcript), true},
+		{"the helper, whole, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), transcript), true},
+		{"the helper, whole, its transcript's path cut", slices.Concat(helperAt(portalPathOf(215), "work"), transcript), true},
+		{"the helper resuming lazily, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), lazily), true},
+		{"the helper, whole, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), lazily), true},
+		{"the helper, whole, resuming lazily, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(214), "work"), lazily), true},
+		{"the helper for another name, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), lazily), false},
+		{"the helper for another name, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), transcript), false},
+		{"a binary not named portal, cut", slices.Concat(helperAt(portalPathOf(237)+"-dev", "work"), transcript), false},
+		{"another of portal's commands, cut", []string{portalPathOf(237), "state", "resume-wait", "--session", "work"}, false},
+	} {
+		t.Run(fmt.Sprintf("it counts %s: %v", tc.name, tc.counted), func(t *testing.T) {
+			w := newWorld(t)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if whole := uncut(w.fake, tc.command); s.Command == whole || len(s.Command) > 256 {
+				t.Fatalf("command = %q, want it cut from %q", s.Command, whole)
+			}
+
+			if got := w.r.RunsHelper(s); got != tc.counted {
+				t.Errorf("RunsHelper(%q) = %v, want %v", s.Command, got, tc.counted)
+			}
+		})
+	}
+}
+
+// helperAt is the hydrate helper's argv for the named session, run by the
+// portal at exe.
+func helperAt(exe, name string) []string {
+	return []string{exe, "state", "hydrate", "--session", name}
+}
+
+// portalPathOf is a path n bytes long to a binary named portal.
+func portalPathOf(n int) string {
+	const base = "/portal"
+	return "/" + strings.Repeat("d", n-len(base)-1) + base
+}
+
+// uncut is command as the backend shows each of its arguments, joined by
+// spaces, however long that is.
+func uncut(b backend.Backend, command []string) string {
+	words := make([]string, len(command))
+	for i, arg := range command {
+		words[i] = b.DisplayCommand([]string{arg})
+	}
+	return strings.Join(words, " ")
+}
+
+func TestRestore_RecordsTheCreation(t *testing.T) {
+	t.Run("its entry takes the creation Create returned, keeping the rest", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Now = func() time.Time { return time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC) }
+		e, _ := w.saveTranscript(t, entry(t, "work"))
+		e.Cwd = e.Dir
+		w.save(t, e)
+
+		w.r.Restore(t.Context())
+
+		live, ok := w.fake.Held("work")
+		if !ok {
+			t.Fatal("work was not made")
+		}
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, restoredAs(e, live)) {
+			t.Errorf("entry = %+v, want %+v", got, restoredAs(e, live))
+		}
+	})
+
+	// The second ask of an unconfirmed Create reads no creation either, as a
+	// session the backend never answers for: the helper's claim records it.
+	t.Run("a creation no ask reads changes nothing", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Now = func() time.Time { return time.Time{} }
+		saved := entry(t, "work")
+		w.save(t, saved)
+
+		if res := w.r.Restore(t.Context()); res.Restored != 1 {
+			t.Fatalf("Restore = %+v, want work restored", res)
+		}
+
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, saved) {
+			t.Errorf("entry = %+v, want it as saved, %+v", got, saved)
+		}
+	})
+
+	// A raw recreation of the name, claimed while restore waited for the lock,
+	// is the live session now: recording restore's creation over it would have
+	// the next claim replace the entry and lose what it was saved with.
+	t.Run("an entry a claim took over since restore read it is left to the claim", func(t *testing.T) {
+		w := newWorld(t)
+		saved := entry(t, "work")
+		w.save(t, saved)
+		claimed := saved
+		claimed.CreatedAt, claimed.PID = time.Now().Truncate(time.Second), 9999
+		w.createWith(func(ctx context.Context, name, dir string, command []string) (backend.Session, error) {
+			w.save(t, claimed)
+			return w.fake.Create(ctx, name, dir, command)
+		})
+
+		if res := w.r.Restore(t.Context()); res.Restored != 1 {
+			t.Fatalf("Restore = %+v, want work restored", res)
+		}
+
+		if got, _ := w.lookup(t, "work"); !sameEntry(got, claimed) {
+			t.Errorf("entry = %+v, want the claim's, %+v", got, claimed)
+		}
+	})
+}
+
+func TestRestore_Progress(t *testing.T) {
+	w := newWorld(t, backend.Session{Name: "live"})
+	w.save(t, entry(t, "a"), entry(t, "live"), entry(t, "b"), entry(t, "c"))
+	w.fake.Fail(backendtest.OpCreate, errRefused)
+	var got [][2]int
+	w.r.SetProgress(func(n, m int) { got = append(got, [2]int{n, m}) })
+
+	w.r.Restore(t.Context())
+
+	if want := [][2]int{{1, 3}, {2, 3}, {3, 3}}; !slices.Equal(got, want) {
+		t.Errorf("progress = %v, want %v: each session restore takes up, failed or not, of those it restores", got, want)
+	}
+}
+
+// decision 75: a Create the backend refuses because the session it made speaks
+// a protocol Portal doesn't support stops the restore there, since every
+// Create after it would make another; the entries it didn't reach stay.
+func TestRestore_StopsOnASessionOfAnUnsupportedProtocol(t *testing.T) {
+	w := newWorld(t)
+	w.fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w", "work", backend.ErrUnsupportedProtocol))
+	w.save(t, entry(t, "work"), entry(t, "notes"))
+
+	res := w.r.Restore(t.Context())
+
+	if !errors.Is(res.Unsupported, backend.ErrUnsupportedProtocol) || res.Failed != 1 || res.Restored != 0 {
+		t.Errorf("Restore = %+v, want one failed, carrying the refusal", res)
+	}
+	if got := w.created(); !slices.Equal(got, []string{"work"}) {
+		t.Errorf("created %q, want work alone: nothing is made after the refusal", got)
+	}
+	for _, name := range []string{"work", "notes"} {
+		if w.hydrating(t, name) {
+			t.Errorf("%s's hydrating flag is up, want it down: no session runs the helper", name)
+		}
+		if _, ok := w.lookup(t, name); !ok {
+			t.Errorf("%s's entry is gone, want it kept for the next restore", name)
+		}
 	}
 }

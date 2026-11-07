@@ -18,7 +18,7 @@ type AckOutcome string
 const (
 	AckConfirmed AckOutcome = "confirmed"
 	// AckTimeout — the window opened but its token never appeared in time; a
-	// missing marker at timeout counts as a failed spawn.
+	// missing ack at timeout counts as a failed spawn.
 	AckTimeout AckOutcome = "timeout"
 	// AckFailed — the adapter reported no window opened, so nothing was awaited.
 	AckFailed AckOutcome = "failed"
@@ -39,7 +39,7 @@ type Burster struct {
 	Adapter Adapter
 	Ack     AckCollector
 	Exe     ExecutableResolver
-	Getenv  func(string) string
+	Env     WindowEnv
 	NewID   func() (string, error)
 	Timeout time.Duration
 	Poll    time.Duration
@@ -49,12 +49,12 @@ type Burster struct {
 
 // NewBurster applies production defaults for the id generator, timeout, poll
 // cadence and clock.
-func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, getenv func(string) string) *Burster {
+func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, env WindowEnv) *Burster {
 	return &Burster{
 		Adapter: adapter,
 		Ack:     ack,
 		Exe:     exe,
-		Getenv:  getenv,
+		Env:     env,
 		NewID:   nanoid.NewGenerator(),
 		Timeout: spawnAckTimeout,
 		Poll:    defaultAckPoll,
@@ -68,15 +68,18 @@ func NewBurster(adapter Adapter, ack AckCollector, exe ExecutableResolver, geten
 // a mint surface is minted inside its own window at exec time. command
 // (nil-tolerant) rides every mint surface byte-identically and attach surfaces
 // ignore it; progress (nil-tolerant) fires after each ack classification. The
-// executable and every id resolve up front, so a failure there aborts before any
-// window opens. Cancelling ctx stops the burst and returns what it has collected
+// executable, the window environment and every id resolve up front, so a
+// failure there aborts before any window opens. Cancelling ctx stops the burst and returns what it has collected
 // with a nil error.
 func (b *Burster) Run(ctx context.Context, external []Surface, command []string, progress func(done, total int)) (batch string, results []WindowResult, err error) {
 	exePath, err := b.Exe()
 	if err != nil {
 		return "", nil, err
 	}
-	path := b.Getenv("PATH")
+	env, err := b.Env()
+	if err != nil {
+		return "", nil, err
+	}
 
 	batch, err = NewSpawnID(b.NewID)
 	if err != nil {
@@ -97,7 +100,7 @@ func (b *Burster) Run(ctx context.Context, external []Surface, command []string,
 			break
 		}
 		token := tokens[i]
-		argv := composeOpenArgv(exePath, path, surface, batch, token, command)
+		argv := composeOpenArgv(exePath, env, surface, batch, token, command)
 		result := b.Adapter.OpenWindow(argv)
 
 		ack := AckFailed

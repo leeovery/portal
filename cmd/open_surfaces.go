@@ -7,7 +7,7 @@ import (
 	"github.com/leeovery/portal/internal/spawn"
 )
 
-// Strictly read-only — no mint, no tmux mutation — so the pre-flight can abort a
+// Strictly read-only — no mint, no session touched — so the pre-flight can abort a
 // burst with nothing opened. Every mint surface carries a literal existing
 // directory: the query must never travel to the spawned window.
 func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces []spawn.Surface, results []resolver.QueryResult, misses []string, err error) {
@@ -17,6 +17,11 @@ func resolveOpenSurfaces(qr *resolver.QueryResolver, targets []Target) (surfaces
 		for _, r := range classified {
 			switch res := r.(type) {
 			case *resolver.SessionResult:
+				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceAttach, Value: res.Name})
+				results = append(results, res)
+			case *resolver.KeptResult:
+				// Its window runs open --session, which brings it back, as the
+				// trigger's connect does.
 				surfaces = append(surfaces, spawn.Surface{Kind: spawn.SurfaceAttach, Value: res.Name})
 				results = append(results, res)
 			case *resolver.PathResult:

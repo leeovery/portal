@@ -129,35 +129,6 @@ func TestIsProcessAlive(t *testing.T) {
 	})
 }
 
-func TestDaemonAlive(t *testing.T) {
-	t.Run("returns true when both PID file and process exist", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := state.WritePIDFile(dir, os.Getpid()); err != nil {
-			t.Fatalf("WritePIDFile: %v", err)
-		}
-		if !state.DaemonAlive(dir) {
-			t.Errorf("DaemonAlive = false; want true with our own PID")
-		}
-	})
-
-	t.Run("returns false when PID file is absent", func(t *testing.T) {
-		dir := t.TempDir()
-		if state.DaemonAlive(dir) {
-			t.Errorf("DaemonAlive = true; want false when PID file absent")
-		}
-	})
-
-	t.Run("returns false when PID file points to a dead process", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := state.WritePIDFile(dir, os.Getpid()+1_000_000); err != nil {
-			t.Fatalf("WritePIDFile: %v", err)
-		}
-		if state.DaemonAlive(dir) {
-			t.Errorf("DaemonAlive = true; want false when PID is unused")
-		}
-	})
-}
-
 func TestVersionFile(t *testing.T) {
 	t.Run("writes and reads a version file", func(t *testing.T) {
 		dir := t.TempDir()

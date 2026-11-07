@@ -12,7 +12,7 @@ import (
 
 func TestResolveProgramContrastValidation(t *testing.T) {
 	t.Run("a built-in slug pins the swatch", func(t *testing.T) {
-		m, err := resolveProgram(capture.ContrastValidationFixture, "tokyo-night", io.Discard)
+		m, err := resolveProgram(capture.ContrastValidationFixture, "tokyo-night", io.Discard, false)
 		if err != nil {
 			t.Fatalf("resolveProgram(contrast-validation, tokyo-night): %v", err)
 		}
@@ -30,7 +30,7 @@ func TestResolveProgramContrastValidation(t *testing.T) {
 	t.Run("an explicit path pins the swatch too", func(t *testing.T) {
 		path := themetest.WriteWithCanvas(t, t.TempDir(), "mytheme.theme", "#1a2b3c")
 
-		m, err := resolveProgram(capture.ContrastValidationFixture, path, io.Discard)
+		m, err := resolveProgram(capture.ContrastValidationFixture, path, io.Discard, false)
 		if err != nil {
 			t.Fatalf("resolveProgram(contrast-validation, %q): %v", path, err)
 		}
@@ -44,7 +44,7 @@ func TestResolveProgramContrastValidation(t *testing.T) {
 }
 
 func TestResolveProgramSessionsFixture(t *testing.T) {
-	m, err := resolveProgram("sessions-flat", defaultThemeSlug, io.Discard)
+	m, err := resolveProgram("sessions-flat", defaultThemeSlug, io.Discard, false)
 	if err != nil {
 		t.Fatalf("resolveProgram(sessions-flat, %s): %v", defaultThemeSlug, err)
 	}

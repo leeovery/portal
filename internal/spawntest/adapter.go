@@ -22,9 +22,9 @@ type FakeAdapter struct {
 	// calls beyond it default to spawn.Success("").
 	Results []spawn.Result
 	// Ack, when set, receives the parsed token of each confirmed success call,
-	// simulating the spawned window's marker write.
+	// simulating the spawned window's ack write.
 	Ack *FakeAckChannel
-	// Confirm gates the marker write per window: Confirm[i] false suppresses
+	// Confirm gates the ack write per window: Confirm[i] false suppresses
 	// window i's write (→ ack timeout). A nil slice confirms every window.
 	Confirm []bool
 

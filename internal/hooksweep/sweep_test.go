@@ -3,535 +3,549 @@ package hooksweep
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/state"
 )
 
-func TestRunCycle(t *testing.T) {
-	const entryDebugFmt = "stale-hook cleanup counts"
-	const completionDebugFmt = "stale-hook cleanup removed"
+// A key is stale when it names neither a session the backend lists, answering
+// or not, nor an entry in sessions.json.
+func TestSweepRule(t *testing.T) {
+	survives := func(t *testing.T, w *world, key string) {
+		t.Helper()
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(key, hookstest.ReapableSeedA)})
 
-	t.Run("hazard guard fires on empty live + non-empty persisted", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-a"},
-  %q: {"on-resume": "cmd-b"}
-}`, hookstest.ReapableSeedA, hookstest.ReapableSeedB)
-		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-		before := hookstest.HooksFileBytes(t, path)
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: tokenRows(), err: nil}
-
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		hookstest.AssertHooksFileUnchanged(t, path, before, "modified by hazard-guard branch")
-
-		if got := len(loggerSink.Records().Matching("hooks", entryDebugFmt).AtExactLevel(slog.LevelDebug)); got != 1 {
-			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, loggerSink.Records())
-		}
-
-		assertStandDown(t, loggerSink, slog.LevelWarn, ReasonEmptyPaneRead)
-
-		if got := len(loggerSink.Records().Matching("hooks", completionDebugFmt).AtExactLevel(slog.LevelDebug)); got != 0 {
-			t.Errorf("completion Debug count = %d, want 0 (must NOT fire on hazard branch); entries=%+v", got, loggerSink.Records())
-		}
-	})
-
-	t.Run("both-sides-empty no-op", func(t *testing.T) {
-		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: ""})
-		before := hookstest.HooksFileBytes(t, path)
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: tokenRows(), err: nil}
-
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		hookstest.AssertHooksFileUnchanged(t, path, before, "materialised under both-sides-empty path")
-
-		if got := len(loggerSink.Records().Matching("hooks", entryDebugFmt).AtExactLevel(slog.LevelDebug)); got != 1 {
-			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, loggerSink.Records())
-		}
-
-		for _, rec := range loggerSink.Records().AtExactLevel(slog.LevelWarn) {
-			t.Errorf("unexpected Warn under both-sides-empty: %+v", rec)
-		}
-
-		if got := len(loggerSink.Records().Matching("hooks", completionDebugFmt).AtExactLevel(slog.LevelDebug)); got != 0 {
-			t.Errorf("completion Debug count = %d, want 0; entries=%+v", got, loggerSink.Records())
-		}
-	})
-
-	t.Run("ListAllPaneHookKeys error stands the cycle down and returns nil", func(t *testing.T) {
-		seed := fmt.Sprintf(`{%q: {"on-resume": "cmd-a"}}`, hookstest.ReapableSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: nil, err: errors.New("tmux dead")}
-
-		outcome, err := Run(lister, store)
-		if err != nil {
-			t.Fatalf("Run on ListAllPaneHookKeys error: want nil, got %v", err)
-		}
-		if outcome.DeclineReason != ReasonPaneReadFailed {
-			t.Fatalf("DeclineReason = %q, want %q", outcome.DeclineReason, ReasonPaneReadFailed)
-		}
-
-		if got := len(loggerSink.Records().Matching("hooks", entryDebugFmt).AtExactLevel(slog.LevelDebug)); got != 0 {
-			t.Errorf("entry-point Debug count = %d, want 0 (must NOT fire on ListAllPaneHookKeys-error branch); entries=%+v", got, loggerSink.Records())
-		}
-	})
-
-	t.Run("hookStore.Load error stands the cycle down and returns nil", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), err: nil}
-
-		outcome, err := Run(lister, store)
-		if err != nil {
-			t.Fatalf("Run on a Load error: want nil, got %v", err)
-		}
-		if outcome.DeclineReason != ReasonStoreReadFailed {
-			t.Fatalf("DeclineReason = %q, want %q", outcome.DeclineReason, ReasonStoreReadFailed)
-		}
-
-		if got := len(loggerSink.Records().Matching("hooks", entryDebugFmt).AtExactLevel(slog.LevelDebug)); got != 0 {
-			t.Errorf("entry-point Debug count = %d, want 0 on Load-error branch; entries=%+v", got, loggerSink.Records())
-		}
-	})
-
-	t.Run("the outcome names every removed entry", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-a"},
-  %q: {"on-resume": "cmd-b"},
-  %q: {"on-resume": "cmd-c"},
-  %q: {"on-resume": "cmd-d"}
-}`, hookstest.LiveSeedA, hookstest.ReapableSeedB, hookstest.ReapableSeedC, hookstest.ReapableSeedD)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), err: nil}
-
-		outcome, err := Run(lister, store)
+		outcome, err := Run(t.Context(), w.sources(), store)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		removedSeen := outcome.Removed
-
-		// CleanStale iterates a map, so removal order varies — assert set equality.
-		want := map[string]struct{}{hookstest.ReapableSeedB: {}, hookstest.ReapableSeedC: {}, hookstest.ReapableSeedD: {}}
-		if len(removedSeen) != len(want) {
-			t.Errorf("Removed = %d (%v), want %d (%v)", len(removedSeen), removedSeen, len(want), want)
+		if !slices.Equal(outcome.Removed, []string{hookstest.ReapableSeedA}) {
+			t.Errorf("Removed = %v, want only [%s]", outcome.Removed, hookstest.ReapableSeedA)
 		}
-		for _, k := range removedSeen {
-			if _, ok := want[k]; !ok {
-				t.Errorf("Removed carries unexpected key %q; want one of %v", k, want)
+		h, err := store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if _, ok := h[key]; !ok {
+			t.Errorf("%s was reaped; file holds %v", key, keysOf(h))
+		}
+	}
+
+	t.Run("it keeps a key naming a listed session", func(t *testing.T) {
+		survives(t, newWorld(t, hookstest.LiveSeedA), hookstest.LiveSeedA)
+	})
+
+	t.Run("it keeps a key naming a listed session that doesn't answer", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		w.backend.StopAnswering(hookstest.LiveSeedA)
+		survives(t, w, hookstest.LiveSeedA)
+	})
+
+	t.Run("it keeps a key naming only an index entry", func(t *testing.T) {
+		w := newWorld(t)
+		w.index(t, hookstest.LiveSeedA)
+		survives(t, w, hookstest.LiveSeedA)
+	})
+
+	t.Run("it reaps a key naming neither", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		w.index(t, hookstest.LiveSeedB)
+		store, _ := hookstest.StageStore(t, hookstest.Staging{
+			Seed: hooksBody(hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.ReapableSeedB, hookstest.ReapableSeedC),
+		})
+
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if want := []string{hookstest.ReapableSeedB, hookstest.ReapableSeedC}; !slices.Equal(outcome.Removed, want) {
+			t.Errorf("Removed = %v, want %v", outcome.Removed, want)
+		}
+		h, err := store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if got := slices.Sorted(slices.Values(keysOf(h))); !slices.Equal(got, []string{hookstest.LiveSeedA, hookstest.LiveSeedB}) {
+			t.Errorf("file holds %v, want the listed and the indexed keys", got)
+		}
+	})
+
+	// hooks.json is shared with the tmux version, whose keys name no zmx
+	// session: a state dir and a zmx dir pointed somewhere fresh would judge
+	// every one stale.
+	for _, key := range []string{hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB} {
+		t.Run("it stands down rather than reap "+key+", a key the tmux version wrote, warning once", func(t *testing.T) {
+			w := newWorld(t, hookstest.LiveSeedA)
+			store, path := hookstest.StageStore(t, hookstest.Staging{
+				Seed: hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, key),
+			})
+			before := hookstest.HooksFileBytes(t, path)
+			persisted, err := store.Load(hooks.ViaInternal)
+			if err != nil {
+				t.Fatalf("load: %v", err)
 			}
-		}
+			sink := logtest.Install(t)
+
+			outcome, err := Run(t.Context(), w.sources(), store)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
+				t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
+			}
+			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that stood down")
+			rec := sink.Records().WithMessage(standDownMsg).AtExactLevel(slog.LevelWarn).Only(t, "the stand-down's warning")
+			if got := rec.AttrString(t, "reason"); got != string(ReasonTmuxKeys) {
+				t.Errorf("reason = %q, want %q", got, ReasonTmuxKeys)
+			}
+			if stale, d := Stale(t.Context(), w.sources(), persisted); d.Reason() != ReasonTmuxKeys || len(stale) != 0 {
+				t.Errorf("Stale = (%v, %q), want none, declined as %q", stale, d.Reason(), ReasonTmuxKeys)
+			}
+		})
+	}
+
+	t.Run("it judges a key in the tmux version's shape that a listed session names as that session's", func(t *testing.T) {
+		survives(t, newWorld(t, hookstest.TmuxEraSeedA), hookstest.TmuxEraSeedA)
 	})
 
-	t.Run("happy-path normal removal emits entry + completion Debug", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-a"},
-  %q: {"on-resume": "cmd-b"},
-  %q: {"on-resume": "cmd-c"},
-  %q: {"on-resume": "cmd-d"}
-}`, hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.ReapableSeedD)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC), err: nil}
-
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
+	// Migration moves the tmux version's state to state-tmux and its keys out
+	// of hooks.json, so a key in their shape is a zmx name: a project called
+	// fabric names its sessions so.
+	t.Run("once the tmux version's state is migrated, it reaps a stale name in a token's shape, warning nothing", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		if err := os.Mkdir(state.TmuxStateDir(w.dir), 0o700); err != nil {
+			t.Fatal(err)
 		}
-
-		postRun, err := store.Load(hooks.ViaInternal)
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
+		persisted, err := store.Load(hooks.ViaInternal)
 		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
+			t.Fatalf("load: %v", err)
 		}
-		wantKeys := map[string]struct{}{hookstest.LiveSeedA: {}, hookstest.LiveSeedB: {}, hookstest.LiveSeedC: {}}
-		if len(postRun) != len(wantKeys) {
-			t.Errorf("post-run hook count = %d (keys=%v), want %d", len(postRun), keysOf(postRun), len(wantKeys))
+		sink := logtest.Install(t)
+
+		if stale, d := Stale(t.Context(), w.sources(), persisted); d.Declined() || !slices.Equal(stale, []string{sixAlphanumerics}) {
+			t.Errorf("Stale = (%v, %q), want [%s] and no stand-down", stale, d.Reason(), sixAlphanumerics)
 		}
-		if _, ok := postRun[hookstest.ReapableSeedD]; ok {
-			t.Errorf("post-run hooks still contains stale key %s; got %v", hookstest.ReapableSeedD, keysOf(postRun))
-		}
-
-		if got := len(loggerSink.Records().Matching("hooks", entryDebugFmt).AtExactLevel(slog.LevelDebug)); got != 1 {
-			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, loggerSink.Records())
-		}
-
-		if got := len(loggerSink.Records().Matching("hooks", completionDebugFmt).AtExactLevel(slog.LevelDebug)); got != 1 {
-			t.Errorf("completion Debug count = %d, want 1; entries=%+v", got, loggerSink.Records())
-		}
-
-		for _, rec := range loggerSink.Records().AtExactLevel(slog.LevelWarn) {
-			t.Errorf("unexpected Warn on normal-removal path: %+v", rec)
-		}
-	})
-
-	t.Run("it enumerates live keys via ListAllPaneHookKeys not ListAllPanesWithFormat", func(t *testing.T) {
-		seed := fmt.Sprintf(`{%q: {"on-resume": "cmd-a"}}`, hookstest.LiveSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		rec := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
-
-		if err := runErr(rec, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		if rec.calls != 1 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 1 (the enumeration must switch to the hook-key method)", rec.calls)
-		}
-	})
-
-	t.Run("it preserves a hook whose token matches the live set", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-live"},
-  %q: {"on-resume": "cmd-gone"}
-}`, hookstest.LiveSeedA, hookstest.ReapableSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), err: nil}
-
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		postRun, err := store.Load(hooks.ViaInternal)
+		outcome, err := Run(t.Context(), w.sources(), store)
 		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
+			t.Fatalf("Run: %v", err)
 		}
-		if _, ok := postRun[hookstest.LiveSeedA]; !ok {
-			t.Errorf("hook %s keyed on a live pane's token was removed; want preserved (present in live set); got %v", hookstest.LiveSeedA, keysOf(postRun))
+		if outcome.DeclineReason != "" || !slices.Equal(outcome.Removed, []string{sixAlphanumerics}) {
+			t.Errorf("Run = %+v, want [%s] removed", outcome, sixAlphanumerics)
 		}
-		if _, ok := postRun[hookstest.ReapableSeedA]; ok {
-			t.Errorf("truly-stale hook %s survived; want removed; got %v", hookstest.ReapableSeedA, keysOf(postRun))
+		if warnings := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) != 0 {
+			t.Errorf("logged %v, want no warning", warnings)
+		}
+	})
+
+	t.Run("a state-tmux path that can't be read holds the guard", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		path := state.TmuxStateDir(w.dir)
+		if err := os.Symlink(filepath.Base(path), path); err != nil { // a loop: every stat of it fails
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(path); err == nil || errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("stat %s = %v, want a failure other than not-exist; the case is vacuous", path, err)
+		}
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
+
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
+			t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
 		}
 	})
 }
 
-// A key the reaper cannot parse as a token is not evidence of a dead pane, so
-// no cycle may take it, however the sweep is reached.
-func TestUnjudgeableHookKeyRetention(t *testing.T) {
-	t.Run("it retains a non-token-shaped key across a sweep", func(t *testing.T) {
-		retained := hookstest.UnjudgeableSeedA
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-live"},
-  %q: {"on-resume": "cmd-old"}
-}`, hookstest.LiveSeedA, retained)
-		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-		before := hookstest.HooksFileBytes(t, path)
+// sixAlphanumerics is a session name in a pane token's shape.
+const sixAlphanumerics = "fabric"
 
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
+// A hook goes with its session's entry, so a sweep reaping three keys or more
+// that are half of hooks.json or more is judging it against the wrong state:
+// it holds them all, warning once.
+func TestSweepHoldsAMassReap(t *testing.T) {
+	reapable := []string{hookstest.ReapableSeedA, hookstest.ReapableSeedB, hookstest.ReapableSeedC}
+	for name, listed := range map[string][]string{
+		"three of four":                  {hookstest.LiveSeedA},
+		"three of six, exactly the half": {hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC},
+	} {
+		t.Run("it holds "+name+", removing none", func(t *testing.T) {
+			w := newWorld(t, listed...)
+			store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(slices.Concat(listed, reapable)...)})
+			before := hookstest.HooksFileBytes(t, path)
+			persisted, err := store.Load(hooks.ViaInternal)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			sink := logtest.Install(t)
 
-		postRun, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
-		}
-		if _, ok := postRun[retained]; !ok {
-			t.Errorf("non-token-shaped key was swept; got %v", keysOf(postRun))
-		}
+			outcome, err := Run(t.Context(), w.sources(), store)
 
-		hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten with nothing to remove")
-	})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if outcome.DeclineReason != ReasonMassReap || len(outcome.Removed) != 0 {
+				t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonMassReap)
+			}
+			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that held a mass reap")
+			rec := sink.Records().WithMessage(standDownMsg).AtExactLevel(slog.LevelWarn).Only(t, "the hold's warning")
+			if got := rec.AttrString(t, "reason"); got != string(ReasonMassReap) {
+				t.Errorf("reason = %q, want %q", got, ReasonMassReap)
+			}
+			if got := rec.IntAttr(t, "entries"); got != int64(len(reapable)) {
+				t.Errorf("entries = %d, want the %d keys it held", got, len(reapable))
+			}
+			if stale, d := Stale(t.Context(), w.sources(), persisted); d.Reason() != ReasonMassReap || len(stale) != 0 {
+				t.Errorf("Stale = (%v, %q), want none, declined as %q", stale, d.Reason(), ReasonMassReap)
+			}
+		})
+	}
 
+	for name, tc := range map[string]struct{ listed, keys []string }{
+		"two keys, every one stale but fewer than three": {
+			listed: []string{hookstest.LiveSeedA},
+			keys:   []string{hookstest.ReapableSeedA, hookstest.ReapableSeedB},
+		},
+		"three stale keys of seven, fewer than half": {
+			listed: []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.SubjectSeedA},
+			keys:   slices.Concat([]string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC, hookstest.SubjectSeedA}, reapable),
+		},
+	} {
+		t.Run("it reaps "+name, func(t *testing.T) {
+			w := newWorld(t, tc.listed...)
+			store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(tc.keys...)})
+			sink := logtest.Install(t)
+
+			outcome, err := Run(t.Context(), w.sources(), store)
+
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			want := slices.DeleteFunc(slices.Clone(tc.keys), func(key string) bool { return slices.Contains(tc.listed, key) })
+			if outcome.DeclineReason != "" || !slices.Equal(outcome.Removed, want) {
+				t.Errorf("Run = %+v, want %v removed", outcome, want)
+			}
+			if warnings := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) != 0 {
+				t.Errorf("logged %v, want no warning", warnings)
+			}
+		})
+	}
 }
 
-// A restore window is a hole in the reaper's judgement: every live pane carries
-// no token between skeleton construction and the re-stamp, so a sweep landing
-// there would reap every token-keyed entry on the machine.
-func TestHookSweepStandsDownWhileRestoring(t *testing.T) {
-	t.Run("it stands down before enumerating while the restore marker is set", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), restoring: true}
+// standDownCase is a world in which the judgement may not run, and the reason
+// it stands down under.
+type standDownCase struct {
+	name   string
+	reason Reason
+	// stage makes the world's one anomaly.
+	stage func(t *testing.T, w *world)
+	// listed is whether the cycle still takes its listing before it stands
+	// down.
+	listed bool
+}
 
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
+func standDownCases() []standDownCase {
+	writeVersion := func(version int) func(*testing.T, *world) {
+		return func(t *testing.T, w *world) {
+			w.writeIndex(t, map[string]any{"version": version, "sessions": []any{}})
 		}
+	}
+	return []standDownCase{
+		{name: "a failed listing", reason: ReasonListFailed, listed: true, stage: func(t *testing.T, w *world) {
+			w.backend.Fail(backendtest.OpList, errZmxDown)
+		}},
+		{name: "an unreadable index", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			makeUnreadableAt(t, sessionindex.Path(w.dir))
+		}},
+		{name: "a version 1 index", reason: ReasonIndexUnusable, listed: true, stage: writeVersion(1)},
+		{name: "an index from a newer Portal", reason: ReasonIndexUnusable, listed: true, stage: writeVersion(sessionindex.SchemaVersion + 1)},
+		{name: "a corrupt index", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			w.writeIndexBytes(t, []byte(`{"version": 2, "sessions": [`))
+		}},
+		// Between its renames, a migration's index is in its staging dir,
+		// and the state dir holds none: every rewritten key would be stale.
+		{name: "a migration cut short beside the state dir", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			w.besideMigration(t, func(staging string) {
+				writeFileAt(t, filepath.Join(staging, "sessions.json"), `{"version": 2, "sessions": []}`)
+			})
+		}},
+		{name: "a migration it can't rule out", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
+			w.besideMigration(t, func(staging string) {
+				if err := os.Remove(staging); err != nil {
+					t.Fatal(err)
+				}
+				writeFileAt(t, staging, "not a dir")
+			})
+		}},
+		{name: "the restoring flag raised", reason: ReasonRestoring, stage: func(t *testing.T, w *world) {
+			w.raiseRestoring(t)
+		}},
+		{name: "the restoring flag unreadable", reason: ReasonRestoringReadFailed, stage: func(t *testing.T, w *world) {
+			makeUnreadableAt(t, w.dir)
+		}},
+		{name: "no state directory", reason: ReasonStateDirUnresolved, stage: func(t *testing.T, w *world) {
+			w.dir = ""
+		}},
+		{name: "nothing listed and no sessions.json", reason: ReasonNoSessions, listed: true, stage: func(*testing.T, *world) {}},
+		{name: "nothing listed and an empty sessions.json", reason: ReasonNoSessions, listed: true, stage: func(t *testing.T, w *world) {
+			w.index(t)
+		}},
+		// The daemon that sweeps runs in _portal-saver, so a listing always
+		// holds it: a scratch state and zmx dir beside a real hooks.json must
+		// still read as nothing listed.
+		{name: "only _portal-saver listed beside an empty sessions.json", reason: ReasonNoSessions, listed: true, stage: func(t *testing.T, w *world) {
+			w.backend.Add(backend.Session{Name: portalSaver})
+			w.index(t)
+		}},
+	}
+}
 
-		if lister.calls != 0 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 0 (the sweep must stand down before enumerating)", lister.calls)
-		}
-	})
+// Every stand-down removes nothing and says why, at DEBUG.
+func TestSweepStandsDown(t *testing.T) {
+	for _, tc := range standDownCases() {
+		t.Run("it removes nothing on "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			tc.stage(t, w)
+			store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
+			before := hookstest.HooksFileBytes(t, path)
+			sink := logtest.Install(t)
 
-	// A read that failed proves nothing about the marker, so the cycle still
-	// stands down on it — the fail-safe posture is unchanged by the reason it
-	// is reported under.
-	t.Run("it stands down before enumerating when the marker read fails", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), restoringErr: errors.New("tmux dead")}
+			outcome, err := Run(t.Context(), w.sources(), store)
+			if err != nil {
+				t.Fatalf("Run: want a stand-down, got %v", err)
+			}
+			if outcome.DeclineReason != tc.reason {
+				t.Errorf("DeclineReason = %q, want %q", outcome.DeclineReason, tc.reason)
+			}
+			if len(outcome.Removed) != 0 {
+				t.Errorf("Removed = %v, want none", outcome.Removed)
+			}
+			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that stood down")
+			assertStandDown(t, sink, tc.reason)
+			if listed := w.lists > 0; listed != tc.listed {
+				t.Errorf("listed = %v, want %v", listed, tc.listed)
+			}
+		})
+	}
 
-		outcome, err := Run(lister, store)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if outcome.DeclineReason != ReasonMarkerReadFailed {
-			t.Fatalf("DeclineReason = %q, want %q", outcome.DeclineReason, ReasonMarkerReadFailed)
-		}
-
-		if lister.calls != 0 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 0 on a failed marker read", lister.calls)
-		}
-	})
-
-	t.Run("it skips before loading the store", func(t *testing.T) {
-		// The store fails loudly on any read, so a decline naming the restore
-		// marker — rather than the store read — proves it was never loaded.
+	// The flag is read before the store, so a restore never waits on this
+	// file's lock: a store that fails any read declines under the flag.
+	t.Run("it stands down on the restoring flag before reading the store", func(t *testing.T) {
+		w := newWorld(t)
+		w.raiseRestoring(t)
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA), restoring: true}
-
-		outcome, err := Run(lister, store)
+		outcome, err := Run(t.Context(), w.sources(), store)
 		if err != nil {
-			t.Fatalf("Run: want nil (store untouched), got %v", err)
+			t.Fatalf("Run: %v", err)
 		}
 		if outcome.DeclineReason != ReasonRestoring {
-			t.Errorf("DeclineReason = %q, want %q (a store read would have declined with %q)",
-				outcome.DeclineReason, ReasonRestoring, ReasonStoreReadFailed)
-		}
-		if lister.calls != 0 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 0", lister.calls)
-		}
-		if len(outcome.Removed) != 0 {
-			t.Errorf("Removed = %v, want none", outcome.Removed)
+			t.Errorf("DeclineReason = %q, want %q (a store read would have failed the cycle)", outcome.DeclineReason, ReasonRestoring)
 		}
 	})
 
-	t.Run("it sweeps normally when the marker is absent", func(t *testing.T) {
+	t.Run("it sweeps once the restoring flag is lowered", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		w.raiseRestoring(t)
+		if _, err := state.Restoring.Clear(w.dir); err != nil {
+			t.Fatalf("lower the restoring flag: %v", err)
+		}
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
 
-		if err := runErr(lister, store); err != nil {
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-
-		if lister.calls != 1 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 1", lister.calls)
-		}
-		postRun, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
-		}
-		if _, ok := postRun[hookstest.ReapableSeedA]; ok {
-			t.Errorf("stale key %s survived a marker-absent sweep; got %v", hookstest.ReapableSeedA, keysOf(postRun))
-		}
-		if _, ok := postRun[hookstest.LiveSeedA]; !ok {
-			t.Errorf("live key was reaped; got %v", keysOf(postRun))
+		if !slices.Equal(outcome.Removed, []string{hookstest.ReapableSeedA}) {
+			t.Errorf("Removed = %v, want [%s]", outcome.Removed, hookstest.ReapableSeedA)
 		}
 	})
-
 }
 
-// A repair that silently did not run is indistinguishable from a repair that
-// found nothing to do, so every stand-down reports itself to its caller.
-func TestHookSweepReportsStandDown(t *testing.T) {
-	t.Run("it reports nothing when the live set is empty and no entries are persisted", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: ""})
-		lister := &stubReader{rows: tokenRows()}
+// The diagnosis must answer the reaper's question with the reaper's own
+// answer: a verdict the two disagree on is a user told a hook is lost by one
+// command and reaped by the other.
+func TestStaleAgreesWithTheSweep(t *testing.T) {
+	for _, tc := range standDownCases() {
+		t.Run("they stand down alike on "+tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			tc.stage(t, w)
+			persisted := hooks.Snapshot{hookstest.ReapableSeedA: {"on-resume": {Command: "gone"}}}
+			store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
 
-		sink := logtest.Install(t)
+			stale, d := Stale(t.Context(), w.sources(), persisted)
+			outcome, err := Run(t.Context(), w.sources(), store)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if d.Reason() != tc.reason || outcome.DeclineReason != tc.reason {
+				t.Errorf("Stale declined under %q and Run under %q, want both %q", d.Reason(), outcome.DeclineReason, tc.reason)
+			}
+			if len(stale) != 0 {
+				t.Errorf("Stale = %v on a stand-down, want none", stale)
+			}
+		})
+	}
 
-		outcome, err := Run(lister, store)
+	t.Run("they judge the same keys stale", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		w.index(t, hookstest.LiveSeedB)
+		keys := []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.ReapableSeedA, hookstest.ReapableSeedB}
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(keys...)})
+		persisted, err := store.Load(hooks.ViaInternal)
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+
+		stale, d := Stale(t.Context(), w.sources(), persisted)
+		if d.Declined() {
+			t.Fatalf("Stale declined under %q", d.Reason())
+		}
+		outcome, err := Run(t.Context(), w.sources(), store)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
+		if len(stale) == 0 || !slices.Equal(stale, outcome.Removed) {
+			t.Errorf("Stale = %v, Run removed %v; want the same, non-empty", stale, outcome.Removed)
+		}
+	})
 
-		if outcome.DeclineReason != "" {
-			t.Errorf("DeclineReason = %q, want none with nothing to protect", outcome.DeclineReason)
+	t.Run("they read nothing past the flag with nothing persisted", func(t *testing.T) {
+		w := newWorld(t)
+		w.backend.Fail(backendtest.OpList, errZmxDown)
+
+		stale, d := Stale(t.Context(), w.sources(), hooks.Snapshot{})
+		if d.Declined() || len(stale) != 0 {
+			t.Errorf("Stale = (%v, %q), want nothing and no stand-down", stale, d.Reason())
+		}
+		if w.lists != 0 {
+			t.Errorf("listings = %d, want 0", w.lists)
+		}
+	})
+}
+
+// One cycle is one INFO summary when it removed anything, with its counts and
+// each key at DEBUG beside it.
+func TestSweepLogging(t *testing.T) {
+	t.Run("it counts the sessions and entries, and the keys it reaped", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA, hookstest.LiveSeedB)
+		store, _ := hookstest.StageStore(t, hookstest.Staging{
+			Seed: hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.ReapableSeedB),
+		})
+		sink := logtest.Install(t)
+
+		if err := runErr(t, w.sources(), store); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		counts := sink.Records().Matching("hooks", countsMsg).AtExactLevel(slog.LevelDebug).Only(t, "the counts line")
+		if got := counts.IntAttr(t, "sessions"); got != 2 {
+			t.Errorf("sessions = %d, want 2", got)
+		}
+		if got := counts.IntAttr(t, "entries"); got != 3 {
+			t.Errorf("entries = %d, want 3", got)
+		}
+		removed := sink.Records().Matching("hooks", removedMsg).AtExactLevel(slog.LevelDebug).Only(t, "the removed line")
+		if got := removed.IntAttr(t, "reaped"); got != 2 {
+			t.Errorf("reaped = %d, want 2", got)
+		}
+		summary := sink.Records().WithMessage("clean-stale").AtExactLevel(slog.LevelInfo)
+		var summaries int
+		for _, rec := range summary {
+			if rec.HasAttr("entries") {
+				summaries++
+			}
+		}
+		if summaries != 1 {
+			t.Errorf("clean-stale summaries = %d, want 1: %+v", summaries, summary)
 		}
 		for _, rec := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
-			t.Errorf("unexpected Warn with nothing to protect: %+v", rec)
+			t.Errorf("unexpected WARN: %+v", rec)
 		}
 	})
 
-	t.Run("it reports the failed enumeration as a stand-down on the hooks component", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hookstest.StaleHookSeed})
-		lister := &stubReader{err: errors.New("tmux dead")}
-
-		sink := logtest.Install(t)
-
-		outcome, err := Run(lister, store)
-		if err != nil {
-			t.Fatalf("Run on an enumeration error: want nil, got %v", err)
-		}
-		if outcome.DeclineReason != ReasonPaneReadFailed {
-			t.Fatalf("DeclineReason = %q, want %q", outcome.DeclineReason, ReasonPaneReadFailed)
-		}
-
-		assertStandDown(t, sink, slog.LevelWarn, ReasonPaneReadFailed)
-	})
-}
-
-// Under lazy stamping a server with no stamped pane at all is the ordinary
-// steady state, so the guard's question — did the tmux read succeed? — is
-// answered by the pane rows, never by the tokens they carry.
-func TestHookSweepGuardCountsPaneRowsNotTokens(t *testing.T) {
-	t.Run("it does not fire the mass-deletion guard when no pane is stamped", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  %q: {"on-resume": "cmd-unjudgeable-a"},
-  %q: {"on-resume": "cmd-unjudgeable-b"}
-}`, hookstest.UnjudgeableSeedA, hookstest.UnjudgeableSeedB)
-		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
+	t.Run("it writes no summary when nothing is stale", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
+		store, path := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA)})
 		before := hookstest.HooksFileBytes(t, path)
-
 		sink := logtest.Install(t)
 
-		outcome, err := Run(&stubReader{rows: unstampedRows(3)}, store)
+		outcome, err := Run(t.Context(), w.sources(), store)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-
-		if outcome.DeclineReason != "" {
-			t.Errorf("DeclineReason = %q, want none (rows present means the read succeeded)", outcome.DeclineReason)
+		if outcome.DeclineReason != "" || len(outcome.Removed) != 0 {
+			t.Errorf("outcome = %+v, want a cycle that ran and removed nothing", outcome)
 		}
-		for _, rec := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
-			t.Errorf("unexpected Warn with rows present and no token: %+v", rec)
+		for _, rec := range sink.Records().AtOrAboveLevel(slog.LevelInfo) {
+			t.Errorf("unexpected record at INFO or above: %+v", rec)
 		}
-		hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten with only unjudgeable entries present")
-	})
-
-	t.Run("it still deletes a token-shaped key absent from the live token set", func(t *testing.T) {
-		seed := fmt.Sprintf(`{%q: {"on-resume": "cmd-gone"}}`, hookstest.ReapableSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		lister := &stubReader{rows: append(tokenRows(hookstest.ReapableSeedB), unstampedRows(1)...)}
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		postRun, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
-		}
-		if _, ok := postRun[hookstest.ReapableSeedA]; ok {
-			t.Errorf("token-shaped key %s absent from the live token set survived; got %v", hookstest.ReapableSeedA, keysOf(postRun))
-		}
-	})
-
-	t.Run("it takes the empty-pane-read branch only on zero rows", func(t *testing.T) {
-		seed := fmt.Sprintf(`{%q: {"on-resume": "cmd-gone"}}`, hookstest.ReapableSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		outcome, err := Run(&stubReader{rows: nil}, store)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		if outcome.DeclineReason != ReasonEmptyPaneRead {
-			t.Errorf("DeclineReason = %q, want %q", outcome.DeclineReason, ReasonEmptyPaneRead)
-		}
-		postRun, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
-		}
-		if _, ok := postRun[hookstest.ReapableSeedA]; !ok {
-			t.Errorf("a zero-row read reaped an entry; got %v", keysOf(postRun))
-		}
-	})
-
-	t.Run("it counts the rows, not the tokens, on the counts line", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q: {"on-resume": "cmd-unjudgeable"}}`, hookstest.UnjudgeableSeedB)})
-
-		loggerSink := logtest.Install(t)
-		lister := &stubReader{rows: unstampedRows(4)}
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		rec := loggerSink.Records().Matching("hooks", "stale-hook cleanup counts").AtExactLevel(slog.LevelDebug).Only(t, "DEBUG hooks stale-hook cleanup counts record")
-		if got := rec.IntAttr(t, "panes"); got != 4 {
-			t.Errorf("panes = %d, want 4 (the count is of live panes; none of these carries a token)", got)
-		}
-	})
-
-	t.Run("it reaps an empty key when a pane carries no token", func(t *testing.T) {
-		seed := fmt.Sprintf(`{
-  "": {"on-resume": "cmd-empty"},
-  %q: {"on-resume": "cmd-old"}
-}`, hookstest.UnjudgeableSeedA)
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: seed})
-
-		lister := &stubReader{rows: unstampedRows(2)}
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		postRun, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("store.Load post-run: %v", err)
-		}
-		// An unstamped pane protects no key. Were its empty token to enter the
-		// live set, this entry would be permanently unreachable by the reaper
-		// and would fire its command on every unstamped restored pane.
-		if _, ok := postRun[""]; ok {
-			t.Errorf("empty-keyed entry survived alongside unstamped panes; got %v", keysOf(postRun))
-		}
-		if _, ok := postRun[hookstest.UnjudgeableSeedA]; !ok {
-			t.Errorf("unjudgeable entry was swept; got %v", keysOf(postRun))
-		}
+		hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten with nothing to remove")
 	})
 }
 
 // With nothing persisted there is no key to judge and none to protect, so the
-// cheapest and most decisive test is taken before the whole-server pane read a
-// daemon would otherwise pay for on every cycle for the life of the process.
-func TestHookSweepWithNothingPersisted(t *testing.T) {
-	t.Run("it enumerates no panes when nothing is persisted", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody()})
-		lister := &stubReader{rows: tokenRows(hookstest.LiveSeedA)}
-
-		if err := runErr(lister, store); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-
-		if lister.calls != 0 {
-			t.Errorf("ListAllPaneHookKeys call count = %d, want 0 (an empty store has nothing to judge)", lister.calls)
-		}
-	})
-
-	t.Run("it reports the entry count alone for an empty snapshot", func(t *testing.T) {
+// cheapest and most decisive test is taken before a listing that asks every
+// session's daemon, which a daemon would otherwise pay on every cycle.
+func TestSweepWithNothingPersisted(t *testing.T) {
+	t.Run("it lists nothing and counts the entries alone", func(t *testing.T) {
+		w := newWorld(t, hookstest.LiveSeedA)
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody()})
 		sink := logtest.Install(t)
 
-		if err := runErr(&stubReader{rows: tokenRows(hookstest.LiveSeedA)}, store); err != nil {
+		outcome, err := Run(t.Context(), w.sources(), store)
+		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-
-		rec := sink.Records().Matching("hooks", "stale-hook cleanup counts").AtExactLevel(slog.LevelDebug).
-			Only(t, "DEBUG hooks stale-hook cleanup counts record")
+		if outcome.DeclineReason != "" {
+			t.Errorf("DeclineReason = %q, want none with nothing persisted", outcome.DeclineReason)
+		}
+		if w.lists != 0 {
+			t.Errorf("listings = %d, want 0 (an empty store has nothing to judge)", w.lists)
+		}
+		rec := sink.Records().Matching("hooks", countsMsg).AtExactLevel(slog.LevelDebug).Only(t, "the counts line")
 		if got := rec.IntAttr(t, "entries"); got != 0 {
 			t.Errorf("entries = %d, want 0", got)
 		}
-		if rec.HasAttr("panes") {
-			t.Errorf("counts line carries a pane count for a cycle that never enumerated: %+v", rec)
+		if rec.HasAttr("sessions") {
+			t.Errorf("counts line carries a session count for a cycle that never listed: %+v", rec)
+		}
+		if recs := sink.Records().WithMessage(standDownMsg); len(recs) != 0 {
+			t.Errorf("stand-down records = %+v, want none", recs)
 		}
 	})
 
-	t.Run("it answers the live token set for a non-empty snapshot", func(t *testing.T) {
-		enumerate := liveTokenEnumeration(&stubReader{rows: tokenRows(hookstest.LiveSeedA)})
+	t.Run("it reports nothing on an empty listing and an empty store", func(t *testing.T) {
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: ""})
+		sink := logtest.Install(t)
 
-		if _, err := enumerate(hooks.Snapshot{}); !errors.Is(err, errNothingPersisted) {
-			t.Errorf("empty snapshot err = %v, want %v", err, errNothingPersisted)
-		}
-
-		tokens, err := enumerate(hooks.Snapshot{hookstest.LiveSeedA: {"on-resume": {Command: "cmd-live"}}})
+		outcome, err := Run(t.Context(), newWorld(t).sources(), store)
 		if err != nil {
-			t.Fatalf("enumerate: %v", err)
+			t.Fatalf("Run: %v", err)
 		}
-		if len(tokens) != 1 || tokens[0] != hookstest.LiveSeedA {
-			t.Errorf("tokens = %v, want [%s]", tokens, hookstest.LiveSeedA)
+		if outcome.DeclineReason != "" {
+			t.Errorf("DeclineReason = %q, want none with nothing to protect", outcome.DeclineReason)
+		}
+		for _, rec := range sink.Records().AtOrAboveLevel(slog.LevelWarn) {
+			t.Errorf("unexpected WARN with nothing to protect: %+v", rec)
 		}
 	})
+}
+
+// fmtSeed renders a one-entry hooks.json body under key.
+func fmtSeed(key, command string) string {
+	return fmt.Sprintf(`{%q: {"on-resume": %q}}`, key, command)
 }

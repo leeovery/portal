@@ -12,10 +12,9 @@ GITHUB_API="${GITHUB_API:-https://api.github.com/repos/${REPO}/releases/latest}"
 detect_os() {
     local uname_s="${PORTAL_TEST_UNAME_S:-$(uname -s)}"
     case "${uname_s}" in
-        Linux)  echo "linux" ;;
         Darwin) echo "darwin" ;;
         *)
-            echo "Error: Unsupported operating system: ${uname_s}. This installer supports Linux and macOS only." >&2
+            echo "Error: Unsupported operating system: ${uname_s}. Portal runs on macOS only." >&2
             return 1
             ;;
     esac

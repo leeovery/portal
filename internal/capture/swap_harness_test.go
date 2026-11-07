@@ -32,45 +32,55 @@ type capturedStateWant struct {
 }
 
 func capturedStates() []capturedStateWant {
-	sessionRow := "agentic-workflows-code-based"
+	sessionRow := "orchard-pipeline-code-based"
 	return []capturedStateWant{
 		{fixture: "sessions-flat", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-empty", page: tui.PageSessions, present: []string{"No sessions yet"}},
 		{fixture: "sessions-by-project", page: tui.PageSessions, present: []string{sessionRow, "— by project"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-by-project-labelled", page: tui.PageSessions, present: []string{"api · user search", "release checklist", "notes on the outage", "— by project"}, absent: []string{"orchard-pipeline-Hq7wNe", "No sessions yet"}},
 		{fixture: "sessions-by-tag", page: tui.PageSessions, present: []string{sessionRow, "— by tag"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-paged", page: tui.PageSessions, present: []string{"session-00"}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"fab-flowx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-rename-refused-separator", page: tui.PageSessions, present: []string{sessionRow, `":" isn't allowed in a session name — tmux reads it as a separator`}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-rename-refused-id-prefix", page: tui.PageSessions, present: []string{sessionRow, `"$" isn't allowed at the start of a session name — tmux reads it as a session ID`}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-rename-refused-flag-prefix", page: tui.PageSessions, present: []string{sessionRow, `"-" isn't allowed at the start of a session name — tmux reads it as a command flag`}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-inline-flash", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "closed externally"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-rename-refused-label", page: tui.PageSessions, present: []string{sessionRow, "label refused: it holds a control or formatting character"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-help", page: tui.PageSessions, present: []string{"Keybindings", "Filter sessions"}},
+		{fixture: "sessions-filtering", page: tui.PageSessions, present: []string{"/ relay", "relayx-3RJDWA"}, absent: []string{sessionRow}},
+		{fixture: "sessions-kill-confirm", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone."}, absent: []string{"tmux", "No sessions yet"}},
+		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "⏎ attach"}, absent: []string{"tmux", "No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-terminal", page: tui.PageSessions, present: []string{sessionRow, "unsupported terminal", "com.apple.Terminal"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-null", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet", "unsupported terminal"}},
 		{fixture: "sessions-multi-select-preflight-abort", page: tui.PageSessions, present: []string{sessionRow, "is gone", "nothing opened"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-burst-opening", page: tui.PageSessions, present: []string{sessionRow, "Opening 2/3"}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-no-tags-signpost", page: tui.PageSessions, present: []string{"fab-flowx-explore", "No tags yet"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-no-tags-signpost", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "No tags yet"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-adaptive-pair", page: tui.PageSessions, present: []string{sessionRow, "Themes", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-constant-previewing", page: tui.PageSessions, present: []string{sessionRow, "Themes", "●"}, absent: []string{"No sessions yet", "● light", "● dark"}},
+		{fixture: "theme-panel-open", page: tui.PageSessions, present: []string{sessionRow, "Themes", "gitlab-dark-grey", "tokyo-night-day", "●"}, absent: []string{"No sessions yet", "⚠", "● light", "● dark", "catppuccin-latte"}},
 		{fixture: "theme-panel-invalid-row", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ bad syntax", "My Gorgeous Midnight Pa…", "● dark"}, absent: []string{"No sessions yet", "bad colour"}},
-		{fixture: "theme-panel-dir-unreadable", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ dir unreadable", "solarized-lee", "● light", "● dark"}, absent: []string{"No sessions yet"}},
+		{fixture: "theme-panel-dir-unreadable", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ dir unreadable", "solarized-dusk", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-narrow", page: tui.PageSessions, present: []string{sessionRow, "Themes", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-paginated", page: tui.PageSessions, present: []string{sessionRow, "Themes", "vivid-01", "● light", "● dark"}, absent: []string{"No sessions yet"}},
-		{fixture: "theme-panel-projects", page: tui.PageProjects, present: []string{"flow-v1-api", "Projects", "Themes", "● light", "● dark"}},
+		{fixture: "theme-panel-projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects", "Themes", "● light", "● dark"}},
 		{fixture: "theme-panel-confirm", page: tui.PageSessions, present: []string{sessionRow, "Themes", "clear constant nord?  y / n", "confirm", "cancel"}, absent: []string{"No sessions yet", "set as dark", "set as light"}},
 		{fixture: "theme-panel-commit-failed", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● light", "● dark", "set as dark"}, absent: []string{"No sessions yet", "confirm", "cancel"}},
-		// The floor's body is one list row, so the light badge's row is off the
-		// frame rather than missing from it.
-		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
-		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "~/code/portal", "~/code/portal-gateway", "/opt/portal-tools"}, absent: []string{"evvi-sync-engine", "No sessions yet"}},
-		{fixture: "sessions-pending-resume", page: tui.PageSessions, present: []string{"agentic-workflows-codify", "folio-Jiz4el"}, absent: []string{"No sessions yet"}},
-		{fixture: "sessions-pending-resume-colourless", page: tui.PageSessions, present: []string{"agentic-workflows-codify", "folio-Jiz4el"}, absent: []string{"No sessions yet", "●"}},
-		{fixture: "projects", page: tui.PageProjects, present: []string{"flow-v1-api", "Projects"}},
-		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"flow-v1-api", "Pick a project to run", "npm run dev"}},
-		{fixture: "preview-screen", present: []string{"aviva-proxy-qNyfEO", "Window 1/1", "kubectl rollout"}},
+		// The floor's body is one list row, the first by the text rows show, so
+		// the light badge's row is off the frame rather than missing from it.
+		{fixture: "theme-panel-min-height-message", page: tui.PageSessions, present: []string{"atelier-web-m4TzpD", "Themes", "⚠ couldn't save theme", "● dark"}, absent: []string{"No sessions yet", "● light"}},
+		{fixture: "sessions-search-results", page: tui.PageSessions, present: []string{"portal-a1b2", "api-work", "~/code/portal", "~/code/portal-gateway", "/opt/portal-tools"}, absent: []string{"lumen-sync-engine", "No sessions yet"}},
+		{fixture: "sessions-search-home", page: tui.PageSessions, present: []string{"portal-a1b2 ~/code/portal", "api-work ~/code/portal-gateway", "lumen-sync-engine ~/code/lumen"}, absent: []string{"legacy-port-shim", "portal-notes", "No sessions yet"}},
+		{fixture: "sessions-pending-resume", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet"}},
+		{fixture: "sessions-pending-resume-colourless", page: tui.PageSessions, present: []string{"orchard-pipeline-codify", "quill-Ue9fLr"}, absent: []string{"No sessions yet", "●"}},
+		{fixture: "sessions-not-answering", page: tui.PageSessions, present: []string{"kiln-relayx-explore", "not answering", "orchard-pipeline-codify"}, absent: []string{"No sessions yet"}},
+		{fixture: "projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects"}},
+		{fixture: "projects-command-pending", page: tui.PageProjects, present: []string{"relay-v1-api", "Pick a project to run", "npm run dev"}},
+		{fixture: "projects-edit", page: tui.PageProjects, present: []string{"Edit Project", "relay-v1-api", "rapi", "Loom"}},
+		{fixture: "preview-screen", present: []string{"tessera-proxy-Vb3kQw", "kubectl rollout"}},
 		// The preview opens at the bottom of the buffer, so the top of it is off the frame.
-		{fixture: "preview-long-scrollback", present: []string{"aviva-proxy-qNyfEO", "Window 1/1", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
+		{fixture: "preview-long-scrollback", present: []string{"tessera-proxy-Vb3kQw", "300  build step 300 complete"}, absent: []string{"  1  build step 1 complete"}},
+		// zmx's rows end at its cursor's CUP, so nothing it writes after them,
+		// the pending-wrap reprint or the cwd, is drawn.
+		{fixture: "preview-zmx-history", present: []string{"tessera-proxy-Vb3kQw", "gap     after-tab", "wide 中文 end", "last row 000"}, absent: []string{"(history unavailable)", "example-host"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
-		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to set @portal-restoring marker"}},
+		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to remove the bootstrapped latch"}},
 	}
 }
 
@@ -156,7 +166,7 @@ func TestRenderSwapRender_ARenderPopulatesCachesBeforeSwap(t *testing.T) {
 	if visible == "" {
 		t.Fatalf("the before-frame is the pre-resolution blank frame (all spaces, no content); the constant nomination must paint from frame one:\n%q", before)
 	}
-	if !strings.Contains(ansi.Strip(before), "agentic-workflows-code-based") {
+	if !strings.Contains(ansi.Strip(before), "orchard-pipeline-code-based") {
 		t.Errorf("the before-frame does not render the fixture's session rows, so it is not the fixture's captured state:\n%s", ansi.Strip(before))
 	}
 

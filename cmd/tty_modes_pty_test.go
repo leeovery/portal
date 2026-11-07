@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -126,10 +127,7 @@ func TestResumeHandOffs_TerminalModes_RealPTY(t *testing.T) {
 		_, slave := openPTY(t)
 		fd := descriptorOf(t, slave)
 		var got hydrateConfig
-		withFuncSeam(t, &hydrateRunFunc, func(cfg hydrateConfig) error {
-			got = cfg
-			return nil
-		})
+		withFuncSeam(t, &hydrateRunFunc, func(_ context.Context, cfg hydrateConfig) { got = cfg })
 		executeHydrateCommand(t)
 		withStdin(t, slave)
 		before := *localModes(t, fd)
@@ -158,7 +156,7 @@ func executeHydrateCommand(t *testing.T) {
 	rootCmd.SetOut(new(bytes.Buffer))
 	errBuf := new(bytes.Buffer)
 	rootCmd.SetErr(errBuf)
-	rootCmd.SetArgs([]string{"state", "hydrate", "--fifo", filepath.Join(dir, "hydrate.fifo"), "--file", filepath.Join(dir, "scrollback.bin")})
+	rootCmd.SetArgs([]string{"state", "hydrate", "--session", "proj-a1b2", "--file", filepath.Join(dir, "scrollback.bin")})
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("executing hydrate: %v\nstderr: %s", err, errBuf)
 	}
@@ -337,10 +335,7 @@ func TestResumeChain_EchoAcrossTheWait_RealPTY(t *testing.T) {
 		_, slave := openPTY(t)
 		fd := descriptorOf(t, slave)
 		var hydrate hydrateConfig
-		withFuncSeam(t, &hydrateRunFunc, func(cfg hydrateConfig) error {
-			hydrate = cfg
-			return nil
-		})
+		withFuncSeam(t, &hydrateRunFunc, func(_ context.Context, cfg hydrateConfig) { hydrate = cfg })
 		executeHydrateCommand(t)
 		var draw resumeDrawConfig
 		withFuncSeam(t, &resumeDrawRunFunc, func(cfg resumeDrawConfig) error {

@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -27,9 +26,6 @@ const (
 	// blank cells, so the name always starts at the same left edge.
 	leftBarColumnWidth = 2
 	nameGap            = 2
-	// Fixed so counts stay column-aligned; sized to fit
-	// "999 windows" without bleeding into the next slot.
-	countSlotWidth = 11
 	// Mirrors the left inset; a wider right margin reads as oversized.
 	rowRightMargin = leftBarColumnWidth
 )
@@ -41,8 +37,12 @@ const (
 	pendingIndicatorLetter  = "P"
 )
 
-// A gone row reserves the badge's width in place of the indicator slot and right margin.
-const goneBadge = "session gone"
+// A badged row reserves the badge's width in place of the indicator slot and
+// right margin. The badge is text, so it reads the same under NO_COLOR.
+const (
+	goneBadge         = "session gone"
+	notAnsweringBadge = "not answering"
+)
 
 type rowIndicators struct {
 	attached bool
@@ -66,18 +66,11 @@ const (
 	groupRowIndent = "  "
 )
 
-func windowLabel(count int) string {
-	if count == 1 {
-		return "1 window"
-	}
-	return fmt.Sprintf("%d windows", count)
-}
-
 // Two SessionItems sharing a Session but differing in GroupKey are independently
 // selectable views of one session, not distinct attach targets — selection and
 // attach key on Session.Name.
 type SessionItem struct {
-	Session tmux.Session
+	Session Session
 
 	// GroupKey is the canonical sort/boundary key: canonical directory path
 	// (By Project), tag (By Tag), empty for Flat.
@@ -89,6 +82,10 @@ type SessionItem struct {
 	// CatchAll marks an Unknown / Untagged bucket instance, pinning it last
 	// without string-matching the heading.
 	CatchAll bool
+
+	// Home is the home directory the session's directory is abbreviated against;
+	// empty abbreviates nothing.
+	Home string
 }
 
 // FilterValue is the session's search fields flattened for the picker's own
@@ -97,7 +94,7 @@ type SessionItem struct {
 // directory is no part of it — a regroup must never make a session findable by a
 // path it was not findable by a moment earlier.
 func (i SessionItem) FilterValue() string {
-	return strings.Join(resolver.SearchFields(i.Session.Name, i.Session.Dir), " ")
+	return strings.Join(resolver.SearchFields(i.Home, i.Session.SearchSubject()), " ")
 }
 
 // A genuine height-1 list.Item is load-bearing: pagination counts every rendered
@@ -138,10 +135,12 @@ type SessionDelegate struct {
 	Selected map[string]struct{}
 	// GoneFlagged is the transient pre-flight abort set, keyed on Session.Name.
 	GoneFlagged map[string]struct{}
-	// Pending holds the sessions with any pane awaiting a resume decision, keyed
-	// on Session.Name so a session carries one dot however many panes wait.
-	// Nil marks nothing.
+	// Pending holds the sessions awaiting a resume decision, keyed on
+	// Session.Name. Nil marks nothing.
 	Pending map[string]struct{}
+	// Home is the home directory a shown directory is abbreviated against; empty
+	// abbreviates nothing.
+	Home string
 }
 
 func isSelected(set map[string]struct{}, name string) bool {
@@ -245,56 +244,32 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	if it.GroupKey != "" {
 		indent = groupRowIndent
 	}
-	indentCell := bg.Render(indent)
-
-	// Precedence: gone ⚠ over marked ● over the ▌ selector. The ●/⚠ styles take
-	// `selected`, not the bar's literal true, so they tint only on the cursor row.
-	goneRow := isSelected(d.GoneFlagged, it.Session.Name)
-	marked := d.MultiSelect && isSelected(d.Selected, it.Session.Name)
-	var bar string
-	switch {
-	case goneRow:
-		bar = renderGoneLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected))
-	case marked:
-		bar = renderMarkedLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.AccentPrimary, selected))
-	default:
-		bar = renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.AccentPrimary, true), selected)
-	}
-
-	nameTok := d.Theme.TextPrimary
+	mutedTok := d.Theme.TextMuted
 	if selected {
-		nameTok = d.Theme.TextOnSelection
+		mutedTok = d.Theme.TextSecondary
 	}
-	countTok := d.Theme.TextMuted
-	if selected {
-		countTok = d.Theme.TextSecondary
-	}
-	countText := windowLabel(it.Session.Windows)
+	trailing, trailingWidth := d.renderRowTrailing(it.Session, bg, mutedTok, selected)
 
 	// An unsized list (before the first WindowSizeMsg) has no width to flex
 	// against — fall back to a left-to-right flow with no truncation.
 	total := m.Width()
-	trailingWidth := indicatorSlotWidth + rowRightMargin
-	if goneRow {
-		trailingWidth = lipgloss.Width(goneBadge)
-	}
-	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + countSlotWidth + trailingWidth
+	used := leftBarColumnWidth + lipgloss.Width(indent) + nameGap + trailingWidth
 
+	nameStyle := d.rowNameStyle(it.Session, mutedTok, selected)
 	var name, namePad, dirText string
 	if total <= 0 {
-		name = d.rowToken(nameBase, nameTok, selected).Render(it.Session.Name)
-		namePad = ""
+		name = nameStyle.Render(it.Session.DisplayName())
 		if d.ShowDir && it.Session.Dir != "" {
-			dirText = resolver.AbbreviateHome(it.Session.Dir)
+			dirText = resolver.AbbreviateHome(d.Home, it.Session.Dir)
 		}
 	} else {
 		nameWidth := max(total-used, 1)
-		visibleName := ansi.Truncate(it.Session.Name, nameWidth, "…")
-		name = d.rowToken(nameBase, nameTok, selected).Render(visibleName)
+		visibleName := ansi.Truncate(it.Session.DisplayName(), nameWidth, "…")
+		name = nameStyle.Render(visibleName)
 		remaining := nameWidth - lipgloss.Width(visibleName)
 		if d.ShowDir {
 			// The separating space is the one cell withheld from the fit.
-			dirText = fitSessionDir(it.Session.Dir, remaining-1)
+			dirText = fitSessionDir(d.Home, it.Session.Dir, remaining-1)
 		}
 		if dirText != "" {
 			remaining -= 1 + lipgloss.Width(dirText)
@@ -305,28 +280,12 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 	// Painted by the row background, so the selected row's tint covers the gap.
 	dirCell := ""
 	if dirText != "" {
-		dirCell = bg.Render(" ") + d.rowToken(lipgloss.Style{}, countTok, selected).Render(dirText)
+		dirCell = bg.Render(" ") + d.rowToken(lipgloss.Style{}, mutedTok, selected).Render(dirText)
 	}
 
 	gap := bg.Render(padTo("", nameGap))
-
-	count := d.rowToken(lipgloss.Style{}, countTok, selected).Render(countText) +
-		bg.Render(padTo("", countSlotWidth-lipgloss.Width(countText)))
-
-	var trailing string
-	if goneRow {
-		badge := d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected).Render(goneBadge)
-		trailing = badge + bg.Render(padTo("", trailingWidth-lipgloss.Width(goneBadge)))
-	} else {
-		cluster := d.indicatorCluster(rowIndicators{
-			attached: it.Session.Attached,
-			pending:  isSelected(d.Pending, it.Session.Name),
-		}, selected)
-		trailing = bg.Render(padTo("", indicatorSlotWidth-lipgloss.Width(cluster))) +
-			cluster +
-			bg.Render(padTo("", rowRightMargin))
-	}
-	row := indentCell + bar + name + dirCell + namePad + gap + count + trailing
+	bar := d.renderRowBar(it.Session.Name, bg, selected)
+	row := bg.Render(indent) + bar + name + dirCell + namePad + gap + trailing
 
 	// The flex name floors at 1, so at pathological narrow widths the assembled
 	// row would overflow; a final guard, and a no-op on the happy path.
@@ -334,6 +293,52 @@ func (d SessionDelegate) renderSessionRow(m list.Model, index int, it SessionIte
 		row = ansi.Truncate(row, total, "…")
 	}
 	return row
+}
+
+// Precedence: gone ⚠ over marked ● over the ▌ selector. The ●/⚠ styles take
+// `selected`, not the bar's literal true, so they tint only on the cursor row.
+func (d SessionDelegate) renderRowBar(name string, bg lipgloss.Style, selected bool) string {
+	switch {
+	case isSelected(d.GoneFlagged, name):
+		return renderGoneLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected))
+	case d.MultiSelect && isSelected(d.Selected, name):
+		return renderMarkedLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.AccentPrimary, selected))
+	default:
+		return renderLeftBarColumn(bg, d.rowToken(lipgloss.Style{}, d.Theme.AccentPrimary, true), selected)
+	}
+}
+
+// A session that did not answer is dimmed: muted and not bold, so under
+// NO_COLOR it still differs from its neighbours beside its badge.
+func (d SessionDelegate) rowNameStyle(s Session, mutedTok theme.Token, selected bool) lipgloss.Style {
+	if s.NotAnswering {
+		return d.rowToken(lipgloss.Style{}, mutedTok, selected)
+	}
+	nameTok := d.Theme.TextPrimary
+	if selected {
+		nameTok = d.Theme.TextOnSelection
+	}
+	return d.rowToken(nameBase, nameTok, selected)
+}
+
+// renderRowTrailing returns the row's hard-right segment and the width it
+// reserves: a badge flush to the edge when the row carries one, gone over not
+// answering, else the indicator cluster in its slot before the right margin.
+func (d SessionDelegate) renderRowTrailing(s Session, bg lipgloss.Style, mutedTok theme.Token, selected bool) (string, int) {
+	switch {
+	case isSelected(d.GoneFlagged, s.Name):
+		return d.rowToken(lipgloss.Style{}, d.Theme.StateDestructive, selected).Render(goneBadge), lipgloss.Width(goneBadge)
+	case s.NotAnswering:
+		return d.rowToken(lipgloss.Style{}, mutedTok, selected).Render(notAnsweringBadge), lipgloss.Width(notAnsweringBadge)
+	}
+	cluster := d.indicatorCluster(rowIndicators{
+		attached: s.Attached,
+		pending:  isSelected(d.Pending, s.Name),
+	}, selected)
+	trailing := bg.Render(padTo("", indicatorSlotWidth-lipgloss.Width(cluster))) +
+		cluster +
+		bg.Render(padTo("", rowRightMargin))
+	return trailing, indicatorSlotWidth + rowRightMargin
 }
 
 // indicatorCluster packs the row's indicators for a hard-right placement; a row
@@ -376,7 +381,19 @@ func spaces(n int) string {
 	return string(b)
 }
 
-func ToListItems(sessions []tmux.Session) []list.Item {
+// withHome stamps home on every session row in items, so a row's filter value
+// abbreviates its directory against the same home its delegate shows it under.
+func withHome(items []list.Item, home string) []list.Item {
+	for i, item := range items {
+		if si, ok := item.(SessionItem); ok {
+			si.Home = home
+			items[i] = si
+		}
+	}
+	return items
+}
+
+func ToListItems(sessions []Session) []list.Item {
 	items := make([]list.Item, len(sessions))
 	for i, s := range sessions {
 		items[i] = SessionItem{Session: s}

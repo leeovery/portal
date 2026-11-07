@@ -1,0 +1,40 @@
+
+  P O R T A L ▌                                                                                        session manager
+  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+
+  Projects 14                                                                                              / to filter
+
+  ▌ relay-v1-api
+  ▌ /home/user/code/loom/relayv1/relay-v1-api
+    portal
+    /home/user/code/portal
+    sorrel
+    /home/user/code/sorrel
+    bramble
+    /home/user/code/bramble
+    orchard-pipeline
+    /home/user/code/orchard-pipeline
+    user
+    /home/user
+    relayx
+    /home/user/code/loom/relayx
+    atelier-web
+    /home/user/code/atelier/atelier-web
+    lumen
+    /home/user/code/lumen
+    tessera-proxy
+    /home/user/code/tessera
+    kiln-aws-migration
+    /home/user/code/kiln
+    quill
+    /home/user/code/quill
+    loom
+    /home/user/code/loom
+    lumen-sync-engine
+    /home/user/code/lumen-sync
+
+
+
+  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ⏎ new session · x sessions · e edit · / filter · t theme                                                      ? help
+

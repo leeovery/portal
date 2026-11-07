@@ -1,36 +1,33 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type keymapParityKiller struct{}
 
 func (keymapParityKiller) KillSession(string) error { return nil }
 
-type keymapParityRenamer struct{}
+type keymapParityLabeller struct{}
 
-func (keymapParityRenamer) RenameSession(string, string) error { return nil }
+func (keymapParityLabeller) SetLabel(string, string) error { return nil }
 
-type keymapParityEnumerator struct{}
+// keymapParityHistory answers every session with a one-line history.
+type keymapParityHistory struct{}
 
-func (keymapParityEnumerator) ListWindowsAndPanesInSession(string) ([]tmux.WindowGroup, error) {
-	return []tmux.WindowGroup{{WindowIndex: 0, WindowName: "w", Panes: []tmux.WindowPane{{Index: 0}}}}, nil
+func (keymapParityHistory) History(context.Context, string, int) ([]byte, error) {
+	return []byte("x"), nil
 }
-
-type keymapParityReader struct{}
-
-func (keymapParityReader) Tail(PaneScrollback) ([]byte, error) { return nil, nil }
 
 func sessionsDispatchModel(t *testing.T) Model {
 	t.Helper()
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 	return m
 }
@@ -149,33 +146,32 @@ func TestSessionsKeymapRevision(t *testing.T) {
 
 func TestSessionsRetainedActionParity(t *testing.T) {
 	t.Run("k routes to kill (opens the kill confirm modal)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m.sessionKiller = keymapParityKiller{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: 'k', Text: "k"})
 		if m.modal != modalKillConfirm {
 			t.Errorf("k must open the kill confirm modal; modal = %v", m.modal)
 		}
-		if m.pendingKillName != "alpha" {
-			t.Errorf("kill target = %q, want alpha", m.pendingKillName)
+		if m.pendingKill.Name != "alpha" {
+			t.Errorf("kill target = %q, want alpha", m.pendingKill.Name)
 		}
 	})
 
 	t.Run("r routes to rename (opens the rename modal)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
-		m.sessionRenamer = keymapParityRenamer{}
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
+		m.sessionLabeller = keymapParityLabeller{}
 		m = pressSession(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if m.modal != modalRename {
 			t.Errorf("r must open the rename modal; modal = %v", m.modal)
 		}
-		if m.renameTarget != "alpha" {
-			t.Errorf("rename target = %q, want alpha", m.renameTarget)
+		if m.renameTarget.Name != "alpha" {
+			t.Errorf("rename target = %q, want alpha", m.renameTarget.Name)
 		}
 	})
 
 	t.Run("space routes to preview", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
-		m.enumerator = keymapParityEnumerator{}
-		m.reader = keymapParityReader{}
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
+		m.history = newPreviewHistory(keymapParityHistory{})
 		m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 		if m.activePage != pagePreview {
 			t.Errorf("space must open the preview page; active page = %d", m.activePage)
@@ -183,7 +179,7 @@ func TestSessionsRetainedActionParity(t *testing.T) {
 	})
 
 	t.Run("Enter routes to attach (handleSessionListEnter)", func(t *testing.T) {
-		m := NewModelWithSessions([]tmux.Session{{Name: "alpha", Windows: 1}})
+		m := NewModelWithSessions([]Session{{Name: "alpha"}})
 		m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		if m.activePage != PageSessions {
 			t.Errorf("Enter must stay on Sessions in the no-attacher path; active page = %d", m.activePage)

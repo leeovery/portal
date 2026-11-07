@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
@@ -15,9 +14,9 @@ var errFatalSentinel = errors.New("fatal cold-boot abort sentinel")
 
 func fatalModelOnLoading(t *testing.T) tea.Model {
 	t.Helper()
-	lister := &mockSessionLister{sessions: []tmux.Session{}}
+	lister := &mockSessionLister{sessions: []tui.Session{}}
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model
@@ -27,10 +26,9 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	model := fatalModelOnLoading(t)
 
 	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 1})
-	model, _ = model.Update(tui.BootstrapProgressMsg{Index: 2})
 	model, _ = model.Update(tui.BootstrapFatalMsg{
-		FailedStep: 3,
-		Message:    "Portal failed to set @portal-restoring marker: permission denied",
+		FailedStep: 2,
+		Message:    "Portal failed to remove the bootstrapped latch: permission denied",
 		Err:        errFatalSentinel,
 	})
 
@@ -40,11 +38,11 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 	if !strings.Contains(visible, "✗") {
 		t.Errorf("error state missing the ✗ failure glyph:\n%s", visible)
 	}
-	if !strings.Contains(visible, "Portal failed to set @portal-restoring marker") {
+	if !strings.Contains(visible, "Portal failed to remove the bootstrapped latch") {
 		t.Errorf("error state missing the one-line fatal message:\n%s", visible)
 	}
-	if !strings.Contains(visible, tui.LabelRegisteredHooks) {
-		t.Errorf("error state missing the failed step label %q:\n%s", tui.LabelRegisteredHooks, visible)
+	if !strings.Contains(visible, tui.LabelStartingTheSaver) {
+		t.Errorf("error state missing the failed step label %q:\n%s", tui.LabelStartingTheSaver, visible)
 	}
 	if !strings.Contains(visible, "quit") {
 		t.Errorf("error state missing a quit hint:\n%s", visible)
@@ -52,6 +50,22 @@ func TestFatalMsg_RendersErrorState(t *testing.T) {
 
 	if got := strings.Count(view, "\n") + 1; got > 24 {
 		t.Errorf("error frame is %d rows tall, overflowing the 24-row terminal", got)
+	}
+}
+
+// A fatal at the first step, as another zmx dir's is, comes before any step
+// completes, yet it names a step, so the frame keeps the step list with that
+// step failed rather than showing the fatal alone.
+func TestFatalMsg_AtTheFirstStepKeepsTheSteps(t *testing.T) {
+	model := fatalModelOnLoading(t)
+
+	model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 1, Message: "Portal can't use this zmx dir", Err: errFatalSentinel})
+
+	visible := ansi.Strip(model.(tui.Model).View().Content)
+	for _, want := range []string{"✗   " + tui.LabelCheckingZmx, tui.LabelStartingTheSaver, tui.LabelRestoringSessions, "Portal can't use this zmx dir"} {
+		if !strings.Contains(visible, want) {
+			t.Errorf("frame lacks %q:\n%s", want, visible)
+		}
 	}
 }
 

@@ -3,860 +3,749 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
+	"reflect"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/commandertest"
-	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
+	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-// Swaps the tick-loop sub-seam rather than the top-level daemonRunFunc, so
-// the production lock-acquire + WritePIDFile head still runs and its side
-// effects stay observable.
-func withImmediateRun(t *testing.T) **daemonDeps {
+// fakeSaver is the saver's cycle as scripted: each poll and flush counted,
+// answering with what the test set.
+type fakeSaver struct {
+	mu                      sync.Mutex
+	polls, flushes          int
+	pollResult, flushResult saver.Result
+	pollErr, flushErr       error
+	// onPoll and onFlush, when set, answer each poll or flush in place of the
+	// script.
+	onPoll, onFlush func(ctx context.Context) (saver.Result, error)
+}
+
+func (f *fakeSaver) Poll(ctx context.Context) (saver.Result, error) {
+	f.mu.Lock()
+	f.polls++
+	onPoll := f.onPoll
+	f.mu.Unlock()
+	if onPoll != nil {
+		return onPoll(ctx)
+	}
+	return f.pollResult, f.pollErr
+}
+
+func (f *fakeSaver) Flush(ctx context.Context) (saver.Result, error) {
+	f.mu.Lock()
+	f.flushes++
+	onFlush := f.onFlush
+	f.mu.Unlock()
+	if onFlush != nil {
+		return onFlush(ctx)
+	}
+	return f.flushResult, f.flushErr
+}
+
+func (f *fakeSaver) counts() (polls, flushes int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.polls, f.flushes
+}
+
+// newTestDaemon is a daemon over a state directory of the test's own and the
+// Fake, which holds the saver session running this process, its polls and
+// flushes going to s.
+func newTestDaemon(t *testing.T, s daemonSaver) (*daemonDeps, *backendtest.Fake) {
 	t.Helper()
-	holder := new(*daemonDeps)
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
+	fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: os.Getpid()})
+	return &daemonDeps{
+		Dir:           t.TempDir(),
+		Version:       "test",
+		Backend:       fake,
+		Saver:         s,
+		ShutdownBound: 2 * time.Second,
+		FlushNaming:   500 * time.Millisecond,
+	}, fake
+}
+
+// releaseHeldDaemonLock closes, at cleanup, the lock a daemon run holds until
+// the process exits, so a test's run leaves no fd behind it.
+func releaseHeldDaemonLock(t *testing.T) {
+	t.Cleanup(func() {
+		if heldDaemonLock != nil {
+			_ = heldDaemonLock.Close()
+		}
 	})
-	return holder
 }
 
-func TestStateDaemon_WritesPIDFileOnStartup(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	pid, err := state.ReadPIDFile(dir)
-	if err != nil {
-		t.Fatalf("ReadPIDFile: %v", err)
-	}
-	if pid != os.Getpid() {
-		t.Errorf("daemon.pid = %d; want %d", pid, os.Getpid())
-	}
+// runningLoop is a daemon's run of the tick loop under runLoop, and when the
+// loop itself ends, which an abandoned one does after runLoop has returned.
+type runningLoop struct {
+	returned <-chan error
+	ended    <-chan struct{}
 }
 
-func TestStateDaemon_WritesVersionFileOnStartup(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
+func startLoop(t *testing.T, deps *daemonDeps) runningLoop {
+	t.Helper()
+	returned := make(chan error, 1)
+	ended := make(chan struct{})
+	go func() {
+		returned <- deps.runLoop(t.Context(), func(ctx context.Context, d *daemonDeps) error {
+			defer close(ended)
+			return defaultDaemonTickLoop(ctx, d)
+		})
+	}()
+	return runningLoop{returned: returned, ended: ended}
+}
 
-	prev := version
-	version = "test-1.2.3"
-	t.Cleanup(func() { version = prev })
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	got, err := state.ReadVersionFile(dir)
-	if err != nil {
-		t.Fatalf("ReadVersionFile: %v", err)
-	}
-	if got != "test-1.2.3" {
-		t.Errorf("daemon.version = %q; want %q", got, "test-1.2.3")
+// awaitReturn is runLoop's return, failing the test past within.
+func (r runningLoop) awaitReturn(t *testing.T, within time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-r.returned:
+		return err
+	case <-time.After(within):
+		t.Fatalf("the daemon still ran %s on", within)
+		return nil
 	}
 }
 
-func TestStateDaemon_ClearsStaleSaveRequestedOnStartup(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-
-	stalePath := filepath.Join(dir, "save.requested")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("seed dir: %v", err)
-	}
-	if err := os.WriteFile(stalePath, []byte("stale"), 0o600); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
-		t.Errorf("save.requested should be removed on daemon startup; stat err = %v", err)
-	}
+// realSaver makes deps's saver the production one, over its Fake and state
+// directory.
+func realSaver(deps *daemonDeps) {
+	deps.Saver = saver.New(saver.Config{Backend: deps.Backend, StateDir: deps.Dir})
 }
 
-func TestStateDaemon_OverwritesPIDAndVersionAcrossInvocations(t *testing.T) {
+// userSession is an answering session a minute old, as a poll would claim it.
+func userSession(name string, pid int) backend.Session {
+	return backend.Session{Name: name, Dir: "/srv/" + name, PID: pid, Created: time.Now().Add(-time.Minute).Truncate(time.Second)}
+}
+
+var epoch = time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+
+func second(n int) time.Time { return epoch.Add(time.Duration(n) * time.Second) }
+
+func TestStateDaemon_StartsHoldingItsLockThenWritingItsPIDAndVersion(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-
+	fake := backendtest.New(backend.Session{Name: saver.SessionName, PID: os.Getpid()})
+	fake.SetCurrent(saver.SessionName)
+	withBackendDeps(t, BackendDeps{Backend: fake})
+	sink := logtest.Install(t)
 	if err := state.WritePIDFile(dir, 42); err != nil {
-		t.Fatalf("seed pid: %v", err)
+		t.Fatal(err)
 	}
-	if err := state.WriteVersionFile(dir, "stale", nil); err != nil {
-		t.Fatalf("seed version: %v", err)
-	}
+	releaseHeldDaemonLock(t)
 
-	prev := version
-	version = "fresh"
-	t.Cleanup(func() { version = prev })
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	pid, err := state.ReadPIDFile(dir)
-	if err != nil {
-		t.Fatalf("ReadPIDFile: %v", err)
-	}
-	if pid != os.Getpid() {
-		t.Errorf("pid = %d; want %d (must overwrite stale)", pid, os.Getpid())
-	}
-
-	got, err := state.ReadVersionFile(dir)
-	if err != nil {
-		t.Fatalf("ReadVersionFile: %v", err)
-	}
-	if got != "fresh" {
-		t.Errorf("version = %q; want %q (must overwrite stale)", got, "fresh")
-	}
-}
-
-func TestStateDaemon_CreatesStateDirectoryIfMissing(t *testing.T) {
-	parent := t.TempDir()
-	dir := filepath.Join(parent, "state-not-yet-created")
-	t.Setenv("PORTAL_STATE_DIR", dir)
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("state dir not created: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("state path is not a directory")
-	}
-	if perm := info.Mode().Perm(); perm != 0o700 {
-		t.Errorf("state dir mode = %o; want 0700", perm)
-	}
-}
-
-func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
-	// Both lines are INFO, which the default WARN threshold filters out.
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	logPath := filepath.Join(dir, "portal.log")
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("portal.log not created: %v", err)
-	}
-	if !strings.Contains(string(data), "daemon: lock acquired") {
-		t.Errorf("startup log line missing; got:\n%s", data)
-	}
-}
-
-func TestStateDaemon_DoesNotEmitStartingINFO(t *testing.T) {
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("portal.log not created: %v", err)
-	}
-	if strings.Contains(string(data), "daemon: starting") {
-		t.Errorf("daemon must not emit an uncataloged 'starting' INFO; got:\n%s", data)
-	}
-	if !strings.Contains(string(data), "daemon: lock acquired") {
-		t.Errorf("expected 'daemon: lock acquired' to preserve startup observability; got:\n%s", data)
-	}
-}
-
-func TestStateDaemon_PassesPreparedDepsToRunFunc(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	holder := withImmediateRun(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	deps := *holder
-	if deps == nil {
-		t.Fatal("daemonRunFunc not invoked")
-	}
-	if deps.Dir != dir {
-		t.Errorf("deps.Dir = %q; want %q", deps.Dir, dir)
-	}
-	if deps.Logger == nil {
-		t.Error("deps.Logger is nil")
-	}
-	if deps.Client == nil {
-		t.Error("deps.Client is nil")
-	}
-}
-
-func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-	withDaemonLockFileReset(t)
-
-	fc := commandertest.New(t, commandertest.Returns("1", "show-option")).AllowingUnmatched("", nil)
-	client := tmux.NewClient(fc)
-
-	withFuncSeam(t, &daemonRunFunc, func(_ context.Context, deps *daemonDeps) error {
-		deps.Client = client
-		return defaultShutdownFlush(deps)
+	var ran *daemonDeps
+	var heldWhileRunning bool
+	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, deps *daemonDeps) error {
+		ran = deps
+		_, err := state.AcquireDaemonLock(dir)
+		heldWhileRunning = errors.Is(err, state.ErrDaemonLockHeld)
+		return nil
 	})
 
 	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("state daemon: %v", err)
 	}
 
-	logData, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	if ran == nil {
+		t.Fatal("the tick loop never ran")
 	}
-	if !strings.Contains(string(logData), "flush_completed=false") {
-		t.Errorf("expected shutdown flush_completed=false when @portal-restoring set; got:\n%s", logData)
+	if !heldWhileRunning {
+		t.Error("the tick loop ran without the daemon holding daemon.lock")
 	}
-	if strings.Contains(string(logData), "flush_completed=true") {
-		t.Errorf("flush should be skipped (flush_completed=false) when @portal-restoring set; got:\n%s", logData)
+	if pid, err := state.ReadPIDFile(dir); err != nil || pid != os.Getpid() {
+		t.Errorf("daemon.pid = %d, %v; want this process's %d, overwriting the stale one", pid, err, os.Getpid())
 	}
-}
-
-func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-	withDaemonLockFileReset(t)
-	withOwnTmuxServer(t, fakeOwnServerPID)
-
-	fc := commandertest.New(t,
-		commandertest.Fails(tmux.ErrOptionNotFound, "show-option"),
-		commandertest.Returns(strconv.Itoa(fakeOwnServerPID), "display-message"),
-	).AllowingUnmatched("", nil)
-	client := tmux.NewClient(fc)
-
-	withFuncSeam(t, &daemonRunFunc, func(_ context.Context, deps *daemonDeps) error {
-		deps.Client = client
-		return defaultShutdownFlush(deps)
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if got, err := state.ReadVersionFile(dir); err != nil || got != Version() {
+		t.Errorf("daemon.version = %q, %v; want %q", got, err, Version())
 	}
-
-	logData, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	rec := sink.Records().Matching("daemon", "lock acquired").AtExactLevel(slog.LevelInfo).Only(t, "lock acquired")
+	if got := rec.AttrString(t, "session"); got != saver.SessionName {
+		t.Errorf("lock acquired session = %q, want the session the daemon runs in", got)
 	}
-	if strings.Contains(string(logData), "flush_completed=false") {
-		t.Errorf("flush should run (flush_completed=true) when @portal-restoring is unset; got:\n%s", logData)
+	if ran.Saver == nil || ran.Ticks == nil || ran.Signals == nil || ran.ShutdownBound != shutdownBound || ran.FlushNaming != flushNaming {
+		t.Errorf("the loop ran with %+v, want a saver, a ticker, the shutdown signals and the production shutdown bounds", ran)
 	}
-	if !strings.Contains(string(logData), "flush_completed=true") {
-		t.Errorf("expected shutdown flush_completed=true when @portal-restoring unset; got:\n%s", logData)
-	}
-}
-
-func TestStateDaemon_DefaultRunReturnsOnContextCancel(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	// Stubbed to keep this exercising the run loop's ctx.Done() response rather
-	// than flush behaviour.
-	withFuncSeam(t, &daemonShutdownFunc, func(_ *daemonDeps) error { return nil })
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	logger, _ := newCaptureLoggerForComponent(t, "daemon")
-	deps := &daemonDeps{Dir: dir, TickerPeriod: time.Hour, Logger: logger}
-	if err := defaultDaemonRun(ctx, deps); err != nil {
-		t.Errorf("defaultDaemonRun returned error after pre-cancelled context: %v", err)
-	}
-}
-
-func TestStateDaemon_ReturnsErrorWhenStateDirNotWritable(t *testing.T) {
-	parent := t.TempDir()
-	dir := filepath.Join(parent, "state")
-
-	if err := os.Chmod(parent, 0o500); err != nil {
-		t.Fatalf("chmod parent: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
-
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	_ = withImmediateRun(t)
-
-	_, _, err := runRootCmd(t, "state", "daemon")
-	if err == nil {
-		t.Fatal("expected error when state dir cannot be created, got nil")
-	}
-}
-
-func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
-	// The startup line is INFO, which the default WARN threshold filters out.
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "vX.Y.Z")
-
-	prev := version
-	version = "vX.Y.Z"
-	t.Cleanup(func() { version = prev })
-
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	got := string(data)
-	if !strings.Contains(got, "daemon: lock acquired") {
-		t.Errorf("startup log missing cataloged 'lock acquired' line; got:\n%s", got)
-	}
-	if !strings.Contains(got, "vX.Y.Z") {
-		t.Errorf("startup log missing version; got:\n%s", got)
-	}
-	if !strings.Contains(got, fmt.Sprintf("pid=%d", os.Getpid())) {
-		t.Errorf("startup log missing pid=%d; got:\n%s", os.Getpid(), got)
-	}
-}
-
-func TestStateDaemon_RunFuncErrorPropagates(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	sentinel := errors.New("boom")
-	withFuncSeam(t, &daemonRunFunc, func(_ context.Context, _ *daemonDeps) error { return sentinel })
-
-	_, _, err := runRootCmd(t, "state", "daemon")
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected sentinel error, got %v", err)
-	}
-}
-
-func withAcquireDaemonLockFake(t *testing.T, fake func(string) (*os.File, error)) {
-	t.Helper()
-	withFuncSeam(t, &acquireDaemonLock, fake)
-}
-
-// Cleared around the test so a prior successful acquisition does not bleed
-// into the post-condition assertions.
-func withDaemonLockFileReset(t *testing.T) {
-	t.Helper()
-	prev := daemonLockFile
-	daemonLockFile = nil
-	t.Cleanup(func() { daemonLockFile = prev })
-}
-
-func TestStateDaemon_AcquiresLockBeforeWritePIDFile(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	// daemon.pid must not exist while the lock is being acquired, so the fake
-	// records whether it did at that instant.
-	var pidFileExistsAtLockAcquire bool
-	withAcquireDaemonLockFake(t, func(d string) (*os.File, error) {
-		if _, err := os.Stat(filepath.Join(d, "daemon.pid")); err == nil {
-			pidFileExistsAtLockAcquire = true
+	// Held until the process exits: daemon.pid must never name a live
+	// process that holds no lock.
+	if lock, err := state.AcquireDaemonLock(dir); !errors.Is(err, state.ErrDaemonLockHeld) {
+		if lock != nil {
+			_ = lock.Close()
 		}
-		return state.AcquireDaemonLock(d)
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if pidFileExistsAtLockAcquire {
-		t.Error("daemon.pid existed before acquireDaemonLock was called; lock must precede WritePIDFile")
-	}
-	if _, err := state.ReadPIDFile(dir); err != nil {
-		t.Errorf("ReadPIDFile after success: %v", err)
+		t.Errorf("daemon.lock once the daemon returned: %v, want it still held", err)
 	}
 }
 
-func TestStateDaemon_AcquireLockCalledAfterEnsureDir(t *testing.T) {
-	parent := t.TempDir()
-	dir := filepath.Join(parent, "fresh-state")
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	var dirExistedAtAcquire bool
-	withAcquireDaemonLockFake(t, func(d string) (*os.File, error) {
-		if info, err := os.Stat(d); err == nil && info.IsDir() {
-			dirExistedAtAcquire = true
-		}
-		return state.AcquireDaemonLock(d)
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !dirExistedAtAcquire {
-		t.Error("state directory did not exist at lock-acquire time; EnsureDir must precede AcquireDaemonLock")
-	}
-}
-
-func TestStateDaemon_ExitsCleanlyWhenLockHeld(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
-		return nil, state.ErrDaemonLockHeld
-	})
-
-	called := false
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, _ *daemonDeps) error {
-		called = true
-		return nil
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("expected nil error on lock-held; got: %v", err)
-	}
-	if called {
-		t.Error("daemonTickLoopFunc must not be called when lock is held")
-	}
-}
-
-func TestStateDaemon_DoesNotWritePIDFileWhenLockHeld(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
-		return nil, state.ErrDaemonLockHeld
-	})
-
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
-		return nil
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
-		t.Errorf("daemon.pid must not exist when lock is held; stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "daemon.version")); !os.IsNotExist(err) {
-		t.Errorf("daemon.version must not exist when lock is held; stat err = %v", err)
-	}
-}
-
-func TestStateDaemon_DoesNotOverwritePIDFileWhenLockHeld(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	withDaemonLockFileReset(t)
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("seed dir: %v", err)
-	}
-	if err := state.WritePIDFile(dir, 9999); err != nil {
-		t.Fatalf("seed pid: %v", err)
-	}
-
-	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
-		return nil, state.ErrDaemonLockHeld
-	})
-
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
-		return nil
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	got, err := state.ReadPIDFile(dir)
-	if err != nil {
-		t.Fatalf("ReadPIDFile: %v", err)
-	}
-	if got != 9999 {
-		t.Errorf("daemon.pid = %d; want 9999 (must not be overwritten by loser)", got)
-	}
-}
-
-func TestStateDaemon_ReturnsErrorAndLogsWarnOnNonContentionLockFailure(t *testing.T) {
-	// Set explicitly rather than depending on the env default.
-	t.Setenv("PORTAL_LOG_LEVEL", "warn")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-	withDaemonLockFileReset(t)
-
-	sentinel := errors.New("flock: permission denied")
-	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
-		return nil, sentinel
-	})
-
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonTickLoopFunc must not be reached when lock acquire fails")
-		return nil
-	})
-
-	_, _, err := runRootCmd(t, "state", "daemon")
-	if err == nil {
-		t.Fatal("expected error on non-EWOULDBLOCK lock failure, got nil")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel error; got %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
-		t.Errorf("daemon.pid must not exist on lock-error path; stat err = %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	got := string(data)
-	if !strings.Contains(got, "WARN") {
-		t.Errorf("expected a WARN log line; got:\n%s", got)
-	}
-	if !strings.Contains(got, "acquire daemon lock") {
-		t.Errorf("expected lock-acquire error log content; got:\n%s", got)
-	}
-	var matches int
-	for line := range strings.SplitSeq(got, "\n") {
-		if strings.Contains(line, "WARN") && strings.Contains(line, "acquire daemon lock") {
-			matches++
-		}
-	}
-	if matches != 1 {
-		t.Errorf("expected exactly one WARN line containing %q; got %d in:\n%s",
-			"acquire daemon lock", matches, got)
-	}
-}
-
-func TestStateDaemon_RetainsLockFdAcrossDaemonLifetime(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	_ = withImmediateRun(t)
-	withDaemonLockFileReset(t)
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if daemonLockFile == nil {
-		t.Fatal("daemonLockFile package-level var must be non-nil after a successful daemon RunE")
-	}
-	// The retained fd must still be open — closing it would release the flock.
-	if _, err := daemonLockFile.Stat(); err != nil {
-		t.Errorf("retained lock fd appears closed: %v", err)
-	}
-}
-
-func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
-	// Set explicitly rather than depending on the env default.
-	t.Setenv("PORTAL_LOG_LEVEL", "warn")
-	dir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", dir)
-	initTestLogToStateDir(t, dir, "test")
-	withDaemonLockFileReset(t)
-
-	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
-		return nil, state.ErrDaemonLockHeld
-	})
-
-	withFuncSeam(t, &daemonTickLoopFunc, func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
-		return nil
-	})
-
-	if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	got := string(data)
-	if !strings.Contains(got, "WARN") {
-		t.Errorf("expected a WARN log line; got:\n%s", got)
-	}
-	if !strings.Contains(got, "another daemon holds the lock") {
-		t.Errorf("expected contention log content; got:\n%s", got)
-	}
-	if n := strings.Count(got, "another daemon holds the lock"); n != 1 {
-		t.Errorf("expected exactly one contention WARN line; got %d in:\n%s", n, got)
-	}
-}
-
-func TestSelfSupervisionHysteresisTicks_ClampInvariant(t *testing.T) {
-	if selfSupervisionHysteresisTicks < 3 {
-		t.Errorf("selfSupervisionHysteresisTicks=%d below clamp floor of 3 "+
-			"(N=1 would risk a single-tmux-hiccup false-positive self-eject)",
-			selfSupervisionHysteresisTicks)
-	}
-	if selfSupervisionHysteresisTicks > 9 {
-		t.Errorf("selfSupervisionHysteresisTicks=%d above clamp ceiling of 9 "+
-			"(a measured max × 2 above 9 indicates an upstream defect, "+
-			"not a tuning-knob increase)",
-			selfSupervisionHysteresisTicks)
-	}
-}
-
-func TestDefaultSaverMembershipProbe(t *testing.T) {
-	t.Run("it returns false when HasSession is false", func(t *testing.T) {
-		fc := commandertest.New(t,
-			commandertest.Fails(fmt.Errorf("exit status 1"), "has-session"),
-		).AllowingUnmatched("", nil)
-		client := tmux.NewClient(fc)
-
-		if defaultSaverMembershipProbe(client, os.Getpid()) {
-			t.Errorf("probe = true, want false when HasSession returns false")
-		}
-		for _, call := range fc.Calls() {
-			if len(call) >= 1 && call[0] == "list-panes" {
-				t.Errorf("list-panes invoked despite HasSession false; calls = %v", fc.Calls())
+func TestStateDaemon_RefusesAnIndexItMustNotTouch(t *testing.T) {
+	for name, tc := range map[string]struct {
+		index string
+		is    error
+	}{
+		"version 1":      {`{"version": 1, "sessions": []}`, sessionindex.ErrLegacyIndex},
+		"corrupt":        {"not an index", nil},
+		"a newer schema": {`{"version": 3, "sessions": []}`, nil},
+	} {
+		t.Run(name+", holding nothing", func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PORTAL_STATE_DIR", dir)
+			if err := os.WriteFile(sessionindex.Path(dir), []byte(tc.index), 0o600); err != nil {
+				t.Fatal(err)
 			}
-		}
-	})
+			withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+			withFuncSeam(t, &daemonTickLoopFunc, func(context.Context, *daemonDeps) error {
+				t.Error("the tick loop ran")
+				return nil
+			})
+			sink := logtest.Install(t)
 
-	t.Run("it returns false when SaverPanePID errors", func(t *testing.T) {
-		fc := commandertest.New(t,
-			commandertest.Returns("", "has-session"),
-			commandertest.Fails(&tmux.CommandError{
-				Stderr: "no such session: _portal-saver",
-				Err:    fmt.Errorf("exit status 1"),
-			}, "list-panes"),
-		).AllowingUnmatched("", nil)
-		client := tmux.NewClient(fc)
+			_, _, err := runRootCmd(t, "state", "daemon")
 
-		if defaultSaverMembershipProbe(client, os.Getpid()) {
-			t.Errorf("probe = true, want false when SaverPanePID errors")
-		}
-	})
+			if err == nil || tc.is != nil && !errors.Is(err, tc.is) {
+				t.Errorf("state daemon = %v, want a refusal", err)
+			}
+			for _, path := range []string{state.DaemonLock(dir), state.DaemonPID(dir), state.DaemonVersion(dir)} {
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("%s exists (%v), want the refused daemon holding and writing nothing", filepath.Base(path), err)
+				}
+			}
+			rec := sink.Records().Matching("daemon", "refused to start").AtExactLevel(slog.LevelWarn).Only(t, "the refusal")
+			if got := rec.AttrString(t, "path"); got != sessionindex.Path(dir) {
+				t.Errorf("refusal path = %q, want sessions.json's", got)
+			}
+		})
+	}
 
-	t.Run("it returns true when the pid matches selfPID", func(t *testing.T) {
-		const selfPID = 4242
-		fc := commandertest.New(t,
-			commandertest.Returns("", "has-session"),
-			commandertest.Returns(fmt.Sprintf("%d\n", selfPID), "list-panes"),
-		).AllowingUnmatched("", nil)
-		client := tmux.NewClient(fc)
-
-		if !defaultSaverMembershipProbe(client, selfPID) {
-			t.Errorf("probe = false, want true when pid matches selfPID")
-		}
-	})
-
-	t.Run("it returns false when the pid does not match selfPID", func(t *testing.T) {
-		fc := commandertest.New(t,
-			commandertest.Returns("", "has-session"),
-			commandertest.Returns("9999\n", "list-panes"),
-		).AllowingUnmatched("", nil)
-		client := tmux.NewClient(fc)
-
-		if defaultSaverMembershipProbe(client, 4242) {
-			t.Errorf("probe = true, want false when pid != selfPID (orphan daemon)")
-		}
-	})
-}
-
-func TestStateDaemon_HooksCleanupWiring(t *testing.T) {
-	t.Run("it builds the hook store from loadHookStore at startup", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", dir)
-		hooksFileInTempDir(t, nil)
-
-		holder := withImmediateRun(t)
-		withDaemonLockFileReset(t)
-
-		if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		deps := *holder
-		if deps == nil {
-			t.Fatal("daemon deps not captured")
-		}
-		if deps.HookStore == nil {
-			t.Fatal("deps.HookStore is nil; want a non-nil store built from loadHookStore()")
-		}
-	})
-
-	t.Run("it initialises lastCleanup to a non-zero start time", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", dir)
-		hooksFileInTempDir(t, nil)
-
-		holder := withImmediateRun(t)
-		withDaemonLockFileReset(t)
-
-		if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		now := time.Now()
-
-		deps := *holder
-		if deps == nil {
-			t.Fatal("daemon deps not captured")
-		}
-		if deps.lastCleanup.IsZero() {
-			t.Fatal("deps.lastCleanup is the zero time.Time; want the daemon-start instant so the first cleanup fires one interval after start, not on the first idle tick")
-		}
-		// Loosely bounded to absorb scheduling jitter: lastCleanup is set a hair
-		// before this capture.
-		if delta := now.Sub(deps.lastCleanup); delta < 0 || delta > 2*time.Second {
-			t.Errorf("deps.lastCleanup = %v; want within 2s of %v (delta %v)", deps.lastCleanup, now, delta)
-		}
-	})
-
-	t.Run("it resolves the same hooks.json path foreground commands use", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", dir)
-		hooksPath := filepath.Join(t.TempDir(), "hooks.json")
-		t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
-
-		// Seeded through the same path a foreground `portal hook set` resolves, so a
-		// daemon store pointed at a different file would fail to read it back.
-		const key = "proj-AbC123:0.0"
-		if err := hooks.NewStore(hooksPath).Set(key, "on-resume", hooks.Registration{Command: "echo hi"}, hooks.ViaCLI); err != nil {
-			t.Fatalf("seed hooks.json: %v", err)
-		}
-
-		holder := withImmediateRun(t)
-		withDaemonLockFileReset(t)
-
-		if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		deps := *holder
-		if deps == nil {
-			t.Fatal("daemon deps not captured")
-		}
-		loaded, err := deps.HookStore.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("deps.HookStore.Load: %v", err)
-		}
-		events, ok := loaded[key]
-		if !ok {
-			t.Fatalf("daemon hook store did not resolve the foreground hooks.json; loaded=%v", loaded)
-		}
-		if got := events["on-resume"].Command; got != "echo hi" {
-			t.Errorf("on-resume command = %q; want %q", got, "echo hi")
-		}
-	})
-
-	// A loadHookStore failure must not abort the daemon: capture cannot be gated
-	// on the best-effort cleanup store, so the failure only disables cleanup.
-	// With PORTAL_HOOKS_FILE unset the path resolution reduces to
-	// os.UserHomeDir(), which blanking $HOME fails deterministically on darwin;
-	// PORTAL_STATE_DIR still drives EnsureDir, so only that branch is perturbed.
-	t.Run("it disables cleanup with a WARN rather than aborting the daemon on a loadHookStore error", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("PORTAL_STATE_DIR", dir)
-		t.Setenv("PORTAL_HOOKS_FILE", "") // force fall-through to home-dir resolution
-		t.Setenv("HOME", "")              // os.UserHomeDir() now errors → loadHookStore errors
-
+	t.Run("a migration cut short, holding nothing", func(t *testing.T) {
+		staging := cutShortStateDir(t)
+		withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
+		withFuncSeam(t, &daemonTickLoopFunc, func(context.Context, *daemonDeps) error {
+			t.Error("the tick loop ran")
+			return nil
+		})
 		sink := logtest.Install(t)
 
-		holder := withImmediateRun(t)
-		withDaemonLockFileReset(t)
+		_, _, err := runRootCmd(t, "state", "daemon")
 
-		if _, _, err := runRootCmd(t, "state", "daemon"); err != nil {
-			t.Fatalf("RunE must proceed to the tick loop despite loadHookStore failure; got error: %v", err)
+		if want := staging + " holds a migration cut short; run portal migrate to finish it"; err == nil || err.Error() != want {
+			t.Errorf("state daemon = %v, want %q", err, want)
 		}
+		sink.Records().Matching("daemon", "refused to start").AtExactLevel(slog.LevelWarn).Only(t, "the refusal")
+	})
+}
 
-		deps := *holder
-		if deps == nil {
-			t.Fatal("daemon deps not captured")
-		}
-		if deps.HookStore != nil {
-			t.Errorf("deps.HookStore = %v; want nil (cleanup disabled on loadHookStore failure)", deps.HookStore)
-		}
+func TestDefaultDaemonRun_ASecondDaemonExitsHoldingNothing(t *testing.T) {
+	deps, _ := newTestDaemon(t, &fakeSaver{})
+	first, err := state.AcquireDaemonLock(deps.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+	withFuncSeam(t, &daemonTickLoopFunc, func(context.Context, *daemonDeps) error {
+		t.Error("the second daemon's tick loop ran")
+		return nil
+	})
+	sink := logtest.Install(t)
 
-		body := sink.Body()
-		const warnMsg = "load hook store failed; hooks stale-cleanup disabled"
-		if !strings.Contains(body, warnMsg) {
-			t.Errorf("expected disabled-cleanup WARN %q; got:\n%s", warnMsg, body)
+	if err := defaultDaemonRun(t.Context(), deps); err != nil {
+		t.Errorf("defaultDaemonRun = %v, want a clean exit", err)
+	}
+
+	if _, err := os.Stat(state.DaemonPID(deps.Dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("daemon.pid exists (%v), want the first daemon's left alone", err)
+	}
+	sink.Records().Matching("daemon", "another daemon holds the lock; exiting").AtExactLevel(slog.LevelWarn).Only(t, "the contention WARN")
+	if got := sink.Records().Matching("daemon", "lock acquired"); len(got) != 0 {
+		t.Errorf("logged %+v, want no lock acquired", got)
+	}
+}
+
+func TestDefaultDaemonRun_ALockItCannotTakeIsAnError(t *testing.T) {
+	deps, _ := newTestDaemon(t, &fakeSaver{})
+	injected := errors.New("injected lock failure")
+	withFuncSeam(t, &acquireDaemonLock, func(string) (*os.File, error) { return nil, injected })
+	withFuncSeam(t, &daemonTickLoopFunc, func(context.Context, *daemonDeps) error {
+		t.Error("the tick loop ran without the lock")
+		return nil
+	})
+	sink := logtest.Install(t)
+
+	if err := defaultDaemonRun(t.Context(), deps); !errors.Is(err, injected) {
+		t.Errorf("defaultDaemonRun = %v, want the lock's failure", err)
+	}
+
+	if _, err := os.Stat(state.DaemonPID(deps.Dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("daemon.pid exists (%v), want none written without the lock", err)
+	}
+	sink.Records().Matching("daemon", "acquire daemon lock failed").AtExactLevel(slog.LevelWarn).Only(t, "the lock failure WARN")
+}
+
+func TestTick_PollsEveryFiveSecondsOfTicks(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ticks, polled []int
+	}{
+		"on a tick a second, the first and every fifth": {
+			ticks:  []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+			polled: []int{0, 5, 10},
+		},
+		"ticks a slow poll dropped move the next poll on": {
+			ticks:  []int{0, 6, 9, 11, 12},
+			polled: []int{0, 6, 11},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &fakeSaver{}
+			deps, _ := newTestDaemon(t, s)
+
+			var polled []int
+			for _, n := range tc.ticks {
+				before, _ := s.counts()
+				deps.tick(t.Context(), second(n))
+				if after, _ := s.counts(); after > before {
+					polled = append(polled, n)
+				}
+			}
+
+			if !reflect.DeepEqual(polled, tc.polled) {
+				t.Errorf("polled on ticks %v, want %v", polled, tc.polled)
+			}
+		})
+	}
+}
+
+func TestDaemonLoop_PollsOnItsTicksAndFlushesAtShutdown(t *testing.T) {
+	s := &fakeSaver{}
+	deps, _ := newTestDaemon(t, s)
+	ticks := make(chan time.Time)
+	signals := make(chan os.Signal, 1)
+	deps.Ticks, deps.Signals = ticks, signals
+	sink := logtest.Install(t)
+	loop := startLoop(t, deps)
+
+	for n := range 6 {
+		ticks <- second(n)
+	}
+	signals <- syscall.SIGTERM
+
+	if err := loop.awaitReturn(t, deps.ShutdownBound); err != nil {
+		t.Errorf("the loop = %v, want a clean shutdown", err)
+	}
+	if polls, flushes := s.counts(); polls != 2 || flushes != 1 {
+		t.Errorf("polls %d, flushes %d; want polls at 0 s and 5 s, then the final flush", polls, flushes)
+	}
+	assertShutdown(t, sink, "signal", "true")
+}
+
+func TestRunLoop_BoundsTheShutdownFromItsSignal(t *testing.T) {
+	t.Run("a poll held on commit.lock when the signal lands still ends the daemon at the bound", func(t *testing.T) {
+		s := &fakeSaver{}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound = 200 * time.Millisecond
+		held := commitlock.HoldForTest(t, deps.Dir)
+		polling := make(chan struct{})
+		// As a poll's UpdateThen waits, deaf to the poll's context, up to the
+		// lock's own 5 s bound.
+		s.onPoll = func(context.Context) (saver.Result, error) {
+			close(polling)
+			lock, err := commitlock.Acquire(deps.Dir)
+			if err == nil {
+				_ = lock.Close()
+			}
+			return saver.Result{}, err
 		}
-		if !strings.Contains(body, "component=daemon") {
-			t.Errorf("expected the disabled-cleanup WARN under the daemon component; got:\n%s", body)
+		ticks := make(chan time.Time, 1)
+		signals := make(chan os.Signal, 1)
+		deps.Ticks, deps.Signals = ticks, signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		ticks <- second(0)
+		<-polling
+		signalled := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, 2*time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
 		}
-		if n := strings.Count(body, warnMsg); n != 1 {
-			t.Errorf("expected exactly one disabled-cleanup WARN; got %d in:\n%s", n, body)
+		if took := time.Since(signalled); took < deps.ShutdownBound {
+			t.Errorf("the daemon ended %s after its signal, want it to give its work the %s bound", took, deps.ShutdownBound)
+		}
+		if _, flushes := s.counts(); flushes != 0 {
+			t.Errorf("flushes = %d, want none: the held poll had the whole bound", flushes)
+		}
+		assertShutdown(t, sink, "signal", "false")
+
+		_ = held.Close()
+		<-loop.ended
+		assertShutdown(t, sink, "signal", "false")
+	})
+
+	t.Run("a second signal ends the daemon at once", func(t *testing.T) {
+		flushing, release := make(chan struct{}), make(chan struct{})
+		s := &fakeSaver{onFlush: func(context.Context) (saver.Result, error) {
+			close(flushing)
+			<-release
+			return saver.Result{}, nil
+		}}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound = time.Minute
+		signals := make(chan os.Signal, 1)
+		deps.Signals = signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		signals <- syscall.SIGHUP
+		<-flushing
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		assertShutdown(t, sink, "sighup", "false")
+
+		close(release)
+		<-loop.ended
+		assertShutdown(t, sink, "sighup", "false")
+	})
+
+	t.Run("a flush that finishes within the bound completes, asking until FlushNaming before it", func(t *testing.T) {
+		asking := make(chan time.Time, 1)
+		s := &fakeSaver{onFlush: func(ctx context.Context) (saver.Result, error) {
+			deadline, _ := ctx.Deadline()
+			asking <- deadline
+			return saver.Result{Captured: 1}, nil
+		}}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound, deps.FlushNaming = time.Minute, 10*time.Second
+		signals := make(chan os.Signal, 1)
+		deps.Signals = signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		before := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		after := time.Now()
+		asks := deps.ShutdownBound - deps.FlushNaming
+		if deadline := <-asking; deadline.Before(before.Add(asks)) || deadline.After(after.Add(asks)) {
+			t.Errorf("the flush asked until %s, want %s from the signal", deadline.Format(time.RFC3339Nano), asks)
+		}
+		sink.Records().Matching("capture", "flush complete").Only(t, "the flush summary")
+		assertShutdown(t, sink, "signal", "true")
+	})
+
+	t.Run("the flush's asking counts from the signal, not from a held poll's end", func(t *testing.T) {
+		const held = 300 * time.Millisecond
+		polling, cancelled := make(chan struct{}), make(chan time.Time, 1)
+		asking := make(chan time.Time, 1)
+		s := &fakeSaver{
+			onPoll: func(ctx context.Context) (saver.Result, error) {
+				close(polling)
+				<-ctx.Done()
+				cancelled <- time.Now()
+				time.Sleep(held)
+				return saver.Result{}, ctx.Err()
+			},
+			onFlush: func(ctx context.Context) (saver.Result, error) {
+				deadline, _ := ctx.Deadline()
+				asking <- deadline
+				return saver.Result{}, nil
+			},
+		}
+		deps, _ := newTestDaemon(t, s)
+		deps.ShutdownBound, deps.FlushNaming = time.Minute, 10*time.Second
+		ticks := make(chan time.Time, 1)
+		signals := make(chan os.Signal, 1)
+		deps.Ticks, deps.Signals = ticks, signals
+		sink := logtest.Install(t)
+		loop := startLoop(t, deps)
+
+		ticks <- second(0)
+		<-polling
+		before := time.Now()
+		signals <- syscall.SIGTERM
+
+		if err := loop.awaitReturn(t, 5*time.Second); err != nil {
+			t.Errorf("runLoop = %v, want nil", err)
+		}
+		asks := deps.ShutdownBound - deps.FlushNaming
+		// The signal came between before and the poll's cancel; the flush began
+		// held after that cancel.
+		if deadline, at := <-asking, <-cancelled; deadline.Before(before.Add(asks)) || deadline.After(at.Add(asks)) {
+			t.Errorf("the flush asked until %s, want %s from the signal, between %s and %s",
+				deadline.Format(time.RFC3339Nano), asks, before.Add(asks).Format(time.RFC3339Nano), at.Add(asks).Format(time.RFC3339Nano))
+		}
+		assertShutdown(t, sink, "signal", "true")
+	})
+}
+
+func TestDaemonPoll_Logs(t *testing.T) {
+	t.Run("a poll that did something logs one INFO summary of it, and a quiet one none", func(t *testing.T) {
+		deps, fake := newTestDaemon(t, nil)
+		realSaver(deps)
+		fake.Add(userSession("work", 4101))
+		fake.SetHistory("work", []byte("the screen"))
+		sink := logtest.Install(t)
+
+		deps.tick(t.Context(), second(0))
+		deps.tick(t.Context(), second(5))
+
+		rec := sink.Records().Matching("capture", "poll complete").AtExactLevel(slog.LevelInfo).Only(t, "one poll summary")
+		for key, want := range map[string]int64{"claimed": 1, "dropped": 0, "captured": 1, "reaped": 0} {
+			if got := rec.IntAttr(t, key); got != want {
+				t.Errorf("poll complete %s = %d, want %d", key, got, want)
+			}
+		}
+		rec.RequireDuration(t, "took")
+	})
+
+	t.Run("a poll standing down for a restore logs nothing above DEBUG", func(t *testing.T) {
+		deps, fake := newTestDaemon(t, nil)
+		realSaver(deps)
+		fake.Add(userSession("work", 4101))
+		if err := state.Restoring.Set(deps.Dir); err != nil {
+			t.Fatal(err)
+		}
+		sink := logtest.Install(t)
+
+		deps.tick(t.Context(), second(0))
+
+		if got := sink.Records().AtOrAboveLevel(slog.LevelInfo); len(got) != 0 {
+			t.Errorf("logged %+v, want nothing above DEBUG", got)
+		}
+	})
+
+	t.Run("a failed poll is a WARN naming the stage, and the next poll carries on", func(t *testing.T) {
+		deps, fake := newTestDaemon(t, nil)
+		realSaver(deps)
+		fake.Add(userSession("work", 4101))
+		boom := errors.New("zmx dir unreadable")
+		fake.Fail(backendtest.OpList, boom)
+		sink := logtest.Install(t)
+
+		deps.tick(t.Context(), second(0))
+		fake.Fail(backendtest.OpList, nil)
+		deps.tick(t.Context(), second(5))
+
+		rec := sink.Records().Matching("daemon", "poll failed").AtExactLevel(slog.LevelWarn).Only(t, "the failed poll's WARN")
+		if err := rec.ErrorAttr(t, "error"); !errors.Is(err, boom) {
+			t.Errorf("poll failed error = %v, want the listing's", err)
+		}
+		sink.Records().Matching("capture", "poll complete").Only(t, "the next poll's summary")
+	})
+
+	t.Run("a poll the shutdown cut short logs nothing", func(t *testing.T) {
+		deps, _ := newTestDaemon(t, &fakeSaver{pollErr: context.Canceled})
+		sink := logtest.Install(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		deps.poll(ctx)
+
+		if got := sink.Records().AtOrAboveLevel(slog.LevelInfo); len(got) != 0 {
+			t.Errorf("logged %+v, want nothing for a poll the shutdown cut", got)
 		}
 	})
 }
 
-func TestSaverMembershipProbeSeam_DefaultsToProduction(t *testing.T) {
-	// Function values are not comparable in Go, so the seam is exercised
-	// behaviourally: a mis-wired one would short HasSession or return true on a
-	// pid mismatch.
-	const selfPID = 4242
-	fc := commandertest.New(t,
-		commandertest.Returns("", "has-session"),
-		commandertest.Returns(fmt.Sprintf("%d\n", selfPID), "list-panes"),
-	).AllowingUnmatched("", nil)
-	client := tmux.NewClient(fc)
+func TestDaemonShutdown(t *testing.T) {
+	t.Run("it flushes, then logs why it ended and that the flush completed", func(t *testing.T) {
+		for reason, sig := range map[string]os.Signal{"signal": syscall.SIGTERM, "sighup": syscall.SIGHUP, "exit": nil} {
+			t.Run(reason, func(t *testing.T) {
+				s := &fakeSaver{}
+				deps, _ := newTestDaemon(t, s)
+				if sig != nil {
+					deps.recordShutdownSignal(sig, time.Now())
+				}
+				sink := logtest.Install(t)
 
-	if !saverMembershipProbe(client, selfPID) {
-		t.Errorf("saverMembershipProbe seam returned false; want true (default probe should pass)")
+				if err := deps.shutdown(); err != nil {
+					t.Errorf("shutdown = %v, want nil", err)
+				}
+
+				if _, flushes := s.counts(); flushes != 1 {
+					t.Errorf("flushes = %d, want 1", flushes)
+				}
+				assertShutdown(t, sink, reason, "true")
+				if got := sink.Records().Matching("capture", "flush complete"); len(got) != 0 {
+					t.Errorf("logged %+v, want no summary of a flush that saved nothing", got)
+				}
+			})
+		}
+	})
+
+	t.Run("a flush that saved something logs one INFO summary", func(t *testing.T) {
+		deps, _ := newTestDaemon(t, &fakeSaver{flushResult: saver.Result{Captured: 2}})
+		sink := logtest.Install(t)
+
+		_ = deps.shutdown()
+
+		rec := sink.Records().Matching("capture", "flush complete").AtExactLevel(slog.LevelInfo).Only(t, "the flush summary")
+		if got := rec.IntAttr(t, "captured"); got != 2 {
+			t.Errorf("flush complete captured = %d, want 2", got)
+		}
+		rec.RequireDuration(t, "took")
+	})
+
+	t.Run("a flush that failed is a WARN, and the shutdown says it did not complete", func(t *testing.T) {
+		deps, _ := newTestDaemon(t, &fakeSaver{flushErr: errors.New("commit lock held")})
+		sink := logtest.Install(t)
+
+		_ = deps.shutdown()
+
+		sink.Records().Matching("daemon", "final flush failed").AtExactLevel(slog.LevelWarn).Only(t, "the failed flush's WARN")
+		assertShutdown(t, sink, "exit", "false")
+	})
+
+	t.Run("a restore in progress skips the flush quietly", func(t *testing.T) {
+		deps, _ := newTestDaemon(t, &fakeSaver{flushErr: saver.ErrRestoring})
+		sink := logtest.Install(t)
+
+		_ = deps.shutdown()
+
+		if got := sink.Records().AtExactLevel(slog.LevelWarn); len(got) != 0 {
+			t.Errorf("logged %+v, want no WARN for a restore", got)
+		}
+		assertShutdown(t, sink, "exit", "false")
+	})
+
+	t.Run("the saver's flush writes and names a changed session's scrollback", func(t *testing.T) {
+		deps, fake := newTestDaemon(t, nil)
+		realSaver(deps)
+		work := userSession("work", 4101)
+		fake.Add(work)
+		fake.SetHistory("work", []byte("the first screen"))
+		sink := logtest.Install(t)
+		deps.tick(t.Context(), second(0))
+		fake.SetHistory("work", []byte("the last screen"))
+
+		_ = deps.shutdown()
+
+		file, err := state.SessionScrollbackFile(work.Name, work.Created, work.PID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(filepath.Join(deps.Dir, filepath.FromSlash(file))); err != nil || string(got) != "the last screen" {
+			t.Errorf("work's scrollback = %q, %v; want the last screen", got, err)
+		}
+		sink.Records().Matching("capture", "flush complete").Only(t, "the flush summary")
+		assertShutdown(t, sink, "exit", "true")
+	})
+}
+
+// assertShutdown checks the daemon logged its end once, at INFO, for reason,
+// its flush completed or not.
+func assertShutdown(t *testing.T, sink *logtest.Sink, reason, flushCompleted string) {
+	t.Helper()
+	rec := sink.Records().Matching("daemon", "shutdown").AtExactLevel(slog.LevelInfo).Only(t, "the shutdown line")
+	if got := rec.AttrString(t, "reason"); got != reason {
+		t.Errorf("shutdown reason = %q, want %q", got, reason)
+	}
+	if got := rec.AttrString(t, "flush_completed"); got != flushCompleted {
+		t.Errorf("flush_completed = %s, want %s", got, flushCompleted)
+	}
+}
+
+func TestShutdownReason_MapsSignalsAndDefaultsToExit(t *testing.T) {
+	for want, sig := range map[string]os.Signal{"sighup": syscall.SIGHUP, "signal": syscall.SIGTERM, "exit": syscall.SIGINT} {
+		deps := &daemonDeps{}
+		deps.recordShutdownSignal(sig, epoch)
+		if got := deps.shutdownReason(); got != want {
+			t.Errorf("shutdownReason after %v = %q; want %q", sig, got, want)
+		}
+	}
+	if got := (&daemonDeps{}).shutdownReason(); got != "exit" {
+		t.Errorf("shutdownReason with no signal = %q; want exit", got)
+	}
+}
+
+func TestMaybeCleanProjects(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+
+	t.Run("it prunes a gone project an interval after the last prune, and not before", func(t *testing.T) {
+		store, _ := seedProjectsJSON(t, gone)
+		deps := &daemonDeps{Projects: store, lastProjectCleanup: epoch}
+		logtest.Install(t)
+
+		deps.maybeCleanProjects(epoch.Add(projectCleanupInterval - time.Second))
+		if got := projectPaths(t, store); len(got) != 1 {
+			t.Errorf("projects = %v before the interval, want the gone one kept", got)
+		}
+
+		deps.maybeCleanProjects(epoch.Add(projectCleanupInterval))
+		if got := projectPaths(t, store); len(got) != 0 {
+			t.Errorf("projects = %v once the interval passed, want the gone one pruned", got)
+		}
+		if want := epoch.Add(projectCleanupInterval); !deps.lastProjectCleanup.Equal(want) {
+			t.Errorf("last prune = %v, want %v", deps.lastProjectCleanup, want)
+		}
+	})
+
+	t.Run("a prune that fails is a WARN, and waits an interval like any other", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "projects.json")
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		deps := &daemonDeps{Projects: project.NewStore(path), lastProjectCleanup: epoch}
+		sink := logtest.Install(t)
+
+		at := epoch.Add(projectCleanupInterval)
+		deps.maybeCleanProjects(at)
+
+		sink.Records().Matching("daemon", "projects stale-cleanup failed").AtExactLevel(slog.LevelWarn).Only(t, "the failed prune's WARN")
+		if !deps.lastProjectCleanup.Equal(at) {
+			t.Errorf("last prune = %v, want %v", deps.lastProjectCleanup, at)
+		}
+	})
+
+	t.Run("it runs on an idle tick, never on one that polls", func(t *testing.T) {
+		store, _ := seedProjectsJSON(t, gone)
+		deps, _ := newTestDaemon(t, &fakeSaver{})
+		deps.Projects, deps.lastProjectCleanup = store, epoch
+		logtest.Install(t)
+
+		deps.tick(t.Context(), epoch.Add(projectCleanupInterval))
+		if got := projectPaths(t, store); len(got) != 1 {
+			t.Errorf("projects = %v after a polling tick, want the prune left to an idle one", got)
+		}
+
+		deps.tick(t.Context(), epoch.Add(projectCleanupInterval+time.Second))
+		if got := projectPaths(t, store); len(got) != 0 {
+			t.Errorf("projects = %v after an idle tick, want the gone one pruned", got)
+		}
+	})
+}
+
+func projectPaths(t *testing.T, store *project.Store) []string {
+	t.Helper()
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("load projects: %v", err)
+	}
+	var paths []string
+	for _, p := range loaded {
+		paths = append(paths, p.Path)
+	}
+	return paths
+}
+
+func TestOsExitIsPoisonedPackageWide(t *testing.T) {
+	if reflect.ValueOf(osExit).Pointer() == reflect.ValueOf(os.Exit).Pointer() {
+		t.Error("osExit is os.Exit: a test reaching it unfaked would end the test binary")
 	}
 }

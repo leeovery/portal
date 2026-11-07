@@ -11,7 +11,6 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 var (
@@ -416,18 +415,17 @@ func TestPanelArrow_NoFileReadPerKeystroke(t *testing.T) {
 
 // The derived-dir cache is emptied after the pre-render: a warm cache would make
 // "zero reads" vacuous.
-func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamper) Model {
+func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, runner *fakeDirRunner) Model {
 	t.Helper()
 
 	deps := newArrowPanelDeps(t, rows, rows[0].Slug)
 	deps.InitialMode = prefs.ModeByProject
-	deps.DirReader = reader
-	deps.DirRunner = &fakeDirRunner{gitRoot: reader.path}
+	deps.DirRunner = runner
 
-	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	projects := []project.Project{{Path: runner.gitRoot, Name: "Portal", Tags: []string{"work"}}}
+	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i), Cwd: runner.gitRoot})
 	}
 
 	m := Build(deps)
@@ -445,10 +443,10 @@ func newArrowRebuildProbeModel(t *testing.T, rows []theme.Row, reader *fakeStamp
 
 func TestPanelArrow_DoesNotRebuildSessionList(t *testing.T) {
 	rows := arrowValidRows(t, 4)
-	reader := &fakeStamper{path: t.TempDir()}
-	m := newArrowRebuildProbeModel(t, rows, reader)
+	runner := &fakeDirRunner{gitRoot: t.TempDir()}
+	m := newArrowRebuildProbeModel(t, rows, runner)
 
-	reader.reads = nil
+	runner.reads = nil
 	for range 10 {
 		m = pressPanelKey(t, m, arrowDown)
 		if arrowPanelIndex(m) == 0 {
@@ -457,19 +455,19 @@ func TestPanelArrow_DoesNotRebuildSessionList(t *testing.T) {
 		m = pressPanelKey(t, m, arrowUp)
 	}
 
-	if len(reader.reads) != 0 {
-		t.Errorf("twenty arrow presses performed %d lazy pane read(s) %v — a preview is the O(1) restyle, never the rebuild's dir-resolution pass", len(reader.reads), reader.reads)
+	if len(runner.reads) != 0 {
+		t.Errorf("twenty arrow presses performed %d lazy git-root resolution(s) %v — a preview is the O(1) restyle, never the rebuild's dir-resolution pass", len(runner.reads), runner.reads)
 	}
 	if got := m.View().Content; !strings.Contains(got, tokenBgSeq(t, m.themeState.active.Canvas)) {
 		t.Errorf("the post-arrow frame does not carry the previewed canvas, so the zero above is a swap that never happened")
 	}
-	if len(reader.reads) != 0 {
-		t.Errorf("rendering after an arrow performed %d lazy pane read(s) %v — the render path pays no reads either", len(reader.reads), reader.reads)
+	if len(runner.reads) != 0 {
+		t.Errorf("rendering after an arrow performed %d lazy git-root resolution(s) %v — the render path pays no reads either", len(runner.reads), runner.reads)
 	}
 
 	m.rebuildSessionList()
-	if len(reader.reads) == 0 {
-		t.Fatal("positive control: rebuildSessionList performed no pane reads, so the counting DirReader proves nothing about the arrow path")
+	if len(runner.reads) == 0 {
+		t.Fatal("positive control: rebuildSessionList performed no git-root resolutions, so the counting DirRunner proves nothing about the arrow path")
 	}
 }
 
@@ -621,7 +619,7 @@ func TestPanelArrow_ColourlessStaysColourless(t *testing.T) {
 		deps.NoColor = colourless
 		m := Build(deps)
 		m.termWidth, m.termHeight = arrowTermW, arrowTermH
-		m.applySessions([]tmux.Session{{Name: "alpha", Windows: 1}, {Name: "bravo", Windows: 2}}, nil)
+		m.applySessions([]Session{{Name: "alpha"}, {Name: "bravo"}}, nil)
 		if colourless {
 			m = armPanelUnderNoColorForTest(t, m)
 		} else {
@@ -678,4 +676,32 @@ func TestPanelArrow_SameRowIsANoOp(t *testing.T) {
 			t.Errorf("A→B→A→B does not render what A→B renders; the preview accumulates state\nonce:  %q\ntwice: %q", escSeq(once), escSeq(twice))
 		}
 	})
+}
+
+// Resized from where its list pages, or from where it fits, to every height
+// between, the panel's list pages as one opened at that size does: the same
+// rows a page and pages, and Ctrl+↓ landing on the same row of the same page.
+func TestPanelArrow_PagesAfterAResizeAsOpenedAtThatSize(t *testing.T) {
+	rows := arrowValidRows(t, 6)
+	opened := make(map[int]Model)
+	for h := arrowPagingTermH; h <= arrowTermH; h++ {
+		opened[h] = newArrowPanelModelAt(t, rows, arrowSlug(0), h)
+	}
+	if opened[arrowPagingTermH].themePanel.list.Paginator.TotalPages < 2 || opened[arrowTermH].themePanel.list.Paginator.TotalPages != 1 {
+		t.Fatalf("fixture: the panel's list must page at %d rows and fit at %d", arrowPagingTermH, arrowTermH)
+	}
+	for _, from := range []int{arrowPagingTermH, arrowTermH} {
+		for to := arrowPagingTermH; to <= arrowTermH; to++ {
+			resized := resizedTo(t, opened[from], arrowTermW, to)
+			got, want := resized.themePanel.list.Paginator, opened[to].themePanel.list.Paginator
+			if got.PerPage != want.PerPage || got.TotalPages != want.TotalPages {
+				t.Errorf("resized from %d to %d rows, the list has %d pages of %d, want %d of %d", from, to, got.TotalPages, got.PerPage, want.TotalPages, want.PerPage)
+			}
+			paged, wantPaged := pressPanelKey(t, resized, arrowPageDown), pressPanelKey(t, opened[to], arrowPageDown)
+			if arrowPanelIndex(paged) != arrowPanelIndex(wantPaged) || paged.themePanel.list.Paginator.Page != wantPaged.themePanel.list.Paginator.Page {
+				t.Errorf("resized from %d to %d rows, Ctrl+↓ lands on index %d of page %d, want %d of page %d", from, to,
+					arrowPanelIndex(paged), paged.themePanel.list.Paginator.Page, arrowPanelIndex(wantPaged), wantPaged.themePanel.list.Paginator.Page)
+			}
+		}
+	}
 }

@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // Dimensions are assigned directly, not through a tea.WindowSizeMsg: a fixture
@@ -21,7 +20,7 @@ func openPanelForTest(t *testing.T, m Model, contentW, contentH int) Model {
 	return openPanelForTestWithSessions(t, m, contentW, contentH, closePanelSessions())
 }
 
-func openPanelForTestWithSessions(t *testing.T, m Model, contentW, contentH int, sessions []tmux.Session) Model {
+func openPanelForTestWithSessions(t *testing.T, m Model, contentW, contentH int, sessions []Session) Model {
 	t.Helper()
 
 	m.termWidth, m.termHeight = geometryTerm(contentW, contentH)
@@ -103,7 +102,7 @@ func requireCommitDoesNoOtherIO(
 		ProjectEditor:  stores.projectEditor,
 		AliasEditor:    stores.aliasEditor,
 		ModePersister:  stores.modePersister,
-		Reader:         stores.scrollback,
+		History:        stores.history,
 		ThemeSource:    enumerator,
 		ThemeKeys:      keys,
 		ThemePersister: persister,
@@ -121,9 +120,9 @@ func requireCommitDoesNoOtherIO(
 
 	assertCommitted(t, persister)
 	if got := stores.calls(); got != 0 {
-		t.Errorf("%s made %d file-touching seam call(s) — the prefs write is the only one (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, scrollback %d, lister %d)",
+		t.Errorf("%s made %d file-touching seam call(s) — the prefs write is the only one (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, history %d, lister %d)",
 			subject, got, stores.projectStore.calls, stores.projectEditor.calls, stores.aliasEditor.calls,
-			stores.modePersister.calls, stores.themePersister.calls, stores.scrollback.calls, stores.lister.calls)
+			stores.modePersister.calls, stores.themePersister.calls, stores.history.calls, stores.lister.calls)
 	}
 	if enumerator.opens != opens {
 		t.Errorf("%s ran %d enumerations in total, want the open's %d — a commit re-derives from the retained parse and never re-reads the directory", subject, enumerator.opens, opens)

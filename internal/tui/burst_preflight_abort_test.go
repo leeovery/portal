@@ -12,14 +12,13 @@ import (
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/spawntest"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestBurstPreflightAbort_AbortsAtomicallyNoAdapterNoSelfAttach(t *testing.T) {
-	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 2},
-		{Name: "agentic-workflows-codify", Windows: 1},
-		{Name: "designlab-web-r8suyU", Windows: 3},
+	sessions := []Session{
+		{Name: "fab-flowx-explore"},
+		{Name: "agentic-workflows-codify"},
+		{Name: "designlab-web-r8suyU"},
 	}
 	ack := &spawntest.FakeAckChannel{}
 	adapter := &spawntest.FakeAdapter{Ack: ack}
@@ -165,9 +164,9 @@ func TestSessionRow_GoneFlaggedShowsRedWarningAndBadge(t *testing.T) {
 		GoneFlagged: markedSet("fab-flowx-explore"),
 	}
 	items := flatItems(
-		tmux.Session{Name: "agentic-workflows-codify", Windows: 1, Attached: true},
-		tmux.Session{Name: "fab-flowx-explore", Windows: 2, Attached: false},
-		tmux.Session{Name: "designlab-web-r8suyU", Windows: 3, Attached: true},
+		Session{Name: "agentic-workflows-codify", Attached: true},
+		Session{Name: "fab-flowx-explore", Attached: false},
+		Session{Name: "designlab-web-r8suyU", Attached: true},
 	)
 
 	gone := renderRow(d, 80, items, 1, 1)
@@ -204,8 +203,8 @@ func TestSessionRow_GoneFlaggedShowsRedWarningAndBadge(t *testing.T) {
 func TestSessionRow_GoneFlaggedWidthByteUnchanged(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "fab-flowx-explore", Windows: 2, Attached: false},
-		tmux.Session{Name: "designlab-web-r8suyU", Windows: 3, Attached: true},
+		Session{Name: "fab-flowx-explore", Attached: false},
+		Session{Name: "designlab-web-r8suyU", Attached: true},
 	)
 	gone := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, GoneFlagged: markedSet("fab-flowx-explore")}, w, items, 0, 1)
 	normal := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true}, w, items, 0, 1)
@@ -225,7 +224,7 @@ func TestSessionRow_GoneFlaggedWidthByteUnchanged(t *testing.T) {
 
 func TestSessionRow_GoneFlaggedColourlessSurvives(t *testing.T) {
 	d := SessionDelegate{Theme: testDarkTheme(t), Colourless: true, MultiSelect: true, GoneFlagged: markedSet("fab-flowx-explore")}
-	items := flatItems(tmux.Session{Name: "fab-flowx-explore", Windows: 2, Attached: false})
+	items := flatItems(Session{Name: "fab-flowx-explore", Attached: false})
 	out := renderRow(d, 80, items, 0, 0)
 	stripped := ansi.Strip(out)
 

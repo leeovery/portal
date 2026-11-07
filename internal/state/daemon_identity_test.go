@@ -2,7 +2,10 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
+	"path"
 	"testing"
 )
 
@@ -107,7 +110,7 @@ func TestIdentifyDaemon_DeadForNonExistentPID(t *testing.T) {
 
 func TestIdentifyDaemon_DeadWhenPSExitsNonZeroWithEmptyStdout(t *testing.T) {
 	withIdentifyPSFake(t, func(pid int) (string, error) {
-		return "", &fakePSExitError{}
+		return "", psExited()
 	})
 
 	got, err := IdentifyDaemon(1234)
@@ -119,9 +122,32 @@ func TestIdentifyDaemon_DeadWhenPSExitsNonZeroWithEmptyStdout(t *testing.T) {
 	}
 }
 
+// psExited is a ps that ran and exited non-zero, as the exec helper wraps it.
+func psExited() error { return fmt.Errorf("/bin/ps [-p 1234]: %w", &exec.ExitError{}) }
+
+func TestIdentifyDaemon_ErrorWhenPSCannotRun(t *testing.T) {
+	t.Run("a ps that never ran says nothing of the pid", func(t *testing.T) {
+		withIdentifyPSFake(t, func(pid int) (string, error) {
+			return "", fmt.Errorf("ps [-p 1234]: %w", exec.ErrNotFound)
+		})
+
+		if got, err := IdentifyDaemon(1234); !errors.Is(err, exec.ErrNotFound) {
+			t.Errorf("IdentifyDaemon = %v, %v; want the failure to run ps, not the pid read as dead", got, err)
+		}
+	})
+
+	t.Run("with no ps on PATH", func(t *testing.T) {
+		t.Setenv("PATH", "")
+
+		if got, err := IdentifyDaemon(0x7FFFFFFE); err == nil {
+			t.Errorf("IdentifyDaemon = %v, nil; want an error, not a result", got)
+		}
+	})
+}
+
 func TestIdentifyDaemon_TransientErrorWhenPSExitsNonZeroWithNonEmptyStdout(t *testing.T) {
 	withIdentifyPSFake(t, func(pid int) (string, error) {
-		return "portal portal state daemon\n", &fakePSExitError{}
+		return "portal portal state daemon\n", psExited()
 	})
 
 	got, err := IdentifyDaemon(1234)
@@ -205,11 +231,126 @@ func TestIdentifyDaemon_DoesNotMatchPortalStateDaemonWithoutSpaces(t *testing.T)
 	}
 }
 
-type fakePSExitError struct{}
+// daemonProgramCases are argv[0]s a daemon runs as, and near misses, for the
+// identity check and the pgrep pattern alike: portal bare or at an absolute
+// path, and nothing else.
+var daemonProgramCases = []struct {
+	program string
+	daemon  bool
+}{
+	{"portal", true},
+	{"/opt/homebrew/bin/portal", true},
+	{"/x/y/portal", true},
+	{"/portal", true},
+	{"/x//portal", true},
+	{"/x/y/notportal", false},
+	{"/x/y/portal2", false},
+	{"/x/y/portal.old", false},
+	{"/x/portal/bin", false},
+	{"x/y/portal", false},
+	{"./portal", false},
+	{"notportal", false},
+	{"/xportal", false},
+}
 
-func (fakePSExitError) Error() string { return "fake ps exit error" }
+func TestIdentifyDaemon_ProgramIsPortalBareOrAtAnAbsolutePath(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		t.Run(tc.program, func(t *testing.T) {
+			// ucomm is the exec'd file's name, the last element of argv[0].
+			withIdentifyPSFake(t, func(int) (string, error) {
+				return path.Base(tc.program) + " " + tc.program + " state daemon\n", nil
+			})
 
-var _ error = fakePSExitError{}
+			got, err := IdentifyDaemon(1234)
+			if err != nil {
+				t.Fatalf("IdentifyDaemon: unexpected err: %v", err)
+			}
+			if want := map[bool]IdentifyResult{true: IdentifyIsPortalDaemon, false: IdentifyNotPortalDaemon}[tc.daemon]; got != want {
+				t.Errorf("IdentifyDaemon(%q state daemon) = %v; want %v", tc.program, got, want)
+			}
+		})
+	}
+}
+
+func TestIdentifyDaemon_NeedsBothCommAndArgvToNamePortal(t *testing.T) {
+	for _, line := range []string{
+		"notportal /x/y/portal state daemon",
+		"/x/y/portal /x/y/portal state daemon",
+		"portal /x/y/notportal state daemon",
+		"sh /bin/sh -c /x/y/portal state daemon",
+		"portal /x/y/portal state daemon-foo",
+		"portal /x/y/portal state hydrate",
+	} {
+		t.Run(line, func(t *testing.T) {
+			withIdentifyPSFake(t, func(int) (string, error) { return line + "\n", nil })
+
+			got, err := IdentifyDaemon(1234)
+			if err != nil {
+				t.Fatalf("IdentifyDaemon: unexpected err: %v", err)
+			}
+			if got != IdentifyNotPortalDaemon {
+				t.Errorf("IdentifyDaemon(%q) = %v; want IdentifyNotPortalDaemon", line, got)
+			}
+		})
+	}
+}
+
+func TestPortalDaemonArgvPattern(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		for _, tail := range []string{"", " --flag"} {
+			argv := tc.program + " state daemon" + tail
+			t.Run(argv, func(t *testing.T) {
+				if got := daemonArgvPattern.MatchString(argv); got != tc.daemon {
+					t.Errorf("PortalDaemonArgvPattern matches %q = %v; want %v", argv, got, tc.daemon)
+				}
+			})
+		}
+	}
+	for _, argv := range []string{
+		"/bin/sh -c /x/y/portal state daemon",
+		"/x/y z/portal state daemon",
+		"/x/y/portal state daemon-foo",
+		"/x/y/portal state daemons",
+		"/x/y/portal open",
+		" /x/y/portal state daemon",
+	} {
+		t.Run(argv, func(t *testing.T) {
+			if daemonArgvPattern.MatchString(argv) {
+				t.Errorf("PortalDaemonArgvPattern matches %q; want no match", argv)
+			}
+		})
+	}
+}
+
+func TestIsDaemonArgv(t *testing.T) {
+	for _, tc := range daemonProgramCases {
+		argv := []string{tc.program, "state", "daemon"}
+		if got := IsDaemonArgv(argv); got != tc.daemon {
+			t.Errorf("IsDaemonArgv(%q) = %v; want %v", argv, got, tc.daemon)
+		}
+	}
+	for _, argv := range [][]string{
+		{"/x/y/portal", "state", "daemon", "--flag"},
+	} {
+		if !IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = false; want true", argv)
+		}
+	}
+	for _, argv := range [][]string{
+		nil,
+		{"/bin/sh", "-c", "/x/y/portal state daemon"},
+		{"/x/y/portal", "state"},
+		{"/x/y/portal", "state", "daemon-foo"},
+		{"/x/y/portal", "state", "hydrate"},
+		{"/x/y/portal", "state daemon"},
+		{"portal state daemon"},
+		{"/x/y z/portal", "state", "daemon"},
+	} {
+		if IsDaemonArgv(argv) {
+			t.Errorf("IsDaemonArgv(%q) = true; want false", argv)
+		}
+	}
+}
 
 func TestIdentifyDaemon_TransientErrorPreservesUnderlyingErrorViaWrap(t *testing.T) {
 	sentinel := errors.New("ps boom")

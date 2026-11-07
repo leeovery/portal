@@ -10,7 +10,7 @@
 //
 // Both are subject-neutral on purpose. Neither belongs to any one domain, so
 // homing them here keeps a package whose subject is bytes, or Go source, or
-// tmux from importing an unrelated helper package for them.
+// zmx from importing an unrelated helper package for them.
 //
 // It depends on stdlib alone and carries no build tag, so every suite it serves
 // runs in the unit lane. Test-only: production code must not import it.

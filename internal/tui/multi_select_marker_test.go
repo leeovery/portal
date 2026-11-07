@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func markedSet(names ...string) map[string]struct{} {
@@ -22,8 +21,8 @@ func markedSet(names ...string) map[string]struct{} {
 func TestSessionRow_MarkedShowsVioletBulletInLeftBar(t *testing.T) {
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("alpha")}
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 1, Attached: false},
-		tmux.Session{Name: "bravo", Windows: 1, Attached: false},
+		Session{Name: "alpha", Attached: false},
+		Session{Name: "bravo", Attached: false},
 	)
 
 	marked := renderRow(d, 80, items, 0, 1)
@@ -43,8 +42,8 @@ func TestSessionRow_MarkedShowsVioletBulletInLeftBar(t *testing.T) {
 func TestSessionRow_NoBulletWhenMultiSelectFalse(t *testing.T) {
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: false, Selected: markedSet("alpha")}
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 1, Attached: false},
-		tmux.Session{Name: "bravo", Windows: 1, Attached: false},
+		Session{Name: "alpha", Attached: false},
+		Session{Name: "bravo", Attached: false},
 	)
 	out := renderRow(d, 80, items, 0, 1)
 	if strings.Contains(ansi.Strip(out), multiSelectMarker) {
@@ -54,7 +53,7 @@ func TestSessionRow_NoBulletWhenMultiSelectFalse(t *testing.T) {
 
 func TestSessionRow_CursorRowMarkedShowsBandAndBullet(t *testing.T) {
 	d := SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("alpha")}
-	items := flatItems(tmux.Session{Name: "alpha", Windows: 2, Attached: false})
+	items := flatItems(Session{Name: "alpha", Attached: false})
 
 	out := renderRow(d, 80, items, 0, 0)
 
@@ -74,13 +73,13 @@ func TestSessionRow_CursorRowMarkedShowsBandAndBullet(t *testing.T) {
 
 func TestSessionRow_MarkedAlignmentByteUnchanged(t *testing.T) {
 	const w = 80
-	sess := tmux.Session{Name: "alpha", Windows: 3, Attached: true}
-	items := flatItems(sess, tmux.Session{Name: "bravo", Windows: 1})
+	sess := Session{Name: "alpha", Attached: true}
+	items := flatItems(sess, Session{Name: "bravo"})
 
 	marked := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("alpha")}, w, items, 0, 1)
 	unmarked := renderRow(SessionDelegate{Theme: testDarkTheme(t), MultiSelect: true, Selected: markedSet("bravo")}, w, items, 0, 1)
 
-	for _, sub := range []string{"alpha", "window", "windows" + strings.Repeat(" ", 2+indicatorSlotWidth-1) + rowIndicatorGlyph} {
+	for _, sub := range []string{"alpha", strings.Repeat(" ", nameGap+indicatorSlotWidth-1) + rowIndicatorGlyph} {
 		mc, uc := visibleColOf(marked, sub), visibleColOf(unmarked, sub)
 		if mc < 0 || uc < 0 {
 			t.Fatalf("column %q missing: marked=%q unmarked=%q", sub, ansi.Strip(marked), ansi.Strip(unmarked))
@@ -95,7 +94,7 @@ func TestSessionRow_MarkedAlignmentByteUnchanged(t *testing.T) {
 }
 
 func TestSessionRow_ByTagMarkedBulletOnEveryRow(t *testing.T) {
-	sess := tmux.Session{Name: "portal-abc", Windows: 1, Attached: false}
+	sess := Session{Name: "portal-abc", Attached: false}
 	items := []list.Item{
 		SessionItem{Session: sess, GroupKey: "work", GroupHeading: "work"},
 		SessionItem{Session: sess, GroupKey: "infra", GroupHeading: "infra"},
@@ -126,9 +125,9 @@ func TestSessionRow_HeaderNeverRendersBullet(t *testing.T) {
 }
 
 func TestMultiSelectMarkerReflectsSetLive(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1, Attached: false},
-		{Name: "bravo", Windows: 2, Attached: false},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha", Attached: false},
+		{Name: "bravo", Attached: false},
 	})
 
 	if strings.Contains(ansi.Strip(m.sessionList.View()), multiSelectMarker) {
@@ -153,8 +152,8 @@ func TestMultiSelectMarkerReflectsSetLive(t *testing.T) {
 func TestSessionRow_MarkedColourlessGlyphSurvivesNoHue(t *testing.T) {
 	d := SessionDelegate{Theme: testDarkTheme(t), Colourless: true, MultiSelect: true, Selected: markedSet("alpha")}
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 1, Attached: false},
-		tmux.Session{Name: "bravo", Windows: 1, Attached: false},
+		Session{Name: "alpha", Attached: false},
+		Session{Name: "bravo", Attached: false},
 	)
 	out := renderRow(d, 80, items, 0, 0)
 

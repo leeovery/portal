@@ -10,7 +10,6 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestMultiSelectHeader_CountVioletCancelDetail(t *testing.T) {
@@ -120,9 +119,9 @@ func TestMultiSelectHeader_PaintsCanvasNoEdgeBleed(t *testing.T) {
 }
 
 func multiSelectBannerModel(marked []string, names ...string) Model {
-	sessions := make([]tmux.Session, 0, len(names))
+	sessions := make([]Session, 0, len(names))
 	for _, n := range names {
-		sessions = append(sessions, tmux.Session{Name: n, Windows: 1, Attached: false})
+		sessions = append(sessions, Session{Name: n, Attached: false})
 	}
 	m := NewModelWithSessions(sessions)
 	m.termWidth = 80
@@ -195,9 +194,9 @@ func TestApplySectionHeader_FilterAppliedInMultiSelectShowsBanner(t *testing.T) 
 }
 
 func TestApplySectionHeader_CountUpdatesLive(t *testing.T) {
-	m := NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
+	m := NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
 	})
 	m.termWidth = 80
 	m.termHeight = 24
@@ -227,7 +226,7 @@ func TestApplySectionHeader_CountUpdatesLive(t *testing.T) {
 func TestApplySectionHeader_ByTagMultiMembershipCountsOnce(t *testing.T) {
 	dir := t.TempDir()
 	projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}}}
-	sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+	sessions := []Session{{Name: "portal-abc", Dir: dir}}
 
 	m := newRebuildTestModel(t, prefs.ModeByTag, sessions, projects)
 	m.termWidth = 80

@@ -39,7 +39,7 @@ func TestOpenHelpMetadata_DescribesSearchForm(t *testing.T) {
 	})
 
 	t.Run("it names what the term is matched against", func(t *testing.T) {
-		for _, want := range []string{"case-folded", "contiguous run", "recorded directory"} {
+		for _, want := range []string{"case-folded", "contiguous run", "label, name and directory"} {
 			if !strings.Contains(long, want) {
 				t.Errorf("openCmd.Long omits %q; the match domain is not stated:\n%s", want, openCmd.Long)
 			}

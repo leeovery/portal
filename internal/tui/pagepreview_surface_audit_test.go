@@ -1,10 +1,16 @@
 package tui
 
 import (
+	"go/ast"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/harnesstest"
+	"github.com/leeovery/portal/internal/sourceguardtest"
 )
 
 func repoRelative(parts ...string) string {
@@ -44,96 +50,57 @@ func readSourceFiles(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-func TestSurfaceAudit_TmuxNoNewCaptureWrapper(t *testing.T) {
-	tmuxPath := repoRelative("internal", "tmux", "tmux.go")
-	b, err := os.ReadFile(tmuxPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", tmuxPath, err)
-	}
-	src := string(b)
-
-	forbiddenSymbols := []string{
-		"CapturePaneTail",
-		"CapturePaneN",
-		"CaptureTail",
-		"CapturePaneLastN",
-		"CapturePaneRange",
-		"CapturePaneBounded",
-	}
-
-	for _, sym := range forbiddenSymbols {
-		t.Run(sym, func(t *testing.T) {
-			methodForm := "func (c *Client) " + sym + "("
-			funcForm := "func " + sym + "("
-			if strings.Contains(src, methodForm) || strings.Contains(src, funcForm) {
-				t.Errorf(
-					"%s declares forbidden capture-wrapper symbol %q; "+
-						"preview must not introduce new tmux capture wrappers — "+
-						"the read pipeline is always-disk via "+
-						"state.ScrollbackFile + tail-N helper.",
-					tmuxPath, sym,
-				)
+// The preview's body is the session's live history, read through the history
+// seam: the one History call in the package asks for all of it, rows 0.
+func TestSurfaceAudit_PreviewReadsTheWholeHistoryThroughTheSeam(t *testing.T) {
+	var calls []string
+	for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
+		sourceguardtest.ForEachFuncCall(source.File, func(funcName string, call *ast.CallExpr) bool {
+			if sourceguardtest.CalleeName(call) != "History" {
+				return true
 			}
+			where := filepath.Base(source.Path) + ":" + funcName
+			calls = append(calls, where)
+			if len(call.Args) != 3 {
+				t.Errorf("%s calls History with %d arguments, want ctx, name and rows", where, len(call.Args))
+				return true
+			}
+			if rows, ok := call.Args[2].(*ast.BasicLit); !ok || rows.Value != strconv.Itoa(0) {
+				t.Errorf("%s asks History for a bounded number of rows; the preview shows the whole history, rows 0", where)
+			}
+			return true
 		})
+	}
+	if len(calls) != 1 || calls[0] != "preview_history.go:body" {
+		t.Errorf("History is called from %v, want exactly once, from previewHistory.body in preview_history.go", calls)
 	}
 }
 
-func TestSurfaceAudit_TmuxCapturePaneSignatureUnchanged(t *testing.T) {
-	tmuxPath := repoRelative("internal", "tmux", "tmux.go")
-	b, err := os.ReadFile(tmuxPath)
+// The saved scrollback files belong to internal/state, which the preview's
+// files never reach.
+func TestSurfaceAudit_PreviewReadsNoSavedScrollback(t *testing.T) {
+	forbidden := map[string]string{
+		`"github.com/leeovery/portal/internal/state"`: "saved scrollback",
+	}
+	files, err := filepath.Glob("*preview*.go")
 	if err != nil {
-		t.Fatalf("read %s: %v", tmuxPath, err)
+		t.Fatalf("glob preview sources: %v", err)
 	}
-	src := string(b)
-
-	const wantSignature = "func (c *Client) CapturePane(target Target) (string, error) {"
-	if !strings.Contains(src, wantSignature) {
-		t.Errorf(
-			"%s no longer contains the verbatim CapturePane signature %q. "+
-				"The existing capture path must remain untouched.",
-			tmuxPath, wantSignature,
-		)
-	}
-}
-
-func TestSurfaceAudit_StateExposesExistingWriters(t *testing.T) {
-	stateDir := repoRelative("internal", "state")
-	files := readSourceFiles(t, stateDir)
-
-	var allSrc strings.Builder
-	for _, src := range files {
-		allSrc.WriteString(src)
-		allSrc.WriteByte('\n')
-	}
-	combined := allSrc.String()
-
-	expectedDeclarations := []string{
-		"func SetSkeletonMarker(",
-		"func UnsetSkeletonMarker(",
-		"func WriteScrollbackIfChanged(",
-		"func Commit(",
-	}
-
-	for _, decl := range expectedDeclarations {
-		t.Run(decl, func(t *testing.T) {
-			if !strings.Contains(combined, decl) {
-				t.Errorf(
-					"internal/state no longer declares %q. "+
-						"Existing writers must remain present alongside the new "+
-						"tail-N helper.",
-					decl,
-				)
+	var scanned int
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		scanned++
+		source := sourceguardtest.PackageSource(t, ".", path)
+		for _, imp := range source.File.Imports {
+			if what, ok := forbidden[imp.Path.Value]; ok {
+				t.Errorf("%s imports %s; the preview reads the session's history, never %s", path, imp.Path.Value, what)
 			}
-		})
+		}
 	}
-
-	const tailDecl = "func TailScrollback("
-	if !strings.Contains(combined, tailDecl) {
-		t.Errorf(
-			"internal/state does not declare %q — the tail-N helper the "+
-				"preview read pipeline depends on is missing.",
-			tailDecl,
-		)
+	if scanned == 0 {
+		t.Fatalf("no preview production sources matched; the audit scanned nothing")
 	}
 }
 
@@ -141,8 +108,8 @@ func TestSurfaceAudit_StateExposesExistingWriters(t *testing.T) {
 var previewTokens = []string{
 	"pagePreview",
 	"previewModel",
-	"TmuxEnumerator",
-	"ScrollbackReader",
+	"previewHistory",
+	"HistoryReader",
 }
 
 func auditNoPreviewTokens(t *testing.T, dir string) {
@@ -153,8 +120,7 @@ func auditNoPreviewTokens(t *testing.T, dir string) {
 			if strings.Contains(src, tok) {
 				t.Errorf(
 					"%s contains forbidden preview token %q. "+
-						"This directory must remain untouched by the "+
-						"session-scrollback-preview feature.",
+						"The preview lives in internal/tui alone.",
 					path, tok,
 				)
 			}
@@ -162,8 +128,8 @@ func auditNoPreviewTokens(t *testing.T, dir string) {
 	}
 }
 
-func TestSurfaceAudit_RestoreNoPreviewTokens(t *testing.T) {
-	auditNoPreviewTokens(t, repoRelative("internal", "restore"))
+func TestSurfaceAudit_StateNoPreviewTokens(t *testing.T) {
+	auditNoPreviewTokens(t, repoRelative("internal", "state"))
 }
 
 func TestSurfaceAudit_BootstrapNoPreviewTokens(t *testing.T) {
@@ -175,129 +141,64 @@ func TestSurfaceAudit_HooksNoPreviewTokens(t *testing.T) {
 }
 
 func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
-	internalDir := repoRelative("internal")
-	entries, err := os.ReadDir(internalDir)
+	t.Run("it finds no package named for the preview under internal", func(t *testing.T) {
+		for _, found := range previewPackages(t, repoRelative("internal")) {
+			t.Errorf("new package internal/%s/ exists; the preview lives in internal/tui", found)
+		}
+	})
+
+	t.Run("it reports each package named for the preview", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, name := range []string{"preview", "scrollback", "snapshot", "tui", "previews"} {
+			if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+				t.Fatalf("stage %s: %v", name, err)
+			}
+		}
+		var rec harnesstest.Recorder
+		var found []string
+		rec.Run(func() { found = previewPackages(&rec, dir) })
+		if want := []string{"preview", "scrollback", "snapshot"}; rec.Failed() || !slices.Equal(found, want) {
+			t.Errorf("previewPackages reported %q and %s, want %q", found, rec.Report(), want)
+		}
+	})
+
+	t.Run("it fails on a directory holding no package", func(t *testing.T) {
+		var rec harnesstest.Recorder
+		rec.Run(func() { previewPackages(&rec, t.TempDir()) })
+		if len(rec.Fatals) != 1 {
+			t.Errorf("previewPackages over an empty directory reported %s, want one fatal", rec.Report())
+		}
+	})
+}
+
+// previewPackageNames are the names a package split out for the preview
+// would carry.
+var previewPackageNames = []string{"preview", "scrollback", "snapshot"}
+
+// previewPackages returns, in directory order, each package under dir named
+// for the preview. A dir holding no package at all is fatal: the audit would
+// pass by having stopped looking.
+func previewPackages(t harnesstest.TestingT, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read dir %s: %v", internalDir, err)
+		t.Fatalf("read dir %s: %v", dir, err)
+		return nil
 	}
-
-	preExistingPackages := map[string]struct{}{
-		"alias":            {},
-		"bootstrapadapter": {},
-		"capture":          {},
-		"commandertest":    {},
-		"fileutil":         {},
-		"fuzzy":            {},
-		"harnesstest":      {},
-		"hooks":            {},
-		"hookstest":        {},
-		"hooksweep":        {},
-		"log":              {},
-		"logtest":          {},
-		"nanoid":           {},
-		"portalbintest":    {},
-		"portaltest":       {},
-		"prefs":            {},
-		"project":          {},
-		"resolver":         {},
-		"restore":          {},
-		"resumekeys":       {},
-		"resumemode":       {},
-		"restoretest":      {},
-		"session":          {},
-		"shellquote":       {},
-		"sourceguardtest":  {},
-		"spawn":            {},
-		"spawntest":        {},
-		"state":            {},
-		"statetest":        {},
-		"storelog":         {},
-		"theme":            {},
-		"themetest":        {},
-		"tmux":             {},
-		"tmuxerr":          {},
-		"tmuxout":          {},
-		"tmuxtest":         {},
-		"transienttest":    {},
-		"tui":              {},
-		"warning":          {},
-		"xdg":              {},
-	}
-
-	forbiddenNames := map[string]struct{}{
-		"preview":    {},
-		"scrollback": {},
-		"snapshot":   {},
-	}
-
+	var packages int
+	var found []string
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		if _, forbidden := forbiddenNames[name]; forbidden {
-			t.Errorf(
-				"new package internal/%s/ exists; the feature must live "+
-					"entirely in pre-existing packages (internal/tui, "+
-					"internal/tmux, internal/state). Forbidden name pinned "+
-					"by audit.",
-				name,
-			)
-			continue
-		}
-		if _, ok := preExistingPackages[name]; !ok {
-			t.Errorf(
-				"new package internal/%s/ exists and is not on the "+
-					"pre-existing allow-list. If this addition is unrelated "+
-					"to the session-scrollback-preview feature, update the "+
-					"audit's preExistingPackages map. Otherwise, preview "+
-					"must not introduce a new internal/ package.",
-				name,
-			)
+		packages++
+		if slices.Contains(previewPackageNames, e.Name()) {
+			found = append(found, e.Name())
 		}
 	}
-}
-
-func TestSurfaceAudit_SaveFormatConstantsUnchanged(t *testing.T) {
-	pathsFile := repoRelative("internal", "state", "paths.go")
-	b, err := os.ReadFile(pathsFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", pathsFile, err)
+	if packages == 0 {
+		t.Fatalf("no package under %s; the audit scanned nothing", dir)
+		return nil
 	}
-	src := string(b)
-
-	type pin struct {
-		name    string
-		literal string
-		why     string
-	}
-	pins := []pin{
-		{
-			name:    "scrollbackSubdir",
-			literal: `scrollbackSubdir  = "scrollback"`,
-			why:     "scrollback subdirectory name is part of the save format; preview reads from this exact subdir",
-		},
-		{
-			name:    "ScrollbackFile suffix",
-			literal: `paneKey+".bin"`,
-			why:     `.bin extension is part of the save-format contract — daemon writes and preview reads must agree`,
-		},
-		{
-			name:    "FIFOPath prefix",
-			literal: `"hydrate-"+paneKey+".fifo"`,
-			why:     "hydration FIFO naming is part of the save format; the surface audit pins it even though preview itself does not touch FIFOs",
-		},
-	}
-
-	for _, p := range pins {
-		t.Run(p.name, func(t *testing.T) {
-			if !strings.Contains(src, p.literal) {
-				t.Errorf(
-					"%s no longer contains %q (%s); the save format and "+
-						"`.bin` file shape must remain unchanged.",
-					pathsFile, p.literal, p.why,
-				)
-			}
-		})
-	}
+	return found
 }

@@ -129,8 +129,8 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 			assertRowsAtWidth(t, rows, resumeCardContentWidth)
 			assertRowsRead(t, rows, []string{
 				"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7",
-				"--cwd /Users/leeovery/Code/portal/internal/tui --",
-				"output-format stream-json",
+				"--cwd /Users/leeovery/Code/portal/internal/tui",
+				"--output-format stream-json",
 			})
 		})
 
@@ -145,13 +145,13 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 			})
 		})
 
-		t.Run("it re-flows a hyphen run past the width onto the next row", func(t *testing.T) {
+		t.Run("it keeps a hyphenated word whole unless it is wider than the row", func(t *testing.T) {
 			for _, tc := range []struct {
 				name  string
 				width int
 				want  []string
 			}{
-				{"at a card's width", 12, []string{"a-b-c-d-e-f", "-- --port=30", "00 --resume"}},
+				{"at a card's width", 12, []string{"a-b-c-d-e-f", "--", "--port=3000…"}},
 				{"at a degraded pane's", 6, []string{"a-b-c-", "d-e-f", "-- --…"}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -167,8 +167,8 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 			assertRowsAtWidth(t, rows, resumeCardContentWidth)
 			assertRowsRead(t, rows, []string{
 				"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7",
-				"--cwd /Users/leeovery/Code/portal/internal/tui --",
-				"output-format stream-json claude --resume 4f2c9a1e-…",
+				"--cwd /Users/leeovery/Code/portal/internal/tui",
+				"--output-format stream-json claude --resume 4f2c9a1…",
 			})
 		})
 
@@ -185,8 +185,8 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 					resumeCardContentWidth,
 					[]string{
 						"--permission-mode run",
-						"/Users/leeovery/Code/portal/internal/tui 4f2c9a1e-",
-						"7b33-4d01-9f6a-2c8e510db4a7 --permission-mode strea…",
+						"/Users/leeovery/Code/portal/internal/tui",
+						"4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7 --permission-m…",
 					},
 				},
 				{
@@ -328,13 +328,15 @@ func TestResumeCommandRows_Geometry(t *testing.T) {
 						1: {"c", "l", "…"},
 						2: {"cl", "au", "d…"},
 						3: {"cla", "ude", "--…"},
-						4: {"clau", "de -", "-re…"},
+						4: {"clau", "de", "--r…"},
 					},
 				},
 				{
 					"a double-width command", "再開するセッション",
 					map[int][]string{
-						1: {"", "", "…"},
+						// No grapheme fits a row one cell wide, and a row
+						// showing nothing is no row: the line keeps one.
+						1: {""},
 						2: {"再", "開", "…"},
 						3: {"再", "開", "す…"},
 						4: {"再開", "する", "セ…"},
@@ -430,8 +432,8 @@ func TestResumePanelParts_CallerChoices(t *testing.T) {
 					"the card's pinned width", resumeCardContentWidth,
 					[]string{
 						"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7",
-						"--cwd /Users/leeovery/Code/portal/internal/tui --",
-						"output-format stream-json --permission-mode acceptE…",
+						"--cwd /Users/leeovery/Code/portal/internal/tui",
+						"--output-format stream-json --permission-mode accep…",
 					},
 					"claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a…",
 				},
@@ -678,7 +680,7 @@ func TestResumeCommandLines_Invariants(t *testing.T) {
 			command string
 			width   int
 		}{
-			{"a hyphen run the wrap over-packs", resumePartsHyphenCommand, 12},
+			{"a hyphen run", resumePartsHyphenCommand, 14},
 			{"a hyphen run at a degraded width", "a-b-c-d-e-f -- --x", 6},
 			{"a command wrapped at the card's width", resumePartsLongCommand, resumeCardContentWidth},
 			{"a command broken mid-token", "claude --resume 4f2c9a1e --cwd /Users/leeovery/Code/portal", resumePartsNarrowWidth + 12},
@@ -715,15 +717,43 @@ func TestResumeCommandLines_Invariants(t *testing.T) {
 	t.Run("it reads the capped row back as the source from where it starts", func(t *testing.T) {
 		forEachResumePartsCommand(t, func(t *testing.T, command string, width int) {
 			text := sanitiseCommandText(command)
-			assertCappedRowReadsSource(t, resumeCommandLines(command, width), text, width, resumeCommandMaxLines)
+			assertCappedRowReadsSource(t, resumeCommandLines(command, width), spaceWrappedLines, text, width, resumeCommandMaxLines)
 		})
 	})
 
-	t.Run("it renders an empty row for a grapheme wider than the width", func(t *testing.T) {
-		if got := resumeCommandLines("再開するセッション", 1); !reflect.DeepEqual(got, []string{"", "", "…"}) {
-			t.Errorf("a double-width command at a width of 1 reads %q, want %q", got, []string{"", "", "…"})
+	t.Run("it keeps a flag's -- with its name at every width the flag fits", func(t *testing.T) {
+		const command = "cd /Users/leeovery/Code/portal && claude --resume 4f2c9a1e-7b33-4d01-9f6a-2c8e510db4a7"
+		proseSplits := 0
+		for width := len("--resume"); width <= resumePartsMaxProbedWidth; width++ {
+			if splitsFlag(wrappedLines(command, width)) {
+				proseSplits++
+			}
+			if lines := resumeCommandLines(command, width); splitsFlag(lines) {
+				t.Errorf("at a width of %d the command splits --resume: %q", width, lines)
+			}
+		}
+		if proseSplits == 0 {
+			t.Fatal("no width splits --resume under the prose wrap, so the command's wrap is pinned by nothing")
 		}
 	})
+
+	t.Run("it renders one empty row where no grapheme fits the width", func(t *testing.T) {
+		if got := resumeCommandLines("再開するセッション", 1); !reflect.DeepEqual(got, []string{""}) {
+			t.Errorf("a double-width command at a width of 1 reads %q, want one empty row", got)
+		}
+	})
+}
+
+func splitsFlag(lines []string) bool {
+	for i, line := range lines {
+		if strings.HasPrefix(line, "-resume") {
+			return true
+		}
+		if i+1 < len(lines) && (strings.HasSuffix(line, "--") || strings.HasSuffix(line, " -")) {
+			return true
+		}
+	}
+	return false
 }
 
 // A row's edge spaces are trimmed, so a line broken at a space loses it: the
@@ -758,13 +788,26 @@ func TestWrappedLines_ReadsTheSourceBack(t *testing.T) {
 
 // The wrap's rows must read the text back in order: a row boundary may swallow
 // the spaces the wrap broke at, and a grapheme too wide for a whole row is
-// dropped onto a row of its own — every other cell of the text is on screen
-// where the text has it, with nothing glued to its neighbour.
+// dropped — every other cell of the text is on screen where the text has it,
+// with nothing glued to its neighbour.
 func assertRowsReadSource(t *testing.T, rows []string, text string, width int) {
 	t.Helper()
 	rest := restPastRows(t, rows, text, width)
-	if strings.TrimFunc(rest, breaksWrap) != "" {
+	if skipUnshowable(rest, width) != "" {
 		t.Errorf("the rows %q stop short of %q at a width of %d", rows, rest, width)
+	}
+}
+
+// skipUnshowable is text past its leading whitespace and the graphemes too
+// wide for any row.
+func skipUnshowable(text string, width int) string {
+	for {
+		text = strings.TrimLeftFunc(text, breaksWrap)
+		cluster, w := ansi.FirstGraphemeCluster(text, ansi.GraphemeWidth)
+		if cluster == "" || w <= width {
+			return text
+		}
+		text = text[len(cluster):]
 	}
 }
 
@@ -772,12 +815,7 @@ func restPastRows(t *testing.T, rows []string, text string, width int) string {
 	t.Helper()
 	rest := text
 	for i, row := range rows {
-		rest = strings.TrimLeftFunc(rest, breaksWrap)
-		if row == "" {
-			if cluster, w := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth); cluster != "" && w > width {
-				rest = rest[len(cluster):]
-			}
-		}
+		rest = skipUnshowable(rest, width)
 		if !strings.HasPrefix(rest, row) {
 			t.Fatalf("row %d of %q reads %q at a width of %d, want the opening of %q", i, rows, row, width, rest)
 		}
@@ -788,9 +826,9 @@ func restPastRows(t *testing.T, rows []string, text string, width int) string {
 
 // The rows before the cap read the source as the wrap left them; the capped
 // row, its … removed, is the source verbatim from there, whitespace and all.
-func assertCappedRowReadsSource(t *testing.T, lines []string, text string, width, maxRows int) {
+func assertCappedRowReadsSource(t *testing.T, lines []string, uncapped func(string, int) []string, text string, width, maxRows int) {
 	t.Helper()
-	if len(wrappedLines(text, width)) <= maxRows {
+	if len(uncapped(text, width)) <= maxRows {
 		return
 	}
 	if len(lines) != maxRows {

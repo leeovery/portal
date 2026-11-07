@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,27 +9,25 @@ import (
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const swapProbeSessions = 12
 
-func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListMode, reader *fakeStamper) Model {
+func newSwapProbeModel(t *testing.T, before theme.Theme, mode prefs.SessionListMode, runner *fakeDirRunner) Model {
 	t.Helper()
 	const w, h = 120, 40
 
-	projects := []project.Project{{Path: reader.path, Name: "Portal", Tags: []string{"work"}}}
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	projects := []project.Project{{Path: runner.gitRoot, Name: "Portal", Tags: []string{"work"}}}
+	sessions := make([]Session, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1})
+		sessions = append(sessions, Session{Name: nameN(i), Cwd: runner.gitRoot})
 	}
 
 	m := Build(Deps{
 		Lister:      fakeLister{},
 		Theme:       theme.ConstantNomination(before),
 		InitialMode: mode,
-		DirReader:   reader,
-		DirRunner:   &fakeDirRunner{gitRoot: reader.path},
+		DirRunner:   runner,
 	})
 	m.termWidth = w
 	m.termHeight = h
@@ -69,30 +68,30 @@ func TestApplyTheme_RestylesWithoutRebuild(t *testing.T) {
 
 	for _, tc := range swapProbeGroupingModes() {
 		t.Run(tc.name, func(t *testing.T) {
-			reader := &fakeStamper{path: t.TempDir()}
-			m := newSwapProbeModel(t, before, tc.mode, reader)
+			runner := &fakeDirRunner{gitRoot: t.TempDir()}
+			m := newSwapProbeModel(t, before, tc.mode, runner)
 
-			reader.reads = nil
+			runner.reads = nil
 			m.ApplyTheme(after)
 
-			if len(reader.reads) != 0 {
-				t.Errorf("ApplyTheme performed %d lazy pane read(s) %v — a swap is the O(1) restyle, never the rebuild's dir-resolution pass", len(reader.reads), reader.reads)
+			if len(runner.reads) != 0 {
+				t.Errorf("ApplyTheme performed %d lazy git-root resolution(s) %v — a swap is the O(1) restyle, never the rebuild's dir-resolution pass", len(runner.reads), runner.reads)
 			}
 
 			frame := m.viewSessionList()
 			assertRepointed(t, tc.name+" sessions frame after ApplyTheme",
 				frame, tokenBgSeq(t, after.Canvas), tokenBgSeq(t, before.Canvas))
 
-			if len(reader.reads) != 0 {
-				t.Errorf("rendering after ApplyTheme performed %d lazy pane read(s) %v — the render path pays no reads either", len(reader.reads), reader.reads)
+			if len(runner.reads) != 0 {
+				t.Errorf("rendering after ApplyTheme performed %d lazy git-root resolution(s) %v — the render path pays no reads either", len(runner.reads), runner.reads)
 			}
 
 			if !tc.rebuildReads {
 				return
 			}
 			m.rebuildSessionList()
-			if len(reader.reads) == 0 {
-				t.Fatal("positive control: rebuildSessionList performed no pane reads, so the counting DirReader proves nothing about ApplyTheme")
+			if len(runner.reads) == 0 {
+				t.Fatal("positive control: rebuildSessionList performed no git-root resolutions, so the counting DirRunner proves nothing about ApplyTheme")
 			}
 		})
 	}
@@ -104,13 +103,13 @@ type countingStores struct {
 	aliasEditor    *countingAliasEditor
 	modePersister  *countingModePersister
 	themePersister *countingThemePersister
-	scrollback     *countingScrollbackReader
+	history        *countingHistory
 	lister         *countingLister
 }
 
 func (c countingStores) calls() int {
 	return c.projectStore.calls + c.projectEditor.calls + c.aliasEditor.calls +
-		c.modePersister.calls + c.themePersister.calls + c.scrollback.calls + c.lister.calls
+		c.modePersister.calls + c.themePersister.calls + c.history.calls + c.lister.calls
 }
 
 func (c countingStores) reset() {
@@ -119,7 +118,7 @@ func (c countingStores) reset() {
 	c.aliasEditor.calls = 0
 	c.modePersister.calls = 0
 	c.themePersister.calls = 0
-	c.scrollback.calls = 0
+	c.history.calls = 0
 	c.lister.calls = 0
 }
 
@@ -129,7 +128,7 @@ func (c countingStores) exercise() {
 	_, _ = c.aliasEditor.Load()
 	_ = c.modePersister.Save(prefs.ModeFlat)
 	_ = c.themePersister.CommitTheme("nord")
-	_, _ = c.scrollback.Tail(PaneScrollback{PaneKey: "pane"})
+	_, _ = c.history.History(context.Background(), "work", 0)
 	_, _ = c.lister.ListSessions()
 }
 
@@ -182,13 +181,16 @@ func (c *countingThemePersister) CommitThemeSlot(string, theme.Member) error {
 	return nil
 }
 
-type countingScrollbackReader struct{ calls int }
+type countingHistory struct{ calls int }
 
-func (c *countingScrollbackReader) Tail(PaneScrollback) ([]byte, error) { c.calls++; return nil, nil }
+func (c *countingHistory) History(context.Context, string, int) ([]byte, error) {
+	c.calls++
+	return nil, nil
+}
 
 type countingLister struct{ calls int }
 
-func (c *countingLister) ListSessions() ([]tmux.Session, error) { c.calls++; return nil, nil }
+func (c *countingLister) ListSessions() ([]Session, error) { c.calls++; return nil, nil }
 
 func newCountingStores() countingStores {
 	return countingStores{
@@ -197,7 +199,7 @@ func newCountingStores() countingStores {
 		aliasEditor:    &countingAliasEditor{},
 		modePersister:  &countingModePersister{},
 		themePersister: &countingThemePersister{},
-		scrollback:     &countingScrollbackReader{},
+		history:        &countingHistory{},
 		lister:         &countingLister{},
 	}
 }
@@ -221,7 +223,7 @@ func TestApplyTheme_PerformsNoFileRead(t *testing.T) {
 			AliasEditor:    stores.aliasEditor,
 			ModePersister:  stores.modePersister,
 			ThemePersister: stores.themePersister,
-			Reader:         stores.scrollback,
+			History:        stores.history,
 		})
 		m.termWidth, m.termHeight = 120, 40
 		m.applySessionListSize(m.contentWidth(), m.contentHeight())
@@ -234,9 +236,9 @@ func TestApplyTheme_PerformsNoFileRead(t *testing.T) {
 		}
 
 		if got := stores.calls(); got != 0 {
-			t.Errorf("fifty swaps made %d file-touching seam call(s) — a swap reads nothing (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, scrollback %d, lister %d)",
+			t.Errorf("fifty swaps made %d file-touching seam call(s) — a swap reads nothing (project store %d, project editor %d, alias editor %d, mode persister %d, theme persister %d, history %d, lister %d)",
 				got, stores.projectStore.calls, stores.projectEditor.calls, stores.aliasEditor.calls,
-				stores.modePersister.calls, stores.themePersister.calls, stores.scrollback.calls, stores.lister.calls)
+				stores.modePersister.calls, stores.themePersister.calls, stores.history.calls, stores.lister.calls)
 		}
 	})
 
@@ -265,10 +267,10 @@ func newSwapFrameModel(t *testing.T, before theme.Theme, colourless bool) Model 
 	t.Helper()
 	const w, h = 120, 40
 
-	sessions := make([]tmux.Session, 0, swapProbeSessions)
+	sessions := make([]Session, 0, swapProbeSessions)
 	projects := make([]project.Project, 0, swapProbeSessions)
 	for i := range swapProbeSessions {
-		sessions = append(sessions, tmux.Session{Name: nameN(i), Windows: 1, Dir: "/Users/leeovery/Code/" + nameN(i)})
+		sessions = append(sessions, Session{Name: nameN(i), Dir: "/Users/leeovery/Code/" + nameN(i)})
 		projects = append(projects, project.Project{Name: nameN(i), Path: "/Users/leeovery/Code/" + nameN(i)})
 	}
 

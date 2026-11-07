@@ -1,45 +1,43 @@
 package cmd
 
 import (
+	"context"
 	"strings"
 
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/tmux"
-	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
-// completionSessions builds its own client rather than reaching for the
-// context-injected one: completion runs on the bootstrap-exempt __complete
-// path, where cmd.Context() carries no client and tmuxClient would panic.
-var completionSessions = func() []tmux.Session {
-	sessions, err := tmux.DefaultClient().ListSessions()
+// completionSessions is the user's session names, Portal's own hidden, and
+// the session this process runs in. A failed listing offers no names: a
+// completion degrades to no suggestions, never to an error.
+func completionSessions() (names []string, current string) {
+	b, err := sessionBackend()
 	if err != nil {
-		return nil
+		return nil, ""
 	}
-	return sessions
-}
-
-// completionCurrentSession builds its own client for the same reason as its
-// neighbour: the bootstrap-exempt __complete path carries no context client.
-var completionCurrentSession = func() string {
-	return currentPickerSession(tmux.DefaultClient())
+	names, err = userSessionNames(context.Background(), b)
+	if err != nil {
+		return nil, ""
+	}
+	return names, b.Current()
 }
 
 // completeSessionNames filters by prefix itself, because cobra does not
 // prefix-filter a dynamic completion func's returns, and suppresses file
 // completion so the shell never merges paths into the session-name list.
 func completeSessionNames(toComplete string) ([]string, cobra.ShellCompDirective) {
+	names, _ := completionSessions()
 	var matches []string
-	for _, s := range completionSessions() {
-		if strings.HasPrefix(s.Name, toComplete) {
-			matches = append(matches, s.Name)
+	for _, name := range names {
+		if strings.HasPrefix(name, toComplete) {
+			matches = append(matches, name)
 		}
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-// Reads only the aliases config file, so it needs no tmux client on the
+// Reads only the aliases config file, so it needs no backend on the
 // bootstrap-exempt __complete path. Any error yields nil, degrading to zero
 // suggestions rather than a failure.
 var completionAliasKeys = func() []string {
@@ -63,20 +61,17 @@ func completeAliasKeys(toComplete string) ([]string, cobra.ShellCompDirective) {
 // completeSearchTerm completes a search-form word against the sessions the sigil
 // searches, matching on the term after the slash and offering each candidate
 // with the slash still on the front: the shell discards any candidate that is
-// not an extension of the word being completed. The searched set comes from
-// tui.PickerSessions, and whether a completed name still composes a search word
-// is asked of resolver.IsSearchSigil — a name that fails it would compose a
-// second slash, which the parser reads as a path rather than a search.
+// not an extension of the word being completed. The searched set leaves out
+// the session the caller is in, as the picker does. No session name holds a
+// slash, so every candidate still composes a search word.
 func completeSearchTerm(toComplete string) ([]string, cobra.ShellCompDirective) {
 	term := resolver.SearchTerm(toComplete)
+	names, current := completionSessions()
 
 	var matches []string
-	for _, s := range tui.PickerSessions(completionSessions(), completionCurrentSession()) {
-		if !resolver.IsSearchSigil("/" + s.Name) {
-			continue
-		}
-		if strings.HasPrefix(s.Name, term) {
-			matches = append(matches, "/"+s.Name)
+	for _, name := range names {
+		if name != current && strings.HasPrefix(name, term) {
+			matches = append(matches, "/"+name)
 		}
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp

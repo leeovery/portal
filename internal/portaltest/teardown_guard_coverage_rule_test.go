@@ -219,7 +219,7 @@ func TestCoverageRuleFailsAFixtureStartingAServerBeforeIsolating(t *testing.T) {
 	if scanned != 1 {
 		t.Fatalf("scanned = %d, want 1", scanned)
 	}
-	want := "server_first_test.go TestX: starts a tmux server at line 6 before isolating at line 7"
+	want := "server_first_test.go TestX: starts a session server at line 6 before isolating at line 7"
 	if len(defects) != 1 || defects[0] != want {
 		t.Fatalf("defects = %v, want [%s]; a server started before the isolation must fail the rule", defects, want)
 	}
@@ -231,7 +231,7 @@ func TestCoverageRuleFailsAFixtureRegisteringTheTeardownGuardAfterTheServer(t *t
 	if scanned != 1 {
 		t.Fatalf("scanned = %d, want 1", scanned)
 	}
-	want := "late_guard_test.go TestX: starts a tmux server at line 8 before registering the teardown guard at line 9"
+	want := "late_guard_test.go TestX: starts a session server at line 8 before registering the teardown guard at line 9"
 	if len(defects) != 1 || defects[0] != want {
 		t.Fatalf("defects = %v, want [%s]; LIFO cleanup makes a guard registered after the server useless", defects, want)
 	}
@@ -359,7 +359,7 @@ func TestCoverageRuleFailsAFixtureWhoseServerStartsInAPackageLocalHelper(t *test
 		t.Fatalf("scanned = %d, want 1; taking the server from a same-package helper must not "+
 			"put the fixture out of the rule's reach", scanned)
 	}
-	want := "through_helper_test.go TestX: starts a tmux server at line 8 without calling " + guardCall
+	want := "through_helper_test.go TestX: starts a session server at line 8 without calling " + guardCall
 	if len(defects) != 1 || defects[0] != want {
 		t.Fatalf("defects = %v, want [%s]", defects, want)
 	}
@@ -393,5 +393,41 @@ func TestCoverageRuleDoesNotFollowAnArrangeInAnotherPackage(t *testing.T) {
 	}
 	if len(defects) != 0 {
 		t.Fatalf("defects = %v, want none over a fixture the rule cannot reach", defects)
+	}
+}
+
+// zmxFixture is a fixture whose session server is a zmxtest directory, its
+// calls in the order body gives them.
+func zmxFixture(body string) string {
+	return "package x\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {\n" + body + "}\n"
+}
+
+func TestCoverageRuleHoldsAZmxFixtureToTheSameRule(t *testing.T) {
+	const (
+		isolate = "\tenv, stateDir := portaltest.IsolateStateForTest(t)\n"
+		guard   = "\tportaltest.RegisterStateDirTeardownGuard(t, stateDir)\n"
+		server  = "\tb := zmxtest.New(t)\n\t_, _ = env, b\n"
+	)
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{name: "isolated and guarded before the server, it passes", body: isolate + guard + server},
+		{name: "with no guard, it fails", body: isolate + server, want: "without calling " + guardCall},
+		{name: "guarded after the server, it fails", body: isolate + server + guard, want: "starts a session server at line 7 before registering the teardown guard at line 9"},
+		{name: "started before the isolation, it fails", body: server + isolate + guard, want: "starts a session server at line 6 before isolating at line 8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scanned, defects := auditFixtureCoverage(scanFixture(t, "zmx_test.go", zmxFixture(tc.body)))
+
+			if scanned != 1 {
+				t.Fatalf("scanned = %d, want 1; a zmxtest.New fixture pairing a state dir is in the rule's reach", scanned)
+			}
+			switch {
+			case tc.want == "" && len(defects) != 0:
+				t.Fatalf("defects = %v, want none", defects)
+			case tc.want != "" && (len(defects) != 1 || !strings.Contains(defects[0], tc.want)):
+				t.Fatalf("defects = %v, want one saying %q", defects, tc.want)
+			}
+		})
 	}
 }

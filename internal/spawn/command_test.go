@@ -6,17 +6,28 @@ import (
 	"testing"
 )
 
+// testWindowEnv stands for an opener's window environment: a variable it
+// lacks, then its PATH and its resolved zmx and state directories.
+var testWindowEnv = WindowEnvironment{
+	Unset: []string{"PORTAL_HOOKS_FILE"},
+	Set: []string{
+		"PATH=/opt/homebrew/bin:/usr/bin",
+		"ZMX_DIR=/Users/me/.local/state/zmx",
+		"PORTAL_STATE_DIR=/Users/me/portal-state",
+	},
+}
+
 func fixedExe(path string) ExecutableResolver {
 	return func() (string, error) { return path, nil }
 }
 
 func TestComposeOpenArgv(t *testing.T) {
-	t.Run("an attach surface composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> open --session <name> --ack <batch>:<token>", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
+	t.Run("an attach surface composes env -u ZMX_SESSION -u TMUX -u TMUX_PANE <window env> <exe> open --session <name> --ack <batch>:<token>", func(t *testing.T) {
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/opt/homebrew/bin:/usr/bin",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+			"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 			"/abs/portal", "open", "--session", "proj-abc123",
 			"--ack", "b1:t1",
 		}
@@ -25,12 +36,12 @@ func TestComposeOpenArgv(t *testing.T) {
 		}
 	})
 
-	t.Run("a mint surface composes env -u TMUX -u TMUX_PANE PATH=<full> <exe> open --path <literal-dir> --ack <batch>:<token>", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", nil)
+	t.Run("a mint surface composes env -u ZMX_SESSION -u TMUX -u TMUX_PANE <window env> <exe> open --path <literal-dir> --ack <batch>:<token>", func(t *testing.T) {
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", nil)
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/opt/homebrew/bin:/usr/bin",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+			"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 			"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 			"--ack", "b1:t1",
 		}
@@ -39,36 +50,34 @@ func TestComposeOpenArgv(t *testing.T) {
 		}
 	})
 
-	t.Run("it injects only PATH and strips TMUX/TMUX_PANE via explicit -u unsets", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
+	t.Run("it unsets ZMX_SESSION, TMUX, TMUX_PANE and the window environment's unset, then assigns its set verbatim and in order", func(t *testing.T) {
+		env := WindowEnvironment{
+			Unset: []string{"XDG_CONFIG_HOME", "PORTAL_LOG_LEVEL"},
+			Set:   []string{"PATH=/usr/bin", "PORTAL_THEMES_DIR=", "PORTAL_HOOKS_FILE=/Users/me/my config/hooks.json"},
+		}
+		got := composeOpenArgv("/abs/portal", env, Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", nil)
 
-		var pathAssignments, tmuxAssignments, tmuxPaneAssignments int
+		want := []string{"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "XDG_CONFIG_HOME", "-u", "PORTAL_LOG_LEVEL"}
+		want = append(append(want, env.Set...), "/abs/portal")
+		if !slices.Equal(got[:len(want)], want) {
+			t.Errorf("argv opens %#v, want %#v", got[:len(want)], want)
+		}
 		for _, elem := range got {
-			switch {
-			case strings.HasPrefix(elem, "PATH="):
-				pathAssignments++
-			case strings.HasPrefix(elem, "TMUX="):
-				tmuxAssignments++
-			case strings.HasPrefix(elem, "TMUX_PANE="):
-				tmuxPaneAssignments++
+			for _, stripped := range []string{"ZMX_SESSION=", "TMUX=", "TMUX_PANE="} {
+				if strings.HasPrefix(elem, stripped) {
+					t.Errorf("argv assigns %s; want only its -u unset; argv = %#v", stripped, got)
+				}
 			}
 		}
-		if pathAssignments != 1 {
-			t.Errorf("PATH= assignment count = %d, want exactly 1; argv = %#v", pathAssignments, got)
-		}
-		if tmuxAssignments != 0 {
-			t.Errorf("TMUX= assignment count = %d, want 0 (only the -u unset); argv = %#v", tmuxAssignments, got)
-		}
-		if tmuxPaneAssignments != 0 {
-			t.Errorf("TMUX_PANE= assignment count = %d, want 0 (only the -u unset); argv = %#v", tmuxPaneAssignments, got)
-		}
-		if !slices.Contains(got, "-u") {
-			t.Errorf("argv missing the -u unset flag; argv = %#v", got)
+		for _, name := range []string{"ZMX_SESSION", "TMUX", "TMUX_PANE"} {
+			if i := slices.Index(got, name); i < 1 || got[i-1] != "-u" {
+				t.Errorf("argv does not unset %s with -u; argv = %#v", name, got)
+			}
 		}
 	})
 
 	t.Run("it keeps a session name with spaces as a single unquoted argv element", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceAttach, Value: "my session"}, "b1", "t1", nil)
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceAttach, Value: "my session"}, "b1", "t1", nil)
 
 		flagIdx := slices.Index(got, "--session")
 		if flagIdx < 0 || flagIdx+1 >= len(got) {
@@ -85,7 +94,7 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("it keeps a mint directory with spaces as a single unquoted argv element", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/my projects/foo"}, "b1", "t1", nil)
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceMint, Value: "/Users/me/my projects/foo"}, "b1", "t1", nil)
 
 		flagIdx := slices.Index(got, "--path")
 		if flagIdx < 0 || flagIdx+1 >= len(got) {
@@ -102,7 +111,7 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("it uses the provided executable path rather than a bare portal lookup", func(t *testing.T) {
-		got := composeOpenArgv("/usr/local/bin/portal-v2", "/usr/bin", Surface{Kind: SurfaceAttach, Value: "s1"}, "b1", "t1", nil)
+		got := composeOpenArgv("/usr/local/bin/portal-v2", testWindowEnv, Surface{Kind: SurfaceAttach, Value: "s1"}, "b1", "t1", nil)
 
 		openIdx := slices.Index(got, "open")
 		if openIdx < 1 {
@@ -117,7 +126,7 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("it appends --ack <batch>:<token> as the final two argv elements", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceAttach, Value: "s1"}, "batchA", "tokenB", nil)
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceAttach, Value: "s1"}, "batchA", "tokenB", nil)
 
 		if len(got) < 2 {
 			t.Fatalf("argv too short to carry the ack flag: %#v", got)
@@ -134,11 +143,11 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("a mint surface WITH a command appends -- <cmd...> after --ack (whole-argv slice)", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/opt/homebrew/bin:/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", []string{"claude", "--resume"})
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", []string{"claude", "--resume"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/opt/homebrew/bin:/usr/bin",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+			"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 			"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 			"--ack", "b1:t1",
 			"--", "claude", "--resume",
@@ -149,11 +158,11 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("an attach surface never carries the command even when one is passed", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", []string{"claude"})
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceAttach, Value: "proj-abc123"}, "b1", "t1", []string{"claude"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/usr/bin",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+			"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 			"/abs/portal", "open", "--session", "proj-abc123",
 			"--ack", "b1:t1",
 		}
@@ -167,11 +176,11 @@ func TestComposeOpenArgv(t *testing.T) {
 
 	t.Run("a mint surface with an empty command appends no bare -- terminator", func(t *testing.T) {
 		for _, cmd := range [][]string{nil, {}} {
-			got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", cmd)
+			got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceMint, Value: "/Users/me/projects/foo"}, "b1", "t1", cmd)
 
 			want := []string{
-				"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-				"PATH=/usr/bin",
+				"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+				"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 				"/abs/portal", "open", "--path", "/Users/me/projects/foo",
 				"--ack", "b1:t1",
 			}
@@ -185,11 +194,11 @@ func TestComposeOpenArgv(t *testing.T) {
 	})
 
 	t.Run("a single-string command stays ONE argv element after -- (no word-splitting)", func(t *testing.T) {
-		got := composeOpenArgv("/abs/portal", "/usr/bin", Surface{Kind: SurfaceMint, Value: "/repo/api"}, "b1", "t1", []string{"npm run dev"})
+		got := composeOpenArgv("/abs/portal", testWindowEnv, Surface{Kind: SurfaceMint, Value: "/repo/api"}, "b1", "t1", []string{"npm run dev"})
 
 		want := []string{
-			"/usr/bin/env", "-u", "TMUX", "-u", "TMUX_PANE",
-			"PATH=/usr/bin",
+			"/usr/bin/env", "-u", "ZMX_SESSION", "-u", "TMUX", "-u", "TMUX_PANE", "-u", "PORTAL_HOOKS_FILE",
+			"PATH=/opt/homebrew/bin:/usr/bin", "ZMX_DIR=/Users/me/.local/state/zmx", "PORTAL_STATE_DIR=/Users/me/portal-state",
 			"/abs/portal", "open", "--path", "/repo/api",
 			"--ack", "b1:t1",
 			"--", "npm run dev",

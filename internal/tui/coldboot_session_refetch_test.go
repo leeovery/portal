@@ -8,15 +8,18 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
+// idleBootstrap is a bootstrap behind the picker that sends nothing, for a
+// test that drives the loading page's messages itself.
+func idleBootstrap() tea.Msg { return nil }
+
 type coldBootStepLister struct {
-	steps [][]tmux.Session
+	steps [][]Session
 	calls int
 }
 
-func (l *coldBootStepLister) ListSessions() ([]tmux.Session, error) {
+func (l *coldBootStepLister) ListSessions() ([]Session, error) {
 	idx := l.calls
 	l.calls++
 	if idx >= len(l.steps) {
@@ -25,7 +28,7 @@ func (l *coldBootStepLister) ListSessions() ([]tmux.Session, error) {
 	return l.steps[idx], nil
 }
 
-func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []tmux.Session) Model {
+func driveColdBootToSessions(t *testing.T, m Model, staleSnapshot []Session) Model {
 	t.Helper()
 
 	var model tea.Model = m
@@ -53,10 +56,10 @@ func oneProjectLoaded() []project.Project {
 	return []project.Project{{Path: "/p/one", Name: "one"}}
 }
 
-func twoRestoredSessions() []tmux.Session {
-	return []tmux.Session{
-		{Name: "restored-alpha", Windows: 1},
-		{Name: "restored-bravo", Windows: 2},
+func twoRestoredSessions() []Session {
+	return []Session{
+		{Name: "restored-alpha"},
+		{Name: "restored-bravo"},
 	}
 }
 
@@ -82,7 +85,7 @@ func assertVisibleSessionNames(t *testing.T, m Model, want []string, context str
 	}
 }
 
-func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []tmux.Session) (Model, tea.Cmd) {
+func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []Session) (Model, tea.Cmd) {
 	t.Helper()
 
 	var model tea.Model = m
@@ -106,7 +109,7 @@ func driveColdBootToTransition(t *testing.T, m Model, staleSnapshot []tmux.Sessi
 	return model.(Model), completeCmd
 }
 
-func driveColdBootWithProjects(t *testing.T, m Model, staleSnapshot []tmux.Session) Model {
+func driveColdBootWithProjects(t *testing.T, m Model, staleSnapshot []Session) Model {
 	t.Helper()
 	interim, completeCmd := driveColdBootToTransition(t, m, staleSnapshot)
 	return drainBatchToModel(t, interim, completeCmd)
@@ -141,13 +144,12 @@ func drainBatchToModel(t *testing.T, m Model, cmd tea.Cmd) Model {
 }
 
 func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	)
 
 	final := driveColdBootToSessions(t, m, stale)
@@ -169,13 +171,12 @@ func TestColdBoot_PostCompleteRefetch_ReflectsRestoredSessions(t *testing.T) {
 }
 
 func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
-	stale := []tmux.Session{}
-	restored := []tmux.Session{{Name: "fast-restored", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	stale := []Session{}
+	restored := []Session{{Name: "fast-restored"}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	)
 
 	var model tea.Model = m
@@ -206,13 +207,12 @@ func TestColdBoot_PostCompleteRefetch_CompleteBeforeMinElapsed(t *testing.T) {
 }
 
 func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -227,38 +227,12 @@ func TestColdBoot_NPositive_LandsOnSessions(t *testing.T) {
 		fmt.Sprintf("expected all %d restored names visible", len(want)))
 }
 
-func TestWarmRoute_NoPostCompleteRefetch(t *testing.T) {
-	sessions := []tmux.Session{{Name: "warm-already-live", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{sessions}}
-
-	m := New(lister, WithServerStarted(true))
-
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	model, _ = model.Update(SessionsMsg{Sessions: sessions})
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-
-	callsBefore := lister.calls
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-	if model.(Model).ActivePage() != PageSessions {
-		t.Fatalf("expected PageSessions after min+complete on warm route, got %v", model.(Model).ActivePage())
-	}
-	if completeCmd != nil {
-		t.Errorf("warm/synchronous route must NOT dispatch a post-complete re-fetch (or any cmd with no warnings); got non-nil cmd %T", completeCmd)
-		drainBatchToModel(t, model.(Model), completeCmd)
-	}
-	if lister.calls != callsBefore {
-		t.Errorf("warm/synchronous route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
-	}
-}
-
 func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
-	stale := []tmux.Session{}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
+	stale := []Session{}
+	lister := &coldBootStepLister{steps: [][]Session{{}}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -274,13 +248,12 @@ func TestColdBoot_ZeroSessions_LandsOnProjects(t *testing.T) {
 }
 
 func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	).WithInitialFilter("alpha")
 
@@ -309,68 +282,12 @@ func TestColdBoot_InitialFilter_RoutesToSessions(t *testing.T) {
 	}
 }
 
-func TestWarmRoute_RefetchSessionsAfterRestore_Nil(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
-
-	warm := New(lister, WithServerStarted(true))
-	if cmd := warm.refetchSessionsAfterRestore(); cmd != nil {
-		t.Errorf("warm route (progressReceiver == nil) must return a nil refetch cmd, got non-nil")
-	}
-
-	cold := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
-	)
-	if cmd := cold.refetchSessionsAfterRestore(); cmd == nil {
-		t.Errorf("cold route (progressReceiver != nil) must return a non-nil refetch cmd, got nil")
-	}
-}
-
-func TestWarmRoute_ZeroSessions_LandsOnProjects(t *testing.T) {
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
-
-	m := New(lister,
-		WithServerStarted(true),
-		WithProjectStore(stubProjectStore{}),
-	)
-
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-	model, _ = model.Update(SessionsMsg{Sessions: nil})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after empty SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
-	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
-	model, _ = model.Update(LoadingMinElapsedMsg{})
-	callsBefore := lister.calls
-	model, completeCmd := model.Update(BootstrapCompleteMsg{})
-
-	final := model.(Model)
-	if final.ActivePage() != PageProjects {
-		t.Fatalf("AC5: warm boot with zero sessions must land on PageProjects, got %v", final.ActivePage())
-	}
-
-	if completeCmd != nil {
-		drainBatchToModel(t, final, completeCmd)
-	}
-	if lister.calls != callsBefore {
-		t.Errorf("warm route must NOT re-fetch sessions on complete; ListSessions calls bumped from %d to %d", callsBefore, lister.calls)
-	}
-}
-
 func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
-	sessions := []tmux.Session{{Name: "live-session", Windows: 1}}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{sessions}}
+	sessions := []Session{{Name: "live-session"}}
+	lister := &coldBootStepLister{steps: [][]Session{sessions}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 	).WithCommand([]string{"echo", "hi"})
 
 	if m.ActivePage() != PageProjects {
@@ -389,13 +306,12 @@ func TestCommandPending_LandsOnProjects_NoInterimFlash(t *testing.T) {
 }
 
 func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -423,13 +339,12 @@ func TestColdBoot_InterimPage_IsValidSessions(t *testing.T) {
 // SessionsMsg is injected directly rather than through drainBatchToModel: the
 // drain would resolve the refetch before the late ProjectsLoadedMsg lands.
 func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
-	stale := []tmux.Session{}
+	stale := []Session{}
 	restored := twoRestoredSessions()
-	lister := &coldBootStepLister{steps: [][]tmux.Session{restored}}
+	lister := &coldBootStepLister{steps: [][]Session{restored}}
 
 	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
@@ -465,42 +380,51 @@ func TestColdBoot_LateProjectsLoadedMsg_StillLandsOnSessions(t *testing.T) {
 		fmt.Sprintf("expected all %d restored names visible after the late-ProjectsLoadedMsg interleave", len(want)))
 }
 
-func TestColdBoot_RefetchError_QuitsWithoutStrandingInterim(t *testing.T) {
-	stale := []tmux.Session{}
-	lister := &coldBootStepLister{steps: [][]tmux.Session{{}}}
-
-	m := New(lister,
-		WithServerStarted(true),
-		WithProgressReceiver(func() tea.Msg { return nil }),
+// coldBootInterim is a cold-boot picker past its loading page, showing stale
+// rows ahead of the post-restore refetch, with the landing page still owed.
+func coldBootInterim(t *testing.T, stale []Session) Model {
+	t.Helper()
+	m := New(&coldBootStepLister{steps: [][]Session{stale}},
+		WithBootstrapping(idleBootstrap),
 		WithProjectStore(stubProjectStore{}),
 	)
 
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
 	model, _ = model.Update(SessionsMsg{Sessions: stale})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after stale SessionsMsg, got %v", model.(Model).ActivePage())
-	}
-
 	model, _ = model.Update(ProjectsLoadedMsg{Projects: oneProjectLoaded()})
-	if model.(Model).ActivePage() != PageLoading {
-		t.Fatalf("setup invariant: expected PageLoading after ProjectsLoadedMsg, got %v", model.(Model).ActivePage())
-	}
-
 	model, _ = model.Update(LoadingMinElapsedMsg{})
 	model, _ = model.Update(BootstrapCompleteMsg{})
 
 	interim := model.(Model)
-	if interim.ActivePage() != PageSessions {
-		t.Fatalf("setup invariant: interim page after transition must be PageSessions, got %v", interim.ActivePage())
+	if interim.ActivePage() != PageSessions || interim.sessionsLoaded {
+		t.Fatalf("setup invariant: interim page = %v, sessionsLoaded = %v; want PageSessions with the landing owed", interim.ActivePage(), interim.sessionsLoaded)
 	}
+	return interim
+}
 
-	_, cmd := interim.Update(SessionsMsg{Err: errors.New("tmux refetch failed")})
-	if cmd == nil {
-		t.Fatal("failing refetch SessionsMsg must return a quit command, got nil")
+// The interim list was shown, so a refetch that fails keeps it, flashes, and
+// settles the landing exactly as a refetch answering with the same rows would.
+func TestColdBoot_RefetchError_FlashesAndSettlesOnTheInterim(t *testing.T) {
+	stale := []Session{}
+
+	answered, _ := coldBootInterim(t, stale).Update(SessionsMsg{Sessions: stale, afterRestore: true})
+	updated, cmd := coldBootInterim(t, stale).Update(SessionsMsg{Err: errors.New("zmx: listing timed out"), afterRestore: true})
+	got, want := updated.(Model), answered.(Model)
+
+	if quits(cmd) {
+		t.Error("a failing refetch quit the picker after the interim list was shown")
 	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Errorf("failing refetch SessionsMsg must run tea.Quit (mirroring a failing Init fetch), got %T", cmd())
+	if !got.sessionsLoaded || !got.defaultPageEvaluated {
+		t.Errorf("sessionsLoaded = %v, defaultPageEvaluated = %v; want the landing settled", got.sessionsLoaded, got.defaultPageEvaluated)
+	}
+	if got.ActivePage() != want.ActivePage() || got.ActivePage() != PageProjects {
+		t.Errorf("page = %v, want %v as an answered refetch lands: an empty list lands on Projects", got.ActivePage(), want.ActivePage())
+	}
+	if got.flashText != "zmx: listing timed out" {
+		t.Errorf("flash = %q, want the listing's own words", got.flashText)
+	}
+	if got.ListError() != nil {
+		t.Errorf("ListError() = %v, want nil once a listing answered", got.ListError())
 	}
 }

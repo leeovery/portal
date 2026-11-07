@@ -33,9 +33,9 @@ const (
 )
 
 const (
-	goldenPreviewHintDark  = "\x1b[38;2;122;162;247;48;2;11;12;20m←→\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20mwindow\x1b[m"
-	goldenPreviewHintLight = "\x1b[38;2;45;92;202;48;2;225;226;231m←→\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231mwindow\x1b[m"
-	goldenPreviewHintNoCol = "←→ window"
+	goldenPreviewHintDark  = "\x1b[38;2;122;162;247;48;2;11;12;20m↑↓\x1b[m\x1b[48;2;11;12;20m \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20msession\x1b[m"
+	goldenPreviewHintLight = "\x1b[38;2;45;92;202;48;2;225;226;231m↑↓\x1b[m\x1b[48;2;225;226;231m \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231msession\x1b[m"
+	goldenPreviewHintNoCol = "↑↓ session"
 )
 
 const (
@@ -144,7 +144,7 @@ func TestFooterHintCallSitesByteIdentical(t *testing.T) {
 	t.Run("previewFooterHint", func(t *testing.T) {
 		for _, md := range modes {
 			for _, cl := range []bool{false, true} {
-				got := renderBlueKeyHint("←→", "window", md.th, cl)
+				got := renderBlueKeyHint("↑↓", "session", md.th, cl)
 				exp := goldenPreviewHintDark
 				if md.name == "light" {
 					exp = goldenPreviewHintLight

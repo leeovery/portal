@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const filteringReskinWidth = 120
@@ -17,11 +16,11 @@ const filteringReskinHeight = 40
 
 func filteringTestModel(t *testing.T, th theme.Theme) Model {
 	t.Helper()
-	sessions := []tmux.Session{
-		{Name: "fab-flowx-explore", Windows: 2, Attached: true},
-		{Name: "fab-aws-migration", Windows: 1, Attached: false},
-		{Name: "fabric-lk26UG", Windows: 1, Attached: false},
-		{Name: "other-session", Windows: 1, Attached: false},
+	sessions := []Session{
+		{Name: "fab-flowx-explore", Attached: true},
+		{Name: "fab-aws-migration", Attached: false},
+		{Name: "fabric-lk26UG", Attached: false},
+		{Name: "other-session", Attached: false},
 	}
 	m := Build(Deps{Lister: fakeLister{}, Theme: theme.ConstantNomination(th)})
 	m.termWidth = filteringReskinWidth

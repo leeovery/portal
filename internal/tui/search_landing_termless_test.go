@@ -7,11 +7,10 @@ import (
 	"charm.land/bubbles/v2/list"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestSearchFormLanding_TermlessForm(t *testing.T) {
-	sessions := []tmux.Session{
+	sessions := []Session{
 		{Name: "myapp-dev"},
 		{Name: "other"},
 		{Name: "myapp-prod"},
@@ -133,10 +132,10 @@ func TestSearchFormLanding_TermlessForm(t *testing.T) {
 	})
 }
 
-func groupedSessions(t *testing.T) ([]tmux.Session, []project.Project) {
+func groupedSessions(t *testing.T) ([]Session, []project.Project) {
 	t.Helper()
 	dirA, dirB := t.TempDir(), t.TempDir()
-	return []tmux.Session{
+	return []Session{
 		{Name: "myapp-alpha", Dir: dirA},
 		{Name: "other", Dir: dirB},
 		{Name: "myapp-bravo", Dir: dirB},

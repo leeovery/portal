@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func preRowBg(th theme.Theme, selected, colourless bool) lipgloss.Style {
@@ -132,22 +131,22 @@ func TestRenderLeftBarGlyphColumn_MatchesPreRefactorGolden(t *testing.T) {
 var sessionRowGoldens = map[theme.Member]map[bool]struct{ sel, uns string }{
 	theme.MemberDark: {
 		false: {
-			sel: "\x1b[48;2;40;36;58m\x1b[m\x1b[38;2;187;154;247;48;2;40;36;58m▌\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58malpha\x1b[m\x1b[48;2;40;36;58m                                                        \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[38;2;169;177;214;48;2;40;36;58m3 windows\x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[38;2;158;206;106;48;2;40;36;58m●\x1b[m\x1b[48;2;40;36;58m  \x1b[m",
-			uns: "\x1b[48;2;11;12;20m\x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mbravo\x1b[m\x1b[48;2;11;12;20m                                                        \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[38;2;115;122;162;48;2;11;12;20m1 window\x1b[m\x1b[48;2;11;12;20m   \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m",
+			sel: "\x1b[48;2;40;36;58m\x1b[m\x1b[38;2;187;154;247;48;2;40;36;58m▌\x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[1;38;2;255;255;255;48;2;40;36;58malpha\x1b[m\x1b[48;2;40;36;58m                                                                   \x1b[m\x1b[48;2;40;36;58m  \x1b[m\x1b[48;2;40;36;58m \x1b[m\x1b[38;2;158;206;106;48;2;40;36;58m●\x1b[m\x1b[48;2;40;36;58m  \x1b[m",
+			uns: "\x1b[48;2;11;12;20m\x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[1;38;2;192;202;245;48;2;11;12;20mbravo\x1b[m\x1b[48;2;11;12;20m                                                                   \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m\x1b[48;2;11;12;20m  \x1b[m",
 		},
 		true: {
-			sel: "▌ \x1b[1malpha\x1b[m                                                          3 windows   A  ",
-			uns: "  \x1b[1mbravo\x1b[m                                                          1 window       ",
+			sel: "▌ \x1b[1malpha\x1b[m                                                                      A  ",
+			uns: "  \x1b[1mbravo\x1b[m                                                                         ",
 		},
 	},
 	theme.MemberLight: {
 		false: {
-			sel: "\x1b[48;2;208;198;240m\x1b[m\x1b[38;2;138;63;209;48;2;208;198;240m▌\x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[1;38;2;26;27;46;48;2;208;198;240malpha\x1b[m\x1b[48;2;208;198;240m                                                        \x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[38;2;63;71;96;48;2;208;198;240m3 windows\x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[38;2;59;94;24;48;2;208;198;240m●\x1b[m\x1b[48;2;208;198;240m  \x1b[m",
-			uns: "\x1b[48;2;225;226;231m\x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[1;38;2;46;60;100;48;2;225;226;231mbravo\x1b[m\x1b[48;2;225;226;231m                                                        \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[38;2;88;96;147;48;2;225;226;231m1 window\x1b[m\x1b[48;2;225;226;231m   \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m",
+			sel: "\x1b[48;2;208;198;240m\x1b[m\x1b[38;2;138;63;209;48;2;208;198;240m▌\x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[1;38;2;26;27;46;48;2;208;198;240malpha\x1b[m\x1b[48;2;208;198;240m                                                                   \x1b[m\x1b[48;2;208;198;240m  \x1b[m\x1b[48;2;208;198;240m \x1b[m\x1b[38;2;59;94;24;48;2;208;198;240m●\x1b[m\x1b[48;2;208;198;240m  \x1b[m",
+			uns: "\x1b[48;2;225;226;231m\x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[1;38;2;46;60;100;48;2;225;226;231mbravo\x1b[m\x1b[48;2;225;226;231m                                                                   \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m\x1b[48;2;225;226;231m  \x1b[m",
 		},
 		true: {
-			sel: "▌ \x1b[1malpha\x1b[m                                                          3 windows   A  ",
-			uns: "  \x1b[1mbravo\x1b[m                                                          1 window       ",
+			sel: "▌ \x1b[1malpha\x1b[m                                                                      A  ",
+			uns: "  \x1b[1mbravo\x1b[m                                                                         ",
 		},
 	},
 }
@@ -194,8 +193,8 @@ func renderProjectRowSnapshot(d ProjectDelegate, width int, items []list.Item, i
 func TestRenderSessionRow_ByteIdenticalAcrossRefactor(t *testing.T) {
 	const w = 80
 	items := flatItems(
-		tmux.Session{Name: "alpha", Windows: 3, Attached: true},
-		tmux.Session{Name: "bravo", Windows: 1, Attached: false},
+		Session{Name: "alpha", Attached: true},
+		Session{Name: "bravo", Attached: false},
 	)
 	for _, appearance := range []theme.Member{theme.MemberDark, theme.MemberLight} {
 		for _, colourless := range []bool{false, true} {

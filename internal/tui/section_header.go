@@ -30,8 +30,12 @@ const (
 	preflightAbortDismissHint = "esc dismiss"
 )
 
-func renderSectionHeader(mode prefs.SessionListMode, insideTmux bool, currentSession string, count, width int, th theme.Theme, colourless bool) string {
-	left := sectionLeftCluster(mode, insideTmux, currentSession, count, th, colourless)
+// The title's room is what the count and the hint leave, so a long current
+// label is cut rather than pushing the hint off the row.
+func renderSectionHeader(mode prefs.SessionListMode, currentSession string, count, width int, th theme.Theme, colourless bool) string {
+	countText := strconv.Itoa(count)
+	titleWidth := headerWidthOrFallback(width) - lipgloss.Width(sectionFilterHint) - 1 - len(" "+countText)
+	left := sectionLeftCluster(sessionListTitleForMode(mode, currentSession, max(titleWidth, 1)), countText, th, colourless)
 	return renderSectionHeaderRow(left, width, th, colourless)
 }
 
@@ -110,16 +114,17 @@ func projectsLeftCluster(count int, th theme.Theme, colourless bool) string {
 }
 
 // Flush at the content's left edge — the same column as the header wordmark and
-// the row cursor. Do not add a leading indent.
-func sectionLeftCluster(mode prefs.SessionListMode, insideTmux bool, currentSession string, count int, th theme.Theme, colourless bool) string {
+// the row cursor. Do not add a leading indent. The count sits between the
+// title's first word and the rest of it.
+func sectionLeftCluster(title, count string, th theme.Theme, colourless bool) string {
 	label := headerStyle(th.AccentMode, th, colourless).Render(sectionLabel)
 
 	gap := headerCanvasBg(th, colourless).Render(" ")
-	countRun := headerStyle(th.StatePositive, th, colourless).Render(strconv.Itoa(count))
+	countRun := headerStyle(th.StatePositive, th, colourless).Render(count)
 
 	cluster := lipgloss.JoinHorizontal(lipgloss.Top, label, gap, countRun)
 
-	if suffix := sectionModeSuffix(mode, insideTmux, currentSession); suffix != "" {
+	if suffix := strings.TrimPrefix(title, sectionLabel); suffix != "" {
 		suffixRun := headerStyle(th.TextMuted, th, colourless).Render(suffix)
 		cluster = lipgloss.JoinHorizontal(lipgloss.Top, cluster, suffixRun)
 	}
@@ -136,11 +141,4 @@ func renderFilterQueryHeader(query string, width int, th theme.Theme, colourless
 	run := headerStyle(th.AccentAttention, th, colourless).Render(filterPromptPrefix + query)
 	runWidth := lipgloss.Width(run)
 	return headerPadRight(run, runWidth, w, th, colourless)
-}
-
-// Stripped from the title producer rather than re-derived, so the wording stays
-// byte-identical. The result carries a leading space, so it renders after the count.
-func sectionModeSuffix(mode prefs.SessionListMode, insideTmux bool, currentSession string) string {
-	title := sessionListTitleForMode(mode, insideTmux, currentSession)
-	return strings.TrimPrefix(title, sectionLabel)
 }

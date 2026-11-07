@@ -13,10 +13,32 @@ func TestMatchesSearchTerm(t *testing.T) {
 	tests := []struct {
 		name        string
 		term        string
+		label       string
 		session     string
 		recordedDir string
 		want        bool
 	}{
+		{
+			name:    "it matches a term contained in the label",
+			term:    "user search",
+			label:   "dotfiles · User Search",
+			session: "dotfiles-PpaTER",
+			want:    true,
+		},
+		{
+			name:    "it still matches the name of a labelled session",
+			term:    "ppater",
+			label:   "dotfiles · user search",
+			session: "dotfiles-PpaTER",
+			want:    true,
+		},
+		{
+			name:    "a term spanning the label and the name is not a match",
+			term:    "search dotfiles",
+			label:   "user search",
+			session: "dotfiles-PpaTER",
+			want:    false,
+		},
 		{
 			name:    "it matches a term contained in the session name",
 			term:    "port",
@@ -126,20 +148,16 @@ func TestMatchesSearchTerm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("HOME", home)
-
-			got := resolver.MatchesSearchTerm(tt.term, tt.session, tt.recordedDir)
+			got := resolver.MatchesSearchTerm(home, tt.term, resolver.SearchSubject{Label: tt.label, Name: tt.session, Dir: tt.recordedDir})
 			if got != tt.want {
-				t.Errorf("MatchesSearchTerm(%q, %q, %q) = %v, want %v", tt.term, tt.session, tt.recordedDir, got, tt.want)
+				t.Errorf("MatchesSearchTerm(%q, %q, %q/%q/%q) = %v, want %v", home, tt.term, tt.label, tt.session, tt.recordedDir, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMatchesSearchTermUnresolvableHome(t *testing.T) {
-	t.Setenv("HOME", "")
-
-	if !resolver.MatchesSearchTerm("Users", "api-work", "/Users/leeovery/Code/portal") {
-		t.Error("MatchesSearchTerm should compare the raw recorded path when the home directory cannot be resolved")
+func TestMatchesSearchTermWithNoHome(t *testing.T) {
+	if !resolver.MatchesSearchTerm("", "home", resolver.SearchSubject{Name: "api-work", Dir: "/home/user/code/portal"}) {
+		t.Error("MatchesSearchTerm with no home should compare the raw recorded path")
 	}
 }

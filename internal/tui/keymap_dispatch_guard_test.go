@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 type dispatchProbe struct {
@@ -75,8 +74,7 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 		}},
 		"␣": {press: tea.KeyPressMsg{Code: tea.KeySpace}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
-			m.enumerator = keymapParityEnumerator{}
-			m.reader = keymapParityReader{}
+			m.history = newPreviewHistory(keymapParityHistory{})
 			m = pressSession(t, m, tea.KeyPressMsg{Code: tea.KeySpace})
 			return m.activePage == pagePreview
 		}},
@@ -99,7 +97,7 @@ func TestSessionsDescriptorDispatchParity(t *testing.T) {
 		}},
 		"r": {press: tea.KeyPressMsg{Code: 'r', Text: "r"}, honour: func(t *testing.T) bool {
 			m := sessionsGuardModel(t)
-			m.sessionRenamer = keymapParityRenamer{}
+			m.sessionLabeller = keymapParityLabeller{}
 			m = pressSession(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 			return m.modal == modalRename
 		}},
@@ -192,6 +190,22 @@ func TestProjectsDescriptorDispatchParity(t *testing.T) {
 	assertDescriptorDispatchParity(t, "projects", projectsKeymap(), probes)
 }
 
+func TestHelpModalDescriptorDispatchParity(t *testing.T) {
+	probes := map[string]dispatchProbe{
+		helpScrollKey: {press: tea.KeyPressMsg{Code: tea.KeyDown}, honour: func(t *testing.T) bool {
+			top := helpOpenAt(t, shortModalWidth, shortModalHeight)
+			scrolled := pressed(t, top, tea.KeyPressMsg{Code: tea.KeyDown})
+			return drawn(scrolled) != drawn(top) && drawn(pressed(t, scrolled, tea.KeyPressMsg{Code: tea.KeyUp})) == drawn(top)
+		}},
+		"esc": {press: tea.KeyPressMsg{Code: tea.KeyEscape}, honour: func(t *testing.T) bool {
+			m := pressed(t, helpOpenAt(t, shortModalWidth, shortModalHeight), tea.KeyPressMsg{Code: tea.KeyEscape})
+			return m.modal == modalNone
+		}},
+	}
+
+	assertDescriptorDispatchParity(t, "help modal", helpModalKeymap(), probes)
+}
+
 func TestPreviewDescriptorDispatchParity(t *testing.T) {
 	probes := map[string]dispatchProbe{
 		"j/k": {press: tea.KeyPressMsg{Code: 'j', Text: "j"}, honour: func(t *testing.T) bool {
@@ -219,17 +233,6 @@ func TestPreviewDescriptorDispatchParity(t *testing.T) {
 			endHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 			return homeHandled && endHandled
 		}},
-		"←→": {press: tea.KeyPressMsg{Code: tea.KeyLeft}, honour: func(t *testing.T) bool {
-			m := previewGuardModel(t)
-			leftHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyLeft})
-			rightHandled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyRight})
-			return leftHandled && rightHandled
-		}},
-		"⇥": {press: tea.KeyPressMsg{Code: tea.KeyTab}, honour: func(t *testing.T) bool {
-			m := previewGuardModel(t)
-			handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyTab})
-			return handled
-		}},
 		"⏎": {press: tea.KeyPressMsg{Code: tea.KeyEnter}, honour: func(t *testing.T) bool {
 			m := previewGuardModel(t)
 			handled, _, _ := m.handlePreviewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -251,10 +254,10 @@ func TestPreviewDescriptorDispatchParity(t *testing.T) {
 
 func sessionsGuardModel(t *testing.T) Model {
 	t.Helper()
-	return NewModelWithSessions([]tmux.Session{
-		{Name: "alpha", Windows: 1},
-		{Name: "bravo", Windows: 2},
-		{Name: "charlie", Windows: 3},
+	return NewModelWithSessions([]Session{
+		{Name: "alpha"},
+		{Name: "bravo"},
+		{Name: "charlie"},
 	})
 }
 

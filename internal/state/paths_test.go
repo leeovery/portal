@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
@@ -177,14 +176,15 @@ func TestAccessors(t *testing.T) {
 			got  string
 			want string
 		}{
-			{"sessions.json", state.SessionsJSON(dir), filepath.Join(dir, "sessions.json")},
-			{"save.requested", state.SaveRequested(dir), filepath.Join(dir, "save.requested")},
 			{"daemon.pid", state.DaemonPID(dir), filepath.Join(dir, "daemon.pid")},
 			{"daemon.version", state.DaemonVersion(dir), filepath.Join(dir, "daemon.version")},
 			{"daemon.lock", state.DaemonLock(dir), filepath.Join(dir, "daemon.lock")},
 			{"portal.log", state.PortalLog(dir), filepath.Join(dir, "portal.log")},
-			{"portal.log.old", state.PortalLogOld(dir), filepath.Join(dir, "portal.log.old")},
 			{"scrollback dir", state.ScrollbackDir(dir), filepath.Join(dir, "scrollback")},
+			{"the tmux version's migrated state, beside it", state.TmuxStateDir(dir), "/tmp/state-tmux"},
+			{"the tmux version's migrated state, beside it given with a trailing separator", state.TmuxStateDir(dir + "/"), "/tmp/state-tmux"},
+			{"a migration's staging dir, beside it", state.MigrationStagingDir(dir), "/tmp/state-migrating"},
+			{"a migration's staging dir, beside it given with a trailing separator", state.MigrationStagingDir(dir + "/"), "/tmp/state-migrating"},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
@@ -192,130 +192,6 @@ func TestAccessors(t *testing.T) {
 					t.Errorf("%s = %q; want %q", c.name, c.got, c.want)
 				}
 			})
-		}
-	})
-
-	t.Run("builds scrollback file path from paneKey", func(t *testing.T) {
-		got := state.ScrollbackFile(dir, "work__0.1")
-		want := filepath.Join(dir, "scrollback", "work__0.1.bin")
-		if got != want {
-			t.Errorf("ScrollbackFile = %q; want %q", got, want)
-		}
-	})
-
-	t.Run("builds hydration FIFO path from paneKey", func(t *testing.T) {
-		got := state.FIFOPath(dir, "work__0.1")
-		want := filepath.Join(dir, "hydrate-work__0.1.fifo")
-		if got != want {
-			t.Errorf("FIFOPath = %q; want %q", got, want)
-		}
-	})
-}
-
-func TestPaneKeyFromFIFOPath(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "absolute path with hydrate prefix and .fifo suffix",
-			in:   "/var/lib/portal/state/hydrate-work__0.1.fifo",
-			want: "work__0.1",
-		},
-		{
-			name: "basename only with hydrate prefix and .fifo suffix",
-			in:   "hydrate-foo__0.0.fifo",
-			want: "foo__0.0",
-		},
-		{
-			name: "round-trips state.FIFOPath",
-			in:   state.FIFOPath("/tmp/portal-state", "myproj__1.2"),
-			want: "myproj__1.2",
-		},
-		{
-			name: "idempotent on input lacking prefix and suffix",
-			in:   "already-bare",
-			want: "already-bare",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := state.PaneKeyFromFIFOPath(c.in)
-			if got != c.want {
-				t.Errorf("PaneKeyFromFIFOPath(%q) = %q; want %q", c.in, got, c.want)
-			}
-		})
-	}
-}
-
-func TestTouchSaveRequested(t *testing.T) {
-	t.Run("creates save.requested with mtime near now", func(t *testing.T) {
-		dir := t.TempDir()
-
-		before := time.Now()
-		if err := state.TouchSaveRequested(dir); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		after := time.Now()
-
-		path := state.SaveRequested(dir)
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat save.requested: %v", err)
-		}
-		if info.Size() != 0 {
-			t.Errorf("save.requested size = %d; want 0", info.Size())
-		}
-		mtime := info.ModTime()
-		// The 2s slack absorbs filesystem mtime resolution.
-		if mtime.Before(before.Add(-2*time.Second)) || mtime.After(after.Add(2*time.Second)) {
-			t.Errorf("mtime = %v; want within [%v, %v] (±2s)", mtime, before, after)
-		}
-	})
-
-	t.Run("bumps mtime on an already-present save.requested", func(t *testing.T) {
-		dir := t.TempDir()
-		path := state.SaveRequested(dir)
-
-		if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
-			t.Fatalf("seed save.requested: %v", err)
-		}
-		old := time.Now().Add(-1 * time.Hour)
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatalf("set old mtime: %v", err)
-		}
-
-		before := time.Now()
-		if err := state.TouchSaveRequested(dir); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("stat: %v", err)
-		}
-		if info.Size() != 0 {
-			t.Errorf("save.requested truncated size = %d; want 0", info.Size())
-		}
-		if !info.ModTime().After(old) {
-			t.Errorf("mtime not bumped: got %v; want after %v", info.ModTime(), old)
-		}
-		if info.ModTime().Before(before.Add(-2 * time.Second)) {
-			t.Errorf("mtime = %v; expected near %v", info.ModTime(), before)
-		}
-	})
-
-	t.Run("returns wrapped error when parent directory does not exist", func(t *testing.T) {
-		root := t.TempDir()
-		missing := filepath.Join(root, "does-not-exist")
-
-		err := state.TouchSaveRequested(missing)
-		if err == nil {
-			t.Fatal("expected error when parent dir is missing, got nil")
-		}
-		if _, statErr := os.Stat(state.SaveRequested(missing)); !os.IsNotExist(statErr) {
-			t.Errorf("save.requested should not exist; stat err = %v", statErr)
 		}
 	})
 }

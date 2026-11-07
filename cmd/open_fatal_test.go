@@ -6,16 +6,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 )
 
 func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 	fatal := bootstrap.NewFatal("Portal failed to set @portal-restoring marker: permission denied", errors.New("permission denied"))
 
-	lister := &mockSessionLister{}
+	lister := fakePickerLister()
 	receiver := tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} })
-	m := tui.New(lister, tui.WithServerStarted(true), tui.WithProgressReceiver(receiver))
+	m := tui.New(lister, tui.WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, _ = model.Update(tui.BootstrapFatalMsg{FailedStep: 3, Message: fatal.UserMessage, Err: fatal})
@@ -41,7 +40,7 @@ func TestProcessTUIResult_ReturnsFatalError(t *testing.T) {
 
 func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	t.Run("clean exit returns nil and does not connect", func(t *testing.T) {
-		m := tui.New(&mockSessionLister{})
+		m := tui.New(fakePickerLister())
 		connector := &mockSessionConnector{}
 		if err := processTUIResult(m, connector); err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -52,7 +51,7 @@ func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 	})
 
 	t.Run("selection still connects", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{{Name: "dev", Windows: 1}})
+		m := tui.NewModelWithSessions([]tui.Session{{Name: "dev"}})
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -65,4 +64,23 @@ func TestProcessTUIResult_NoFatalUnchanged(t *testing.T) {
 			t.Errorf("connector called with %q, want %q", connector.connectedTo, "dev")
 		}
 	})
+}
+
+func TestProcessTUIResult_AFirstListingThatFailed(t *testing.T) {
+	listErr := errors.New("zmx: listing timed out")
+	var model tea.Model = tui.New(fakePickerLister())
+	model, _ = model.Update(tui.SessionsMsg{Err: listErr})
+
+	connector := &mockSessionConnector{}
+	err := processTUIResult(model.(tui.Model), connector)
+
+	if !errors.Is(err, listErr) {
+		t.Fatalf("processTUIResult error = %v, want %v", err, listErr)
+	}
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
+		t.Errorf("a failed listing was reported as a bootstrap fatal: %v", fatal)
+	}
+	if connector.connectedTo != "" {
+		t.Errorf("connector was called on a failed listing (%q); must skip connect", connector.connectedTo)
+	}
 }

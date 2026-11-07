@@ -16,7 +16,7 @@ diff_exclude = [
     '**/*_test.go',   # Go tests, incl. large byte-exact golden fixtures (the dominant diff-size contributor); notes describe behaviour, not test scaffolding
     'testdata/**',    # vhs capture tapes + reference/capture PNGs (visual-test fixtures)
     'art/**',         # README screenshot + demo-clip assets (docs, not source)
-    'demo/**',        # sandboxed demo-recording harness (Dockerfiles, tapes, scripts)
+    'demo/**',        # demo tapes and their recording scripts: vhs runs capturetool, which plays each scenario in-process
 ]
 
 [release]

@@ -1,35 +1,36 @@
 package tui
 
 import (
-	"fmt"
-
 	"github.com/leeovery/portal/internal/theme"
 )
 
 const (
 	killTitle       = "Kill session?"
-	killConsequence = "Ends the tmux session and all its panes. Can't be undone."
+	killConsequence = "Ends the session. Can't be undone."
 
 	killKeyConfirm   = "y"
 	killLabelConfirm = "kill"
+
+	killKeyAttach   = "⏎"
+	killLabelAttach = "attach"
 )
 
-func renderKillModalContent(name string, windows int, th theme.Theme, colourless bool) string {
+func renderKillModalContent(name string, offersAttach bool, th theme.Theme, colourless bool) string {
+	return renderDestructiveConfirm(killModalSpec(name, offersAttach), th, colourless)
+}
+
+// offersAttach adds Enter's choice, for the prompt the kill key asked for
+// from inside the session: keep it and attach it again.
+func killModalSpec(name string, offersAttach bool) destructiveConfirmSpec {
 	spec := destructiveConfirmSpec{
 		title:        killTitle,
 		targetName:   name,
-		nameTrailer:  killWindowCount(windows),
 		consequence:  killConsequence,
 		confirmKey:   killKeyConfirm,
 		confirmLabel: killLabelConfirm,
 	}
-	return renderDestructiveConfirm(spec, th, colourless)
-}
-
-func killWindowCount(windows int) string {
-	unit := "windows"
-	if windows == 1 {
-		unit = "window"
+	if offersAttach {
+		spec.keep = footerHintGroup{key: killKeyAttach, label: killLabelAttach}
 	}
-	return fmt.Sprintf("· %d %s", windows, unit)
+	return spec
 }

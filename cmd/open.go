@@ -1,26 +1,28 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/runner"
+	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -35,83 +37,55 @@ var openPathFunc = openPath
 
 var openSessionFunc = openSession
 
-var openDeps *OpenDeps
+var runProgramFunc = runProgram
 
-// OpenDeps overrides production dependencies; a nil field falls back to the
-// production implementation.
-type OpenDeps struct {
-	SessionLister resolver.SessionLister
-	AliasLookup   resolver.AliasLookup
-	Zoxide        resolver.ZoxideQuerier
-	DirValidator  resolver.DirValidator
-	AckWriter     spawn.AckWriter
-	ThemeLoader   *theme.Loader
-	// SearchSessions enumerates the live sessions a /term search is counted over.
-	SearchSessions SearchSessionSource
+// runProgram runs the picker on the terminal until it quits.
+func runProgram(m tui.Model) (tea.Model, error) {
+	return tea.NewProgram(m).Run()
 }
 
+var openDeps *OpenDeps
+
+// OpenDeps overrides production dependencies. Once it is staged, the
+// resolver takes its alias, zoxide and directory seams as they stand; every
+// other nil field falls back to the production implementation.
+type OpenDeps struct {
+	// SessionLister, when nil, lists the backend's user sessions.
+	SessionLister resolver.SessionLister
+	// Kept, when nil, judges a saved session kept by sessions.json and the
+	// backend's sessions.
+	Kept         resolver.KeptLookup
+	AliasLookup  resolver.AliasLookup
+	Zoxide       resolver.ZoxideQuerier
+	DirValidator resolver.DirValidator
+	ThemeLoader  *theme.Loader
+	// Execer replaces the exec that hands the terminal to the backend's
+	// attach command.
+	Execer execer
+	// Runner replaces runner.Run, which attaches the terminal to a session.
+	Runner func(context.Context, runner.Config) (runner.Outcome, error)
+	// Runners replaces the runner registry under the state directory.
+	Runners runnerRegistry
+	// AckWriter replaces the spawn-ack channel under the state directory.
+	AckWriter spawn.AckWriter
+}
+
+// SessionConnector connects the caller's terminal to a session.
 type SessionConnector interface {
 	Connect(name string) error
 }
 
-type SwitchClienter interface {
-	SwitchClient(name string) error
-}
+// connectorFunc is a SessionConnector that is a function.
+type connectorFunc func(name string) error
 
-// SwitchConnector is the connector for use inside an existing tmux session.
-type SwitchConnector struct {
-	client SwitchClienter
-}
-
-func (sc *SwitchConnector) Connect(name string) error {
-	return sc.client.SwitchClient(name)
-}
-
-// AttachConnector is the connector for use outside tmux (bare shell); it execs,
-// so Connect never returns on success. A zero execer or tmuxPath falls back to
-// the production default.
-type AttachConnector struct {
-	execer   execer
-	tmuxPath string
-}
-
-func (ac *AttachConnector) Connect(name string) error {
-	tmuxPath := ac.tmuxPath
-	if tmuxPath == "" {
-		p, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		tmuxPath = p
-	}
-	ex := ac.execer
-	if ex == nil {
-		ex = &realExecer{}
-	}
-
-	// attach-session parses its -t as a window or pane target before falling
-	// back to a session lookup, so the target is pinned with the trailing
-	// separator: without it a period-bearing name is split into window and pane
-	// and any live session whose name extends the pre-period component answers
-	// instead.
-	// Spent as a string because this argv is exec'd directly rather than run
-	// through the client; the pinning is the constructor's, not this slice's.
-	argv := []string{"tmux", "attach-session", "-t", string(tmux.CoordTargetExact(name))}
-
-	logExecHandoff(argv)
-
-	return ex.Exec(tmuxPath, argv, os.Environ())
-}
-
-func buildSessionConnector(client *tmux.Client) SessionConnector {
-	if tmux.InsideTmux() {
-		return &SwitchConnector{client: client}
-	}
-	return &AttachConnector{}
-}
+func (f connectorFunc) Connect(name string) error { return f(name) }
 
 func openSession(cmd *cobra.Command, name string) error {
-	return buildSessionConnector(tmuxClient(cmd)).Connect(name)
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
+	return newSessionConnector(cmd, b).Connect(name)
 }
 
 var openCmd = &cobra.Command{
@@ -121,12 +95,15 @@ var openCmd = &cobra.Command{
 
 With no arguments, open launches the TUI picker so you can choose a destination.
 
-A bare target is resolved through the precedence chain — exact session name → path
-→ alias → zoxide query, first match wins. An exact session name attaches that
-existing session; a path, alias, or zoxide match mints a new session there.
+A bare target is resolved through the precedence chain — exact session name → kept
+saved session → path → alias → zoxide query, first match wins. An exact session
+name attaches that existing session; the name of a saved session that isn't
+running, which the next restore would bring back, brings it back and attaches it;
+a path, alias, or zoxide match mints a new session there.
 
 Domain pins skip the precedence chain and force a single domain:
-  -s, --session   attach the named session or session glob (never mints)
+  -s, --session   attach the named session or session glob (never mints); an
+                  exact name that is a kept saved session is brought back first
   -p, --path      mint a new session at the given directory (must exist)
   -a, --alias     mint a new session at the given alias key or key glob
   -z, --zoxide    mint a new session at zoxide's best match
@@ -140,7 +117,7 @@ sessions instead of resolving:
   open /          open the picker with the filter empty and ready to type
 
 The term is matched case-folded, as a contiguous run, against each live session's
-name and its recorded directory. Exactly one match attaches that session outright;
+label, name and directory. Exactly one match attaches that session outright;
 no match or several open the picker pre-filtered by the term — never an error.
 A single-segment absolute directory is read as a search, not a path: mint there
 with -p /tmp.
@@ -165,12 +142,10 @@ in host-terminal windows.`,
 			return err
 		}
 
-		// Ahead of every branch that touches tmux, so a malformed --ack is a usage
-		// error rather than a tmux failure.
-		if ackVal, _ := cmd.Flags().GetString("ack"); ackVal != "" {
-			if _, _, ok := spawn.ParseSpawnAckFlag(ackVal); !ok {
-				return NewUsageError("open: --ack must be <batch>:<token>")
-			}
+		// Ahead of resolution, so a malformed --ack is a usage error rather than
+		// an open that acks nothing.
+		if _, _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
+			return NewUsageError("open: --ack must be <batch>:<token>")
 		}
 
 		// Ahead of the multi-target gate as much as of resolution: a term carrying
@@ -184,15 +159,22 @@ in host-terminal windows.`,
 		// the Args validator has already refused every line where it would not.
 		if cmd.Flags().Changed("filter") {
 			filterVal, _ := cmd.Flags().GetString("filter")
-			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command)
 		}
 
 		// Raw argv because cobra collapses repeated same-flag values and splits
 		// positionals from flags, losing the order and repeats the burst needs. Must
 		// precede the single-pin blocks so a two-pin set bursts rather than hitting
-		// the single -s arm.
+		// the single -s arm. A window a burst spawned names its one surface
+		// exactly, so it never bursts again: a name with glob characters would
+		// expand, opening more windows than were asked for. No burst spawns a
+		// window naming more than one, which would ack one and drop the rest.
 		ordered := orderedOpenTargets(openOwnArgs())
-		if isMultiTarget(ordered) {
+		acked := cmd.Flags().Changed("ack")
+		if acked && len(ordered) > 1 {
+			return NewUsageError("open: cannot use --ack with more than one target")
+		}
+		if !acked && isMultiTarget(ordered) {
 			return dispatchOpenBurst(cmd, ordered, command)
 		}
 
@@ -205,28 +187,31 @@ in host-terminal windows.`,
 		}
 
 		if destination == "" {
-			return openTUIFunc(cmd, pickerLanding{}, command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, pickerLanding{}, command)
 		}
-
-		query := destination
 
 		qr, err := buildQueryResolver(cmd)
 		if err != nil {
 			return err
 		}
-
-		result, err := qr.Resolve(query)
-		if err != nil {
-			return err
-		}
-
-		emitResolveDecision(query, result)
-
-		if miss, ok := result.(*resolver.MissResult); ok {
-			return singleMissError(miss.Target)
-		}
-		return openResolved(cmd, result, command)
+		return openBare(cmd, qr, destination, command)
 	},
+}
+
+// openBare opens what qr resolves the bare positional query to, logging the
+// decision, a kept session brought back first.
+func openBare(cmd *cobra.Command, qr *resolver.QueryResolver, query string, command []string) error {
+	result, err := qr.Resolve(query)
+	if err != nil {
+		return err
+	}
+	emitResolveDecision(query, result)
+	if miss, ok := result.(*resolver.MissResult); ok {
+		return singleMissError(miss.Target)
+	}
+	return openOr(cmd, result, command, func() error {
+		return openBare(cmd, qr.WithKept(nil), query, command)
+	})
 }
 
 // validateFilterFlag refuses the lines -f cannot open a picker for: it is the
@@ -259,68 +244,54 @@ var pinResolvers = map[string]func(*resolver.QueryResolver, string) (resolver.Qu
 
 func resolvePinAndOpen(cmd *cobra.Command, flag string, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), command []string) error {
 	val, _ := cmd.Flags().GetString(flag)
+	return openPinned(cmd, resolve, val, command)
+}
+
+// openPinned opens what resolve, a pin's resolver, finds for val, a kept
+// session brought back first.
+func openPinned(cmd *cobra.Command, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), val string, command []string) error {
 	qr, err := buildQueryResolver(cmd)
 	if err != nil {
 		return err
 	}
+	return openPinnedBy(cmd, qr, resolve, val, command)
+}
+
+// openPinnedBy is openPinned over qr.
+func openPinnedBy(cmd *cobra.Command, qr *resolver.QueryResolver, resolve func(*resolver.QueryResolver, string) (resolver.QueryResult, error), val string, command []string) error {
 	result, err := resolve(qr, val)
 	if err != nil {
 		return err
 	}
-	return openResolved(cmd, result, command)
+	return openOr(cmd, result, command, func() error {
+		return openPinnedBy(cmd, qr.WithKept(nil), resolve, val, command)
+	})
 }
 
 // openResolved handles no MissResult — the bare-positional path renders its own
 // message and pins never miss — so any other result type is a defensive error.
-// A command (-e/--) is mint-scoped: an attach target has no safe injection
-// channel (send-keys corrupts a busy pane, respawn-pane -k destroys running work).
+// A command (-e/--) is mint-scoped: an attach target is already running its
+// own program, so there is nothing safe to inject it into.
 func openResolved(cmd *cobra.Command, result resolver.QueryResult, command []string) error {
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		if len(command) > 0 {
 			return NewUsageError(commandAttachOnlyMessage)
 		}
-		// After the command guard: a command+attach usage error must fire without
-		// writing a marker.
-		writeAckMarker(cmd)
 		return openSessionFunc(cmd, r.Name)
+	case *resolver.KeptResult:
+		return openKept(cmd, r.Name, command)
 	case *resolver.PathResult:
-		writeAckMarker(cmd)
 		return openPathFunc(cmd, r.Path, command)
 	default:
 		return fmt.Errorf("unexpected resolution result: %T", result)
 	}
 }
 
-// writeAckMarker is best-effort: a failed write still attaches, which the
-// parent's poll classifies as a failed window rather than leaving an orphan.
-func writeAckMarker(cmd *cobra.Command) {
-	ackVal, _ := cmd.Flags().GetString("ack")
-	if ackVal == "" {
-		return
-	}
-	batch, token, ok := spawn.ParseSpawnAckFlag(ackVal)
-	if !ok {
-		return // unreachable: RunE rejects a malformed --ack before dispatch
-	}
-	if err := buildAckWriter(cmd).Write(batch, token); err != nil {
-		spawnLogger.Debug("spawn-ack marker write failed",
-			"batch", batch,
-			"detail", err.Error(),
-		)
-	}
-}
-
-func buildAckWriter(cmd *cobra.Command) spawn.AckWriter {
-	if openDeps != nil && openDeps.AckWriter != nil {
-		return openDeps.AckWriter
-	}
-	client := tmuxClient(cmd)
-	return spawn.NewServerOptionAckChannel(client, client)
-}
-
-// emitResolveDecision logs one line per resolved query: globs are deterministic
-// rather than guesses, so they emit none.
+// emitResolveDecision logs one line per resolution of a query, so a kept
+// target that is kept no longer by its bring-back logs a second, for its
+// fall-through. Globs are deterministic rather than guesses, so they emit
+// none.
 func emitResolveDecision(query string, result resolver.QueryResult) {
 	if resolver.HasGlobMeta(query) {
 		return
@@ -333,6 +304,8 @@ func resolveDecision(result resolver.QueryResult) (domain resolver.Domain, resol
 	switch r := result.(type) {
 	case *resolver.SessionResult:
 		return r.Domain, r.Name
+	case *resolver.KeptResult:
+		return resolver.DomainKept, r.Name
 	case *resolver.PathResult:
 		return r.Domain, r.Path
 	case *resolver.MissResult:
@@ -350,7 +323,7 @@ func logExecHandoff(argv []string) {
 	if len(args) > 0 {
 		args = args[1:]
 	}
-	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(args, " "))
+	log.For("process").Info("exec", "target", "zmx", "args", shellquote.Readable(args))
 }
 
 func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, error) {
@@ -394,89 +367,31 @@ func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, erro
 	return nil, dest, nil
 }
 
-type sessionCreatorIface interface {
-	CreateFromDir(dir string, command []string) (string, error)
-}
-
-type quickStarter interface {
-	Run(path string, command []string) (*session.QuickStartResult, error)
-}
-
 type execer interface {
 	Exec(argv0 string, argv []string, envv []string) error
 }
 
 type realExecer struct{}
 
-func (r *realExecer) Exec(argv0 string, argv []string, envv []string) error {
+func (realExecer) Exec(argv0 string, argv []string, envv []string) error {
 	return syscall.Exec(argv0, argv, envv)
 }
 
-type quickStartAdapter struct {
-	qs *session.QuickStart
-}
-
-func (a *quickStartAdapter) Run(path string, command []string) (*session.QuickStartResult, error) {
-	return a.qs.Run(path, command)
-}
-
-type PathOpener struct {
-	insideTmux bool
-	creator    sessionCreatorIface
-	switcher   SwitchClienter
-	qs         quickStarter
-	execer     execer
-	tmuxPath   string
-}
-
-func (po *PathOpener) Open(resolvedPath string, command []string) error {
-	if po.insideTmux {
-		sessionName, err := po.creator.CreateFromDir(resolvedPath, command)
-		if err != nil {
-			return err
-		}
-		return po.switcher.SwitchClient(sessionName)
-	}
-
-	result, err := po.qs.Run(resolvedPath, command)
+func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
+	b, err := attachingBackend()
 	if err != nil {
 		return err
 	}
-
-	logExecHandoff(result.ExecArgs)
-
-	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
-}
-
-func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
-	client := tmuxClient(cmd)
-	gitResolver := &resolverAdapter{}
 	projectsPath, err := projectsFilePath()
 	if err != nil {
 		return err
 	}
-	store := project.NewStore(projectsPath)
-	gen := nanoid.NewGenerator()
-
-	insideTmux := tmux.InsideTmux()
-
-	opener := &PathOpener{
-		insideTmux: insideTmux,
-		creator:    session.NewSessionCreator(gitResolver, store, client, gen),
-		switcher:   client,
-		qs:         &quickStartAdapter{qs: session.NewQuickStart(gitResolver, store, client, gen)},
-		execer:     &realExecer{},
+	creator := newIndexingCreator(cmd.Context(), project.NewStore(projectsPath), b, "cli")
+	name, err := creator.CreateFromDir(resolvedPath, command)
+	if err != nil {
+		return err
 	}
-
-	if !insideTmux {
-		tmuxPath, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		opener.tmuxPath = tmuxPath
-	}
-
-	return opener.Open(resolvedPath, command)
+	return newSessionConnector(cmd, b).Connect(name)
 }
 
 type resolverAdapter struct{}
@@ -485,34 +400,19 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 	return resolver.ResolveGitRoot(dir, &resolver.RealCommandRunner{})
 }
 
-// pendingSettleBound outlasts a hydrate helper's signal timeout, so a helper
-// never signalled has reached the tail that marks its pane before the picker
-// stops re-reading.
-const pendingSettleBound = hydrateTimeout + 2*time.Second
-
-type skeletonMarkerReader struct {
-	lister state.ServerOptionLister
-}
-
-func (r skeletonMarkerReader) ListSkeletonMarkers() (map[string]struct{}, error) {
-	return state.ListSkeletonMarkers(r.lister)
-}
-
 type tuiConfig struct {
 	lister           tui.SessionLister
 	killer           tui.SessionKiller
-	renamer          tui.SessionRenamer
+	askedKiller      tui.SessionKiller
+	labeller         tui.SessionLabeller
 	projectStore     tui.ProjectStore
 	projectEditor    tui.ProjectEditor
 	aliasEditor      tui.AliasEditor
 	sessionCreator   tui.SessionCreator
-	enumerator       tui.TmuxEnumerator
-	reader           tui.ScrollbackReader
-	previewAttacher  tui.PreviewAttacher
-	dirReader        session.PaneCurrentPathReader
+	history          tui.HistoryReader
 	dirRunner        resolver.CommandRunner
 	pendingReader    tui.PendingResumeReader
-	skeletonMarkers  tui.SkeletonMarkerReader
+	hydrating        tui.HydratingReader
 	initialMode      prefs.SessionListMode
 	theme            theme.Nomination
 	themeKeys        theme.RawKeys
@@ -524,12 +424,10 @@ type tuiConfig struct {
 	sessionExists    func(string) bool
 	ackChannel       spawn.AckChannelFull
 	spawnExe         spawn.ExecutableResolver
-	spawnGetenv      func(string) string
+	spawnEnv         spawn.WindowEnv
 	spawnLogger      *slog.Logger
 	cwd              string
-	insideTmux       bool
 	currentSession   string
-	serverStarted    bool
 	progressReceiver tea.Cmd
 	noColor          bool
 }
@@ -574,42 +472,41 @@ func themeResolution(keys prefs.ThemeKeys, loader theme.Loader) (theme.Resolutio
 
 func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
 	deps := tui.Deps{
-		Lister:             cfg.lister,
-		Killer:             cfg.killer,
-		Renamer:            cfg.renamer,
-		Creator:            cfg.sessionCreator,
-		ProjectStore:       cfg.projectStore,
-		ProjectEditor:      cfg.projectEditor,
-		AliasEditor:        cfg.aliasEditor,
-		Enumerator:         cfg.enumerator,
-		Reader:             cfg.reader,
-		PreviewAttacher:    cfg.previewAttacher,
-		DirReader:          cfg.dirReader,
-		DirRunner:          cfg.dirRunner,
-		PendingReader:      cfg.pendingReader,
-		SkeletonMarkers:    cfg.skeletonMarkers,
-		PendingSettleBound: pendingSettleBound,
-		ModePersister:      cfg.modePersister,
-		ThemePersister:     cfg.themePersister,
-		CWD:                cfg.cwd,
-		InitialMode:        cfg.initialMode,
-		Theme:              cfg.theme,
-		ThemeKeys:          cfg.themeKeys,
-		ThemeSource:        cfg.themeSource,
-		Command:            command,
-		ServerStarted:      cfg.serverStarted,
-		InsideTmux:         cfg.insideTmux,
-		CurrentSession:     cfg.currentSession,
-		NoColor:            cfg.noColor,
-		ProgressReceiver:   cfg.progressReceiver,
-		Detector:           cfg.detector,
-		Resolve:            cfg.resolve,
-		SessionExists:      cfg.sessionExists,
-		AckChannel:         cfg.ackChannel,
-		SpawnExe:           cfg.spawnExe,
-		SpawnGetenv:        cfg.spawnGetenv,
-		SpawnLogger:        cfg.spawnLogger,
+		Lister:           cfg.lister,
+		Killer:           cfg.killer,
+		AskedKiller:      cfg.askedKiller,
+		Labeller:         cfg.labeller,
+		Creator:          cfg.sessionCreator,
+		CreateFatal:      createFatal,
+		ProjectStore:     cfg.projectStore,
+		ProjectEditor:    cfg.projectEditor,
+		AliasEditor:      cfg.aliasEditor,
+		History:          cfg.history,
+		DirRunner:        cfg.dirRunner,
+		PendingReader:    cfg.pendingReader,
+		Hydrating:        cfg.hydrating,
+		ModePersister:    cfg.modePersister,
+		ThemePersister:   cfg.themePersister,
+		CWD:              cfg.cwd,
+		InitialMode:      cfg.initialMode,
+		Theme:            cfg.theme,
+		ThemeKeys:        cfg.themeKeys,
+		ThemeSource:      cfg.themeSource,
+		Command:          command,
+		CurrentSession:   cfg.currentSession,
+		NoColor:          cfg.noColor,
+		ProgressReceiver: cfg.progressReceiver,
+		Detector:         cfg.detector,
+		Resolve:          cfg.resolve,
+		SessionExists:    cfg.sessionExists,
+		AckChannel:       cfg.ackChannel,
+		SpawnExe:         cfg.spawnExe,
+		SpawnEnv:         cfg.spawnEnv,
+		SpawnLogger:      cfg.spawnLogger,
+		Flash:            landing.flash,
+		KillAsk:          landing.kill,
 	}
+	deps.PendingSettleBound = pendingSettleBound
 	if landing.search != nil {
 		deps.Search = landing.search
 	} else {
@@ -622,11 +519,15 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 	if fatal := model.FatalError(); fatal != nil {
 		return fatal
 	}
-	// A session list that could not be read has searched nothing, so it is an
-	// ordinary error rather than a bootstrap fatal: tmux's own words on stderr
-	// and a non-zero exit, with no error frame and nothing attached.
+	// A session list that could not be read has searched or shown nothing, so
+	// it is an ordinary error rather than a bootstrap fatal: the backend's own
+	// words on stderr and a non-zero exit, with no error frame and nothing
+	// attached.
 	if searchErr := model.SearchError(); searchErr != nil {
 		return searchErr
+	}
+	if listErr := model.ListError(); listErr != nil {
+		return listErr
 	}
 	selected := model.Selected()
 	if selected == "" {
@@ -640,25 +541,45 @@ func finishTUI(model tui.Model, connector SessionConnector, canvas, warnings io.
 	// Before the attach handoff, while the screen is still ours: terminals that
 	// ignore Bubble Tea's OSC 111 reset keep the canvas colour after Portal quits.
 	tui.RestoreTerminalBackground(canvas, model)
-	// Before the connect: the outside-tmux attach execs and never returns.
+	// Before the connect: an attach Portal cannot run itself execs and never
+	// returns.
 	tui.WriteBootstrapWarnings(warnings, model.WarningsOwedAtTeardown())
 
 	return processTUIResult(model, connector)
 }
 
-func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, serverStarted bool) error {
-	client := tmuxClient(cmd)
-	gitResolver := &resolverAdapter{}
-	gen := nanoid.NewGenerator()
+func openTUI(cmd *cobra.Command, landing pickerLanding, command []string) error {
+	b, err := attachingBackend()
+	if err != nil {
+		return err
+	}
+	launch := pickerLaunch{
+		landing:   landing,
+		command:   command,
+		bootstrap: deferredBootstrapFromContext(cmd),
+	}
+	return runPicker(cmd, b, launch, connectorFunc(newSessionConnector(cmd, b).ConnectPick))
+}
 
+// pickerLaunch is what one run of the picker opens with.
+type pickerLaunch struct {
+	landing pickerLanding
+	command []string
+	// bootstrap is the deferred bootstrap the picker runs behind its loading
+	// page; nil when none is owed.
+	bootstrap *deferredBootstrap
+}
+
+// runPicker runs the picker, tears it down and connects its pick. The
+// connector is handed in, since the attach takes over the terminal the
+// picker holds and so runs only once the picker has shut down. A picker with
+// a bootstrap to run opens on its loading page while it runs.
+func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, connector SessionConnector) error {
 	var pipe *bootstrapProgressPipe
-	if deferred := deferredBootstrapFromContext(cmd); deferred != nil {
+	if launch.bootstrap != nil {
 		pipe = newBootstrapProgressPipe()
-		pipe.start(cmd.Context(), deferred.runner)
-		// Forced because a bootstrap is in progress, not because the server was cold
-		// — a warm-unlatched server reaches this route too. Its only effect is
-		// parking the model on the loading page.
-		serverStarted = true
+		pipe.start(cmd.Context(), launch.bootstrap.runner)
+		defer pipe.unwind()
 	}
 
 	store, err := loadProjectStore()
@@ -675,12 +596,6 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 	if err != nil {
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
-
-	stateDir, err := state.Dir()
-	if err != nil {
-		return fmt.Errorf("failed to resolve state directory: %w", err)
-	}
-	previewReader := tui.NewProductionScrollbackReader(stateDir)
 
 	// A prefs path-resolution failure must not block opening the picker: degrade to
 	// a nil persister, zero keys (the shipped pair) and the Flat default.
@@ -699,46 +614,35 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		return err
 	}
 
-	// Built now, connected only after the TUI shuts down: switching the tmux
-	// client while portal is still event-looping leaves an orphan with no UI.
-	connector := buildSessionConnector(client)
-
-	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
-
-	spawnSeams := buildProductionSpawnSeams(client)
+	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b, stateRunners{})
 
 	cfg := tuiConfig{
-		lister:          client,
-		killer:          client,
-		renamer:         client,
-		projectStore:    store,
-		projectEditor:   store,
-		aliasEditor:     aliasStore,
-		sessionCreator:  session.NewSessionCreator(gitResolver, store, client, gen),
-		enumerator:      client,
-		reader:          previewReader,
-		previewAttacher: previewAttacher,
-		dirReader:       client,
-		dirRunner:       &resolver.RealCommandRunner{},
-		pendingReader:   client,
-		skeletonMarkers: skeletonMarkerReader{lister: client},
-		initialMode:     initialMode,
-		theme:           resolution.Nomination,
-		themeKeys:       themeKeys,
-		themeSource:     newThemeSource(themeLoader),
-		cwd:             cwd,
-		serverStarted:   serverStarted,
-		detector:        spawnSeams.Detector,
-		resolve:         spawnSeams.Resolve,
-		sessionExists:   spawnSeams.Exists,
-		ackChannel:      spawnSeams.Ack,
-		spawnExe:        spawnSeams.Exe,
-		spawnGetenv:     spawnSeams.Getenv,
-		spawnLogger:     spawnSeams.Logger,
-		noColor:         noColorEnabled(),
+		lister:         pickerLister{ctx: cmd.Context(), b: b},
+		killer:         pickerKiller{ctx: cmd.Context(), b: b},
+		askedKiller:    askedKiller(cmd.Context(), b),
+		labeller:       pickerLabeller{ctx: cmd.Context(), b: b},
+		projectStore:   store,
+		projectEditor:  store,
+		aliasEditor:    aliasStore,
+		sessionCreator: newIndexingCreator(cmd.Context(), store, b, "tui"),
+		history:        b,
+		dirRunner:      &resolver.RealCommandRunner{},
+		initialMode:    initialMode,
+		theme:          resolution.Nomination,
+		themeKeys:      themeKeys,
+		themeSource:    newThemeSource(themeLoader),
+		cwd:            cwd,
+		detector:       spawnSeams.Detector,
+		resolve:        spawnSeams.Resolve,
+		sessionExists:  spawnSeams.Exists,
+		ackChannel:     spawnSeams.Ack,
+		spawnExe:       spawnSeams.Exe,
+		spawnEnv:       spawnSeams.Env,
+		spawnLogger:    spawnSeams.Logger,
+		noColor:        noColorEnabled(),
 	}
-	// On the concurrent route the channel owns the terminal BootstrapCompleteMsg;
-	// Init does not synthesize one.
+	// The concurrent route: the picker opens on its loading page, and the
+	// channel owns the terminal BootstrapCompleteMsg.
 	if pipe != nil {
 		cfg.progressReceiver = pipe.receiver()
 	}
@@ -750,18 +654,15 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 		cfg.themePersister = newThemePersister(prefsStore)
 	}
 
-	if sessionName := currentPickerSession(client); sessionName != "" {
-		cfg.insideTmux = true
-		cfg.currentSession = sessionName
-	}
+	cfg.currentSession = b.Current()
+	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
 
-	m := buildTUIModel(cfg, landing, command)
+	m := buildTUIModel(cfg, launch.landing, launch.command)
 	// Staged rather than written: a direct write while the TUI holds the screen
 	// corrupts the rendered frame.
 	stageBootstrapWarningsOnModel(&m)
-	p := tea.NewProgram(m)
 
-	finalModel, err := p.Run()
+	finalModel, err := runProgramFunc(m)
 	if err != nil {
 		return err
 	}
@@ -775,8 +676,9 @@ func openTUI(cmd *cobra.Command, landing pickerLanding, command []string, server
 }
 
 func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
+	sessions := resolverSessions(cmd)
 	if openDeps != nil {
-		return resolver.NewQueryResolver(openDeps.SessionLister, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator), nil
+		return resolver.NewQueryResolver(sessions, openDeps.AliasLookup, openDeps.Zoxide, openDeps.DirValidator).WithKept(resolverKept(cmd)), nil
 	}
 
 	store, err := loadAliasStore()
@@ -787,17 +689,95 @@ func buildQueryResolver(cmd *cobra.Command) (*resolver.QueryResolver, error) {
 	zoxide := resolver.NewZoxideResolver(&resolver.RealCommandRunner{}, exec.LookPath)
 	dirValidator := &resolver.OSDirValidator{}
 
-	return resolver.NewQueryResolver(tmuxClient(cmd), store, zoxide, dirValidator), nil
+	return resolver.NewQueryResolver(sessions, store, zoxide, dirValidator).WithKept(resolverKept(cmd)), nil
+}
+
+func resolverSessions(cmd *cobra.Command) resolver.SessionLister {
+	if openDeps != nil && openDeps.SessionLister != nil {
+		return openDeps.SessionLister
+	}
+	return backendSessionNames{ctx: cmd.Context()}
+}
+
+func resolverKept(cmd *cobra.Command) resolver.KeptLookup {
+	if openDeps != nil && openDeps.Kept != nil {
+		return openDeps.Kept
+	}
+	return keptSessions{ctx: cmd.Context()}
+}
+
+// keptSessions judges a saved session kept by restore's own rule. A name
+// zmx's Create refuses, its length aside, is never kept, so it costs nothing.
+// Any other is looked up in sessions.json, read without its lock, and the
+// sessions are listed only for a name the index holds, so a target no session
+// was saved under costs one file read. A read that fails is logged here; the
+// resolver then keeps nothing, as a listing that fails lists no session.
+type keptSessions struct {
+	ctx context.Context
+}
+
+func (k keptSessions) IsKept(name string) (bool, error) {
+	if zmx.CheckName(name) != nil {
+		return false, nil
+	}
+	b, err := sessionBackend()
+	if err != nil {
+		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
+		return false, err
+	}
+	dir, e, saved, err := savedEntry(name)
+	if err != nil {
+		restoreLogger.Warn("sessions.json unreadable", "session", name, "error", err)
+		return false, err
+	}
+	if !saved {
+		return false, nil
+	}
+	live, err := b.List(k.ctx)
+	if err != nil {
+		restoreLogger.Warn("list sessions failed", "session", name, "error", err)
+		return false, err
+	}
+	kept := restore.Kept(k.ctx, []sessionindex.Entry{e}, live, restore.Keeping{Rule: claimRule(dir, b.ValidateName), Names: b})
+	return len(kept) == 1, nil
+}
+
+// savedEntry is the state directory and the entry sessions.json there holds
+// for name, and whether it holds one.
+func savedEntry(name string) (dir string, e sessionindex.Entry, saved bool, err error) {
+	if dir, err = state.Dir(); err != nil {
+		return "", sessionindex.Entry{}, false, err
+	}
+	idx, err := sessionindex.Read(dir)
+	if err != nil {
+		return "", sessionindex.Entry{}, false, err
+	}
+	e, saved = idx.Lookup(name)
+	return dir, e, saved, nil
+}
+
+// backendSessionNames lists the names of the backend's user sessions, the ones
+// a target resolves against: resolution matches names, never labels.
+type backendSessionNames struct {
+	ctx context.Context
+}
+
+func (l backendSessionNames) ListSessionNames() ([]string, error) {
+	b, err := sessionBackend()
+	if err != nil {
+		return nil, err
+	}
+	return userSessionNames(l.ctx, b)
 }
 
 func init() {
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	openCmd.Flags().StringP("filter", "f", "", "open the picker pre-filtered by <text> (skips resolution)")
-	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints)")
+	openCmd.Flags().StringP("session", "s", "", "attach the named session or session glob (session-domain; never mints); an exact name that is a kept saved session is brought back first")
 	openCmd.Flags().StringP("path", "p", "", "mint a new session at the given directory (path-domain; dir must exist)")
 	openCmd.Flags().StringP("alias", "a", "", "mint a new session at the given alias key or key glob (alias-domain)")
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
-	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — write the @portal-spawn-<batch>-<token> ack marker before the attach/mint handoff")
+	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — a spawned window's receipt, written once its attach begins")
 	_ = openCmd.Flags().MarkHidden("ack")
 
 	// -p/--path and -z/--zoxide deliberately register no completer, so cobra emits

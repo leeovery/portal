@@ -16,7 +16,7 @@ import (
 // beside it would be a second name for the same rule, and a caller reaching the
 // twin would be a reader the exported name's callers cannot account for.
 func TestStalenessRuleHasOneExportedFunction(t *testing.T) {
-	t.Run("it applies the staleness rule through the single exported function from both callers", func(t *testing.T) {
+	t.Run("it applies the staleness rule through the single exported function", func(t *testing.T) {
 		for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
 			for _, decl := range source.File.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
@@ -27,7 +27,6 @@ func TestStalenessRuleHasOneExportedFunction(t *testing.T) {
 		}
 
 		assertCallsStaleKeys(t, ".", "deleteStale")
-		assertCallsStaleKeys(t, "../../cmd", "checkStaleHooks")
 	})
 }
 

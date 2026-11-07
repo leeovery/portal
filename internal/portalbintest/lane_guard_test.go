@@ -20,8 +20,6 @@ import (
 var buildHelperNames = []string{
 	"BuildPortalBinary",
 	"StagePortalBinary",
-	"BuildPortalBinaryDir",
-	"BuildPortalBinaryStable",
 }
 
 // helperRef is one reference to a build helper: which one, and where.

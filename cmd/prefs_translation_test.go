@@ -301,8 +301,8 @@ func TestLoadPrefsStore_SingleProductionCaller(t *testing.T) {
 	// Map-ordered, so sort for a stable failure message.
 	slices.Sort(callers)
 
-	if len(callers) != 1 || callers[0] != "open.go:openTUI" {
-		t.Errorf("loadPrefsStore is called from %v, want exactly [open.go:openTUI] — the translation runs only where a TUI is constructed; use loadPrefsStoreNoMigrate for a read-only one", callers)
+	if len(callers) != 1 || callers[0] != "open.go:runPicker" {
+		t.Errorf("loadPrefsStore is called from %v, want exactly [open.go:runPicker] — the translation runs only where a TUI is constructed; use loadPrefsStoreNoMigrate for a read-only one", callers)
 	}
 }
 

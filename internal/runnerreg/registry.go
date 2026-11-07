@@ -1,0 +1,426 @@
+// Package runnerreg is the registry of attach runners. zmx doesn't list its
+// clients, so each runner lists itself while it is attached: an entry in the
+// state directory's runners/ naming its pid and session, and beside it a
+// control socket other Portal processes send requests to, such as a switch to
+// another session. The entry's token is also in the runner's zmx client's
+// environment, as runnertoken.Var, which zmx tracks, so the client leading a
+// session names its runner.
+//
+// A connection to a runner's socket carries one request, a JSON line naming
+// the protocol version and the asker's deadline, and its answer, one JSON
+// line. A runner refuses a version, a request or a field it doesn't know, and
+// the caller then goes on as if no runner were there.
+package runnerreg
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"syscall"
+
+	"github.com/leeovery/portal/internal/bootid"
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/nanoid"
+	"github.com/leeovery/portal/internal/runnertoken"
+)
+
+var logger = log.For("attach")
+
+const (
+	entryExt  = ".json"
+	socketExt = ".sock"
+)
+
+// Registry is the runners registered under one state directory, in its
+// runners/: for each, an entry <token>.json and its socket <token>.sock.
+type Registry struct {
+	dir      string
+	readOnly bool
+}
+
+// New is the registry under the state directory stateDir.
+func New(stateDir string) Registry {
+	return Registry{dir: filepath.Join(stateDir, "runners")}
+}
+
+// ReadOnly is r for a caller that must change nothing, as doctor: it reads
+// and confirms a session as r does, but removes nothing it proves stale, and
+// refuses to ask a runner to switch or to detach, as either moves the user's
+// terminal.
+func (r Registry) ReadOnly() Registry {
+	r.readOnly = true
+	return r
+}
+
+// Dir is the directory holding the entries and their sockets.
+func (r Registry) Dir() string { return r.dir }
+
+func (r Registry) entryPath(token string) string {
+	return filepath.Join(r.dir, token+entryExt)
+}
+
+func (r Registry) socketPath(token string) string {
+	return filepath.Join(r.dir, token+socketExt)
+}
+
+// entry is a runner's registration as its file holds it.
+type entry struct {
+	PID     int    `json:"pid"`
+	Session string `json:"session"`
+	// BootID is the boot the runner registered in, empty when it couldn't
+	// read it.
+	BootID string `json:"boot_id,omitempty"`
+}
+
+// registered is one runner as its entry names it.
+type registered struct {
+	token string
+	entry
+}
+
+// errReadOnly refuses a request that would change something, asked of a
+// read-only registry.
+var errReadOnly = errors.New("a read-only registry asks no runner to act")
+
+// Switch asks the runner registered under token, whose terminal leads the
+// session current, to switch to target, and returns once it has accepted.
+// Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal,
+// wrapping runnertoken.ErrRefused, or the failure to ask it, and the caller
+// switches as if there were no runner. The exception is a read-only
+// registry's refusal, which asks no runner and means do nothing: its caller
+// must change nothing, so it must not move the terminal itself either.
+func (r Registry) Switch(ctx context.Context, token, current, target string) error {
+	if r.readOnly {
+		return errReadOnly
+	}
+	attrs := []any{"session", current, "target", target}
+	rn, err := r.lookup(token)
+	if err == nil {
+		attrs = append(attrs, "target_pid", rn.PID)
+		err = r.askOn(ctx, rn, current, request{Request: reqSwitch, Session: target})
+	}
+	report("switch", err, attrs...)
+	return err
+}
+
+// ConfirmSession returns the pid of the runner registered under token, whose
+// terminal leads session, once the runner confirms its attach under way shows
+// session: sure of it, having seen no switch since the attach began, or,
+// having seen one, once the session's leader carries its token as it asks.
+// Otherwise it returns runnertoken.ErrNoRunner, the runner's refusal, wrapping
+// runnertoken.ErrRefused, or the failure to ask it.
+func (r Registry) ConfirmSession(ctx context.Context, token, session string) (int, error) {
+	attrs := []any{"session", session}
+	rn, err := r.lookup(token)
+	if err == nil {
+		attrs = append(attrs, "target_pid", rn.PID)
+		err = r.askOn(ctx, rn, session, request{Request: reqConfirmSession, Session: session})
+	}
+	report("confirm session", err, attrs...)
+	if err != nil {
+		return 0, err
+	}
+	return rn.PID, nil
+}
+
+// askOn sends rn req only if its entry says it shows session, the one the
+// caller found rn's token leading. A token leading session that names a
+// runner on another session is in some other client's environment: the
+// shells of a session zmx made through a runner's client inherit it.
+func (r Registry) askOn(ctx context.Context, rn registered, session string, req request) error {
+	if rn.Session != session {
+		return fmt.Errorf("%w: runner %d is on %s, not %s", runnertoken.ErrNoRunner, rn.PID, rn.Session, session)
+	}
+	return r.ask(ctx, rn, req)
+}
+
+// DetachToPicker asks every runner registered on session to detach to the
+// picker, all at once, and returns how many accepted. Each request has a
+// deadline of its own, timeout from when it is sent or sooner as ctx ends,
+// so a runner slow to answer, as one unsure of its session confirming
+// through the backend, costs the others nothing. With none accepting it
+// returns runnertoken.ErrNoRunner when no runner was there to ask, a runner
+// proved gone as it was asked included, and otherwise every refusal and
+// failure. A read-only registry refuses, asking no runner.
+func (r Registry) DetachToPicker(ctx context.Context, session string) (int, error) {
+	if r.readOnly {
+		return 0, errReadOnly
+	}
+	runners, err := r.on(session)
+	if err != nil {
+		return 0, err
+	}
+	if len(runners) == 0 {
+		report("detach to picker", runnertoken.ErrNoRunner, "session", session)
+	}
+	accepted, reasons := 0, []error{}
+	for i, err := range r.askAll(ctx, runners, request{Request: reqDetachToPicker}) {
+		report("detach to picker", err, "session", session, "target_pid", runners[i].PID)
+		switch {
+		case err == nil:
+			accepted++
+		case !errors.Is(err, runnertoken.ErrNoRunner):
+			reasons = append(reasons, err)
+		}
+	}
+	switch {
+	case accepted > 0:
+		return accepted, nil
+	case len(reasons) > 0:
+		return 0, fmt.Errorf("no runner on %s detached to the picker: %w", session, errors.Join(reasons...))
+	}
+	return 0, fmt.Errorf("%w on %s", runnertoken.ErrNoRunner, session)
+}
+
+// askAll sends req to every runner at once, returning each one's result in
+// their order.
+func (r Registry) askAll(ctx context.Context, runners []registered, req request) []error {
+	errs := make([]error, len(runners))
+	var asked sync.WaitGroup
+	for i, rn := range runners {
+		asked.Go(func() { errs[i] = r.ask(ctx, rn, req) })
+	}
+	asked.Wait()
+	return errs
+}
+
+// report logs a request's result: accepted, refused, failed, or no runner to
+// ask.
+func report(msg string, err error, attrs ...any) {
+	attrs = append(attrs, "result", resultOf(err))
+	if err != nil && !errors.Is(err, runnertoken.ErrNoRunner) {
+		attrs = append(attrs, "error", err)
+	}
+	logger.Info(msg, attrs...)
+}
+
+func resultOf(err error) string {
+	switch {
+	case err == nil:
+		return "accepted"
+	case errors.Is(err, runnertoken.ErrNoRunner):
+		return "no runner"
+	case errors.Is(err, runnertoken.ErrRefused):
+		return "refused"
+	}
+	return "failed"
+}
+
+// lookup reads the entry token names. A token no runner could hold, as one
+// another program set, names none.
+func (r Registry) lookup(token string) (registered, error) {
+	if !nanoid.IsIDShaped(token) {
+		return registered{}, runnertoken.ErrNoRunner
+	}
+	e, err := r.read(token)
+	if errors.Is(err, fs.ErrNotExist) {
+		return registered{}, fmt.Errorf("%w: no entry %s", runnertoken.ErrNoRunner, token)
+	}
+	if err != nil {
+		r.leave(token, 0, "unreadable", err)
+		return registered{}, err
+	}
+	return registered{token: token, entry: e}, nil
+}
+
+// on is the runners registered on session, read as scan reads them.
+func (r Registry) on(session string) ([]registered, error) {
+	runners, err := r.scan()
+	return slices.DeleteFunc(runners, func(rn registered) bool { return rn.Session != session }), err
+}
+
+// sweep removes what scan proves stale, so runners that ended without
+// unregistering, killed or with the machine, leave nothing behind for long.
+// What it can't read it leaves.
+func (r Registry) sweep() {
+	_, _ = r.scan()
+}
+
+// scan reads the directory for the runners registered in it that may be
+// running. An entry stale proves gone is removed with its socket; one it
+// can't read is left. A socket with no entry, which no runner registering
+// leaves for longer than it takes to write one, is removed if it refuses
+// connections. A registry never made holds no runners.
+func (r Registry) scan() ([]registered, error) {
+	files, err := os.ReadDir(r.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the runner registry: %w", err)
+	}
+	entries, sockets := map[string]bool{}, []string{}
+	for _, f := range files {
+		if token, ok := strings.CutSuffix(f.Name(), entryExt); ok && f.Type().IsRegular() {
+			entries[token] = true
+		} else if token, ok := strings.CutSuffix(f.Name(), socketExt); ok {
+			sockets = append(sockets, token)
+		}
+	}
+	for _, token := range sockets {
+		if !entries[token] {
+			r.removeOrphan(token)
+		}
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	boot := currentBoot()
+	var runners []registered
+	for token := range entries {
+		e, err := r.read(token)
+		rn := registered{token: token, entry: e}
+		if err != nil {
+			r.leave(token, 0, "unreadable", err)
+		} else if reason := stale(e, boot); reason != "" {
+			r.remove(rn, reason)
+		} else {
+			runners = append(runners, rn)
+		}
+	}
+	return runners, nil
+}
+
+// stale is why e's runner is proved gone, empty while it may be running: its
+// pid isn't running, or its entry is from a boot other than boot, the current
+// one, or names none. After a reboot a dead runner's pid may be another
+// process's, so only the boot tells its entry is stale. With boot unknown, the
+// pid alone judges.
+func stale(e entry, boot string) string {
+	switch {
+	case !running(e.PID):
+		return "dead"
+	case boot == "":
+		return ""
+	case e.BootID == "":
+		return "no boot id"
+	case e.BootID != boot:
+		return "another boot"
+	}
+	return ""
+}
+
+// currentBoot is the current boot's id, empty when it can't be read.
+func currentBoot() string {
+	id, err := bootID()
+	if err != nil {
+		logger.Debug("boot id unknown", "error", err)
+		return ""
+	}
+	return id
+}
+
+// read reads token's entry, refusing one that names no pid or no session.
+func (r Registry) read(token string) (entry, error) {
+	data, err := os.ReadFile(r.entryPath(token))
+	if err != nil {
+		return entry{}, err
+	}
+	var e entry
+	if err := decodeStrict(data, fields{"pid": &e.PID, "session": &e.Session, "boot_id": &e.BootID}); err != nil {
+		return entry{}, err
+	}
+	if e.PID <= 0 || e.Session == "" {
+		return entry{}, fmt.Errorf("an entry naming pid %d and session %q", e.PID, e.Session)
+	}
+	return e, nil
+}
+
+// ask sends req to rn, returning nil once it accepts. It removes rn's entry
+// and socket only on proof the runner is gone, its pid not running. Anything
+// else leaves them: a live runner's socket refuses connections once its
+// backlog is full, as a closed one does; a missing socket or an answer from
+// another pid may mean the pid is reused, which can't be told from the
+// runner itself; a runner that doesn't answer in time may be busy; and one
+// that refuses, or answers unreadably, may be another version's.
+func (r Registry) ask(ctx context.Context, rn registered, req request) error {
+	if !running(rn.PID) {
+		r.remove(rn, "dead")
+		return fmt.Errorf("%w: runner %d has exited", runnertoken.ErrNoRunner, rn.PID)
+	}
+	err := send(ctx, r.socketPath(rn.token), rn.PID, req)
+	if err != nil {
+		r.leave(rn.token, rn.PID, leftReason(err), err)
+	}
+	return err
+}
+
+// leftReason is why a failed request leaves the entry.
+func leftReason(err error) string {
+	switch {
+	case errors.Is(err, runnertoken.ErrRefused):
+		return "refused"
+	case errors.Is(err, errOtherPID):
+		return "another pid"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, fs.ErrNotExist):
+		return "missing"
+	case errors.Is(err, os.ErrDeadlineExceeded), errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	}
+	return "no answer"
+}
+
+// remove removes the socket, then the entry, of a runner proved gone for
+// reason, unless r is read-only.
+func (r Registry) remove(rn registered, reason string) {
+	if r.readOnly {
+		return
+	}
+	_ = os.Remove(r.socketPath(rn.token))
+	_ = os.Remove(r.entryPath(rn.token))
+	logger.Debug("stale runner", "path", r.entryPath(rn.token), "target_pid", rn.PID, "reason", reason)
+}
+
+// leave logs why an entry stays, its runner's pid when it is known.
+func (r Registry) leave(token string, pid int, reason string, cause error) {
+	attrs := []any{"path", r.entryPath(token), "reason", reason, "error", cause}
+	if pid > 0 {
+		attrs = append(attrs, "target_pid", pid)
+	}
+	logger.Debug("runner entry left", attrs...)
+}
+
+// removeOrphan removes a socket with no entry once a connection to it is
+// refused, which proves no runner listens there, unless r is read-only.
+func (r Registry) removeOrphan(token string) {
+	if r.readOnly {
+		return
+	}
+	path := r.socketPath(token)
+	if checkSocketPath(path) != nil {
+		return
+	}
+	conn, err := net.Dial("unix", path)
+	if err == nil {
+		_ = conn.Close()
+		return
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		_ = os.Remove(path)
+		logger.Debug("stale runner", "path", path, "reason", "orphan socket", "error", err)
+	}
+}
+
+// bootID reads the current boot's id, a variable so a test can stand in
+// another boot's.
+var bootID = bootid.Read
+
+// running is processRunning, a variable so a test can end a runner between
+// the scan that finds it and the request that asks it.
+var running = processRunning
+
+// processRunning reports whether a process holds pid, which must be positive.
+// It may not be the runner that registered it.
+func processRunning(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}

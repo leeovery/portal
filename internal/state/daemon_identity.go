@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -26,18 +27,38 @@ const (
 	IdentifyDead
 )
 
+// portalProgram is portal as a daemon's argv[0] names it: bare, or an absolute
+// path whose last element is exactly portal, as the saver runs it. The path
+// admits no space, which is what keeps a wrapper such as
+// "/bin/sh -c /x/portal state daemon" from reading as a daemon.
+const portalProgram = `(/([^ ]*/)?)?portal`
+
 // PortalDaemonArgvPattern's trailing "( |$)" accepts an exact match or trailing
 // flags while rejecting a suffix such as "portal state daemon-foo".
-const PortalDaemonArgvPattern = `^portal state daemon( |$)`
+const PortalDaemonArgvPattern = `^` + portalProgram + ` state daemon( |$)`
 
-var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
+var (
+	daemonArgvPattern    = regexp.MustCompile(PortalDaemonArgvPattern)
+	portalProgramPattern = regexp.MustCompile(`^` + portalProgram + `$`)
+)
+
+// IsDaemonArgv reports whether argv, as a process exec'd it, is a portal state
+// daemon's, word by word: portal, bare or at an absolute path, then state,
+// then daemon, then any flags. A word holding a space is no daemon's, though
+// ps would show it as one.
+func IsDaemonArgv(argv []string) bool {
+	return len(argv) >= 3 && portalProgramPattern.MatchString(argv[0]) && argv[1] == "state" && argv[2] == "daemon"
+}
 
 var identifyPS = defaultIdentifyPS
 
 func defaultIdentifyPS(pid int) (string, error) {
 	// The helper still returns captured stdout on the error path, which
-	// IdentifyDaemon's dead-vs-transient discrimination keys on.
-	cmd := exec.Command("ps", "-o", "comm=,args=", "-p", strconv.Itoa(pid))
+	// IdentifyDaemon's dead-vs-transient discrimination keys on. ucomm is the
+	// name of the file the process exec'd, as the kernel keeps it: darwin's
+	// comm is argv[0], cut to 16 bytes in any column but the last, so a
+	// daemon at an absolute path would read as no portal.
+	cmd := exec.Command("ps", "-o", "ucomm=,args=", "-p", strconv.Itoa(pid))
 	out, err := log.CombinedOutputWithContext(cmd)
 	return string(out), err
 }
@@ -53,8 +74,9 @@ func IdentifyDaemon(pid int) (IdentifyResult, error) {
 	trimmed := strings.TrimSpace(stdout)
 
 	if execErr != nil {
-		// Non-zero exit with no output is the canonical pid-not-found shape.
-		if trimmed == "" {
+		// A ps that ran and exited non-zero with no output is the canonical
+		// pid-not-found shape; one that never ran says nothing of the pid.
+		if _, exited := errors.AsType[*exec.ExitError](execErr); exited && trimmed == "" {
 			return IdentifyDead, nil
 		}
 		return 0, fmt.Errorf("identify pid %d: ps failed with stdout %q: %w", pid, trimmed, execErr)

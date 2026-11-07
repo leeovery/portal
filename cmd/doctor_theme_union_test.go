@@ -33,26 +33,26 @@ func requireAdvisoryLines(t *testing.T, got []themeAdvisory, want ...string) {
 }
 
 func TestThemeAdvisoryUnion_PersistedLineWins(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 
 	cases := []struct{ name, prefs, want string }{
 		{
 			name:  "a slot names the invalid file",
-			prefs: `{"theme_dark":"nord-lee"}`,
-			want:  "⚠ theme nord-lee (dark) does not resolve: bad colour",
+			prefs: `{"theme_dark":"nord-frost"}`,
+			want:  "⚠ theme nord-frost (dark) does not resolve: bad colour",
 		},
 		{
 			name:  "a constant names the invalid file",
-			prefs: `{"theme":"nord-lee"}`,
-			want:  "⚠ theme nord-lee does not resolve: bad colour",
+			prefs: `{"theme":"nord-frost"}`,
+			want:  "⚠ theme nord-frost does not resolve: bad colour",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := themesDirWith(t, map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
+			dir := themesDirWith(t, map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
 
-			const fileLine = "⚠ theme nord-lee: bad colour — canvas = blue"
+			const fileLine = "⚠ theme nord-frost: bad colour — canvas = blue"
 			loader := theme.NewSilentLoader()
 			requireAdvisoryLines(t, scanThemesDirectory(loader.OpenEnumeration(dir)), fileLine)
 
@@ -68,9 +68,9 @@ func TestThemeAdvisoryUnion_PersistedLineWins(t *testing.T) {
 
 	t.Run("the report carries the one line", func(t *testing.T) {
 		t.Setenv("PORTAL_THEMES_DIR", themesDirWith(t, map[string][]byte{
-			"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"}),
+			"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"}),
 		}))
-		setPrefsFile(t, `{"theme_dark":"nord-lee"}`)
+		setPrefsFile(t, `{"theme_dark":"nord-frost"}`)
 
 		outBuf, _, err := runDoctorWith(t, healthyDoctorDeps(t))
 		if err != nil {
@@ -79,12 +79,12 @@ func TestThemeAdvisoryUnion_PersistedLineWins(t *testing.T) {
 
 		out := outBuf.String()
 		want := "" +
-			"  ⚠ theme nord-lee (dark) does not resolve: bad colour\n" +
-			"  7 checks passed · 1 advisory\n"
+			"  ⚠ theme nord-frost (dark) does not resolve: bad colour\n" +
+			"  11 checks passed · 1 advisory\n"
 		if !strings.HasSuffix(out, want) {
 			t.Errorf("report does not close with the single union line and its summary:\n%s", out)
 		}
-		if strings.Contains(out, "⚠ theme nord-lee: bad colour") {
+		if strings.Contains(out, "⚠ theme nord-frost: bad colour") {
 			t.Errorf("report carries the dropped file line as well:\n%s", out)
 		}
 	})
@@ -92,17 +92,17 @@ func TestThemeAdvisoryUnion_PersistedLineWins(t *testing.T) {
 	t.Run("the rank is the fromPrefs field, not the argument position", func(t *testing.T) {
 		// Only a hand-built value can separate rank-by-field from
 		// rank-by-argument-position: the real producer always sets fromPrefs.
-		file := themeAdvisory{line: "⚠ theme nord-lee: bad colour — canvas = blue", slug: "nord-lee"}
-		unranked := themeAdvisory{line: "⚠ theme nord-lee does not resolve: bad colour", slug: "nord-lee"}
+		file := themeAdvisory{line: "⚠ theme nord-frost: bad colour — canvas = blue", slug: "nord-frost"}
+		unranked := themeAdvisory{line: "⚠ theme nord-frost does not resolve: bad colour", slug: "nord-frost"}
 
 		requireAdvisoryLines(t, assembleThemeAdvisories([]themeAdvisory{file}, []themeAdvisory{unranked}), file.line, unranked.line)
 	})
 }
 
 func TestThemeAdvisoryUnion_OneParseBehindBothProducers(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 
-	const want = "⚠ theme nord-lee does not resolve: bad colour"
+	const want = "⚠ theme nord-frost does not resolve: bad colour"
 
 	assemble := func(t *testing.T, dir string, disturb func(*testing.T, string)) []themeAdvisory {
 		t.Helper()
@@ -111,15 +111,15 @@ func TestThemeAdvisoryUnion_OneParseBehindBothProducers(t *testing.T) {
 		enumeration := loader.OpenEnumeration(dir)
 		disturb(t, dir)
 
-		deps := persistedThemeDeps(t, `{"theme":"nord-lee"}`, dir)
+		deps := persistedThemeDeps(t, `{"theme":"nord-frost"}`, dir)
 		return assembleThemeAdvisories(scanThemesDirectory(enumeration), persistedThemeAdvisories(deps, loader, enumeration))
 	}
 
 	t.Run("a rewritten file cannot change one producer's answer", func(t *testing.T) {
-		dir := themesDirWith(t, map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
+		dir := themesDirWith(t, map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
 
 		requireAdvisoryLines(t, assemble(t, dir, func(t *testing.T, dir string) {
-			path := filepath.Join(dir, "nord-lee.theme")
+			path := filepath.Join(dir, "nord-frost.theme")
 			if err := os.WriteFile(path, validThemeSource(t), 0o644); err != nil {
 				t.Fatalf("rewrite %s: %v", path, err)
 			}
@@ -127,7 +127,7 @@ func TestThemeAdvisoryUnion_OneParseBehindBothProducers(t *testing.T) {
 	})
 
 	t.Run("a directory that is gone changes nothing", func(t *testing.T) {
-		dir := themesDirWith(t, map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
+		dir := themesDirWith(t, map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
 
 		requireAdvisoryLines(t, assemble(t, dir, func(t *testing.T, dir string) {
 			if err := os.RemoveAll(dir); err != nil {
@@ -138,13 +138,13 @@ func TestThemeAdvisoryUnion_OneParseBehindBothProducers(t *testing.T) {
 }
 
 func TestThemeAdvisoryUnion_BadNameFileNeverCollides(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 	dir := themesDirWith(t, map[string][]byte{"Nord.theme": validThemeSource(t)})
 
-	got := unionAdvisoriesFor(t, `{"theme":"nord-lee"}`, dir)
+	got := unionAdvisoriesFor(t, `{"theme":"nord-frost"}`, dir)
 	requireAdvisoryLines(t, got,
 		"⚠ theme file Nord.theme: slug must be lowercase letters, digits and hyphens",
-		"⚠ theme nord-lee does not resolve: not found",
+		"⚠ theme nord-frost does not resolve: not found",
 	)
 	if got[0].slug != "" {
 		t.Errorf("file advisory slug = %q; the two lines stand together because a `bad name` row carries none", got[0].slug)
@@ -181,50 +181,50 @@ func TestThemeAdvisoryUnion_ReservedNameResolvesToBuiltin(t *testing.T) {
 }
 
 func TestThemeAdvisoryUnion_ValidPersistedFileIsSilent(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 	dir := themesDirWith(t, map[string][]byte{
-		"nord-lee.theme": validThemeSource(t),
-		"notes.txt":      []byte("not a theme file\n"),
+		"nord-frost.theme": validThemeSource(t),
+		"notes.txt":        []byte("not a theme file\n"),
 	})
 
-	requireNoAdvisories(t, unionAdvisoriesFor(t, `{"theme":"nord-lee"}`, dir))
+	requireNoAdvisories(t, unionAdvisoriesFor(t, `{"theme":"nord-frost"}`, dir))
 }
 
 func TestThemeAdvisoryUnion_BothSlotsStayOneLine(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
-	dir := themesDirWith(t, map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
+	requireDropInSlug(t, "nord-frost")
+	dir := themesDirWith(t, map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
 
-	got := requireOneAdvisory(t, unionAdvisoriesFor(t, `{"theme_light":"nord-lee","theme_dark":"nord-lee"}`, dir))
+	got := requireOneAdvisory(t, unionAdvisoriesFor(t, `{"theme_light":"nord-frost","theme_dark":"nord-frost"}`, dir))
 
-	if want := "⚠ theme nord-lee (both) does not resolve: bad colour"; got.line != want {
+	if want := "⚠ theme nord-frost (both) does not resolve: bad colour"; got.line != want {
 		t.Errorf("advisory line = %q; want %q", got.line, want)
 	}
 }
 
 func TestThemeAdvisoryUnion_DirectoryLineIsNeverDeduped(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 	dir := filepath.Join(t.TempDir(), "themes")
 	if err := os.WriteFile(dir, []byte("not a directory\n"), 0o644); err != nil {
 		t.Fatalf("seed %s: %v", dir, err)
 	}
 
-	requireAdvisoryLines(t, unionAdvisoriesFor(t, `{"theme":"nord-lee"}`, dir),
+	requireAdvisoryLines(t, unionAdvisoriesFor(t, `{"theme":"nord-frost"}`, dir),
 		"⚠ themes directory unreadable: "+dir,
-		"⚠ theme nord-lee does not resolve: unreadable",
+		"⚠ theme nord-frost does not resolve: unreadable",
 	)
 }
 
 func TestThemeAdvisoryUnion_HandsTheRendererLinesOnly(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
-	dir := themesDirWith(t, map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
-	deps := persistedThemeDeps(t, `{"theme_dark":"nord-lee"}`, dir)
+	requireDropInSlug(t, "nord-frost")
+	dir := themesDirWith(t, map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})})
+	deps := persistedThemeDeps(t, `{"theme_dark":"nord-frost"}`, dir)
 
 	themeBlock := collectThemeAdvisories(deps)
-	if want := []advisory{{line: "⚠ theme nord-lee (dark) does not resolve: bad colour"}}; !slices.Equal(themeBlock, want) {
+	if want := []advisory{{line: "⚠ theme nord-frost (dark) does not resolve: bad colour"}}; !slices.Equal(themeBlock, want) {
 		t.Fatalf("collected block = %+v; want %+v", themeBlock, want)
 	}
 
-	elsewhere := advisory{line: "⚠ theme nord-lee: reported by another producer"}
+	elsewhere := advisory{line: "⚠ theme nord-frost: reported by another producer"}
 	lines := renderedLines(t, mixedCatalog(), append(themeBlock, elsewhere))
 
 	want := []string{
@@ -348,7 +348,7 @@ func TestThemeAdvisoryUnion_OrderIsDeterministic(t *testing.T) {
 }
 
 func TestThemeAdvisoryUnion_CountMatchesRenderedLines(t *testing.T) {
-	requireDropInSlug(t, "nord-lee")
+	requireDropInSlug(t, "nord-frost")
 
 	cases := []struct {
 		name  string
@@ -359,13 +359,13 @@ func TestThemeAdvisoryUnion_CountMatchesRenderedLines(t *testing.T) {
 		{
 			name:  "nothing to report",
 			prefs: `{}`,
-			files: map[string][]byte{"nord-lee.theme": validThemeSource(t)},
+			files: map[string][]byte{"nord-frost.theme": validThemeSource(t)},
 		},
 		{
 			name:  "a persisted line covering a file line",
-			prefs: `{"theme_dark":"nord-lee"}`,
-			files: map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})},
-			want:  []string{"⚠ theme nord-lee (dark) does not resolve: bad colour"},
+			prefs: `{"theme_dark":"nord-frost"}`,
+			files: map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})},
+			want:  []string{"⚠ theme nord-frost (dark) does not resolve: bad colour"},
 		},
 		{
 			name:  "two lines sharing the empty slug",
@@ -379,9 +379,9 @@ func TestThemeAdvisoryUnion_CountMatchesRenderedLines(t *testing.T) {
 		{
 			name:  "a file line and a persisted line for different slugs",
 			prefs: `{"theme":"gone"}`,
-			files: map[string][]byte{"nord-lee.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})},
+			files: map[string][]byte{"nord-frost.theme": sourceBadColours(t, themeOverride{"canvas", "blue"})},
 			want: []string{
-				"⚠ theme nord-lee: bad colour — canvas = blue",
+				"⚠ theme nord-frost: bad colour — canvas = blue",
 				"⚠ theme gone does not resolve: not found",
 			},
 		},

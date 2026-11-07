@@ -5,321 +5,196 @@ package bootstrap_test
 import (
 	"errors"
 	"fmt"
-	"log/slog"
+	"os"
 	"os/exec"
-	"strconv"
-	"strings"
+	"path/filepath"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/proctable"
+	"github.com/leeovery/portal/internal/proctest"
+	"github.com/leeovery/portal/internal/saver"
+	"github.com/leeovery/portal/internal/saverhost"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
-	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-const pgrepConvergencePollTick = 50 * time.Millisecond
+const (
+	// markedHelperEnv, set, makes TestMarkedHelperProcess sleep carrying the
+	// environment it was run with.
+	markedHelperEnv = "PORTAL_TEST_MARKED_HELPER"
+	// survivalSettle is how long a process the sweep spared must outlive it.
+	survivalSettle = 300 * time.Millisecond
+	daemonSettle   = 10 * time.Second
+)
 
-// The daemon population converges through several observable steps (orphans
-// dying, the respawned saver re-registering), so Stall bounds how long it may
-// sit unchanged rather than how long the whole convergence takes, and Ceiling
-// only backstops a population that churns without ever settling: a loaded
-// machine makes convergence slower without making it wrong.
-var pgrepConvergenceWait = harnesstest.ProgressWait{
-	Stall:   10 * time.Second,
-	Ceiling: 45 * time.Second,
-	Tick:    pgrepConvergencePollTick,
+// TestMarkedHelperProcess is no test of its own: a sweep's candidate that
+// carries the saver session's marks without being a portal state daemon.
+func TestMarkedHelperProcess(t *testing.T) {
+	if os.Getenv(markedHelperEnv) == "" {
+		return
+	}
+	time.Sleep(time.Minute)
 }
 
-// The saver pane becomes readable through several observable steps (the session
-// appearing, its pane answering, the respawn landing), so Stall bounds how long
-// the read may sit unchanged rather than how long the whole sequence takes.
-var saverPanePIDWait = harnesstest.ProgressWait{
-	Stall:   5 * time.Second,
-	Ceiling: 30 * time.Second,
-	Tick:    pgrepConvergencePollTick,
+// sweepMarks are the saver session's marks for one test: its name, and a
+// ZMX_DIR of the test's own under a file, so every read a daemon run with it
+// makes fails with ENOTDIR. Such a daemon never reads its saver session as
+// gone, so it never self-ejects while the test holds it.
+func sweepMarks(t *testing.T) []string {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return []string{zmx.SessionEntry(saver.SessionName), "ZMX_DIR=" + filepath.Join(blocker, "zmx")}
 }
 
-const recycledPIDSettleWindow = 200 * time.Millisecond
-
-func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) {
-	tmuxtest.SkipIfNoTmux(t)
-	skipIfNoPgrep(t)
-	_ = portalbintest.StagePortalBinary(t)
-
-	envSlice, stateDir := portaltest.IsolateStateForTest(t)
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-	// LIFO runs this wait between kill-server and the TempDir RemoveAll.
-	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
-
-	sock := tmuxtest.New(t, "ptl-sweep3-")
-	client := sock.Client()
-
-	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
-		t.Fatalf("BootstrapPortalSaver: %v", err)
-	}
-	saverPID := waitForSaverPanePID(t, sock)
-
-	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
-	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice, sock.SocketPath())
-
-	if res := waitForPgrepCount(t, 3); !res.Reached {
-		t.Fatalf("precondition: pgrep -fxc did not reach 3 (%s)\n"+
-			"  saverPID: %d\n"+
-			"  orphan1.PID: %d (alive=%v)\n"+
-			"  orphan2.PID: %d (alive=%v)\n"+
-			"  hint: an orphan may have exited before the sweep — see test diagnostic above",
-			res,
-			saverPID,
-			orphan1.Process.Pid, pidAlive(orphan1.Process.Pid),
-			orphan2.Process.Pid, pidAlive(orphan2.Process.Pid))
-	}
-
-	sweeper := bootstrapadapter.NewOrphanSweeper(client, nil)
-	if err := sweeper.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned non-nil error (best-effort step must return nil): %v", err)
-	}
-
-	if res := waitForPgrepCount(t, 1); !res.Reached {
-		t.Fatalf("post-sweep: pgrep -fxc did not converge to 1 (%s)", res)
-	}
-
-	survivors, err := portaltest.PgrepPortalDaemons()
-	if err != nil {
-		t.Fatalf("post-sweep pgrep snapshot: %v", err)
-	}
-	if len(survivors) != 1 {
-		t.Fatalf("post-sweep: expected exactly 1 daemon, got %d: %v", len(survivors), survivors)
-	}
-	currentSaverPID := readSaverPanePID(t, sock)
-	if survivors[0] != currentSaverPID {
-		t.Fatalf("post-sweep: survivor pid=%d does not match saver pane pid=%d",
-			survivors[0], currentSaverPID)
-	}
-}
-
-func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
-	tmuxtest.SkipIfNoTmux(t)
-	skipIfNoPgrep(t)
-	_ = portalbintest.StagePortalBinary(t)
-
-	_, stateDir := portaltest.IsolateStateForTest(t)
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-	// LIFO runs this wait between kill-server and the TempDir RemoveAll.
-	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
-
-	sock := tmuxtest.New(t, "ptl-sweepclean-")
-	client := sock.Client()
-
-	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
-		t.Fatalf("BootstrapPortalSaver: %v", err)
-	}
-	_ = waitForSaverPanePID(t, sock)
-
-	if res := waitForPgrepCount(t, 1); !res.Reached {
-		t.Fatalf("precondition: pgrep -fxc did not reach 1 (%s)", res)
-	}
-
-	sweeper := bootstrapadapter.NewOrphanSweeper(client, nil)
-	core, ok := sweeper.(*bootstrap.OrphanSweepCore)
-	if !ok {
-		t.Fatalf("NewOrphanSweeper returned %T; want *bootstrap.OrphanSweepCore "+
-			"(needed to inject a capturing Logger)", sweeper)
-	}
-	sink := &logtest.Sink{}
-	core.Logger = slog.New(sink)
-
-	if err := sweeper.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned non-nil error: %v", err)
-	}
-
-	const forbidden = "sweep: killed orphan daemon"
-	for _, entry := range sink.Lines() {
-		if strings.Contains(entry, forbidden) {
-			t.Fatalf("clean-state sweep emitted forbidden log entry containing %q\n"+
-				"  entry: %s\n"+
-				"  all entries:\n%s",
-				forbidden, entry, sink.Body())
+// sweepWith runs the production sweep's proof of the saver of stateDir over
+// candidates, signalling only through held, which proves each pid the test's
+// own as it is sent. No saver session is running, so every proved daemon is
+// an orphan.
+func sweepWith(t *testing.T, stateDir string, marks []string, pgrep func() ([]int, error), held ...*proctest.Held) {
+	t.Helper()
+	signal := func(pid int, sig syscall.Signal) error {
+		for _, h := range held {
+			if h.PID() == pid {
+				return h.Signal(pid, sig)
+			}
 		}
+		return fmt.Errorf("pid %d is none of the test's processes, so it is not signalled", pid)
 	}
-
-	pids, err := portaltest.PgrepPortalDaemons()
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: stateDir, Marks: marks, Signal: signal})
 	if err != nil {
-		t.Fatalf("post-sweep pgrep: %v", err)
+		t.Fatal(err)
 	}
-	if len(pids) != 1 {
-		t.Fatalf("post-sweep: pgrep returned %d daemons, want 1: %v", len(pids), pids)
+	core := &bootstrap.OrphanSweepCore{Pgrep: pgrep, SaverPID: host.SaverPID, Prove: host.Prove, Signal: signal, AwaitExit: host.AwaitExit}
+	if err := core.SweepOrphanDaemons(t.Context()); err != nil {
+		t.Fatalf("SweepOrphanDaemons = %v, want nil", err)
 	}
 }
 
+// startDaemon holds `binary state daemon` over a state directory of its own,
+// which the sandbox's pgrep surfaces, with env and extra, and returns once it
+// holds its lock, with that directory, which its environment names as a
+// saver's does.
+func startDaemon(t *testing.T, binary string, env []string, extra ...string) (*proctest.Held, string) {
+	t.Helper()
+	dir := t.TempDir()
+	portaltest.OwnStateDir(t, dir)
+	cmd := exec.Command(binary, "state", "daemon")
+	cmd.Env = append(slices.Clone(env), append([]string{saverhost.StateDirMark(dir)}, extra...)...)
+	h := proctest.Start(t, cmd, "")
+	if !harnesstest.PollUntil(t, daemonSettle, 20*time.Millisecond, func() bool {
+		pid, err := state.ReadPIDFile(dir)
+		return err == nil && pid == h.PID()
+	}) {
+		t.Fatalf("the daemon %d never held its lock\n--- portal.log ---\n%s", h.PID(), portaltest.ReadPortalLogSafe(dir))
+	}
+	return h, dir
+}
+
+// awaitEnviron waits for pid to carry every entry of marks, read as the
+// proof reads it.
+func awaitEnviron(t *testing.T, pid int, marks []string) {
+	t.Helper()
+	if !harnesstest.PollUntil(t, daemonSettle, 10*time.Millisecond, func() bool {
+		args, err := proctable.ReadArgs(pid)
+		return err == nil && !slices.ContainsFunc(marks, func(m string) bool { return !slices.Contains(args.Env, m) })
+	}) {
+		t.Fatalf("pid %d never carried %q", pid, marks)
+	}
+}
+
+func survives(t *testing.T, h *proctest.Held, what string) {
+	t.Helper()
+	select {
+	case <-h.Exited():
+		t.Errorf("%s (pid %d) was killed by the sweep: %v", what, h.PID(), h.Status(t))
+	case <-time.After(survivalSettle):
+	}
+}
+
+// A pgrep hit can name a pid recycled to an unrelated process by the time the
+// sweep reaches it. The production proof must refuse it, so nothing is
+// signalled: whether its environment can't be read, or carries every mark of
+// the saver session and only the identity check stands in the way. The
+// candidates are the test's own children, so a failure kills nothing the test
+// doesn't own.
 func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
-	tmuxtest.SkipIfNoTmux(t)
-	skipIfNoPgrep(t)
-	_ = portalbintest.StagePortalBinary(t)
+	env, stateDir := portaltest.IsolateStateForTest(t)
+	marks := sweepMarks(t)
+	carried := append(slices.Clone(marks), saverhost.StateDirMark(stateDir))
 
-	_, stateDir := portaltest.IsolateStateForTest(t)
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-
-	// LIFO runs this wait between kill-server and the TempDir RemoveAll.
-	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
-
-	sock := tmuxtest.New(t, "ptl-sweeprecycle-")
-	client := sock.Client()
-
-	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
-		t.Fatalf("BootstrapPortalSaver: %v", err)
-	}
-	saverPID := waitForSaverPanePID(t, sock)
-
-	sleeper := exec.Command("sh", "-c", "exec sleep 30")
-	if err := sleeper.Start(); err != nil {
-		t.Fatalf("start sleep process: %v", err)
-	}
-	sleeperPID := sleeper.Process.Pid
-	reaped := portaltest.RegisterSubprocessCleanup(t, sleeper)
-
-	sweeper := bootstrapadapter.NewOrphanSweeper(client, nil)
-	core, ok := sweeper.(*bootstrap.OrphanSweepCore)
-	if !ok {
-		t.Fatalf("NewOrphanSweeper returned %T; want *bootstrap.OrphanSweepCore", sweeper)
-	}
-	core.Pgrep = func() ([]int, error) {
-		return []int{saverPID, sleeperPID}, nil
-	}
-
-	if err := sweeper.SweepOrphanDaemons(); err != nil {
-		t.Fatalf("SweepOrphanDaemons returned non-nil error: %v", err)
-	}
-
-	time.Sleep(recycledPIDSettleWindow)
-
-	killErr := syscall.Kill(sleeperPID, 0)
-	if errors.Is(killErr, syscall.ESRCH) {
-		t.Fatalf("sleeper PID %d was killed by SweepOrphanDaemons; "+
-			"the identity check failed to refuse the non-daemon PID\n"+
-			"  this is a Component B recycled-PID safety violation",
-			sleeperPID)
-	}
-	if killErr != nil {
-		t.Logf("sleeper PID %d: kill(pid, 0) returned %v (proceeding; non-ESRCH means process still exists)",
-			sleeperPID, killErr)
-	}
-
-	_ = reaped
-}
-
-func skipIfNoPgrep(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("pgrep"); err != nil {
-		t.Skipf("pgrep not available; skipping orphan-sweep integration test: %v", err)
-	}
-}
-
-func waitForSaverPanePID(t *testing.T, sock *tmuxtest.Socket) int {
-	t.Helper()
-	res := harnesstest.AwaitProgress(t, saverPanePIDWait,
-		func() panePIDObservation { return observeSaverPanePID(sock) },
-		func(o panePIDObservation) bool { return o.pid() > 0 })
-	if !res.Reached {
-		t.Fatalf("saver pane PID did not become observable (%s)", res)
-	}
-	pid := res.Last.pid()
-	state.RegisterSandboxDaemon(pid)
-	return pid
-}
-
-// panePIDObservation is comparable so the wait can tell a saver pane that is
-// still coming up from one that has stopped changing, and carries the read
-// error rather than discarding it so a red run says why the PID was unreadable.
-type panePIDObservation struct {
-	Out string
-	Err string
-}
-
-func (o panePIDObservation) String() string {
-	if o.Err != "" {
-		return fmt.Sprintf("out=%q err=%s", o.Out, o.Err)
-	}
-	return fmt.Sprintf("out=%q", o.Out)
-}
-
-// pid gives the PID the observation carries, or 0 for a reading that is not one.
-func (o panePIDObservation) pid() int {
-	if o.Err != "" {
-		return 0
-	}
-	pid, err := strconv.Atoi(o.Out)
-	if err != nil || pid <= 0 {
-		return 0
-	}
-	return pid
-}
-
-func observeSaverPanePID(sock *tmuxtest.Socket) panePIDObservation {
-	out, err := sock.TryRun("list-panes", "-t", tmux.PortalSaverName, "-F", "#{pane_pid}")
-	obs := panePIDObservation{Out: strings.TrimSpace(out)}
+	sleeper := proctest.Start(t, exec.Command("sh", "-c", "exec sleep 30"), "")
+	exe, err := os.Executable()
 	if err != nil {
-		obs.Err = err.Error()
+		t.Fatal(err)
 	}
-	return obs
-}
+	helper := exec.Command(exe, "-test.run=^TestMarkedHelperProcess$")
+	helper.Env = append(slices.Clone(env), append(slices.Clone(carried), markedHelperEnv+"=1")...)
+	marked := proctest.Start(t, helper, "")
+	awaitEnviron(t, marked.PID(), carried)
 
-func readSaverPanePID(t *testing.T, sock *tmuxtest.Socket) int {
-	t.Helper()
-	for range 2 {
-		if pid := observeSaverPanePID(sock).pid(); pid > 0 {
-			state.RegisterSandboxDaemon(pid)
-			return pid
-		}
-		time.Sleep(pgrepConvergencePollTick)
-	}
-	t.Fatalf("saver pane PID unreadable after retry; saver pane may have died between setup and sweep")
-	return 0
-}
+	sweepWith(t, stateDir, marks, func() ([]int, error) { return []int{sleeper.PID(), marked.PID()}, nil }, sleeper, marked)
 
-// pgrepObservation is comparable so the wait can tell a daemon population that
-// is still moving from one that has stopped, and carries the enumeration error
-// rather than discarding it so a red run says why the snapshot was empty.
-type pgrepObservation struct {
-	Count int
-	Pids  string
-	Err   string
-}
-
-func (o pgrepObservation) String() string {
-	if o.Err != "" {
-		return fmt.Sprintf("count=%d pids=%s err=%s", o.Count, o.Pids, o.Err)
-	}
-	return fmt.Sprintf("count=%d pids=%s", o.Count, o.Pids)
-}
-
-func waitForPgrepCount(t *testing.T, target int) harnesstest.ProgressResult[pgrepObservation] {
-	t.Helper()
-	return harnesstest.AwaitProgress(t, pgrepConvergenceWait, observePgrepDaemons,
-		func(o pgrepObservation) bool { return o.Err == "" && o.Count == target })
-}
-
-func observePgrepDaemons() pgrepObservation {
-	pids, err := portaltest.PgrepPortalDaemons()
-	obs := pgrepObservation{Count: len(pids), Pids: fmt.Sprint(pids)}
+	survives(t, sleeper, "a sleep the pgrep hit named")
+	survives(t, marked, "a process carrying the saver session's marks")
+	host, err := saverhost.NewHost(saverhost.Config{Backend: backendtest.New(), StateDir: stateDir, Marks: marks, Signal: func(int, syscall.Signal) error {
+		return errors.New("no signal")
+	}})
 	if err != nil {
-		obs.Err = err.Error()
+		t.Fatal(err)
 	}
-	return obs
+	if err := host.Prove(marked.PID()); !errors.Is(err, saverhost.ErrNotSaverDaemon) {
+		t.Errorf("Prove(the marked process) = %v, want the identity check's refusal", err)
+	}
 }
 
-func pidAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
+// Three of the test's daemons, all found by the sandboxed pgrep and all
+// identified by argv: the one carrying the saver session's environment and
+// the sweep's state directory is an orphaned saver daemon and is killed,
+// while the one without the session's name, as another install's daemon
+// would be, the tmux version's among them, and the one of another state
+// directory, as a saver another Portal's state started would be, survive.
+func TestSweepOrphanDaemons_Integration_KillsOnlyTheMarkedDaemon(t *testing.T) {
+	// Built before the isolation scrubs HOME, which go build's caches hang off.
+	binary := portalbintest.Build(t)
+	env, _ := portaltest.IsolateStateForTest(t)
+	marks := sweepMarks(t)
+	orphan, stateDir := startDaemon(t, binary, env, marks...)
+	unmarked, _ := startDaemon(t, binary, env, marks[1])
+	theirs, _ := startDaemon(t, binary, env, marks...)
+
+	if pids, err := portaltest.PgrepPortalDaemons(); err != nil || !slices.Contains(pids, orphan.PID()) || !slices.Contains(pids, unmarked.PID()) || !slices.Contains(pids, theirs.PID()) {
+		t.Fatalf("PgrepPortalDaemons = %v, %v; want all three daemons, %d, %d and %d", pids, err, orphan.PID(), unmarked.PID(), theirs.PID())
 	}
-	return !errors.Is(err, syscall.ESRCH)
+
+	sink := logtest.Install(t)
+
+	sweepWith(t, stateDir, marks, state.PgrepPortalDaemons, orphan, unmarked, theirs)
+
+	// Counted only once it has finished exiting, a zombie the test holds.
+	summary := sink.Records().Matching("clean", "orphan-daemon sweep complete").Only(t, "the sweep's summary")
+	if killed := summary.IntAttr(t, "killed"); killed != 1 {
+		t.Errorf("killed = %d, want the orphan, once it has exited", killed)
+	}
+	select {
+	case <-orphan.Exited():
+	case <-time.After(daemonSettle):
+		t.Fatalf("the orphaned saver daemon %d outlived the sweep by %s", orphan.PID(), daemonSettle)
+	}
+	if status := orphan.Status(t); !status.Signaled() || status.Signal() != syscall.SIGKILL {
+		t.Errorf("the orphan ended %v, want by SIGKILL", status)
+	}
+	survives(t, unmarked, "the daemon without the saver session's environment")
+	survives(t, theirs, "the daemon of another state directory")
 }

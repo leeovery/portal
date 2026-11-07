@@ -6,8 +6,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/leeovery/portal/internal/harnesstest"
 )
 
 // handOffWindow is one moment a waiting pane's process has started but not yet
@@ -56,10 +54,11 @@ func handOffWindows() []handOffWindow {
 	}
 }
 
-// awaitEnded waits for a held process the SIGTERM ended.
-func (p termPane) awaitEnded(t *testing.T, pid int, what string) {
+// endsOnSIGTERMBeforeItsCatch sends a SIGTERM to a process held before its
+// catch and waits for it to end.
+func (p termPane) endsOnSIGTERMBeforeItsCatch(t *testing.T, pid int, what string) {
 	t.Helper()
-	if !harnesstest.PollUntil(t, termPaneWait, 10*time.Millisecond, func() bool { return !processAlive(pid) }) {
+	if !p.endsOn(t, pid, syscall.SIGTERM) {
 		t.Fatalf("%s (pid %d) outlived a SIGTERM before its catch; the harness did not hold it in the window; %s", what, pid, p.diagnostics())
 	}
 }
@@ -71,8 +70,7 @@ func TestResumeWaitingPane_SIGTERMBeforeTheCatch(t *testing.T) {
 			held := w.reach(t, p)
 			waits := len(p.pidsOf(termEventWait))
 
-			p.signal(t, held, syscall.SIGTERM)
-			p.awaitEnded(t, held, "the held process")
+			p.endsOnSIGTERMBeforeItsCatch(t, held, "the held process")
 
 			waiter := p.awaitEvent(t, termEventWait, waits+1)
 			p.assertStillWaiting(t, waiter)
@@ -83,19 +81,18 @@ func TestResumeWaitingPane_SIGTERMBeforeTheCatch(t *testing.T) {
 			p := startTermPane(t, termPaneOpts{holdCatch: w.hold})
 			held := w.reach(t, p)
 			waits := len(p.pidsOf(termEventWait))
-			p.signal(t, held, syscall.SIGTERM)
-			p.awaitEnded(t, held, "the held process")
+			p.endsOnSIGTERMBeforeItsCatch(t, held, "the held process")
 			waiter := p.awaitEvent(t, termEventWait, waits+1)
 
 			p.press(t, "\r")
 
 			hook := p.readPID(t, "hook.pid", "the hook program")
-			assertEndsOnSIGTERM(t, hook, "the hook program")
+			assertEndsOnSIGTERM(t, p.held, hook, "the hook program")
 			shell := p.readPID(t, "shell.pid", "the user's shell")
 			if shell != waiter {
 				t.Fatalf("the user's shell runs as pid %d, want the pane's own process %d", shell, waiter)
 			}
-			assertEndsOnSIGTERM(t, shell, "the user's shell")
+			assertEndsOnSIGTERM(t, p.held, shell, "the user's shell")
 		})
 	}
 

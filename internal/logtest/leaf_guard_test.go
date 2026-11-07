@@ -14,16 +14,18 @@ const (
 	logTestPkg     = modulePrefix + "internal/logtest"
 	harnessTestPkg = modulePrefix + "internal/harnesstest"
 	logPkg         = modulePrefix + "internal/log"
+	shellquotePkg  = modulePrefix + "internal/shellquote"
 )
 
 // Every test package in the tree may reach for the capture handler, so what
 // logtest imports arrives everywhere tests run — and a helper here that
 // resolved a value from another package, rather than taking it as a parameter,
 // would put that package there too. It reaches the logging machinery it
-// captures, and the stand-in its failing helpers report through. A third-party
-// import is judged on the same footing, for the same reason: it would land in
-// every test package in the tree as surely as an internal one.
-var logTestMayImport = []string{harnessTestPkg, logPkg}
+// captures, with the stdlib-only shellquote leaf that reaches, and the stand-in
+// its failing helpers report through. A third-party import is judged on the
+// same footing, for the same reason: it would land in every test package in the
+// tree as surely as an internal one.
+var logTestMayImport = []string{harnessTestPkg, logPkg, shellquotePkg}
 
 func TestLogTestPackage(t *testing.T) {
 	t.Run("it holds logtest's transitive dependencies inside the declared allowlist", func(t *testing.T) {
@@ -32,8 +34,8 @@ func TestLogTestPackage(t *testing.T) {
 		}
 	})
 
-	// Narrowing the allowlist to one of the two entries makes the other a
-	// dependency outside it, so the assertion above is shown to bite without a
+	// Narrowing the allowlist to harnesstest alone makes log a dependency
+	// outside it, so the assertion above is shown to bite without a
 	// package having to import something it must not.
 	t.Run("it reports a dependency outside the allowlist", func(t *testing.T) {
 		lanes := sourceguardtest.Lanes()

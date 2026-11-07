@@ -2,73 +2,80 @@ package hookstest_test
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/nanoid"
 )
 
-// tokenShapedSeeds and unjudgeableSeeds name every seed the vocabulary mints,
-// so the sweeps below cover the whole of it rather than a prefix of it.
+// sessionNameSeeds, in the order the vocabulary declares them, and
+// tmuxEraSeeds name every seed it holds, so the sweeps below cover the whole
+// of it rather than a prefix of it.
 var (
-	tokenShapedSeeds = map[string]string{
-		"ReapableSeedA": hookstest.ReapableSeedA,
-		"ReapableSeedB": hookstest.ReapableSeedB,
-		"ReapableSeedC": hookstest.ReapableSeedC,
-		"ReapableSeedD": hookstest.ReapableSeedD,
-		"LiveSeedA":     hookstest.LiveSeedA,
-		"LiveSeedB":     hookstest.LiveSeedB,
-		"LiveSeedC":     hookstest.LiveSeedC,
-		"SubjectSeedA":  hookstest.SubjectSeedA,
-		"SubjectSeedB":  hookstest.SubjectSeedB,
-		"SubjectSeedC":  hookstest.SubjectSeedC,
-		"SubjectSeedD":  hookstest.SubjectSeedD,
+	sessionNameSeeds = []struct{ name, key string }{
+		{"ReapableSeedA", hookstest.ReapableSeedA},
+		{"ReapableSeedB", hookstest.ReapableSeedB},
+		{"ReapableSeedC", hookstest.ReapableSeedC},
+		{"ReapableSeedD", hookstest.ReapableSeedD},
+		{"LiveSeedA", hookstest.LiveSeedA},
+		{"LiveSeedB", hookstest.LiveSeedB},
+		{"LiveSeedC", hookstest.LiveSeedC},
+		{"SubjectSeedA", hookstest.SubjectSeedA},
+		{"SubjectSeedB", hookstest.SubjectSeedB},
+		{"SubjectSeedC", hookstest.SubjectSeedC},
+		{"SubjectSeedD", hookstest.SubjectSeedD},
 	}
 
-	unjudgeableSeeds = map[string]string{
-		"UnjudgeableSeedA": hookstest.UnjudgeableSeedA,
-		"UnjudgeableSeedB": hookstest.UnjudgeableSeedB,
-		"UnjudgeableSeedC": hookstest.UnjudgeableSeedC,
+	tmuxEraSeeds = map[string]string{
+		"TmuxEraSeedA": hookstest.TmuxEraSeedA,
+		"TmuxEraSeedB": hookstest.TmuxEraSeedB,
+		"TmuxEraSeedC": hookstest.TmuxEraSeedC,
 	}
 )
 
 func TestHookKeySeedVocabulary(t *testing.T) {
-	t.Run("it mints a token-shaped key for every named seed index", func(t *testing.T) {
-		for name, key := range tokenShapedSeeds {
-			if !nanoid.IsTokenShaped(key) {
-				t.Errorf("%s = %q, want a token-shaped key", name, key)
+	t.Run("it names a session zmx can hold with every session-name seed", func(t *testing.T) {
+		for _, seed := range sessionNameSeeds {
+			if err := zmx.CheckLookup(seed.key); err != nil {
+				t.Errorf("%s = %q, want a name a zmx session can have: %v", seed.name, seed.key, err)
 			}
 		}
 	})
 
-	t.Run("it authors every token-shaped seed at the pane-token width", func(t *testing.T) {
-		token, err := nanoid.NewPaneTokenGenerator()()
-		if err != nil {
-			t.Fatalf("mint a pane token: %v", err)
+	t.Run("it sorts the session-name seeds in the order they are declared", func(t *testing.T) {
+		keys := make([]string, 0, len(sessionNameSeeds))
+		for _, seed := range sessionNameSeeds {
+			keys = append(keys, seed.key)
 		}
-		for name, key := range tokenShapedSeeds {
-			if len(key) != len(token) {
-				t.Errorf("%s = %q (%d bytes), want the pane-token width of %d", name, key, len(key), len(token))
-			}
+		if !slices.IsSorted(keys) {
+			t.Errorf("seeds %v do not sort in declared order; a fixture listing several would read them out of order", keys)
 		}
 	})
 
-	t.Run("an unjudgeable seed is not token-shaped", func(t *testing.T) {
-		for name, key := range unjudgeableSeeds {
-			if nanoid.IsTokenShaped(key) {
-				t.Errorf("%s = %q, want a key the staleness rule cannot judge", name, key)
+	// The tmux version keyed a hook by pane token, and before that by pane
+	// coordinates; the half holds both, so a fixture asserting what the rule
+	// makes of the tmux version's keys covers each shape it wrote.
+	t.Run("it holds a pane token and coordinate keys in the tmux-era half", func(t *testing.T) {
+		if !nanoid.IsTokenShaped(hookstest.TmuxEraSeedA) {
+			t.Errorf("TmuxEraSeedA = %q, want a pane token", hookstest.TmuxEraSeedA)
+		}
+		for _, key := range []string{hookstest.TmuxEraSeedB, hookstest.TmuxEraSeedC} {
+			if !strings.Contains(key, ":") || !strings.Contains(key, ".") {
+				t.Errorf("tmux-era seed %q, want a <session>:<window>.<pane> key", key)
 			}
 		}
 	})
 
 	t.Run("every named seed is distinct", func(t *testing.T) {
 		seen := map[string]string{}
-		for name, key := range tokenShapedSeeds {
-			assertUnseen(t, seen, name, key)
+		for _, seed := range sessionNameSeeds {
+			assertUnseen(t, seen, seed.name, seed.key)
 		}
-		for name, key := range unjudgeableSeeds {
+		for name, key := range tmuxEraSeeds {
 			assertUnseen(t, seen, name, key)
 		}
 	})

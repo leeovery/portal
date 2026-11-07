@@ -66,3 +66,19 @@ func TestDefaultExecShell_ExecFailure_MarksTerminationBeforeExit(t *testing.T) {
 			warnIdx, processExitIdx, strings.Join(linesAtExit, "\n"))
 	}
 }
+
+func indexOfLineContaining(lines []string, substrs ...string) int {
+	for i, line := range lines {
+		all := true
+		for _, s := range substrs {
+			if !strings.Contains(line, s) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return i
+		}
+	}
+	return -1
+}

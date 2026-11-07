@@ -18,9 +18,8 @@ const (
 )
 
 type destructiveConfirmSpec struct {
-	title       string
-	targetName  string
-	nameTrailer string
+	title      string
+	targetName string
 	// Pre-rendered rows standing in for the single name row, for a target that
 	// does not fit one. Empty leaves the name row in place.
 	targetRows    []string
@@ -31,10 +30,19 @@ type destructiveConfirmSpec struct {
 	reportRows   []string
 	confirmKey   string
 	confirmLabel string
+	// keep is a choice beside the cancel that also keeps the target, its hint
+	// between the confirmation's and the cancel's. Its zero value offers none.
+	keep footerHintGroup
 }
 
 func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
-	return renderJoinedPanel(destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless), th.Border, th, colourless)
+	return renderJoinedPanel(destructiveConfirmLayout(spec, th, colourless).compartments, th.Border, th, colourless)
+}
+
+// destructiveConfirmLayout is the framed confirmation as a modal fits it: its
+// title and key hints hold still, and its body scrolls.
+func destructiveConfirmLayout(spec destructiveConfirmSpec, th theme.Theme, colourless bool) panelLayout {
+	return panelLayout{compartments: destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless), head: 1, foot: 1}
 }
 
 // The confirmation's parts, so a caller that cannot afford the frame stacks the
@@ -44,7 +52,7 @@ func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colou
 func destructiveConfirmCompartments(spec destructiveConfirmSpec, wrapWidth int, th theme.Theme, colourless bool) [][]string {
 	header := []string{destructiveHeaderRow(spec.title, th, colourless)}
 	body := destructiveBodyRows(spec, wrapWidth, th, colourless)
-	footer := []string{destructiveFooterRow(spec.confirmKey, spec.confirmLabel, th, colourless)}
+	footer := []string{destructiveFooterRow(spec, th, colourless)}
 	return [][]string{header, body, footer}
 }
 
@@ -62,7 +70,7 @@ func destructiveBodyRows(spec destructiveConfirmSpec, wrapWidth int, th theme.Th
 	if len(spec.targetRows) > 0 {
 		rows = append(rows, spec.targetRows...)
 	} else {
-		rows = append(rows, destructiveNameRow(spec.targetName, spec.nameTrailer, th, colourless))
+		rows = append(rows, destructiveNameRow(spec.targetName, th, colourless))
 	}
 	rows = append(rows, spec.extraBodyRows...)
 	rows = append(rows, headerCanvasBg(th, colourless).Render(""))
@@ -70,14 +78,8 @@ func destructiveBodyRows(spec destructiveConfirmSpec, wrapWidth int, th theme.Th
 	return append(rows, spec.reportRows...)
 }
 
-func destructiveNameRow(name, trailer string, th theme.Theme, colourless bool) string {
-	nameSeg := headerStyle(th.StateDestructive, th, colourless).Bold(true).Render(name)
-	if trailer == "" {
-		return nameSeg
-	}
-	gap := headerCanvasBg(th, colourless).Render("  ")
-	trailerSeg := headerStyle(th.TextMuted, th, colourless).Render(trailer)
-	return lipgloss.JoinHorizontal(lipgloss.Top, nameSeg, gap, trailerSeg)
+func destructiveNameRow(name string, th theme.Theme, colourless bool) string {
+	return headerStyle(th.StateDestructive, th, colourless).Bold(true).Render(name)
 }
 
 func destructiveConsequenceRows(text string, wrapWidth int, th theme.Theme, colourless bool) []string {
@@ -91,6 +93,11 @@ func destructiveConsequenceRows(text string, wrapWidth int, th theme.Theme, colo
 	return rows
 }
 
-func destructiveFooterRow(confirmKey, confirmLabel string, th theme.Theme, colourless bool) string {
-	return renderConfirmCancelFooter(confirmKey, confirmLabel, destructiveKeyCancel, destructiveLabelCancel, th, colourless)
+func destructiveFooterRow(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
+	groups := []footerHintGroup{{spec.confirmKey, spec.confirmLabel}}
+	if spec.keep.key != "" {
+		groups = append(groups, spec.keep)
+	}
+	groups = append(groups, footerHintGroup{destructiveKeyCancel, destructiveLabelCancel})
+	return renderModalFooter(groups, th, colourless)
 }

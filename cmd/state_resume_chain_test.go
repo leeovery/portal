@@ -9,9 +9,7 @@ func TestResumeChainArgv(t *testing.T) {
 	full := resumeChainPayload{
 		Command: "claude --resume abc",
 		Report:  "could not clear the pending marker",
-		HookKey: "tok123",
-		Pane:    "%7",
-		PaneKey: "proj-a1b2:0.1",
+		Session: "proj-a1b2",
 		Width:   120,
 		Height:  40,
 	}
@@ -22,9 +20,7 @@ func TestResumeChainArgv(t *testing.T) {
 			"/usr/local/bin/portal", "state", "resume-draw",
 			"--command", "claude --resume abc",
 			"--report", "could not clear the pending marker",
-			"--hook-key", "tok123",
-			"--pane", "%7",
-			"--pane-key", "proj-a1b2:0.1",
+			"--session", "proj-a1b2",
 			"--width", "120",
 			"--height", "40",
 		}
@@ -35,24 +31,22 @@ func TestResumeChainArgv(t *testing.T) {
 
 	t.Run("it omits the report and size flags a payload does not carry", func(t *testing.T) {
 		got := resumeChainArgv("/p", resumeWaitSubcommand, resumeChainPayload{
-			Command: "c", HookKey: "k", Pane: "%1", PaneKey: "s:0.0", Width: 0, Height: -3,
+			Command: "c", Session: "s", Width: 0, Height: -3,
 		})
 		want := []string{
 			"/p", "state", "resume-wait",
 			"--command", "c",
-			"--hook-key", "k",
-			"--pane", "%1",
-			"--pane-key", "s:0.0",
+			"--session", "s",
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("argv = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("it carries the hook key, the pane and the pane key alone for the chain's tail", func(t *testing.T) {
-		for _, payload := range []resumeChainPayload{full, {HookKey: "tok123", Pane: "%7", PaneKey: "proj-a1b2:0.1"}} {
+	t.Run("it carries the session alone to the chain's tail", func(t *testing.T) {
+		for _, payload := range []resumeChainPayload{full, {Session: "proj-a1b2"}} {
 			got := resumeChainArgv("/p", resumeRecoverSubcommand, payload)
-			want := []string{"/p", "state", "resume-recover", "--hook-key", "tok123", "--pane", "%7", "--pane-key", "proj-a1b2:0.1"}
+			want := []string{"/p", "state", "resume-recover", "--session", "proj-a1b2"}
 			if !slices.Equal(got, want) {
 				t.Errorf("argv = %q, want %q", got, want)
 			}
@@ -70,4 +64,16 @@ func TestResumeChainExe(t *testing.T) {
 			t.Error("resumeChainExe() returned an empty path with no error")
 		}
 	})
+}
+
+func TestResumeChainSteps_RequireTheSession(t *testing.T) {
+	for _, step := range []string{resumeDrawSubcommand, resumeWaitSubcommand} {
+		t.Run("state "+step+" refuses an argv naming no session", func(t *testing.T) {
+			_, _, err := runRootCmd(t, "state", step, "--command", "make deploy")
+
+			if err == nil || err.Error() != `required flag(s) "session" not set` {
+				t.Errorf("state %s with no --session = %v, want the required-flag refusal", step, err)
+			}
+		})
+	}
 }

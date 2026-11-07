@@ -3,6 +3,7 @@ package sourceguardtest
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -11,18 +12,21 @@ import (
 )
 
 const (
-	hooksPkg     = "github.com/leeovery/portal/internal/hooks"
-	nanoidPkg    = "github.com/leeovery/portal/internal/nanoid"
-	themePkg     = "github.com/leeovery/portal/internal/theme"
-	fileutilPkg  = "github.com/leeovery/portal/internal/fileutil"
-	logPkg       = "github.com/leeovery/portal/internal/log"
-	nanoidPkgDir = "../nanoid"
+	hooksPkg      = "github.com/leeovery/portal/internal/hooks"
+	nanoidPkg     = "github.com/leeovery/portal/internal/nanoid"
+	themePkg      = "github.com/leeovery/portal/internal/theme"
+	fileutilPkg   = "github.com/leeovery/portal/internal/fileutil"
+	logPkg        = "github.com/leeovery/portal/internal/log"
+	shellquotePkg = "github.com/leeovery/portal/internal/shellquote"
+	nanoidPkgDir  = "../nanoid"
 
 	fixtureModule       = "portalguardfixture"
 	fixtureLanePkg      = fixtureModule + "/lane"
 	fixtureForbiddenPkg = fixtureModule + "/forbidden"
 
 	fixtureDefaultLanePkg = fixtureModule + "/defaultlane"
+	fixtureLinuxPkg       = fixtureModule + "/onlinux"
+	fixtureCgoPkg         = fixtureModule + "/cgoonly"
 )
 
 func TestAssertDepsWithin_ReportsEveryDepOutsideTheAllowlist(t *testing.T) {
@@ -30,7 +34,7 @@ func TestAssertDepsWithin_ReportsEveryDepOutsideTheAllowlist(t *testing.T) {
 
 	rec.Run(func() { AssertDepsWithin(rec, hooksPkg, []string{fileutilPkg}) })
 
-	for _, want := range []string{logPkg, nanoidPkg, "internal/storelog"} {
+	for _, want := range []string{logPkg, "internal/resumemode", "internal/storelog"} {
 		if !errored(rec, want) {
 			t.Errorf("AssertDepsWithin did not report %s as outside the allowlist; reported %v", want, rec.Errors)
 		}
@@ -78,7 +82,7 @@ func TestAssertDepsWithin_FatalsWhenNoAllowlistedInternalDepIsPresent(t *testing
 func TestAssertDepsWithin_LeavesAnotherModuleAloneByDefault(t *testing.T) {
 	rec := &harnesstest.Recorder{}
 
-	rec.Run(func() { AssertDepsWithin(rec, themePkg, []string{logPkg}) })
+	rec.Run(func() { AssertDepsWithin(rec, themePkg, []string{logPkg, shellquotePkg}) })
 
 	if rec.Failed() {
 		t.Errorf("AssertDepsWithin faulted a dependency outside the package's own module: %s", rec.Report())
@@ -196,6 +200,44 @@ func TestAssertDepsWithin_WithBuildTags(t *testing.T) {
 	})
 }
 
+func TestAssertDepsWithin_ForGOOS(t *testing.T) {
+	t.Run("it reports a forbidden dependency reachable only from a file for that GOOS, naming it", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureLinuxPkg, nil, InDir(dir), ForGOOS("linux")) })
+
+		if !errored(rec, fixtureForbiddenPkg) {
+			t.Errorf("AssertDepsWithin did not report %s, which the fixture reaches only from its _linux.go file; reported %v", fixtureForbiddenPkg, rec.Errors)
+		}
+		if !errored(rec, fixtureLinuxPkg+" under GOOS=linux CGO_ENABLED=0") {
+			t.Errorf("the finding does not name the GOOS it was resolved for; reported %v", rec.Errors)
+		}
+	})
+
+	t.Run("it reads with cgo off, as the release builds, even for the host's own GOOS", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureCgoPkg, nil, InDir(dir), ForGOOS(runtime.GOOS)) })
+
+		if rec.Failed() {
+			t.Errorf("the reading took in a file built only with cgo: %s", rec.Report())
+		}
+	})
+
+	t.Run("it leaves that dependency out of another GOOS's reading", func(t *testing.T) {
+		dir := stageTaggedFixtureModule(t)
+		rec := &harnesstest.Recorder{}
+
+		rec.Run(func() { AssertDepsWithin(rec, fixtureLinuxPkg, nil, InDir(dir), ForGOOS("darwin")) })
+
+		if rec.Failed() {
+			t.Errorf("the darwin reading faulted the fixture, so the linux one proves nothing: %s", rec.Report())
+		}
+	})
+}
+
 // stageTaggedFixtureModule writes a module holding both shapes a single-lane
 // dependency reading is blind to — one package reaching a third only from an
 // integration-tagged source, one reaching it only from a source gated against
@@ -220,6 +262,10 @@ func stageTaggedFixtureModule(t *testing.T) string {
 	write("defaultlane/defaultlane.go", "package defaultlane\n")
 	write("defaultlane/defaultlane_unit.go", "//go:build !"+IntegrationTag+"\n\npackage defaultlane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("lane/lane_integration.go", "//go:build "+IntegrationTag+"\n\npackage lane\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
+	write("cgoonly/cgoonly.go", "package cgoonly\n")
+	write("cgoonly/cgoonly_cgo.go", "//go:build cgo\n\npackage cgoonly\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
+	write("onlinux/onlinux.go", "package onlinux\n")
+	write("onlinux/onlinux_linux.go", "package onlinux\n\nimport _ \""+fixtureForbiddenPkg+"\"\n")
 	write("forbidden/forbidden.go", "package forbidden\n")
 	return dir
 }

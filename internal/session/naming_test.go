@@ -1,242 +1,117 @@
 package session_test
 
 import (
-	"fmt"
-	"regexp"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/session"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func TestSanitiseProjectName(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "replaces periods with hyphens",
-			input: "my.app",
-			want:  "my-app",
-		},
-		{
-			name:  "replaces colons with hyphens",
-			input: "my:app",
-			want:  "my-app",
-		},
-		{
-			name:  "replaces multiple periods and colons",
-			input: "my.cool:app.v2",
-			want:  "my-cool-app-v2",
-		},
-		{
-			name:  "drops a leading dollar from a project fragment rather than substituting a hyphen",
-			input: "$work",
-			want:  "work",
-		},
-		{
-			name:  "drops the hyphen a leading period replaces into",
-			input: ".dotfiles",
-			want:  "dotfiles",
-		},
-		{
-			name:  "leaves a $ that is not leading alone",
-			input: "a$b",
-			want:  "a$b",
-		},
-		{
-			name:  "leaves clean name unchanged",
-			input: "portal",
-			want:  "portal",
-		},
-		{
-			name:  "handles empty string",
-			input: "",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := session.SanitiseProjectName(tt.input)
-			if got != tt.want {
-				t.Errorf("SanitiseProjectName(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
+	for input, want := range map[string]string{
+		"portal":       "portal",
+		"my.app:v2":    "my.app:v2",
+		"$work":        "$work",
+		"-lead":        "lead",
+		"_portal":      "portal",
+		"-_-x":         "x",
+		"a/b":          "a-b",
+		"/":            "",
+		"line\nbreak":  "line-break",
+		"\tlead":       "lead",
+		"bad\xffbyte":  "bad-byte",
+		"café — 日本":    "café — 日本",
+		"a_b-c":        "a_b-c",
+		"":             "",
+		"\x00\x01\x02": "",
+	} {
+		if got := session.SanitiseProjectName(input); got != want {
+			t.Errorf("SanitiseProjectName(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
-func TestGenerateSessionName(t *testing.T) {
-	validNamePattern := regexp.MustCompile(`^.+-[a-zA-Z0-9]{6}$`)
+func accept(string) error { return nil }
 
-	t.Run("generates name in correct format", func(t *testing.T) {
-		gen := func() (string, error) { return "abc123", nil }
-		exists := func(name string) bool { return false }
-
-		got, err := session.GenerateSessionName("portal", gen, exists)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "portal-abc123" {
-			t.Errorf("got %q, want %q", got, "portal-abc123")
-		}
-
-		if !validNamePattern.MatchString(got) {
-			t.Errorf("name %q does not match pattern {project}-[a-zA-Z0-9]{6}", got)
+func TestSessionName(t *testing.T) {
+	t.Run("it is the project, a hyphen and the suffix", func(t *testing.T) {
+		got, err := session.SessionName("portal", "abc123", accept)
+		if err != nil || got != "portal-abc123" {
+			t.Errorf("SessionName = %q, %v; want portal-abc123", got, err)
 		}
 	})
 
-	t.Run("sanitises periods in project name", func(t *testing.T) {
-		gen := func() (string, error) { return "abc123", nil }
-		exists := func(name string) bool { return false }
-
-		got, err := session.GenerateSessionName("my.app", gen, exists)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "my-app-abc123" {
-			t.Errorf("got %q, want %q", got, "my-app-abc123")
-		}
-	})
-
-	t.Run("sanitises colons in project name", func(t *testing.T) {
-		gen := func() (string, error) { return "abc123", nil }
-		exists := func(name string) bool { return false }
-
-		got, err := session.GenerateSessionName("my:app", gen, exists)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "my-app-abc123" {
-			t.Errorf("got %q, want %q", got, "my-app-abc123")
-		}
-	})
-
-	t.Run("retries on collision", func(t *testing.T) {
-		callCount := 0
-		gen := func() (string, error) {
-			callCount++
-			if callCount == 1 {
-				return "aaaaaa", nil
+	t.Run("a project that sanitises to nothing takes the fallback word, never the bare nanoid", func(t *testing.T) {
+		for _, project := range []string{"", "-", "_", "/"} {
+			got, err := session.SessionName(project, "abc123", accept)
+			if err != nil || got != session.FallbackProject+"-abc123" {
+				t.Errorf("SessionName(%q) = %q, %v; want %s-abc123", project, got, err, session.FallbackProject)
 			}
-			return "bbbbbb", nil
+			if nanoid.IsTokenShaped(got) {
+				t.Errorf("SessionName(%q) = %q, which is token-shaped", project, got)
+			}
 		}
-		exists := func(name string) bool {
-			return name == "portal-aaaaaa"
-		}
+	})
 
-		got, err := session.GenerateSessionName("portal", gen, exists)
+	t.Run("it cuts the project part until the name fits", func(t *testing.T) {
+		got, err := session.SessionName("abcdefghij", "abc123", maxLen(12))
+		if err != nil || got != "abcde-abc123" {
+			t.Errorf("SessionName = %q, %v; want abcde-abc123", got, err)
+		}
+	})
+
+	t.Run("a cut never splits a character", func(t *testing.T) {
+		got, err := session.SessionName("日本語", "abc123", maxLen(13))
+		if err != nil || got != "日本-abc123" {
+			t.Errorf("SessionName = %q, %v; want 日本-abc123", got, err)
+		}
+	})
+
+	t.Run("a cut never leaves the part ending in a hyphen", func(t *testing.T) {
+		got, err := session.SessionName("ab--cd", "abc123", maxLen(10))
+		if err != nil || got != "ab-abc123" {
+			t.Errorf("SessionName = %q, %v; want ab-abc123", got, err)
+		}
+	})
+
+	t.Run("with nothing left to cut it returns the refusal", func(t *testing.T) {
+		_, err := session.SessionName("portal", "abc123", maxLen(7))
+		if !errors.Is(err, backend.ErrInvalidName) {
+			t.Errorf("SessionName = %v, want ErrInvalidName", err)
+		}
+	})
+
+	t.Run("it fits a long project within zmx's limit for a long zmx dir", func(t *testing.T) {
+		b, err := zmx.New(zmx.Config{Dir: "/Users/someone-with-a-long-name/.local/state/zmx"})
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("zmx.New: %v", err)
 		}
-
-		if got != "portal-bbbbbb" {
-			t.Errorf("got %q, want %q", got, "portal-bbbbbb")
-		}
-
-		if callCount != 2 {
-			t.Errorf("expected 2 generator calls, got %d", callCount)
-		}
-	})
-
-	t.Run("returns error after max retries", func(t *testing.T) {
-		gen := func() (string, error) { return "aaaaaa", nil }
-		exists := func(name string) bool { return true }
-
-		_, err := session.GenerateSessionName("portal", gen, exists)
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-
-		want := "failed to generate unique session name after 10 attempts"
-		if err.Error() != want {
-			t.Errorf("error = %q, want %q", err.Error(), want)
-		}
-	})
-
-	t.Run("it generates the nanoid alone when the sanitised project fragment is empty", func(t *testing.T) {
-		gen := func() (string, error) { return "abc123", nil }
-		exists := func(name string) bool { return false }
-
-		got, err := session.GenerateSessionName("", gen, exists)
+		got, err := session.SessionName(strings.Repeat("project", 20), "abc123", b.ValidateName)
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("SessionName: %v", err)
 		}
-
-		if got != "abc123" {
-			t.Errorf("got %q, want %q", got, "abc123")
-		}
-	})
-
-	t.Run("returns error when generator fails", func(t *testing.T) {
-		gen := func() (string, error) { return "", fmt.Errorf("random source exhausted") }
-		exists := func(name string) bool { return false }
-
-		_, err := session.GenerateSessionName("portal", gen, exists)
-		if err == nil {
-			t.Fatal("expected error, got nil")
+		if len(got) != b.MaxNameLen() || !strings.HasSuffix(got, "-abc123") {
+			t.Errorf("SessionName = %q (%d bytes), want %d bytes ending -abc123", got, len(got), b.MaxNameLen())
 		}
 	})
 }
 
-// The pane-token width is hooks.json's key-recognition contract; the
-// session-name suffix is not classified by anything and draws on the
-// general-purpose generator, so the two must be free to move apart.
-func TestGenerateSessionName_SuffixDrawsOnTheGeneralPurposeGenerator(t *testing.T) {
-	t.Run("it leaves session-name suffix width independent of the pane-token width", func(t *testing.T) {
-		gen := nanoid.NewGenerator()
-
-		name, err := session.GenerateSessionName("portal", gen, func(string) bool { return false })
+func TestSessionNamesAreOnesZmxAccepts(t *testing.T) {
+	hostile := []string{"", "-", "_portal", "-lead", "logs", "a/b", "/", "tab\there", "bad\xff", "star*", "-h", "--labels", "..", "."}
+	for _, project := range hostile {
+		name, err := session.SessionName(project, "abc123", accept)
 		if err != nil {
-			t.Fatalf("GenerateSessionName: %v", err)
+			t.Fatalf("SessionName(%q): %v", project, err)
 		}
-		_, suffix, found := strings.Cut(name, "-")
-		if !found {
-			t.Fatalf("GenerateSessionName produced %q, want a {project}-{id} name", name)
+		if err := zmx.CheckName(name); err != nil {
+			t.Errorf("SessionName(%q) = %q, which zmx refuses: %v", project, name, err)
 		}
-
-		id, err := gen()
-		if err != nil {
-			t.Fatalf("mint a general-purpose id: %v", err)
+		if (backend.Session{Name: name}).PortalOwned() {
+			t.Errorf("SessionName(%q) = %q, which reads as one of Portal's own", project, name)
 		}
-		if len(suffix) != len(id) {
-			t.Errorf("session-name suffix %q is %d bytes, want the general-purpose id width of %d", suffix, len(suffix), len(id))
-		}
-		for i := range len(suffix) {
-			if !strings.ContainsRune(nanoid.Alphabet, rune(suffix[i])) {
-				t.Errorf("session-name suffix %q carries %q, which is outside the generated-id alphabet", suffix, suffix[i])
-			}
-		}
-	})
-}
-
-func TestGenerateSessionNameProducesAddressableNames(t *testing.T) {
-	t.Run("it generates only names ValidateSessionName accepts", func(t *testing.T) {
-		// Directory names carrying the characters the generator drops or
-		// replaces: the target separator, the leading ID prefix, the period,
-		// and a leading hyphen — plus the empty name, which leaves no fragment
-		// at all.
-		hostileProjectNames := []string{"$foo", "$", "a:b", "a.b", "$a:b", "", "-lead", ".dotfiles"}
-		gen := func() (string, error) { return "abc123", nil }
-		exists := func(string) bool { return false }
-
-		for _, projectName := range hostileProjectNames {
-			t.Run(projectName, func(t *testing.T) {
-				name, err := session.GenerateSessionName(projectName, gen, exists)
-				if err != nil {
-					t.Fatalf("GenerateSessionName(%q): %v", projectName, err)
-				}
-
-				if err := tmux.ValidateSessionName(name); err != nil {
-					t.Errorf("GenerateSessionName(%q) produced %q, which ValidateSessionName refuses: %v", projectName, name, err)
-				}
-			})
-		}
-	})
+	}
 }

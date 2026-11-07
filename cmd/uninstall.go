@@ -1,106 +1,130 @@
 package cmd
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"log/slog"
 
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/xdg"
 	"github.com/spf13/cobra"
 )
 
-// Client is required; Unregister and Logger fall back to their production
-// values when nil.
-type UninstallDeps struct {
-	Client     *tmux.Client
-	Unregister func(*tmux.Client) error
-	Logger     *slog.Logger
-}
-
 var uninstallDeps *UninstallDeps
 
-// The log-component taxonomy is closed, so uninstall borrows the daemon
-// component's logger rather than introducing one.
-func buildUninstallDeps() (*tmux.Client, func(*tmux.Client) error, *slog.Logger) {
-	if uninstallDeps != nil {
-		unregister := uninstallDeps.Unregister
-		if unregister == nil {
-			unregister = tmux.UnregisterPortalHooks
-		}
-		logger := uninstallDeps.Logger
-		if logger == nil {
-			logger = daemonLogger
-		}
-		return uninstallDeps.Client, unregister, logger
-	}
-	return tmux.DefaultClient(), tmux.UnregisterPortalHooks, daemonLogger
+// UninstallDeps overrides the saver's stop and the end of a saver Portal
+// can't use; production leaves uninstallDeps nil, stops the saver over the
+// session backend and ends one as the bootstrap does. A field left nil is
+// production's.
+type UninstallDeps struct {
+	Saver  saverStopper
+	Daemon unusableSaver
 }
 
-const uninstallCompletionLine1 = "Portal's tmux runtime removed. Your saved sessions and config are untouched at ~/.config/portal/."
-const uninstallCompletionLine2 = "To remove Portal completely, uninstall the binary and delete that directory."
+// saverStopper stops the saver, reporting whether there was one, and hands a
+// stop that fails to orElse under the same hold of saver.lock.
+type saverStopper interface {
+	StopOr(ctx context.Context, orElse func(ctx context.Context, err error) (bool, error)) (bool, error)
+}
 
-// Order matters: killSaver runs before the hooks are unregistered so the
-// daemon's SIGHUP flush observes the pre-teardown world. Neither failure
-// short-circuits the other.
+// unusableSaver is the saver session's daemon as uninstall ends one whose zmx
+// protocol Portal can't use, and so can't read to stop.
+type unusableSaver interface {
+	unusable(ctx context.Context) bool
+	End(ctx context.Context) error
+}
+
+func uninstallSaver() (saverStopper, unusableSaver, error) {
+	var deps UninstallDeps
+	if uninstallDeps != nil {
+		deps = *uninstallDeps
+	}
+	dir, err := state.Dir()
+	if err != nil {
+		return nil, nil, err
+	}
+	if deps.Daemon == nil {
+		deps.Daemon = newSaverDaemon(dir)
+	}
+	if deps.Saver != nil {
+		return deps.Saver, deps.Daemon, nil
+	}
+	b, err := sessionBackend()
+	if err != nil {
+		return nil, nil, err
+	}
+	host, err := newSaverHost(b, dir)
+	return host, deps.Daemon, err
+}
+
+// Uninstall stops the saver and nothing more: it keeps the bootstrapped
+// latch, touches no state or config file but saver.lock, which it holds for
+// the stop (making the state directory for it only when a saver runs
+// without one), and starts nothing. The next Portal command, finding no
+// saver, runs the full bootstrap, which brings it back.
 var uninstallCmd = &cobra.Command{
 	Use:           "uninstall",
-	Short:         "Remove Portal's tmux runtime (save daemon + global hooks); leaves saved sessions and config",
+	Short:         "Stop Portal's save daemon; leaves saved sessions and config",
 	Args:          cobra.NoArgs,
 	SilenceErrors: true,
 	SilenceUsage:  true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, unregister, logger := buildUninstallDeps()
-
-		var errs []error
-
-		if client.ServerRunning() {
-			if err := killSaver(client, logger); err != nil {
-				errs = append(errs, fmt.Errorf("daemon kill: %w", err))
-			}
-			if err := unregister(client); err != nil {
-				errs = append(errs, fmt.Errorf("hook removal: %w", err))
-			}
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		stopped, err := stopSaver(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("couldn't stop Portal's save daemon: %w", err)
 		}
-
-		// Printed before the joined error returns: the message must appear even
-		// on a partial failure, since nothing here is irreversible.
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), uninstallCompletionLine1)
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), uninstallCompletionLine2)
-
-		return errors.Join(errs...)
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), uninstallReport(stopped))
+		return err
 	},
 }
 
-const killSaverInfoMessage = "killed _portal-saver; daemon will flush final state on SIGHUP"
-
-// killSaver probes with the discriminating HasSessionProbe, not the
-// error-collapsing HasSession, so a transient tmux fault is never mistaken for
-// "saver absent". A session that auto-destroys between probe and kill is success.
-func killSaver(c *tmux.Client, logger *slog.Logger) error {
-	present, err := c.HasSessionProbe(tmux.PortalSaverName)
-	switch {
-	case err == nil:
-		// Confirmed present — fall through to the kill below.
-	case !present:
-		// A genuine non-zero tmux exit: the saver is gone, nothing to kill.
-		return nil
-	default:
-		// The probe could not confirm either way; surface it rather than claim
-		// the saver was removed.
-		logger.Warn("kill _portal-saver probe failed", "error", err)
-		return fmt.Errorf("saver probe: %w", err)
+// stopSaver stops the saver, and reports whether there was one. A saver the
+// stop fails on whose daemon speaks a zmx protocol Portal can't use is ended
+// as the bootstrap ends one, still under saver.lock, so no saver an ensure
+// makes meanwhile is ended in its place. A saver proved another state
+// directory's is refused in the bootstrap's terms, sent nothing.
+func stopSaver(ctx context.Context) (bool, error) {
+	stopper, daemon, err := uninstallSaver()
+	if err != nil {
+		return false, err
 	}
-
-	if err := c.KillSession(tmux.PortalSaverName); err != nil {
-		if errors.Is(err, tmux.ErrNoSuchSession) {
-			logger.Info(killSaverInfoMessage)
-			return nil
-		}
-		logger.Warn("kill _portal-saver failed", "error", err)
-		return err
+	stopped, err := stopper.StopOr(ctx, func(ctx context.Context, stopErr error) (bool, error) {
+		return endUnusable(ctx, daemon, stopErr)
+	})
+	if refusal := bootstrap.OtherStateDir(err); refusal != nil {
+		return false, refusal
 	}
-	logger.Info(killSaverInfoMessage)
-	return nil
+	return stopped, err
+}
+
+// endUnusable ends the saver a stop failed on with stopErr when its daemon
+// speaks a zmx protocol Portal can't use, and reports whether it did. One it
+// can neither stop nor end fails with the bootstrap's way out of it.
+func endUnusable(ctx context.Context, daemon unusableSaver, stopErr error) (bool, error) {
+	if !daemon.unusable(ctx) {
+		return false, stopErr
+	}
+	if err := daemon.End(ctx); err != nil {
+		return false, fmt.Errorf("%s (%w; %w)", bootstrap.SaverLeftMessage, stopErr, err)
+	}
+	return true, nil
+}
+
+// uninstallReport says what uninstall did, where the saved sessions and
+// config it left are, and how to remove them too.
+func uninstallReport(stopped bool) string {
+	done := "Portal's save daemon isn't running."
+	if stopped {
+		done = "Portal's save daemon stopped."
+	}
+	dir, err := xdg.PortalDir(xdg.OSEnv)
+	if err != nil {
+		return done + " Saved sessions and config are untouched.\n" +
+			"To remove Portal completely, uninstall the binary and delete Portal's config directory."
+	}
+	return done + " Saved sessions and config are untouched at " + resolver.AbbreviateHome(resolver.ProcessHome(), dir) + "/.\n" +
+		"To remove Portal completely, uninstall the binary and delete that directory."
 }
 
 func init() {

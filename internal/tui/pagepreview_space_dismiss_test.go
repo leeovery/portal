@@ -7,13 +7,7 @@ import (
 )
 
 func TestPreviewSpaceEmitsDismissedMsg(t *testing.T) {
-	enum := &hermeticEnumerator{}
-	reader := &hermeticReader{}
-
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("expected ok=true on construction, got false")
-	}
+	m := newTestPreview(t, "content", 80, 24)
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	if cmd == nil {

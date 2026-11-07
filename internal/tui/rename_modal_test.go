@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 func renameModalContains(content, s string) bool {
@@ -301,43 +300,30 @@ func TestRenameModal_LongOldNameTruncates(t *testing.T) {
 	}
 }
 
-func TestUpdateRenameModal_EnterRenamesNonEmpty(t *testing.T) {
-	rec := &recordingRenamer{}
-	m := newRenameTestModel(rec, "aviva-proxy-qNyfEO", "  aviva-proxy  ")
+func TestUpdateRenameModal_EnterLabelsWithTheTextAsTyped(t *testing.T) {
+	for _, value := range []string{"  aviva proxy  ", "", "aviva-proxy-qNyfEO"} {
+		rec := &recordingLabeller{}
+		m := newRenameTestModel(rec, "aviva-proxy-qNyfEO", value)
 
-	updated, cmd := m.updateRenameModal(tea.KeyPressMsg{Code: tea.KeyEnter})
-	um := updated.(Model)
-	if um.modal != modalNone {
-		t.Errorf("Enter on a non-empty name must close the modal; modal still %v", um.modal)
-	}
-	if cmd == nil {
-		t.Fatalf("Enter on a non-empty name must return a rename command")
-	}
-	cmd()
-	if rec.oldName != "aviva-proxy-qNyfEO" || rec.newName != "aviva-proxy" {
-		t.Errorf("Enter must rename old=%q→new=%q (trimmed); got old=%q new=%q", "aviva-proxy-qNyfEO", "aviva-proxy", rec.oldName, rec.newName)
-	}
-}
-
-func TestUpdateRenameModal_EnterEmptyIsNoOp(t *testing.T) {
-	rec := &recordingRenamer{}
-	m := newRenameTestModel(rec, "aviva-proxy-qNyfEO", "   ")
-
-	updated, cmd := m.updateRenameModal(tea.KeyPressMsg{Code: tea.KeyEnter})
-	um := updated.(Model)
-	if um.modal != modalRename {
-		t.Errorf("Enter on a whitespace-only name must keep the modal open; modal now %v", um.modal)
-	}
-	if cmd != nil {
-		t.Errorf("Enter on a whitespace-only name must NOT return a command")
-	}
-	if rec.called {
-		t.Errorf("Enter on a whitespace-only name must not rename")
+		updated, cmd := m.updateRenameModal(tea.KeyPressMsg{Code: tea.KeyEnter})
+		um := updated.(Model)
+		if um.modal != modalNone {
+			t.Errorf("Enter on %q must close the modal; modal still %v", value, um.modal)
+		}
+		if cmd == nil {
+			t.Fatalf("Enter on %q must return a label command", value)
+		}
+		cmd()
+		// Empty text and the name itself reset the label: the labeller's rule,
+		// so the modal hands both over rather than deciding for it.
+		if rec.name != "aviva-proxy-qNyfEO" || rec.label != value {
+			t.Errorf("Enter must label %q as %q; got %q as %q", "aviva-proxy-qNyfEO", value, rec.name, rec.label)
+		}
 	}
 }
 
 func TestUpdateRenameModal_EscCancels(t *testing.T) {
-	rec := &recordingRenamer{}
+	rec := &recordingLabeller{}
 	m := newRenameTestModel(rec, "aviva-proxy-qNyfEO", "aviva-proxy")
 
 	updated, cmd := m.updateRenameModal(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -349,36 +335,37 @@ func TestUpdateRenameModal_EscCancels(t *testing.T) {
 		t.Errorf("Esc must not return a command")
 	}
 	if rec.called {
-		t.Errorf("Esc must not rename")
+		t.Errorf("Esc must not label")
 	}
 }
 
-type recordingRenamer struct {
-	called  bool
-	oldName string
-	newName string
+type recordingLabeller struct {
+	called bool
+	name   string
+	label  string
+	err    error
 }
 
-func (r *recordingRenamer) RenameSession(oldName, newName string) error {
+func (r *recordingLabeller) SetLabel(name, label string) error {
 	r.called = true
-	r.oldName = oldName
-	r.newName = newName
-	return nil
+	r.name = name
+	r.label = label
+	return r.err
 }
 
 type stubLister struct {
-	sessions []tmux.Session
+	sessions []Session
 }
 
-func (l stubLister) ListSessions() ([]tmux.Session, error) { return l.sessions, nil }
+func (l stubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
-func newRenameTestModel(renamer SessionRenamer, target, value string) Model {
-	sessions := []tmux.Session{{Name: target, Windows: 1}}
+func newRenameTestModel(labeller SessionLabeller, target, value string) Model {
+	sessions := []Session{{Name: target}}
 	m := NewModelWithSessions(sessions)
-	m.sessionRenamer = renamer
+	m.sessionLabeller = labeller
 	m.sessionLister = stubLister{sessions: sessions}
 	m.modal = modalRename
-	m.renameTarget = target
+	m.renameTarget = sessions[0]
 	m.renameInput = newRenameInput(value)
 	return m
 }

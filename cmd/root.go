@@ -7,44 +7,97 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
 // Bootstrap must not run for these: it would heal doctor's subject, build what
-// uninstall then tears down, recurse for `state` subcommands fired from tmux
-// hooks, and start a server on every __complete TAB. A match anywhere in the
-// parent chain exempts the invocation, keyed on cobra's canonical Name() so the
-// silent `hooks` alias rides on "hook".
-var skipTmuxCheck = map[string]bool{
+// uninstall then tears down, run on migrate's version 1 state before migrate
+// runs it on the state it makes, run again inside the saver and the helpers
+// its `state` subcommands are, and run on every __complete TAB; the rest only
+// read or label sessions. A match anywhere in the parent chain exempts
+// the invocation, keyed on cobra's canonical Name() so the silent `hooks` alias
+// rides on "hook".
+var bootstrapExempt = map[string]bool{
 	"__complete": true,
 	"alias":      true,
+	"current":    true,
 	"doctor":     true,
 	"help":       true,
 	"hook":       true,
 	"init":       true,
+	"migrate":    true,
+	"rename":     true,
 	"state":      true,
 	"theme":      true,
 	"uninstall":  true,
 	"version":    true,
 }
 
+// The state check spares version and init, which read no state, so a new
+// shell's eval of init's script keeps working before portal migrate; doctor, which reports
+// an unusable sessions.json, or a migration cut short, itself, and repairs
+// nothing on either; current, which only reads
+// it and shows the name alone when it can't, since footers run it on every
+// refresh; migrate, whose subject is the version 1 sessions.json the check
+// refuses, and which judges each state dir it finds itself; and the hidden
+// state commands, the helpers a restored session runs: a refused helper
+// exits, and the session it runs in ends with it.
+var stateCheckExempt = map[string]bool{
+	"current": true,
+	"doctor":  true,
+	"init":    true,
+	"migrate": true,
+	"state":   true,
+	"version": true,
+}
+
+// Exempt from the bootstrap, these still write state: sessions.json's claims,
+// a label, hooks.json. Run against another zmx directory than the one the
+// state directory belongs to, they would claim entries for sessions the state
+// doesn't hold, so they make the check the bootstrap's gate makes, recording
+// nothing. Keyed on the command's path below the root, so the silent `hooks`
+// alias rides on "hook". Doctor's --fix makes the same check itself, after
+// its diagnosis.
+var exemptStateWriters = map[string]bool{
+	"hook rm":  true,
+	"hook set": true,
+	"rename":   true,
+}
+
+// refuseOtherZmxDir is the fatal of a state directory that belongs to another
+// zmx directory than this Portal's, or whose record can't be read. One that
+// records none passes, as does one that can't be resolved.
+func refuseOtherZmxDir() error {
+	dir, err := state.Dir()
+	if err != nil {
+		return nil
+	}
+	return zmxDirOwner(dir, zmx.DirFor(os.Environ())).Refusal()
+}
+
+// pathBelowRoot is cmd's path without the root's name, "hook set" for
+// `portal hook set`.
+func pathBelowRoot(cmd *cobra.Command) string {
+	return strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
+}
+
 var bootstrapDeps *BootstrapDeps
 
-// BootstrapDeps overrides bootstrap collaborators; production leaves the
-// package-level bootstrapDeps nil.
+// BootstrapDeps overrides the bootstrap's gate and the bootstrap it owes;
+// production leaves the package-level bootstrapDeps nil.
 type BootstrapDeps struct {
-	// A nil Orchestrator short-circuits runBootstrap to a no-op result.
+	// Owed reports whether a bootstrap is owed. Nil owes one exactly when an
+	// Orchestrator is staged, so an empty BootstrapDeps owes none.
+	Owed func(ctx context.Context) bool
+
+	// Orchestrator is the bootstrap a command owed one runs.
 	Orchestrator bootstrap.Runner
-
-	Client *tmux.Client
-
-	// RegisterHooks is nil in production — the orchestrator owns registration.
-	RegisterHooks func(*tmux.Client) error
 
 	// ForceMemoise opts back into the production sync.Once gate, which tests
 	// bypass by default so subtests can swap mocks without resetting it.
@@ -53,115 +106,120 @@ type BootstrapDeps struct {
 
 var (
 	bootstrapOnce          sync.Once
-	bootstrapStarted       bool
 	bootstrapWarningsSlice []bootstrap.Warning
 	bootstrapErr           error
 )
 
-func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) error) {
+// owedBootstrap is the bootstrap this command owes, nil when it owes none:
+// the warm path, which asks the gate alone.
+func owedBootstrap(ctx context.Context) (bootstrap.Runner, error) {
 	if bootstrapDeps != nil {
-		return bootstrapDeps.Orchestrator, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
+		return bootstrapDeps.owed(ctx), nil
 	}
-	orch, client := buildProductionOrchestrator()
-	return orch, client, nil
+	p, err := newProductionBootstrap()
+	if err != nil {
+		return nil, err
+	}
+	if !p.gate.Owed(ctx) {
+		return nil, nil
+	}
+	return p.runner()
 }
 
-func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, []bootstrap.Warning, error) {
+func (d BootstrapDeps) owed(ctx context.Context) bootstrap.Runner {
+	if d.Owed != nil && !d.Owed(ctx) {
+		return nil
+	}
+	return d.Orchestrator
+}
+
+func runBootstrap(ctx context.Context, runner bootstrap.Runner) ([]bootstrap.Warning, error) {
 	if bootstrapDeps != nil && !bootstrapDeps.ForceMemoise {
-		if runner == nil {
-			return false, nil, nil
-		}
 		return runner.Run(ctx)
 	}
 	bootstrapOnce.Do(func() {
-		if runner == nil {
-			return
-		}
-		bootstrapStarted, bootstrapWarningsSlice, bootstrapErr = runner.Run(ctx)
+		bootstrapWarningsSlice, bootstrapErr = runner.Run(ctx)
 	})
-	return bootstrapStarted, bootstrapWarningsSlice, bootstrapErr
+	return bootstrapWarningsSlice, bootstrapErr
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "portal",
-	Short: "An interactive session picker for tmux",
+	Short: "An interactive session picker for zmx",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		for c := cmd; c != nil; c = c.Parent() {
-			if skipTmuxCheck[c.Name()] {
-				return nil
-			}
-		}
-		if err := tmux.CheckTmuxAvailable(); err != nil {
-			return bootstrap.NewFatal(err.Error(), err)
-		}
-		if err := runVersionCheck(); err != nil {
-			return bootstrap.NewFatal(err.Error(), err)
-		}
-
-		runner, client, registerHooks := buildBootstrapDeps()
-
-		// Read exactly once and threaded downstream; every not-satisfied case
-		// (including a nil client) folds into a full bootstrap.
-		latchSatisfied := client != nil && state.BootstrappedLatchSatisfied(client, version)
-
-		// Setting no deferredBootstrapKey is load-bearing: openTUI keeps
-		// serverStarted=false and reaches the picker with no loading page.
-		if latchSatisfied {
-			stateDir, _ := state.Dir()
-			ensureSaverLiveness(client, stateDir)
-			if !isTUIPath(cmd, args) {
-				bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
-			}
-			ctx := context.WithValue(cmd.Context(), serverStartedKey, false)
-			ctx = context.WithValue(ctx, tmuxClientKey, client)
-			cmd.SetContext(ctx)
-			return nil
-		}
-
-		// openTUI runs the deferred orchestrator in a goroutine behind the loading
-		// page.
-		if shouldRunConcurrentBootstrap(cmd, args, client, latchSatisfied) {
-			ctx := cmd.Context()
-			if client != nil {
-				ctx = context.WithValue(ctx, tmuxClientKey, client)
-			}
-			ctx = context.WithValue(ctx, deferredBootstrapKey, &deferredBootstrap{runner: runner})
-			cmd.SetContext(ctx)
-			// serverStartedKey is deliberately unset: openTUI reads it from the
-			// progress pipe's terminal event.
-			return nil
-		}
-
-		started, warnings, err := runBootstrap(cmd.Context(), runner)
-		if err != nil {
-			return err
-		}
-
-		// The CLI path drains here so warnings precede the command's own output;
-		// the TUI path leaves them in the sink for the model to carry, so nothing is
-		// written into a frame the picker is about to claim.
-		for _, w := range warnings {
-			bootstrapWarnings.Add(w)
-		}
-		if !isTUIPath(cmd, args) {
-			bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
-		}
-
-		ctx := context.WithValue(cmd.Context(), serverStartedKey, started)
-		if client != nil {
-			ctx = context.WithValue(ctx, tmuxClientKey, client)
-		}
-		cmd.SetContext(ctx)
-
-		if registerHooks != nil && client != nil {
-			if err := registerHooks(client); err != nil {
+		if !inChain(cmd, stateCheckExempt) {
+			if err := refuseUnusableState(); err != nil {
 				return err
 			}
 		}
-		return nil
+		if exemptStateWriters[pathBelowRoot(cmd)] {
+			return refuseOtherZmxDir()
+		}
+		if inChain(cmd, bootstrapExempt) {
+			return nil
+		}
+		// The picker creates and attaches too, so it fails here, before it
+		// draws, rather than at the pick.
+		if cmd.Name() == openCmd.Name() {
+			if _, err := attachingBackend(); err != nil {
+				return err
+			}
+		}
+		return bootstrapFor(cmd, args)
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+// bootstrapFor runs the bootstrap the command owes, or defers it to the
+// picker's loading page on a picker launch. A command owed none runs
+// straight away.
+func bootstrapFor(cmd *cobra.Command, args []string) error {
+	runner, err := owedBootstrap(cmd.Context())
+	if err != nil {
+		return err
+	}
+	if shouldRunConcurrentBootstrap(cmd, args, runner) {
+		// openTUI runs the deferred bootstrap in a goroutine behind the
+		// loading page.
+		cmd.SetContext(context.WithValue(cmd.Context(), deferredBootstrapKey, &deferredBootstrap{runner: runner}))
+		return nil
+	}
+	if runner == nil {
+		return nil
+	}
+
+	warnings, err := runBootstrap(bootstrap.WithProgressEmitter(cmd.Context(), waitNotice(cmd.ErrOrStderr())), runner)
+	if err != nil {
+		return err
+	}
+	// Every picker launch took the deferred route above, so warnings precede
+	// the command's own output here.
+	for _, w := range warnings {
+		bootstrapWarnings.Add(w)
+	}
+	bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
+	return nil
+}
+
+// waitNotice is a command's progress off the picker: one line on w should its
+// bootstrap wait a while for another Portal's, and nothing of its steps.
+func waitNotice(w io.Writer) bootstrap.ProgressEmitter {
+	return func(ev bootstrap.StepEvent) {
+		if ev.Waiting {
+			_, _ = fmt.Fprintln(w, "Waiting for another Portal to finish starting…")
+		}
+	}
+}
+
+// inChain reports whether cmd or any command above it is named in set.
+func inChain(cmd *cobra.Command, set map[string]bool) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if set[c.Name()] {
+			return true
+		}
+	}
+	return false
 }
 
 // isTUIPath reports whether this invocation will launch the picker, and so must
@@ -169,7 +227,7 @@ var rootCmd = &cobra.Command{
 //
 // A search form is classified on its shape rather than on its outcome: whether
 // it ends at the picker depends on how many live sessions its term matches, and
-// on a cold server there are none to match until restore has finished.
+// on a cold start there are none to match until restore has finished.
 func isTUIPath(cmd *cobra.Command, args []string) bool {
 	if cmd.Name() != "open" || anyOpenDomainPin(cmd) {
 		return false
@@ -183,25 +241,38 @@ func anyOpenDomainPin(cmd *cobra.Command) bool {
 	return slices.ContainsFunc(openDomainPinFlags, cmd.Flags().Changed)
 }
 
-// The loading screen means "a full bootstrap is in progress", so the trigger is
-// the threaded latch verdict, not a server-down probe: this decider issues no
-// tmux round-trip and never re-reads the latch.
-func shouldRunConcurrentBootstrap(cmd *cobra.Command, args []string, client *tmux.Client, latchSatisfied bool) bool {
-	if !isTUIPath(cmd, args) || client == nil {
-		return false
-	}
-	return !latchSatisfied
+// A picker launch with a bootstrap to run shows the loading page while it
+// runs. With no runner there is nothing to wait for, so the picker opens
+// straight onto its list.
+func shouldRunConcurrentBootstrap(cmd *cobra.Command, args []string, runner bootstrap.Runner) bool {
+	return runner != nil && isTUIPath(cmd, args)
 }
 
 var fatalErrorStderr io.Writer = os.Stderr
 
+// createFatal is the fatal a create's failure is, nil for one that is none:
+// the one mapping Execute and the picker's mints share.
+func createFatal(err error) error {
+	if fatal := bootstrap.UnsupportedCreate(err); fatal != nil {
+		return fatal
+	}
+	return nil
+}
+
 // Execute writes a *bootstrap.FatalError's UserMessage to stderr before
 // returning it, and never calls os.Exit — the caller maps the returned error to
-// the process exit code.
+// the process exit code. A create's refusal of a session made by a zmx Portal
+// can't talk to, from any command, is the fatal a bootstrap meeting that zmx
+// gives.
 func Execute() error {
 	err := rootCmd.Execute()
 	if err == nil {
 		return nil
+	}
+	if _, ok := errors.AsType[*bootstrap.FatalError](err); !ok {
+		if refused := createFatal(err); refused != nil {
+			err = refused
+		}
 	}
 	if fatal, ok := errors.AsType[*bootstrap.FatalError](err); ok {
 		_, _ = fmt.Fprintln(fatalErrorStderr, fatal.UserMessage)

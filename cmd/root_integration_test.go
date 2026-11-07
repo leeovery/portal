@@ -3,27 +3,23 @@
 package cmd_test
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
 )
 
 // Delegates to portalbintest, which compiles with -tags integration so every
 // test-staged binary carries the daemon-pgrep sandbox.
 func buildPortalBinary(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := portalbintest.BuildPortalBinary(dir); err != nil {
-		t.Fatalf("failed to build portal binary: %v", err)
-	}
-	return filepath.Join(dir, "portal")
+	return portalbintest.Build(t)
 }
 
-func TestPortalBinaryTmuxMissing(t *testing.T) {
+func TestPortalBinaryZmxMissing(t *testing.T) {
 	binary := buildPortalBinary(t)
 
 	tests := []struct {
@@ -37,35 +33,28 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 			name:     "open prints error to stderr and exits 1",
 			args:     []string{"open"},
 			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
+			wantMsg:  "zmx not found on PATH; Portal needs zmx 1.0.1 or later",
 			wantCode: 1,
 		},
 		{
-			name:     "list prints error to stderr and exits 1",
+			name:     "list's bootstrap prints error to stderr and exits 1",
 			args:     []string{"list"},
 			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
+			wantMsg:  "zmx not found on PATH; Portal needs zmx 1.0.1 or later",
 			wantCode: 1,
 		},
 		{
-			name:     "kill prints error to stderr and exits 1",
-			args:     []string{"kill", "test"},
-			wantErr:  true,
-			wantMsg:  "Portal requires tmux. Install with: brew install tmux",
-			wantCode: 1,
-		},
-		{
-			name:    "version works without tmux",
+			name:    "version works without zmx",
 			args:    []string{"version"},
 			wantErr: false,
 		},
 		{
-			name:    "init works without tmux",
+			name:    "init works without zmx",
 			args:    []string{"init", "zsh"},
 			wantErr: false,
 		},
 		{
-			name:    "help works without tmux",
+			name:    "help works without zmx",
 			args:    []string{"help"},
 			wantErr: false,
 		},
@@ -73,8 +62,10 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			env, _ := portaltest.IsolateStateForTest(t)
 			cmd := exec.Command(binary, tt.args...)
-			cmd.Env = []string{"PATH=/nonexistent/path", "HOME=" + t.TempDir()}
+			// A zmx dir of the test's own, never there.
+			cmd.Env = append(env, "PATH=/nonexistent/path", "ZMX_DIR="+filepath.Join(t.TempDir(), "zmx"))
 
 			output, err := cmd.CombinedOutput()
 
@@ -127,8 +118,9 @@ func TestPortalBinaryUnsupportedShellExitCode2(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			env, _ := portaltest.IsolateStateForTest(t)
 			cmd := exec.Command(binary, tt.args...)
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}
+			cmd.Env = env
 
 			output, err := cmd.CombinedOutput()
 			if err == nil {
@@ -154,15 +146,9 @@ func TestPortalBinaryUnsupportedShellExitCode2(t *testing.T) {
 func TestPortalBinaryAliasRmNotFound(t *testing.T) {
 	binary := buildPortalBinary(t)
 
-	tmpDir := t.TempDir()
-	aliasFile := filepath.Join(tmpDir, "aliases")
-
+	env, _ := portaltest.IsolateStateForTest(t)
 	cmd := exec.Command(binary, "alias", "rm", "nonexistent")
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + tmpDir,
-		"PORTAL_ALIASES_FILE=" + aliasFile,
-	}
+	cmd.Env = append(env, "PORTAL_ALIASES_FILE="+filepath.Join(t.TempDir(), "aliases"))
 
 	output, err := cmd.CombinedOutput()
 	if err == nil {

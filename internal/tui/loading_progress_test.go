@@ -10,9 +10,22 @@ import (
 
 const floatEps = 1e-9
 
+// bootstrapSteps is how many steps the bootstrap reports, as cmd/bootstrap
+// numbers them.
+const bootstrapSteps = 6
+
 func feed(acc tui.LoadingProgress, events ...tui.BootstrapProgressMsg) tui.LoadingProgress {
 	for _, e := range events {
 		acc = acc.Apply(e)
+	}
+	return acc
+}
+
+// through feeds steps 1 to last, each completing.
+func through(last int) tui.LoadingProgress {
+	var acc tui.LoadingProgress
+	for step := 1; step <= last; step++ {
+		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
 	}
 	return acc
 }
@@ -29,26 +42,21 @@ func activeLabelText(v tui.LoadingProgressView) string {
 func TestStepMapsToFriendlyLabel(t *testing.T) {
 	cases := []struct {
 		name      string
-		event     tui.BootstrapProgressMsg
+		index     int
 		wantLabel string
 	}{
-		{"step 1 EnsureServer", tui.BootstrapProgressMsg{Index: 1}, tui.LabelStartedTmuxServer},
-		{"step 2 RegisterPortalHooks", tui.BootstrapProgressMsg{Index: 2}, tui.LabelRegisteredHooks},
-		{"step 3 SetRestoring", tui.BootstrapProgressMsg{Index: 3}, tui.LabelRegisteredHooks},
-		{"step 4 SweepOrphanDaemons", tui.BootstrapProgressMsg{Index: 4}, tui.LabelRegisteredHooks},
-		{"step 5 EnsureSaver", tui.BootstrapProgressMsg{Index: 5}, tui.LabelRegisteredHooks},
-		{"step 6 Restore skeleton (M>0)", tui.BootstrapProgressMsg{Index: 6, RestoreN: 1, RestoreM: 3}, tui.LabelRestoringSessions},
-		{"step 6 Restore complete (M==0)", tui.BootstrapProgressMsg{Index: 6}, tui.LabelReplayingScrollback},
-		{"step 7 EagerSignalHydrate", tui.BootstrapProgressMsg{Index: 7}, tui.LabelReplayingScrollback},
-		{"step 8 ClearRestoring", tui.BootstrapProgressMsg{Index: 8}, tui.LabelRunningResumeCommands},
-		{"step 9 CleanStaleMarkers", tui.BootstrapProgressMsg{Index: 9}, tui.LabelRunningResumeCommands},
-		{"step 10 SweepOrphanFIFOs", tui.BootstrapProgressMsg{Index: 10}, tui.LabelRunningResumeCommands},
+		{"step 1 CheckZmx", 1, tui.LabelCheckingZmx},
+		{"step 2 RemoveLatch", 2, tui.LabelStartingTheSaver},
+		{"step 3 Sweep", 3, tui.LabelStartingTheSaver},
+		{"step 4 EnsureSaver", 4, tui.LabelStartingTheSaver},
+		{"step 5 Restore", 5, tui.LabelRestoringSessions},
+		{"step 6 WriteLatch", 6, tui.LabelRestoringSessions},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tui.LabelForStep(tc.event); got != tc.wantLabel {
-				t.Errorf("LabelForStep(step %d) = %q; want %q", tc.event.Index, got, tc.wantLabel)
+			if got := tui.LabelForStepIndex(tc.index); got != tc.wantLabel {
+				t.Errorf("LabelForStepIndex(%d) = %q; want %q", tc.index, got, tc.wantLabel)
 			}
 		})
 	}
@@ -59,178 +67,140 @@ func TestBarAdvancesEveryStep(t *testing.T) {
 	if f := acc.View().BarFraction; f != 0 {
 		t.Fatalf("initial bar fraction = %v; want 0", f)
 	}
-	for step := 1; step <= 10; step++ {
+	for step := 1; step <= bootstrapSteps; step++ {
 		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
-		want := float64(step) / 10.0
+		want := float64(step) / bootstrapSteps
 		got := acc.View().BarFraction
 		if math.Abs(got-want) > floatEps {
 			t.Errorf("after step %d bar fraction = %v; want %v", step, got, want)
 		}
-		if step < 10 && got >= 1.0 {
-			t.Errorf("bar reached 100%% at step %d; must reach 100%% only after step 10", step)
+		if step < bootstrapSteps && got >= 1.0 {
+			t.Errorf("bar reached 100%% at step %d; must reach 100%% only after step %d", step, bootstrapSteps)
 		}
 	}
 	if got := acc.View().BarFraction; math.Abs(got-1.0) > floatEps {
-		t.Errorf("after step 10 bar fraction = %v; want 1.0", got)
+		t.Errorf("after the last step bar fraction = %v; want 1.0", got)
 	}
 }
 
 func TestLabelStateTransitions(t *testing.T) {
-	acc := tui.LoadingProgress{}
-
-	assertStates(t, acc.View(), map[string]tui.LabelState{
-		tui.LabelStartedTmuxServer:     tui.LabelPending,
-		tui.LabelRegisteredHooks:       tui.LabelPending,
-		tui.LabelRestoringSessions:     tui.LabelPending,
-		tui.LabelReplayingScrollback:   tui.LabelPending,
-		tui.LabelRunningResumeCommands: tui.LabelPending,
+	assertStates(t, tui.LoadingProgress{}.View(), map[string]tui.LabelState{
+		tui.LabelCheckingZmx:       tui.LabelPending,
+		tui.LabelStartingTheSaver:  tui.LabelPending,
+		tui.LabelRestoringSessions: tui.LabelPending,
 	})
 
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 1})
-	assertStates(t, acc.View(), map[string]tui.LabelState{
-		tui.LabelStartedTmuxServer:     tui.LabelDone,
-		tui.LabelRegisteredHooks:       tui.LabelActive,
-		tui.LabelRestoringSessions:     tui.LabelPending,
-		tui.LabelReplayingScrollback:   tui.LabelPending,
-		tui.LabelRunningResumeCommands: tui.LabelPending,
+	assertStates(t, through(1).View(), map[string]tui.LabelState{
+		tui.LabelCheckingZmx:       tui.LabelDone,
+		tui.LabelStartingTheSaver:  tui.LabelActive,
+		tui.LabelRestoringSessions: tui.LabelPending,
 	})
 
-	for step := 2; step <= 5; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
-	}
-	assertStates(t, acc.View(), map[string]tui.LabelState{
-		tui.LabelStartedTmuxServer:     tui.LabelDone,
-		tui.LabelRegisteredHooks:       tui.LabelDone,
-		tui.LabelRestoringSessions:     tui.LabelActive,
-		tui.LabelReplayingScrollback:   tui.LabelPending,
-		tui.LabelRunningResumeCommands: tui.LabelPending,
+	assertStates(t, through(4).View(), map[string]tui.LabelState{
+		tui.LabelCheckingZmx:       tui.LabelDone,
+		tui.LabelStartingTheSaver:  tui.LabelDone,
+		tui.LabelRestoringSessions: tui.LabelActive,
 	})
 
-	for step := 6; step <= 10; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
-	}
-	assertStates(t, acc.View(), map[string]tui.LabelState{
-		tui.LabelStartedTmuxServer:     tui.LabelDone,
-		tui.LabelRegisteredHooks:       tui.LabelDone,
-		tui.LabelRestoringSessions:     tui.LabelDone,
-		tui.LabelReplayingScrollback:   tui.LabelDone,
-		tui.LabelRunningResumeCommands: tui.LabelDone,
+	done := through(bootstrapSteps).View()
+	assertStates(t, done, map[string]tui.LabelState{
+		tui.LabelCheckingZmx:       tui.LabelDone,
+		tui.LabelStartingTheSaver:  tui.LabelDone,
+		tui.LabelRestoringSessions: tui.LabelDone,
 	})
-	if got := activeLabelText(acc.View()); got != "" {
+	if got := activeLabelText(done); got != "" {
 		t.Errorf("after all steps active label = %q; want none", got)
 	}
 }
 
-func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
-	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1},
-		tui.BootstrapProgressMsg{Index: 2},
-		tui.BootstrapProgressMsg{Index: 3},
-		tui.BootstrapProgressMsg{Index: 4},
-	)
-	if got := labelState(acc.View(), tui.LabelRegisteredHooks); got != tui.LabelActive {
-		t.Errorf("Registered hooks state after step 4 = %v; want active (last step 5 not done)", got)
-	}
+func TestWaitingLabel(t *testing.T) {
+	waited := tui.BootstrapProgressMsg{Waiting: true}
 
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 5})
-	if got := labelState(acc.View(), tui.LabelRegisteredHooks); got != tui.LabelDone {
-		t.Errorf("Registered hooks state after step 5 = %v; want done", got)
+	t.Run("absent until the bootstrap says it waits", func(t *testing.T) {
+		if got := labelState(through(1).View(), tui.LabelWaiting); got != tui.LabelState(-1) {
+			t.Errorf("waiting label state = %v; want no waiting label", got)
+		}
+	})
+
+	t.Run("leads the labels, the only one active, until the first step", func(t *testing.T) {
+		v := feed(tui.LoadingProgress{}, waited).View()
+		if v.Labels[0].Text != tui.LabelWaiting {
+			t.Errorf("first label = %q; want %q", v.Labels[0].Text, tui.LabelWaiting)
+		}
+		assertStates(t, v, map[string]tui.LabelState{
+			tui.LabelWaiting:           tui.LabelActive,
+			tui.LabelCheckingZmx:       tui.LabelPending,
+			tui.LabelStartingTheSaver:  tui.LabelPending,
+			tui.LabelRestoringSessions: tui.LabelPending,
+		})
+		if v.BarFraction != 0 {
+			t.Errorf("bar fraction = %v; want 0: waiting is no step", v.BarFraction)
+		}
+	})
+
+	t.Run("done once a step completes", func(t *testing.T) {
+		v := feed(tui.LoadingProgress{}, waited, tui.BootstrapProgressMsg{Index: 1}).View()
+		assertStates(t, v, map[string]tui.LabelState{
+			tui.LabelWaiting:          tui.LabelDone,
+			tui.LabelCheckingZmx:      tui.LabelDone,
+			tui.LabelStartingTheSaver: tui.LabelActive,
+		})
+	})
+}
+
+func TestMultiStepLabelStaysActiveUntilLastStep(t *testing.T) {
+	if got := labelState(through(3).View(), tui.LabelStartingTheSaver); got != tui.LabelActive {
+		t.Errorf("Starting the saver after step 3 = %v; want active (its last step, 4, not done)", got)
+	}
+	if got := labelState(through(4).View(), tui.LabelStartingTheSaver); got != tui.LabelDone {
+		t.Errorf("Starting the saver after step 4 = %v; want done", got)
+	}
+	if got := labelState(through(5).View(), tui.LabelRestoringSessions); got != tui.LabelActive {
+		t.Errorf("Restoring sessions after step 5 = %v; want active (the latch, step 6, not written)", got)
 	}
 }
 
 func TestRestoringSessionsCounter(t *testing.T) {
-	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1},
-		tui.BootstrapProgressMsg{Index: 2},
-		tui.BootstrapProgressMsg{Index: 3},
-		tui.BootstrapProgressMsg{Index: 4},
-		tui.BootstrapProgressMsg{Index: 5},
-		tui.BootstrapProgressMsg{Index: 6, RestoreN: 1, RestoreM: 3},
-	)
+	acc := through(4).Apply(tui.BootstrapProgressMsg{Index: 5, RestoreN: 1, RestoreM: 3})
 	v := acc.View()
 	if got := counterText(v, tui.LabelRestoringSessions); got != "1/3" {
 		t.Errorf("Restoring sessions counter = %q; want %q", got, "1/3")
 	}
 	if got := labelState(v, tui.LabelRestoringSessions); got != tui.LabelActive {
-		t.Errorf("mid-flight Restoring sessions state = %v; want active (step 6 not yet complete)", got)
+		t.Errorf("mid-flight Restoring sessions state = %v; want active (step 5 not yet complete)", got)
 	}
-	if got := labelState(v, tui.LabelReplayingScrollback); got != tui.LabelPending {
-		t.Errorf("mid-flight Replaying scrollback state = %v; want pending", got)
-	}
-	if want := 5.0 / 10.0; math.Abs(v.BarFraction-want) > floatEps {
-		t.Errorf("mid-flight bar fraction = %v; want %v (skeleton event must not advance step 6)", v.BarFraction, want)
+	if want := 4.0 / bootstrapSteps; math.Abs(v.BarFraction-want) > floatEps {
+		t.Errorf("mid-flight bar fraction = %v; want %v (a session's event must not complete step 5)", v.BarFraction, want)
 	}
 	for _, l := range v.Labels {
-		if l.Text == tui.LabelRestoringSessions {
-			continue
-		}
-		if l.Counter != "" {
+		if l.Text != tui.LabelRestoringSessions && l.Counter != "" {
 			t.Errorf("label %q carries counter %q; only Restoring sessions may", l.Text, l.Counter)
 		}
 	}
 
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6, RestoreN: 3, RestoreM: 3})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 5, RestoreN: 3, RestoreM: 3})
 	if got := counterText(acc.View(), tui.LabelRestoringSessions); got != "3/3" {
 		t.Errorf("Restoring sessions counter after N=3 = %q; want %q", got, "3/3")
 	}
 
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 6})
+	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 5})
 	done := acc.View()
-	if got := labelState(done, tui.LabelRestoringSessions); got != tui.LabelDone {
-		t.Errorf("after completion tick Restoring sessions state = %v; want done", got)
-	}
-	if want := 6.0 / 10.0; math.Abs(done.BarFraction-want) > floatEps {
-		t.Errorf("after completion tick bar fraction = %v; want %v", done.BarFraction, want)
+	if want := 5.0 / bootstrapSteps; math.Abs(done.BarFraction-want) > floatEps {
+		t.Errorf("after the restore's completion bar fraction = %v; want %v", done.BarFraction, want)
 	}
 	if got := counterText(done, tui.LabelRestoringSessions); got != "3/3" {
-		t.Errorf("after completion tick counter = %q; want %q (sticky last N/M)", got, "3/3")
+		t.Errorf("after the restore's completion counter = %q; want %q (sticky last N/M)", got, "3/3")
 	}
 }
 
 func TestEmptyRestoreSuppressesCounterAndTicksDone(t *testing.T) {
-	acc := feed(tui.LoadingProgress{},
-		tui.BootstrapProgressMsg{Index: 1},
-		tui.BootstrapProgressMsg{Index: 2},
-		tui.BootstrapProgressMsg{Index: 3},
-		tui.BootstrapProgressMsg{Index: 4},
-		tui.BootstrapProgressMsg{Index: 5},
-		tui.BootstrapProgressMsg{Index: 6},
-	)
-	v := acc.View()
+	v := through(bootstrapSteps).View()
 
 	if got := counterText(v, tui.LabelRestoringSessions); got != "" {
 		t.Errorf("M=0: Restoring sessions counter = %q; want empty (suppressed)", got)
 	}
 	if got := labelState(v, tui.LabelRestoringSessions); got != tui.LabelDone {
 		t.Errorf("M=0: Restoring sessions state = %v; want done (not stalled)", got)
-	}
-	want := 6.0 / 10.0
-	if math.Abs(v.BarFraction-want) > floatEps {
-		t.Errorf("M=0: bar fraction after step 6 = %v; want %v", v.BarFraction, want)
-	}
-}
-
-func TestRunningResumeCommandsTicksDoneWithNoItems(t *testing.T) {
-	var acc tui.LoadingProgress
-	for step := 1; step <= 5; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
-	}
-	if got := labelState(acc.View(), tui.LabelRunningResumeCommands); got != tui.LabelPending {
-		t.Fatalf("Running resume commands before its group = %v; want pending", got)
-	}
-	for step := 6; step <= 9; step++ {
-		acc = acc.Apply(tui.BootstrapProgressMsg{Index: step})
-	}
-	if got := labelState(acc.View(), tui.LabelRunningResumeCommands); got != tui.LabelActive {
-		t.Errorf("Running resume commands at step 9 = %v; want active (last step 10 not done)", got)
-	}
-	acc = acc.Apply(tui.BootstrapProgressMsg{Index: 10})
-	v := acc.View()
-	if got := labelState(v, tui.LabelRunningResumeCommands); got != tui.LabelDone {
-		t.Errorf("Running resume commands at step 10 = %v; want done (no per-item work)", got)
-	}
-	if got := counterText(v, tui.LabelRunningResumeCommands); got != "" {
-		t.Errorf("Running resume commands counter = %q; want empty (no per-item counter)", got)
 	}
 }
 
@@ -240,29 +210,27 @@ func TestIdempotentPerStepIndex(t *testing.T) {
 		tui.BootstrapProgressMsg{Index: 1},
 		tui.BootstrapProgressMsg{Index: 1},
 	)
-	if got := acc.View().BarFraction; math.Abs(got-1.0/10.0) > floatEps {
-		t.Errorf("3× step 1: bar = %v; want %v (no double-advance)", got, 1.0/10.0)
+	if got := acc.View().BarFraction; math.Abs(got-1.0/bootstrapSteps) > floatEps {
+		t.Errorf("3× step 1: bar = %v; want %v (no double-advance)", got, 1.0/bootstrapSteps)
 	}
 
 	acc = feed(tui.LoadingProgress{},
 		tui.BootstrapProgressMsg{Index: 3},
 		tui.BootstrapProgressMsg{Index: 2},
 	)
-	if got := acc.View().BarFraction; math.Abs(got-2.0/10.0) > floatEps {
-		t.Errorf("steps 3,2 out of order: bar = %v; want %v", got, 2.0/10.0)
+	if got := acc.View().BarFraction; math.Abs(got-2.0/bootstrapSteps) > floatEps {
+		t.Errorf("steps 3,2 out of order: bar = %v; want %v", got, 2.0/bootstrapSteps)
 	}
 }
 
-func TestMappingCoversAllTenStepsNoGaps(t *testing.T) {
+func TestMappingCoversTheSixStepsNoGaps(t *testing.T) {
 	valid := map[string]bool{
-		tui.LabelStartedTmuxServer:     true,
-		tui.LabelRegisteredHooks:       true,
-		tui.LabelRestoringSessions:     true,
-		tui.LabelReplayingScrollback:   true,
-		tui.LabelRunningResumeCommands: true,
+		tui.LabelCheckingZmx:       true,
+		tui.LabelStartingTheSaver:  true,
+		tui.LabelRestoringSessions: true,
 	}
-	for step := 1; step <= 10; step++ {
-		got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: step})
+	for step := 1; step <= bootstrapSteps; step++ {
+		got := tui.LabelForStepIndex(step)
 		if got == "" {
 			t.Errorf("step %d resolved to no label (gap in the step→label mapping)", step)
 			continue
@@ -271,8 +239,8 @@ func TestMappingCoversAllTenStepsNoGaps(t *testing.T) {
 			t.Errorf("step %d resolved to unknown label %q", step, got)
 		}
 	}
-	for _, bad := range []int{0, 11, 12, 99} {
-		if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: bad}); got != "" {
+	for _, bad := range []int{0, 7, 10, 99} {
+		if got := tui.LabelForStepIndex(bad); got != "" {
 			t.Errorf("out-of-range step %d mapped to label %q; want none", bad, got)
 		}
 		v := feed(tui.LoadingProgress{}, tui.BootstrapProgressMsg{Index: bad}).View()
@@ -282,15 +250,9 @@ func TestMappingCoversAllTenStepsNoGaps(t *testing.T) {
 	}
 
 	v := tui.LoadingProgress{}.View()
-	if len(v.Labels) != 5 {
-		t.Fatalf("View().Labels length = %d; want 5", len(v.Labels))
-	}
-	wantOrder := []string{
-		tui.LabelStartedTmuxServer,
-		tui.LabelRegisteredHooks,
-		tui.LabelRestoringSessions,
-		tui.LabelReplayingScrollback,
-		tui.LabelRunningResumeCommands,
+	wantOrder := []string{tui.LabelCheckingZmx, tui.LabelStartingTheSaver, tui.LabelRestoringSessions}
+	if len(v.Labels) != len(wantOrder) {
+		t.Fatalf("View().Labels length = %d; want %d", len(v.Labels), len(wantOrder))
 	}
 	for i, want := range wantOrder {
 		if v.Labels[i].Text != want {
@@ -299,18 +261,29 @@ func TestMappingCoversAllTenStepsNoGaps(t *testing.T) {
 	}
 }
 
-func TestRemovedStep11IsUnmapped(t *testing.T) {
-	if got := tui.LabelForStep(tui.BootstrapProgressMsg{Index: 11}); got != "" {
-		t.Errorf("LabelForStep(step 11) = %q; want empty (step 11 removed)", got)
-	}
-	v := feed(tui.LoadingProgress{}, tui.BootstrapProgressMsg{Index: 11}).View()
-	if f := v.BarFraction; f != 0 {
-		t.Errorf("removed step 11 advanced the bar to %v; want 0", f)
-	}
+func TestFailedViewFailsTheStepsLabel(t *testing.T) {
+	t.Run("a step's fatal fails its label", func(t *testing.T) {
+		v := through(1).FailedView(4, "boom")
+		if got := labelState(v, tui.LabelStartingTheSaver); got != tui.LabelFailed {
+			t.Errorf("Starting the saver = %v; want failed", got)
+		}
+		if v.Message != "boom" {
+			t.Errorf("Message = %q; want the fatal's", v.Message)
+		}
+	})
+
+	t.Run("a fatal before any step fails no label", func(t *testing.T) {
+		v := tui.LoadingProgress{}.FailedView(0, "boom")
+		for _, l := range v.Labels {
+			if l.State == tui.LabelFailed {
+				t.Errorf("label %q failed, want none", l.Text)
+			}
+		}
+	})
 }
 
 func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
-	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true}
+	want := map[string]bool{"Index": true, "RestoreN": true, "RestoreM": true, "Waiting": true}
 	tp := reflect.TypeFor[tui.BootstrapProgressMsg]()
 	got := map[string]bool{}
 	for field := range tp.Fields() {
@@ -318,7 +291,7 @@ func TestBootstrapProgressMsgCarriesOnlyConsumedFields(t *testing.T) {
 	}
 	for name := range got {
 		if !want[name] {
-			t.Errorf("BootstrapProgressMsg carries field %q — only Index/RestoreN/RestoreM may ride the wire (the label mapping is loading_progress.go's sole authority)", name)
+			t.Errorf("BootstrapProgressMsg carries field %q — only Index/RestoreN/RestoreM/Waiting may ride the wire (the label mapping is loading_progress.go's sole authority)", name)
 		}
 	}
 	for name := range want {

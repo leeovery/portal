@@ -1,0 +1,561 @@
+package zmx_test
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/proctable"
+)
+
+// endingWorld is a session, work, whose socket in dir refuses, over a process
+// table the test sets, and the signals EndDaemon sends.
+type endingWorld struct {
+	dir string
+	b   *zmx.Backend
+
+	mu    sync.Mutex
+	procs []zmx.Process
+	sent  []syscall.Signal
+}
+
+func newEndingWorld(t *testing.T) *endingWorld {
+	t.Helper()
+	w := &endingWorld{dir: socketDir(t)}
+	refusing(t, w.dir, "work")
+	w.b = newBackend(t, w.dir)
+	zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return w.procs, nil
+	})
+	return w
+}
+
+// table sets the processes the next listing shows.
+func (w *endingWorld) table(procs ...zmx.Process) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.procs = procs
+}
+
+func (w *endingWorld) listed() []zmx.Process {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.procs
+}
+
+// unlink removes work's socket, as its daemon does on SIGTERM.
+func (w *endingWorld) unlink(t *testing.T) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(w.dir, "work")); err != nil {
+		t.Error(err)
+	}
+}
+
+// signalled records each signal, then does what the daemon does with it.
+func (w *endingWorld) signalled(then func()) func(pid int, sig syscall.Signal) error {
+	return func(pid int, sig syscall.Signal) error {
+		w.mu.Lock()
+		w.sent = append(w.sent, sig)
+		w.mu.Unlock()
+		if pid != 100 {
+			return errors.New("signalled a pid the table never proved")
+		}
+		then()
+		return nil
+	}
+}
+
+func (w *endingWorld) signals() []syscall.Signal {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sent
+}
+
+func TestEndDaemon_SignalsTheProvedDaemonThenWaitsForItsSocketAndItToGo(t *testing.T) {
+	w := newEndingWorld(t)
+	w.table(daemonOf(100, w.dir, "work"))
+	end := w.signalled(func() {
+		time.AfterFunc(40*time.Millisecond, func() {
+			w.unlink(t)
+			time.AfterFunc(40*time.Millisecond, func() { w.table() })
+		})
+	})
+
+	if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+		t.Fatalf("EndDaemon(work) = %v", err)
+	}
+	if got := w.listed(); len(got) != 0 {
+		t.Errorf("EndDaemon returned while the table still showed %v: before the daemon exited", got)
+	}
+	if got := w.signals(); len(got) != 1 || got[0] != syscall.SIGTERM {
+		t.Errorf("signals sent = %v, want one SIGTERM", got)
+	}
+}
+
+func TestEndDaemon_EndsADaemonWhosePidIsReusedOnceItExits(t *testing.T) {
+	w := newEndingWorld(t)
+	w.table(daemonOf(100, w.dir, "work"))
+	reused := daemonOf(100, w.dir, "work")
+	reused.Args.Argv = []string{"sleep", "60"}
+	end := w.signalled(func() {
+		w.unlink(t)
+		w.table(reused)
+	})
+
+	if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+		t.Errorf("EndDaemon(work) = %v, want nil: pid 100 runs another program now", err)
+	}
+}
+
+func TestEndDaemon_SignalsNothingWithoutTheProof(t *testing.T) {
+	probe := socketDir(t)
+	inDir := func(dir string) string { return "ZMX_DIR=" + dir }
+	daemon := func(pid int, mutate func(*zmx.Process)) func(dir string) zmx.Process {
+		return func(dir string) zmx.Process {
+			p := daemonOf(pid, dir, "work")
+			mutate(&p)
+			return p
+		}
+	}
+	same := func(*zmx.Process) {}
+
+	for _, tt := range []struct {
+		name  string
+		procs []func(dir string) zmx.Process
+	}{
+		{"no process", nil},
+		{"two daemons", []func(string) zmx.Process{daemon(100, same), daemon(101, same)}},
+		{"a child of another process", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.PPID = 50 })}},
+		{"a process on a terminal", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Terminal = true })}},
+		{"a daemon in another directory", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Args.Env = []string{inDir(probe)} })}},
+		{"a daemon in a relative directory", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Args.Env = []string{"ZMX_DIR=zmx"} })}},
+		{"a daemon whose environment the kernel doesn't show", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Args.Env = nil })}},
+		{"the daemon of another session", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Args.Argv = []string{"zmx", "attach", "works"} })}},
+		{"the daemon of its name under a prefix", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) {
+			p.Args.Env = append(p.Args.Env, "ZMX_SESSION_PREFIX=p-")
+		})}},
+		{"a zmx command that starts no daemon", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Args.Argv = []string{"zmx", "kill", "work"} })}},
+		{"a process it can't read", []func(string) zmx.Process{daemon(100, func(p *zmx.Process) { p.Err = errors.New("operation not permitted") })}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			procs := make([]zmx.Process, len(tt.procs))
+			for i, p := range tt.procs {
+				procs[i] = p(w.dir)
+			}
+			w.table(procs...)
+
+			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {})); err == nil {
+				t.Error("EndDaemon(work) = nil, want the proof's failure")
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+}
+
+// A caller may name directories the daemon's environment must name too, as
+// the saver's state directory: a daemon of another such directory is never
+// signalled.
+func TestEndDaemon_ProvesTheDirectoriesItIsGiven(t *testing.T) {
+	state := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(state, link); err != nil {
+		t.Fatal(err)
+	}
+	mark := "PORTAL_STATE_DIR=" + state
+
+	for name, env := range map[string][]string{
+		"the same spelling":       {mark},
+		"another spelling of it":  {"PORTAL_STATE_DIR=" + link + "/"},
+		"every setting naming it": {mark, "PORTAL_STATE_DIR=" + link},
+	} {
+		t.Run("it signals a daemon naming "+name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			d := daemonOf(100, w.dir, "work")
+			d.Args.Env = append(d.Args.Env, env...)
+			w.table(d)
+
+			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() { w.unlink(t); w.table() }), mark); err != nil {
+				t.Fatalf("EndDaemon(work) = %v", err)
+			}
+			if got := w.signals(); len(got) != 1 || got[0] != syscall.SIGTERM {
+				t.Errorf("signals sent = %v, want one SIGTERM", got)
+			}
+		})
+	}
+
+	other, third := t.TempDir(), t.TempDir()
+	for name, tc := range map[string]struct {
+		env []string
+		// theirs is the directory an *OtherDirError names, empty for a
+		// plain failure of the proof.
+		theirs string
+	}{
+		"no such directory":            {env: nil},
+		"another directory":            {env: []string{"PORTAL_STATE_DIR=" + other}, theirs: other},
+		"another directory, set twice": {env: []string{"PORTAL_STATE_DIR=" + other, "PORTAL_STATE_DIR=" + other}, theirs: other},
+		"two other directories":        {env: []string{"PORTAL_STATE_DIR=" + other, "PORTAL_STATE_DIR=" + third}},
+		"a relative directory":         {env: []string{"PORTAL_STATE_DIR=state"}},
+		"it, then another directory":   {env: []string{mark, "PORTAL_STATE_DIR=" + other}},
+		"another directory, then it":   {env: []string{"PORTAL_STATE_DIR=" + other, mark}},
+		"it under another variable":    {env: []string{"PORTAL_STATE=" + state}},
+	} {
+		t.Run("it signals nothing to a daemon naming "+name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			d := daemonOf(100, w.dir, "work")
+			d.Args.Env = append(d.Args.Env, tc.env...)
+			w.table(d)
+
+			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}), mark)
+
+			if err == nil {
+				t.Fatal("EndDaemon(work) = nil, want the proof's failure")
+			}
+			theirs, isTheirs := errors.AsType[*zmx.OtherDirError](err)
+			switch {
+			case tc.theirs == "" && isTheirs:
+				t.Errorf("EndDaemon(work) = %v, want a plain failure of the proof, no other directory named", err)
+			case tc.theirs != "" && (!isTheirs || *theirs != zmx.OtherDirError{PID: 100, Key: "PORTAL_STATE_DIR", Dir: tc.theirs}):
+				t.Errorf("EndDaemon(work) = %v, want the daemon of %s refused", err, tc.theirs)
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+}
+
+func TestEndDaemon_SignalsNothingWhenTheTableCantBeListed(t *testing.T) {
+	w := newEndingWorld(t)
+	zmx.FakeProcesses(w.b, nil, proctable.ErrUnsupported)
+
+	err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}))
+	if !errors.Is(err, proctable.ErrUnsupported) {
+		t.Errorf("EndDaemon(work) = %v, want ErrUnsupported", err)
+	}
+	if got := w.signals(); len(got) != 0 {
+		t.Errorf("signals sent = %v, want none", got)
+	}
+}
+
+// provedThen has the world's table show the daemon 100 at the proof's
+// listing, and what the world's table holds at every read after it.
+func (w *endingWorld) provedThen(t *testing.T) {
+	t.Helper()
+	proved := daemonOf(100, w.dir, "work")
+	listings := 0
+	zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
+		if listings++; listings == 1 {
+			return []zmx.Process{proved}, nil
+		}
+		return w.listed(), nil
+	})
+}
+
+func TestEndDaemon_ReadsTheProvedDaemonAgainJustBeforeTheSignal(t *testing.T) {
+	again := func(mutate func(*zmx.Process)) func(dir string) []zmx.Process {
+		return func(dir string) []zmx.Process {
+			p := daemonOf(100, dir, "work")
+			mutate(&p)
+			return []zmx.Process{p}
+		}
+	}
+	for _, tt := range []struct {
+		name  string
+		again func(dir string) []zmx.Process
+	}{
+		{"its pid reused by another program", again(func(p *zmx.Process) { p.Args.Argv = []string{"sleep", "60"} })},
+		{"its pid reused in another environment", again(func(p *zmx.Process) { p.Args.Env = append(p.Args.Env, "HOME=/h") })},
+		{"its pid reused by a child of another process", again(func(p *zmx.Process) { p.PPID = 50 })},
+		{"its pid reused on a terminal", again(func(p *zmx.Process) { p.Terminal = true })},
+		{"unreadable", again(func(p *zmx.Process) { p.Err = errors.New("operation not permitted") })},
+		{"unreadable, the kernel naming it another program", again(func(p *zmx.Process) {
+			p.Command = "helpd"
+			p.Err = errors.New("operation not permitted")
+		})},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			w.table(tt.again(w.dir)...)
+			w.provedThen(t)
+
+			if err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {})); err == nil {
+				t.Error("EndDaemon(work) = nil, want the second read's failure")
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+
+	t.Run("it reads only that pid again, so another process unreadable since keeps no signal back", func(t *testing.T) {
+		w := newEndingWorld(t)
+		unreadable := zmxProcess(nil)
+		unreadable.PID = 300
+		unreadable.Err = errors.New("operation not permitted")
+		w.table(daemonOf(100, w.dir, "work"), unreadable)
+		w.provedThen(t)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 || got[0] != syscall.SIGTERM {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+}
+
+// The process table's reads fail for a process caught as it forks or execs,
+// as scans under load often catch one: each read that fails is read again a
+// while before it proves nothing.
+func TestEndDaemon_ReadsAgainAProcessWhoseReadsFailAWhile(t *testing.T) {
+	t.Run("the daemon", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(settling(daemonOf(100, w.dir, "work")))
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+
+	t.Run("the daemon at its second read", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(settling(daemonOf(100, w.dir, "work")))
+		w.provedThen(t)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+		if got := w.signals(); len(got) != 1 {
+			t.Errorf("signals sent = %v, want one SIGTERM", got)
+		}
+	})
+
+	t.Run("another process", func(t *testing.T) {
+		w := newEndingWorld(t)
+		other := settling(zmxProcess([]string{"node", "server.js"}))
+		other.PID = 300
+		w.table(daemonOf(100, w.dir, "work"), other)
+		end := w.signalled(func() {
+			w.unlink(t)
+			w.table()
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil", err)
+		}
+	})
+
+	t.Run("the daemon as it exits, signalled", func(t *testing.T) {
+		w := newEndingWorld(t)
+		w.table(daemonOf(100, w.dir, "work"))
+		end := w.signalled(func() {
+			w.unlink(t)
+			exiting := daemonOf(100, w.dir, "work")
+			exiting.Reads = zmx.FailReads(caught(syscall.EIO), caught(syscall.EINVAL), fmt.Errorf("read arguments of process 100: %w", proctable.ErrGone))
+			w.table(exiting)
+		})
+
+		if err := w.b.EndDaemon(t.Context(), "work", end); err != nil {
+			t.Errorf("EndDaemon(work) = %v, want nil: its reads failed as it went", err)
+		}
+	})
+}
+
+func TestEndDaemon_FailsWhenTheDaemonOutlivesTheSignal(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		then func(w *endingWorld, t *testing.T)
+		left string
+	}{
+		{"its socket and it both stay", func(*endingWorld, *testing.T) {}, "its socket is still there"},
+		{"its socket goes and it stays", func(w *endingWorld, t *testing.T) { w.unlink(t) }, "pid 100 is still its daemon"},
+		{"it goes and its socket stays", func(w *endingWorld, _ *testing.T) { w.table() }, "its socket is still there"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			w.table(daemonOf(100, w.dir, "work"))
+
+			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() { tt.then(w, t) }))
+			if !errors.Is(err, backend.ErrTimeout) || !strings.Contains(fmt.Sprint(err), tt.left) {
+				t.Errorf("EndDaemon(work) = %v, want ErrTimeout past the kill ceiling, saying %q", err, tt.left)
+			}
+		})
+	}
+}
+
+// The pid it waits on was the daemon, so it reads that one strictly: unread,
+// whatever the kernel names it, it may be the daemon still.
+func TestEndDaemon_FailsWhenTheDaemonItWaitsOnCantBeRead(t *testing.T) {
+	for _, command := range []string{"zmx", "helpd"} {
+		t.Run(command, func(t *testing.T) {
+			w := newEndingWorld(t)
+			w.table(daemonOf(100, w.dir, "work"))
+			end := w.signalled(func() {
+				w.unlink(t)
+				unreadable := daemonOf(100, w.dir, "work")
+				unreadable.Command = command
+				unreadable.Err = errors.New("operation not permitted")
+				w.table(unreadable)
+			})
+
+			if err := w.b.EndDaemon(t.Context(), "work", end); err == nil || errors.Is(err, backend.ErrTimeout) {
+				t.Errorf("EndDaemon(work) = %v, want the read's failure", err)
+			}
+		})
+	}
+}
+
+// A daemon gone or exiting by its second read, as a SIGTERM from another,
+// such as a concurrent uninstall's, leaves one, is ended, not an end that
+// failed: EndDaemon waits for its socket and it to go, as for one it
+// signalled, and signals nothing.
+func TestEndDaemon_WaitsForADaemonGoneByItsSecondRead(t *testing.T) {
+	exiting := func(dir string) []zmx.Process {
+		p := daemonOf(100, dir, "work")
+		p.Reads = zmx.FailReads(fmt.Errorf("read arguments of process 100: %w", proctable.ErrGone))
+		return []zmx.Process{p}
+	}
+	gone := func(string) []zmx.Process { return nil }
+
+	for _, tt := range []struct {
+		name    string
+		again   func(dir string) []zmx.Process
+		unlinks bool
+		ends    bool
+	}{
+		{"gone, its socket unlinked", gone, true, true},
+		{"exiting, its socket unlinked", exiting, true, true},
+		{"gone, its socket left behind", gone, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newEndingWorld(t)
+			proved, again := daemonOf(100, w.dir, "work"), tt.again(w.dir)
+			listings := 0
+			zmx.FakeProcessesFrom(w.b, func() ([]zmx.Process, error) {
+				switch listings++; listings {
+				case 1:
+					return []zmx.Process{proved}, nil
+				case 2:
+					if tt.unlinks {
+						w.unlink(t)
+					}
+					return again, nil
+				}
+				return nil, nil
+			})
+
+			err := w.b.EndDaemon(t.Context(), "work", w.signalled(func() {}))
+			switch {
+			case tt.ends && err != nil:
+				t.Errorf("EndDaemon(work) = %v, want nil: another's signal ended it", err)
+			case !tt.ends && (!errors.Is(err, backend.ErrTimeout) || !strings.Contains(fmt.Sprint(err), "its socket is still there")):
+				t.Errorf("EndDaemon(work) = %v, want ErrTimeout past the kill ceiling, its socket still there", err)
+			}
+			if got := w.signals(); len(got) != 0 {
+				t.Errorf("signals sent = %v, want none", got)
+			}
+		})
+	}
+}
+
+// Under load the proof's scan catches processes unreadable, such as helpd, as
+// it does the holder proof's: an unreadable child of launchd on no terminal
+// keeps the signal back only when the kernel names it zmx (decision 70).
+func TestEndDaemon_IsKeptFromTheSignalByAnUnreadableProcessOnlyWhenTheKernelNamesItZmx(t *testing.T) {
+	for _, tt := range []struct {
+		command string
+		keeps   bool
+	}{
+		{"helpd", false},
+		{"node", false},
+		{"zmx", true},
+		{"zmx-foo", true},
+		{".zmx-wrapped", true},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			w := newEndingWorld(t)
+			unreadable := zmxProcess(nil)
+			unreadable.PID, unreadable.Command = 300, tt.command
+			unreadable.Err = errors.New("operation not permitted")
+			w.table(daemonOf(100, w.dir, "work"), unreadable)
+			end := w.signalled(func() {
+				w.unlink(t)
+				w.table()
+			})
+
+			err := w.b.EndDaemon(t.Context(), "work", end)
+			got := w.signals()
+			switch {
+			case tt.keeps && (err == nil || len(got) != 0):
+				t.Errorf("EndDaemon(work) = %v, signals %v; want the read's failure, and none sent", err, got)
+			case !tt.keeps && (err != nil || len(got) != 1 || got[0] != syscall.SIGTERM):
+				t.Errorf("EndDaemon(work) = %v, signals %v; want nil, and one SIGTERM", err, got)
+			}
+		})
+	}
+}
+
+func TestEndDaemon_FailsWhenTheSignalFails(t *testing.T) {
+	w := newEndingWorld(t)
+	w.table(daemonOf(100, w.dir, "work"))
+
+	err := w.b.EndDaemon(t.Context(), "work", func(int, syscall.Signal) error { return syscall.EPERM })
+	if !errors.Is(err, syscall.EPERM) {
+		t.Errorf("EndDaemon(work) = %v, want the signal's failure", err)
+	}
+}
+
+func TestEndDaemon_EndsASessionWhoseSocketHasGone(t *testing.T) {
+	b := newBackend(t, socketDir(t))
+	zmx.FakeProcessesFrom(b, func() ([]zmx.Process, error) {
+		t.Error("the process table was read for a session with no socket")
+		return nil, nil
+	})
+
+	if err := b.EndDaemon(t.Context(), "work", func(int, syscall.Signal) error {
+		t.Error("signalled for a session with no socket")
+		return nil
+	}); err != nil {
+		t.Errorf("EndDaemon(work) = %v, want nil: nothing is left to end", err)
+	}
+}
+
+func TestEndDaemon_RefusesAnInvalidName(t *testing.T) {
+	w := newEndingWorld(t)
+	w.table(daemonOf(100, w.dir, "work"))
+
+	if err := w.b.EndDaemon(t.Context(), "../work", w.signalled(func() {})); err == nil {
+		t.Error("EndDaemon(../work) = nil, want the name refused")
+	}
+	if got := w.signals(); len(got) != 0 {
+		t.Errorf("signals sent = %v, want none", got)
+	}
+}

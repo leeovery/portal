@@ -6,32 +6,28 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/spf13/cobra"
 )
 
 type recordingRunner struct {
 	calls    int
-	started  bool
 	warnings []bootstrap.Warning
 	err      error
 }
 
-func (r *recordingRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+func (r *recordingRunner) Run(_ context.Context) ([]bootstrap.Warning, error) {
 	r.calls++
-	return r.started, r.warnings, r.err
+	return r.warnings, r.err
 }
 
 func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	runner := &recordingRunner{started: true}
+	runner := &recordingRunner{}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner, ForceMemoise: true})
 
-	withListDeps(t, ListDeps{
-		Lister: &mockSessionLister{sessions: []tmux.Session{}},
-		IsTTY:  func() bool { return false },
-	})
+	withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
 	for i := range 3 {
 		resetRootCmd()
@@ -46,77 +42,69 @@ func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	}
 }
 
-func TestPersistentPreRunE_PopulatesServerStartedFromOrchestrator(t *testing.T) {
-	t.Run("started=true", func(t *testing.T) {
-		resetBootstrapOnce(t)
+func TestPersistentPreRunE_CLIBootstrapSaysOnceThatItWaitsForAnother(t *testing.T) {
+	for name, waited := range map[string]bool{"waited": true, "ran straight away": false} {
+		t.Run(name, func(t *testing.T) {
+			resetBootstrapOnce(t)
+			withBootstrapDeps(t, BootstrapDeps{Orchestrator: &emittingRunner{waited: waited, steps: 7}})
+			withBackendDeps(t, BackendDeps{Backend: backendtest.New()})
 
-		runner := &recordingRunner{started: true}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+			_, stderr, err := runRootCmd(t, "list")
+			if err != nil {
+				t.Fatalf("portal list: %v", err)
+			}
 
-		var got bool
-		var ran bool
-		probe := &cobra.Command{
-			Use: "orchprobe1",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				got = serverWasStarted(cmd)
-				ran = true
-				return nil
-			},
-		}
-		rootCmd.AddCommand(probe)
-		t.Cleanup(func() { rootCmd.RemoveCommand(probe) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"orchprobe1"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !ran {
-			t.Fatal("probe RunE was not reached")
-		}
-		if !got {
-			t.Errorf("serverWasStarted = false, want true")
-		}
-	})
-
-	t.Run("started=false", func(t *testing.T) {
-		resetBootstrapOnce(t)
-
-		runner := &recordingRunner{started: false}
-		withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
-
-		var got bool
-		var ran bool
-		probe := &cobra.Command{
-			Use: "orchprobe2",
-			RunE: func(cmd *cobra.Command, args []string) error {
-				got = serverWasStarted(cmd)
-				ran = true
-				return nil
-			},
-		}
-		rootCmd.AddCommand(probe)
-		t.Cleanup(func() { rootCmd.RemoveCommand(probe) })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"orchprobe2"})
-		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !ran {
-			t.Fatal("probe RunE was not reached")
-		}
-		if got {
-			t.Errorf("serverWasStarted = true, want false")
-		}
-	})
+			want := map[bool]string{true: "Waiting for another Portal to finish starting…\n", false: ""}[waited]
+			if got := stderr.String(); got != want {
+				t.Errorf("stderr = %q, want %q: one line for the wait, nothing for the steps", got, want)
+			}
+		})
+	}
 }
 
-func TestPersistentPreRunE_OrchestratorErrorPropagatesAndContextNotPopulated(t *testing.T) {
+func TestPersistentPreRunE_RunsTheBootstrapTheGateOwes(t *testing.T) {
+	for _, owed := range []bool{true, false} {
+		name := map[bool]string{true: "owed", false: "not owed"}[owed]
+		t.Run(name, func(t *testing.T) {
+			resetBootstrapOnce(t)
+
+			runner := &recordingRunner{}
+			asked := 0
+			withBootstrapDeps(t, BootstrapDeps{
+				Owed:         func(context.Context) bool { asked++; return owed },
+				Orchestrator: runner,
+			})
+
+			ran := false
+			probe := &cobra.Command{
+				Use: "owedprobe",
+				RunE: func(*cobra.Command, []string) error {
+					ran = true
+					return nil
+				},
+			}
+			rootCmd.AddCommand(probe)
+			t.Cleanup(func() { rootCmd.RemoveCommand(probe) })
+
+			resetRootCmd()
+			rootCmd.SetArgs([]string{"owedprobe"})
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			want := map[bool]int{true: 1, false: 0}[owed]
+			if asked != 1 || runner.calls != want || !ran {
+				t.Errorf("gate asked %d times, bootstrap run %d times, command ran %v; want the gate asked once, the bootstrap run %d times, then the command", asked, runner.calls, ran, want)
+			}
+		})
+	}
+}
+
+func TestPersistentPreRunE_OrchestratorErrorPropagatesAndCommandDoesNotRun(t *testing.T) {
 	resetBootstrapOnce(t)
 
 	sentinel := errors.New("orchestrator boom")
-	runner := &recordingRunner{started: true, err: sentinel}
+	runner := &recordingRunner{err: sentinel}
 	withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
 
 	probeRan := false
@@ -145,7 +133,7 @@ func TestPersistentPreRunE_OrchestratorErrorPropagatesAndContextNotPopulated(t *
 	}
 }
 
-func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing.T) {
+func TestPersistentPreRunE_DoesNotAskTheGateForExemptCommands(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -159,7 +147,11 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 			resetBootstrapOnce(t)
 
 			runner := &recordingRunner{}
-			withBootstrapDeps(t, BootstrapDeps{Orchestrator: runner})
+			asked := false
+			withBootstrapDeps(t, BootstrapDeps{
+				Owed:         func(context.Context) bool { asked = true; return true },
+				Orchestrator: runner,
+			})
 
 			resetRootCmd()
 			rootCmd.SetArgs(tt.args)
@@ -168,8 +160,8 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if runner.calls != 0 {
-				t.Errorf("orchestrator Run call count for exempt command = %d, want 0", runner.calls)
+			if asked || runner.calls != 0 {
+				t.Errorf("gate asked %v, orchestrator Run call count = %d for an exempt command; want neither", asked, runner.calls)
 			}
 		})
 	}

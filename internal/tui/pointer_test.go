@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 const (
@@ -26,15 +25,15 @@ var (
 	fingerUp   = tea.MouseWheelMsg{X: pointerX, Y: 5, Button: tea.MouseWheelDown}
 )
 
-func pointerSessions(names ...string) []tmux.Session {
-	sessions := make([]tmux.Session, 0, len(names))
+func pointerSessions(names ...string) []Session {
+	sessions := make([]Session, 0, len(names))
 	for _, name := range names {
-		sessions = append(sessions, tmux.Session{Name: name, Windows: 1})
+		sessions = append(sessions, Session{Name: name})
 	}
 	return sessions
 }
 
-func pointerSessionsModel(t *testing.T, termH int, sessions []tmux.Session) Model {
+func pointerSessionsModel(t *testing.T, termH int, sessions []Session) Model {
 	t.Helper()
 	m := NewModelWithSessions(sessions)
 	m.termWidth = pointerTermW
@@ -178,7 +177,7 @@ func TestTapOpensTheSessionUnderIt(t *testing.T) {
 	t.Run("in a grouped list a heading opens nothing and a session row opens", func(t *testing.T) {
 		dirA, dirB := t.TempDir(), t.TempDir()
 		projects := []project.Project{{Path: dirA, Name: "Orion"}, {Path: dirB, Name: "Vega"}}
-		sessions := []tmux.Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
+		sessions := []Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
 		m := pointerSessionsModel(t, pointerTermH, sessions)
 		m.sessionListMode = prefs.ModeByProject
 		m.sessionList.SetItems(buildByProject(sessions, project.NewIndex(projects), nil))
@@ -324,7 +323,7 @@ func TestSwipeMovesTheHighlightWithTheFinger(t *testing.T) {
 	t.Run("in a grouped list a step down skips the heading, and off the bottom wraps past the first", func(t *testing.T) {
 		dirA, dirB := t.TempDir(), t.TempDir()
 		projects := []project.Project{{Path: dirA, Name: "Orion"}, {Path: dirB, Name: "Vega"}}
-		sessions := []tmux.Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
+		sessions := []Session{{Name: "orion-1", Dir: dirA}, {Name: "vega-1", Dir: dirB}}
 		m := pointerSessionsModel(t, pointerTermH, sessions)
 		m.sessionList.SetItems(buildByProject(sessions, project.NewIndex(projects), nil))
 		m.ensureSessionRowSelected()
@@ -393,18 +392,12 @@ func dispatchPanelArrow(t *testing.T, m Model, press tea.KeyPressMsg) Model {
 // a finger drawn down pulls older lines into view.
 func TestSwipeScrollsThePreviewWithTheFinger(t *testing.T) {
 	sessions := pointerSessions("alpha")
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", Panes: []tmux.WindowPane{{Index: 0}}},
-		},
-	}
 	lines := make([]string, 0, 200)
 	for i := range 200 {
 		lines = append(lines, fmt.Sprintf("line %d", i))
 	}
-	reader := &recordingReader{bytes: []byte(strings.Join(lines, "\n"))}
-	m := modelWithSeams(t, sessions, enum, reader)
-	m, _ = pointerUpdate(t, m, keySpaceMsg())
+	m := modelWithSeams(t, sessions, historyFor(t, strings.Join(lines, "\n"), sessions))
+	m = openPreviewOn(t, m)
 	if m.activePage != pagePreview {
 		t.Fatal("fixture: Space did not open the preview")
 	}

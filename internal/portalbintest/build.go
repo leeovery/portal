@@ -38,6 +38,17 @@ func BuildPortalBinary(dir string) error {
 	return buildPortalBinaryInto(dir)
 }
 
+// Build compiles the portal CLI into a fresh t.TempDir, failing the test if it
+// can't, and returns the binary's absolute path.
+func Build(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := BuildPortalBinary(dir); err != nil {
+		t.Fatalf("build portal: %v", err)
+	}
+	return filepath.Join(dir, "portal")
+}
+
 // StagePortalBinary builds the portal CLI into a fresh t.TempDir and prepends
 // that directory to $PATH, so a system-installed portal cannot shadow it. A build
 // or lookup failure skips the test rather than failing it.

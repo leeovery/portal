@@ -2,7 +2,9 @@ package state
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,6 +19,34 @@ func TestDefaultIdentifyPS_NonExistentPIDReturnsEmptyStdout(t *testing.T) {
 	}
 }
 
+// The test binary runs from an absolute path well past 16 bytes, as the saver
+// runs portal, so a comm cut short or read as a path would fail here.
+func TestDefaultIdentifyPS_NamesTheExecutedFileWhateverItsPath(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exe) <= 16 {
+		t.Skipf("the test binary's path %q is too short to tell", exe)
+	}
+
+	out, err := defaultIdentifyPS(os.Getpid())
+	if err != nil {
+		t.Fatalf("ps on this process: %v", err)
+	}
+	comm, argv, ok := splitCommAndArgv(strings.TrimSpace(out))
+	if !ok {
+		t.Fatalf("ps output %q is not comm then argv", out)
+	}
+
+	if want := filepath.Base(exe); comm != want {
+		t.Errorf("comm = %q, want the executable's name %q, not its path", comm, want)
+	}
+	if !strings.HasPrefix(argv, os.Args[0]) {
+		t.Errorf("argv = %q, want this process's, from %q", argv, os.Args[0])
+	}
+}
+
 func TestDefaultIdentifyPS_ErrorEmbedsPSArgv(t *testing.T) {
 	_, err := defaultIdentifyPS(0x7FFFFFFE)
 	if err == nil {
@@ -26,7 +56,7 @@ func TestDefaultIdentifyPS_ErrorEmbedsPSArgv(t *testing.T) {
 	if !strings.Contains(msg, "ps") {
 		t.Errorf("error %q does not contain ps binary path", msg)
 	}
-	if !strings.Contains(msg, "comm=,args=") {
+	if !strings.Contains(msg, "ucomm=,args=") {
 		t.Errorf("error %q does not contain ps argv", msg)
 	}
 

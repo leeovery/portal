@@ -2,103 +2,109 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/hooksweep"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 )
+
+const doctorZmxPath = "/opt/test/bin/zmx"
 
 func doctorUnsupportedResolve(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 	return nil, spawn.ResolutionUnsupported
 }
 
-func seedLiveDaemonPID(t *testing.T, dir string) {
-	t.Helper()
-	pid := strconv.Itoa(os.Getpid())
-	if err := os.WriteFile(state.DaemonPID(dir), []byte(pid+"\n"), 0o600); err != nil {
-		t.Fatalf("write daemon.pid: %v", err)
-	}
+func zmxFound(string) (string, error) { return doctorZmxPath, nil }
+
+func zmxMissing(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
+
+// protocolAnswers stands in for the driver's protocol read: each named session
+// answers with its version or its error, and any other is ErrNoSuchSession.
+type protocolAnswers map[string]struct {
+	version int
+	err     error
 }
 
-func seedDeadDaemonPID(t *testing.T, dir string) {
-	t.Helper()
-	if err := os.WriteFile(state.DaemonPID(dir), []byte("999999\n"), 0o600); err != nil {
-		t.Fatalf("write daemon.pid: %v", err)
+func (p protocolAnswers) read(_ context.Context, name string) (int, error) {
+	a, ok := p[name]
+	if !ok {
+		return 0, fmt.Errorf("read protocol version of session %q: %w", name, backend.ErrNoSuchSession)
 	}
+	return a.version, a.err
 }
 
-func seedDaemonVersion(t *testing.T, dir, version string) {
-	t.Helper()
-	if err := os.WriteFile(state.DaemonVersion(dir), []byte(version+"\n"), 0o600); err != nil {
-		t.Fatalf("write daemon.version: %v", err)
-	}
-}
+func protocolOne(context.Context, string) (int, error) { return 1, nil }
 
 func seedValidSessionsJSON(t *testing.T, dir string, sessions int) {
 	t.Helper()
-	idx := state.Index{Version: state.SchemaVersion, SavedAt: time.Now()}
+	entries := make([]sessionindex.Entry, 0, sessions)
 	for i := range sessions {
-		idx.Sessions = append(idx.Sessions, state.Session{
-			Name: "s" + strconv.Itoa(i),
-			Windows: []state.Window{
-				{Index: 0, Name: "main", Panes: []state.Pane{{Index: 0, CWD: "/tmp"}}},
-			},
-		})
+		entries = append(entries, sessionindex.Entry{Name: "s" + strconv.Itoa(i), Dir: "/tmp"})
 	}
-	data, err := state.EncodeIndex(idx)
+	idx := entryIndexOf(t, entries...)
+	idx.SavedAt = time.Now()
+	data, err := sessionindex.Encode(idx)
 	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
+		t.Fatalf("Encode: %v", err)
 	}
-	if err := os.WriteFile(state.SessionsJSON(dir), data, 0o600); err != nil {
+	writeSessionsJSON(t, dir, data)
+}
+
+func writeSessionsJSON(t *testing.T, dir string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(sessionindex.Path(dir), data, 0o600); err != nil {
 		t.Fatalf("write sessions.json: %v", err)
 	}
 }
 
-// cmd cannot import the managedEvents table at test time, so this key set
-// stands in for the canonical event set.
-func allHooksHealthy() map[string]int {
-	return map[string]int{
-		"session-created":        1,
-		"session-closed":         1,
-		"session-renamed":        1,
-		"window-linked":          1,
-		"window-unlinked":        1,
-		"window-layout-changed":  1,
-		"pane-focus-out":         1,
-		"client-attached":        1,
-		"client-session-changed": 1,
+// withHealthyRuntime fills every unset runtime seam with a healthy answer: a
+// Fake holding one answering session, the one seedValidSessionsJSON saves
+// first, so nothing saved is kept, zmx on PATH, a protocol 1 daemon, and a
+// saver whose daemon, of this Portal's version, records itself in the state
+// dir when that dir is there. It also stubs the host-terminal seams so no
+// doctor test invokes a real detector, which would read the process tree.
+func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
+	t.Helper()
+	if deps.Version == "" {
+		deps.Version = doctorVersion
 	}
-}
-
-// withHealthyRuntime fills any unset probe seam with a healthy result. It also
-// stubs the host-terminal seams so no doctor test invokes a real detector,
-// which would read the process tree and the live tmux server.
-func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
-	if deps.ServerRunning == nil {
-		deps.ServerRunning = func() bool { return true }
+	if deps.Saver == nil {
+		deps.Saver = runningSaver(t, deps.StateDir, deps.Version)
 	}
-	if deps.SaverPresent == nil {
-		deps.SaverPresent = func() (bool, error) { return true, nil }
+	if deps.DaemonSettle == 0 {
+		deps.DaemonSettle = testDaemonSettle
 	}
-	if deps.HookCounts == nil {
-		deps.HookCounts = func() (map[string]int, error) { return allHooksHealthy(), nil }
+	if deps.ListSessions == nil {
+		deps.ListSessions = backendtest.New(backend.Session{Name: "s0"}).List
 	}
-	if deps.PendingResumes == nil {
-		deps.PendingResumes = func() (tmux.PendingResumeView, error) {
-			return tmux.PendingResumeView{Rows: []tmux.PendingResumeRow{}, Sessions: map[string]struct{}{}}, nil
-		}
+	if deps.ZmxDir == "" {
+		deps.ZmxDir = t.TempDir()
+	}
+	if deps.LookPath == nil {
+		deps.LookPath = zmxFound
+	}
+	if deps.ProtocolVersion == nil {
+		deps.ProtocolVersion = protocolOne
 	}
 	if deps.Detector == nil {
 		deps.Detector = fakeTerminalDetector{}
@@ -106,19 +112,19 @@ func withHealthyRuntime(deps *DoctorDeps) *DoctorDeps {
 	if deps.Resolve == nil {
 		deps.Resolve = doctorUnsupportedResolve
 	}
+	if deps.HookStore == nil {
+		deps.HookStore = hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json"))
+	}
 	return deps
 }
 
-func seedHealthyStateDir(t *testing.T, dir string) {
+func diagnose(t *testing.T, deps *DoctorDeps) []checkResult {
 	t.Helper()
-	seedLiveDaemonPID(t, dir)
-	seedDaemonVersion(t, dir, "v9.9.9")
-	seedValidSessionsJSON(t, dir, 1)
-}
-
-func runDoctor(t *testing.T, dir string) (*bytes.Buffer, *bytes.Buffer, error) {
-	t.Helper()
-	return runDoctorWith(t, withHealthyRuntime(&DoctorDeps{StateDir: dir}))
+	results, err := runDoctorDiagnosis(t.Context(), deps)
+	if err != nil {
+		t.Fatalf("runDoctorDiagnosis: %v", err)
+	}
+	return results
 }
 
 func findCheck(t *testing.T, results []checkResult, name string) checkResult {
@@ -132,33 +138,56 @@ func findCheck(t *testing.T, results []checkResult, name string) checkResult {
 	return checkResult{}
 }
 
-func TestDoctorAllStateChecksPassExitsZero(t *testing.T) {
+func assertCheck(t *testing.T, got checkResult, status checkStatus, detail string) {
+	t.Helper()
+	if got.status != status || got.detail != detail {
+		t.Errorf("%s = (%v, %q); want (%v, %q)", got.name, got.status, got.detail, status, detail)
+	}
+}
+
+// unreadableDir makes a directory that stats as one and refuses to be opened.
+func unreadableDir(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0o000 directory permissions")
+	}
+	dir := filepath.Join(t.TempDir(), "noread")
+	if err := os.Mkdir(dir, 0o000); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	return dir
+}
+
+func TestDoctorAllChecksPassExitsZero(t *testing.T) {
 	dir := t.TempDir()
-	seedLiveDaemonPID(t, dir)
-	seedDaemonVersion(t, dir, "v9.9.9")
 	seedValidSessionsJSON(t, dir, 1)
+	projectStore, _ := seedProjectsJSON(t, t.TempDir())
+	zmxDir := t.TempDir()
 
-	outBuf, _, err := runDoctor(t, dir)
+	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ProjectStore: projectStore}))
 	if err != nil {
-		t.Fatalf("Execute returned %v; want nil when every state check passes", err)
+		t.Fatalf("Execute returned %v; want nil when every check passes", err)
 	}
 
-	out := outBuf.String()
-	if !strings.HasPrefix(out, "Portal doctor:\n") {
-		t.Errorf("report missing header line:\n%s", out)
-	}
-	wantDaemon := "running (pid " + strconv.Itoa(os.Getpid()) + ", version v9.9.9)"
-	if !strings.Contains(out, wantDaemon) {
-		t.Errorf("report missing daemon detail %q:\n%s", wantDaemon, out)
-	}
-	if !strings.Contains(out, "1 session, 1 pane") {
-		t.Errorf("report missing sessions detail:\n%s", out)
-	}
-	// The stale-hooks seams keep their production defaults, whose live-pane
-	// enumeration fails against TestMain's poisoned tmux socket and reports
-	// not-evaluable — so that check falls outside the count below.
-	if !strings.HasSuffix(out, "\n  6 checks passed\n") {
-		t.Errorf("report does not close with the all-passed summary:\n%s", out)
+	want := "Portal doctor:\n" +
+		"  ✓ zmx: " + doctorZmxPath + "\n" +
+		"  ✓ zmx dir: " + zmxDir + "\n" +
+		"  ✓ sessions: 1 session answering\n" +
+		"  ✓ saver: _portal-saver up\n" +
+		"  ✓ daemon: running (pid 4242, version " + doctorVersion + ")\n" +
+		"  ✓ state dir: " + dir + "\n" +
+		"  ✓ state's zmx dir: not recorded yet\n" +
+		"  ✓ sessions.json: 1 session indexed\n" +
+		"  ✓ stale hooks: no hooks\n" +
+		"  ✓ stale projects: no stale projects\n" +
+		"    pending resumes: 0 sessions waiting to resume\n" +
+		defaultKeyConfigLine + "\n" +
+		"    host terminal: unsupported (remote session)\n" +
+		"    resume mode: " + installResumeModeOf(nil).String() + "\n" +
+		"  11 checks passed\n"
+	if got := outBuf.String(); got != want {
+		t.Errorf("report =\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -184,202 +213,504 @@ func TestDoctorZeroValueCheckResultNotHealthy(t *testing.T) {
 	}
 }
 
-func TestDoctorDeadDaemonFailsNonZero(t *testing.T) {
-	dir := t.TempDir()
-	seedDeadDaemonPID(t, dir)
-	seedValidSessionsJSON(t, dir, 1)
-
-	outBuf, _, err := runDoctor(t, dir)
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy when daemon.pid is dead", err)
-	}
-	if !strings.Contains(outBuf.String(), "daemon: not running") {
-		t.Errorf("report missing \"daemon: not running\":\n%s", outBuf.String())
-	}
-}
-
-func TestDoctorFreshInstallReportedHonestly(t *testing.T) {
+// A fresh install has run no Portal command, so no saver: that is its one
+// failure, and every line about what Portal has made passes.
+// A fresh install has nothing for a saver to save, so the saver it doesn't
+// run yet is stated, and doctor reads it healthy.
+func TestDoctorFreshInstallIsHealthy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
-
-	outBuf, _, err := runDoctor(t, dir)
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy on fresh install (daemon down)", err)
+	zmxDir := filepath.Join(t.TempDir(), "zmx")
+	outBuf, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: backendtest.New().List, Saver: &saverAnswers{}}))
+	if err != nil {
+		t.Fatalf("Execute err = %v; want a healthy fresh install", err)
 	}
 	out := outBuf.String()
-	if !strings.Contains(out, "daemon: not running") {
-		t.Errorf("report missing daemon-down line:\n%s", out)
-	}
-	if !strings.Contains(out, "state dir: not created yet") {
-		t.Errorf("state-dir-sane must pass with \"not created yet\":\n%s", out)
-	}
-	if !strings.Contains(out, "sessions.json: no sessions saved yet") {
-		t.Errorf("absent sessions.json must pass:\n%s", out)
-	}
-	if !strings.HasSuffix(out, "\n  5 of 6 checks passed\n") {
-		t.Errorf("report does not close with the partial summary:\n%s", out)
+	for _, line := range []string{
+		"✓ zmx dir: not created yet",
+		"✓ sessions: no sessions",
+		"  saver: _portal-saver not running — nothing to save yet",
+		"  daemon: not running (no _portal-saver; nothing to save yet)",
+		"✓ state dir: not created yet",
+		"✓ state's zmx dir: not recorded yet",
+		"✓ sessions.json: no sessions indexed yet",
+		"  pending resumes: 0 sessions waiting to resume",
+		"9 checks passed",
+	} {
+		if !strings.Contains(out, line) {
+			t.Errorf("report missing %q:\n%s", line, out)
+		}
 	}
 }
 
 func TestDoctorIsReadOnly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
+	zmxDir := filepath.Join(t.TempDir(), "zmx")
+	fake := backendtest.New(backend.Session{Name: "api"}, backend.Session{Name: "wedged"})
+	fake.StopAnswering("wedged")
 
-	if _, _, err := runDoctor(t, dir); err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy", err)
+	if _, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ZmxDir: zmxDir, ListSessions: fake.List})); err != ErrDoctorUnhealthy {
+		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy for the silent session", err)
 	}
 
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("doctor created the state dir %q (stat err = %v); want it left absent", dir, err)
+	for _, made := range []string{dir, zmxDir} {
+		if _, err := os.Stat(made); !os.IsNotExist(err) {
+			t.Errorf("doctor created %q (stat err = %v); want it left absent", made, err)
+		}
 	}
-}
-
-func TestDoctorSessionsJSONStatesDistinguished(t *testing.T) {
-	t.Run("valid index reports N sessions, M panes", func(t *testing.T) {
-		dir := t.TempDir()
-		seedValidSessionsJSON(t, dir, 3)
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
+	for _, call := range fake.Calls() {
+		if call.Op != backendtest.OpList {
+			t.Errorf("doctor called %s on the backend; the diagnosis only lists", call.Op)
 		}
-		got := findCheck(t, results, "sessions.json")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "3 sessions, 3 panes" {
-			t.Errorf("detail = %q; want %q", got.detail, "3 sessions, 3 panes")
-		}
-	})
-
-	t.Run("absent sessions.json passes as no sessions saved yet", func(t *testing.T) {
-		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "sessions.json")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass for absent file", got.status)
-		}
-		if got.detail != "no sessions saved yet" {
-			t.Errorf("detail = %q; want %q", got.detail, "no sessions saved yet")
-		}
-	})
-
-	t.Run("corrupt sessions.json fails", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not json"), 0o600); err != nil {
-			t.Fatalf("write garbage sessions.json: %v", err)
-		}
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "sessions.json")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for corrupt file", got.status)
-		}
-	})
-}
-
-func TestDoctorDaemonCheckDetail(t *testing.T) {
-	t.Run("live pid passes with pid+version detail", func(t *testing.T) {
-		dir := t.TempDir()
-		seedLiveDaemonPID(t, dir)
-		seedDaemonVersion(t, dir, "v1.2.3")
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "daemon")
-		if got.status != checkPass {
-			t.Fatalf("status = %v; want checkPass", got.status)
-		}
-		want := "running (pid " + strconv.Itoa(os.Getpid()) + ", version v1.2.3)"
-		if got.detail != want {
-			t.Errorf("detail = %q; want %q", got.detail, want)
-		}
-	})
-
-	t.Run("missing pid fails as not running", func(t *testing.T) {
-		dir := t.TempDir()
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "daemon")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail", got.status)
-		}
-		if got.detail != "not running" {
-			t.Errorf("detail = %q; want %q", got.detail, "not running")
-		}
-	})
-}
-
-func TestDoctorStateDirSaneHealthyDirPasses(t *testing.T) {
-	dir := t.TempDir()
-	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-	if err != nil {
-		t.Fatalf("runDoctorDiagnosis: %v", err)
 	}
-	got := findCheck(t, results, "state dir")
-	if got.status != checkPass {
-		t.Errorf("status = %v; want checkPass for an existing directory", got.status)
+	if _, ok := fake.Held("wedged"); !ok {
+		t.Error("the silent session is gone; doctor must leave it as it found it")
 	}
 }
 
-func TestDoctorStateDirSaneFailBranches(t *testing.T) {
-	t.Run("existing path that is not a directory fails", func(t *testing.T) {
-		// A regular file at the state-dir path: os.Stat succeeds, IsDir does not.
-		file := filepath.Join(t.TempDir(), "state")
-		if err := os.WriteFile(file, []byte("i am a file, not a dir"), 0o600); err != nil {
-			t.Fatalf("write state file: %v", err)
-		}
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: file}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "state dir")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail when the state-dir path is a regular file", got.status)
-		}
-		if got.detail != "not a directory" {
-			t.Errorf("detail = %q; want %q", got.detail, "not a directory")
-		}
+func TestDoctorZmxBinaryCheck(t *testing.T) {
+	t.Run("it shows the path of the zmx on PATH", func(t *testing.T) {
+		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()})), "zmx")
+		assertCheck(t, got, checkPass, doctorZmxPath)
 	})
 
-	t.Run("unreadable stat fails", func(t *testing.T) {
-		if os.Geteuid() == 0 {
-			t.Skip("root bypasses 0o000 directory permissions; the stat would not fail")
-		}
-		// os.Stat of a child inside a 0o000 directory returns EACCES, not
-		// ErrNotExist.
-		blocked := filepath.Join(t.TempDir(), "blocked")
-		if err := os.Mkdir(blocked, 0o700); err != nil {
-			t.Fatalf("mkdir blocked: %v", err)
-		}
-		dir := filepath.Join(blocked, "state")
-		if err := os.Chmod(blocked, 0o000); err != nil {
-			t.Fatalf("chmod 0o000: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(blocked, 0o700) })
+	t.Run("it fails naming the zmx it needs when zmx is not on PATH", func(t *testing.T) {
+		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing})), "zmx")
+		assertCheck(t, got, checkFail, "zmx not found on PATH; Portal needs zmx 1.0.1 or later")
+	})
 
-		results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
+	t.Run("it looks up the zmx program", func(t *testing.T) {
+		var looked []string
+		lookPath := func(file string) (string, error) {
+			looked = append(looked, file)
+			return doctorZmxPath, nil
 		}
-		got := findCheck(t, results, "state dir")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail on an unreadable stat", got.status)
-		}
-		if got.detail != "unreadable" {
-			t.Errorf("detail = %q; want %q", got.detail, "unreadable")
+		diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: lookPath}))
+		if !slices.Equal(looked, []string{"zmx"}) {
+			t.Errorf("looked up %v; want [zmx]", looked)
 		}
 	})
 }
 
-func TestDoctorRegisteredInSkipTmuxCheck(t *testing.T) {
-	if !skipTmuxCheck["doctor"] {
-		t.Error("skipTmuxCheck[\"doctor\"] = false; want true (Bootstrap Exemption)")
+func TestDoctorZmxDirCheck(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "zmx")
+	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existing := t.TempDir()
+
+	cases := []struct {
+		name   string
+		dir    string
+		status checkStatus
+		detail string
+	}{
+		{"an existing dir passes with its path", existing, checkPass, existing},
+		{"a dir not made yet passes", filepath.Join(t.TempDir(), "zmx"), checkPass, "not created yet"},
+		{"an unreadable dir fails", unreadableDir(t), checkFail, "unreadable"},
+		{"a file in its place fails", notADir, checkFail, "not a directory"},
+		{"a relative dir fails", "zmx", checkFail, `"zmx" is not an absolute path`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ZmxDir: tc.dir})), "zmx dir")
+			assertCheck(t, got, tc.status, tc.detail)
+		})
+	}
+}
+
+// silentSessions is a Fake holding the named sessions, none of them answering.
+func silentSessions(names ...string) *backendtest.Fake {
+	fake := backendtest.New()
+	for _, name := range names {
+		fake.Add(backend.Session{Name: name})
+		fake.StopAnswering(name)
+	}
+	return fake
+}
+
+func sessionsDeps(t *testing.T, fake *backendtest.Fake, protocolVersion func(context.Context, string) (int, error)) *DoctorDeps {
+	t.Helper()
+	return withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ListSessions: fake.List, ProtocolVersion: protocolVersion})
+}
+
+func sessionsCheck(t *testing.T, fake *backendtest.Fake, protocolVersion func(context.Context, string) (int, error)) checkResult {
+	t.Helper()
+	return findCheck(t, diagnose(t, sessionsDeps(t, fake, protocolVersion)), "sessions")
+}
+
+func TestDoctorSessionsCheck(t *testing.T) {
+	t.Run("it passes when every session answers", func(t *testing.T) {
+		fake := backendtest.New(backend.Session{Name: "api"}, backend.Session{Name: "web"})
+		assertCheck(t, sessionsCheck(t, fake, nil), checkPass, "2 sessions answering")
+	})
+
+	t.Run("it names a protocol-2 daemon with its version and a silent one as not answering", func(t *testing.T) {
+		fake := silentSessions("future", "old-zmx")
+		fake.Add(backend.Session{Name: "api"})
+		answers := protocolAnswers{
+			"future":  {version: 2},
+			"old-zmx": {err: fmt.Errorf("no answer in 1s: %w", backend.ErrTimeout)},
+		}
+		assertCheck(t, sessionsCheck(t, fake, answers.read), checkFail, "2 of 3 not answering: future (speaks protocol 2; Portal speaks 1), old-zmx (no answer)")
+	})
+
+	t.Run("it gives a refusing socket the hint that clears it", func(t *testing.T) {
+		answers := protocolAnswers{
+			"crashed": {err: fmt.Errorf("read protocol version: connection refused: %w", zmx.ErrRefusing)},
+			"wedged":  {err: backend.ErrTimeout},
+		}
+		assertCheck(t, sessionsCheck(t, silentSessions("crashed", "wedged"), answers.read), checkFail,
+			"2 of 2 not answering: crashed (refuses connections: a zmx process may still hold it; try again in a moment), wedged (no answer)")
+	})
+
+	t.Run("it names Portal's own sessions too", func(t *testing.T) {
+		answers := protocolAnswers{"_portal-saver": {err: backend.ErrTimeout}}
+		assertCheck(t, sessionsCheck(t, silentSessions("_portal-saver"), answers.read), checkFail, "1 of 1 not answering: _portal-saver (no answer)")
+	})
+
+	t.Run("it names a daemon whose header reads protocol 1 as not answering", func(t *testing.T) {
+		assertCheck(t, sessionsCheck(t, silentSessions("slow"), protocolOne), checkFail, "1 of 1 not answering: slow (no answer)")
+	})
+
+	t.Run("it leaves out a session that ended after the listing", func(t *testing.T) {
+		fake := silentSessions("gone")
+		fake.Add(backend.Session{Name: "api"})
+		assertCheck(t, sessionsCheck(t, fake, protocolAnswers{}.read), checkPass, "1 session answering")
+	})
+
+	t.Run("it counts a session that ended beside one still silent out of the total", func(t *testing.T) {
+		answers := protocolAnswers{"wedged": {err: backend.ErrTimeout}}
+		assertCheck(t, sessionsCheck(t, silentSessions("gone", "wedged"), answers.read), checkFail, "1 of 1 not answering: wedged (no answer)")
+	})
+
+	t.Run("it reports no sessions when every listed one has ended", func(t *testing.T) {
+		assertCheck(t, sessionsCheck(t, silentSessions("gone"), protocolAnswers{}.read), checkPass, "no sessions")
+	})
+
+	t.Run("it reads the protocol of the silent sessions alone", func(t *testing.T) {
+		fake := silentSessions("wedged")
+		fake.Add(backend.Session{Name: "api"})
+		var mu sync.Mutex
+		var asked []string
+		read := func(_ context.Context, name string) (int, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked = append(asked, name)
+			return 0, backend.ErrTimeout
+		}
+
+		sessionsCheck(t, fake, read)
+		if !slices.Equal(asked, []string{"wedged"}) {
+			t.Errorf("protocol read for %v; want [wedged]", asked)
+		}
+	})
+
+	// Each silent daemon costs the probe ceiling, so asking them in turn would
+	// cost one ceiling each.
+	t.Run("it asks every silent session at once", func(t *testing.T) {
+		var arrived sync.WaitGroup
+		arrived.Add(2)
+		read := func(context.Context, string) (int, error) {
+			arrived.Done()
+			waited := make(chan struct{})
+			go func() { arrived.Wait(); close(waited) }()
+			select {
+			case <-waited:
+				return 0, backend.ErrTimeout
+			case <-time.After(5 * time.Second):
+				return 7, nil
+			}
+		}
+		assertCheck(t, sessionsCheck(t, silentSessions("a", "b"), read), checkFail, "2 of 2 not answering: a (no answer), b (no answer)")
+	})
+
+	// Each probe holds a socket open, so a directory of many silent sessions
+	// must not exhaust Portal's file descriptors.
+	t.Run("it holds no more than 64 probes in flight", func(t *testing.T) {
+		names := make([]string, 100)
+		for i := range names {
+			names[i] = fmt.Sprintf("s%03d", i)
+		}
+		var mu sync.Mutex
+		inFlight, most := 0, 0
+		full := make(chan struct{})
+		var fill sync.Once
+		read := func(context.Context, string) (int, error) {
+			mu.Lock()
+			inFlight++
+			most = max(most, inFlight)
+			if inFlight == maxProtocolProbes {
+				fill.Do(func() { close(full) })
+			}
+			mu.Unlock()
+			select {
+			case <-full:
+			case <-time.After(5 * time.Second):
+			}
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+			return 0, backend.ErrTimeout
+		}
+
+		got := sessionsCheck(t, silentSessions(names...), read)
+		if got.status != checkFail || !strings.HasPrefix(got.detail, "100 of 100 not answering: ") {
+			t.Errorf("sessions = (%v, %q); want all 100 named", got.status, got.detail)
+		}
+		if most != 64 {
+			t.Errorf("most probes in flight = %d; want the cap of 64", most)
+		}
+	})
+
+	t.Run("it is not evaluable when the listing fails", func(t *testing.T) {
+		fake := backendtest.New()
+		fake.Fail(backendtest.OpList, errors.New("list zmx sessions: permission denied"))
+
+		results := diagnose(t, sessionsDeps(t, fake, nil))
+		assertCheck(t, findCheck(t, results, "sessions"), checkNotEvaluable, "could not list sessions: list zmx sessions: permission denied")
+		if doctorUnhealthy(results) {
+			t.Error("doctorUnhealthy = true; a not-evaluable line must never drive the exit code")
+		}
+	})
+}
+
+func TestDoctorSessionsJSONStates(t *testing.T) {
+	cases := []struct {
+		name   string
+		seed   func(t *testing.T, dir string)
+		status checkStatus
+		detail string
+	}{
+		{"a version 2 index reports its sessions", func(t *testing.T, dir string) { seedValidSessionsJSON(t, dir, 3) }, checkPass, "3 sessions indexed"},
+		{"an absent file passes", func(*testing.T, string) {}, checkPass, "no sessions indexed yet"},
+		{"a corrupt file fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte("{not json")) }, checkFail, "corrupt"},
+		{"a newer version fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 3}`)) }, checkFail, newerIndexDetail},
+		{"a version 1 file fails", func(t *testing.T, dir string) { writeSessionsJSON(t, dir, []byte(`{"version": 1}`)) }, checkFail, legacyIndexDetail},
+		{"an unreadable file fails", func(t *testing.T, dir string) {
+			writeSessionsJSON(t, dir, []byte(`{"version": 2}`))
+			if err := os.Chmod(sessionindex.Path(dir), 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}, checkFail, "unreadable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc.seed(t, dir)
+			got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: dir})), "sessions.json")
+			assertCheck(t, got, tc.status, tc.detail)
+		})
+	}
+}
+
+const (
+	legacyIndexDetail = "from the tmux version of Portal; run portal migrate"
+	newerIndexDetail  = "version 3, from a newer Portal; this one reads version 2"
+)
+
+// Doctor runs past the root's stop on an unusable sessions.json, so it can
+// report the index itself.
+func TestDoctorReportsAnUnusableIndexThroughTheRoot(t *testing.T) {
+	for name, tc := range map[string]struct{ body, detail string }{
+		"version 1": {legacyIndexBody, legacyIndexDetail},
+		"corrupt":   {`{"version": 2,`, "corrupt"},
+		"newer":     {`{"version": 3, "sessions": []}`, newerIndexDetail},
+	} {
+		t.Run("it reports a "+name+" sessions.json and fails", func(t *testing.T) {
+			seedSessionsJSON(t, tc.body)
+
+			outBuf, errBuf, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{}))
+			if err != ErrDoctorUnhealthy {
+				t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy from the report, not the root's stop", err)
+			}
+			if errBuf.Len() != 0 {
+				t.Errorf("stderr = %q; want it silent", errBuf.String())
+			}
+			if want := "\n  ✗ sessions.json: " + tc.detail + "\n"; !strings.Contains(outBuf.String(), want) {
+				t.Errorf("report missing %q:\n%s", want, outBuf.String())
+			}
+		})
+	}
+}
+
+func TestDoctorStateDirCheck(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(notADir, []byte("i am a file, not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	existing := t.TempDir()
+	blockedParent := unreadableDir(t)
+
+	cases := []struct {
+		name   string
+		dir    string
+		status checkStatus
+		detail string
+	}{
+		{"an existing dir passes with its path", existing, checkPass, existing},
+		{"a file in its place fails", notADir, checkFail, "not a directory"},
+		{"a dir that cannot be stat'ed fails", filepath.Join(blockedParent, "state"), checkFail, "unreadable"},
+		{"a dir that cannot be opened fails", blockedParent, checkFail, "unreadable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: tc.dir})), "state dir")
+			assertCheck(t, got, tc.status, tc.detail)
+		})
+	}
+
+	t.Run("an unresolvable dir fails every state check", func(t *testing.T) {
+		unresolved := errors.New("no home")
+		assertCheck(t, checkStateDirSane("", unresolved), checkFail, "unresolvable")
+		assertCheck(t, checkStateZmxDir("", unresolved, t.TempDir()), checkFail, "unresolvable")
+		assertCheck(t, checkSessionsJSON("", unresolved), checkFail, "unresolvable")
+	})
+}
+
+// decision 76: doctor reads which zmx dir the state dir belongs to, as the
+// bootstrap does, and records nothing.
+func TestDoctorStateZmxDirCheck(t *testing.T) {
+	check := func(t *testing.T, stateDir, zmxDir string) checkResult {
+		t.Helper()
+		return findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: stateDir, ZmxDir: zmxDir})), "state's zmx dir")
+	}
+	recorded := func(t *testing.T, zmxDir string) string {
+		t.Helper()
+		stateDir := t.TempDir()
+		if err := state.RecordZmxDir(stateDir, zmx.CanonicalDir(zmxDir)); err != nil {
+			t.Fatal(err)
+		}
+		return stateDir
+	}
+
+	t.Run("a state dir recording none passes, and doctor records none", func(t *testing.T) {
+		stateDir := t.TempDir()
+
+		assertCheck(t, check(t, stateDir, t.TempDir()), checkPass, "not recorded yet")
+		if _, err := os.Stat(state.ZmxDirRecordPath(stateDir)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat the record = %v, want none: doctor is read-only", err)
+		}
+	})
+
+	t.Run("a state dir of this zmx dir passes with it", func(t *testing.T) {
+		zmxDir := t.TempDir()
+
+		assertCheck(t, check(t, recorded(t, zmxDir), zmxDir), checkPass, zmx.CanonicalDir(zmxDir))
+	})
+
+	t.Run("a state dir of another zmx dir fails, naming both and the way out", func(t *testing.T) {
+		zmxDir, other := t.TempDir(), t.TempDir()
+		real := zmx.CanonicalDir(zmxDir)
+		stateDir := recorded(t, zmxDir)
+
+		want := "belongs to the zmx sessions in " + real + " (recorded in " + state.ZmxDirRecordPath(stateDir) + "), but this Portal is using " + other + "; run it with ZMX_DIR=" + real + ", or give it a state of its own with PORTAL_STATE_DIR"
+		assertCheck(t, check(t, stateDir, other), checkFail, want)
+	})
+
+	t.Run("a record it can't read fails, naming it and the way out", func(t *testing.T) {
+		stateDir := t.TempDir()
+		if err := os.WriteFile(state.ZmxDirRecordPath(stateDir), []byte(`{"zmx_dir":"zmx"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		want := "can't read " + state.ZmxDirRecordPath(stateDir) + `: "zmx" is not an absolute directory; delete it, and Portal records the directory in use at its next start`
+		assertCheck(t, check(t, stateDir, t.TempDir()), checkFail, want)
+	})
+}
+
+// --fix writes state, so it repairs nothing in a state directory that belongs
+// to another zmx directory, or whose record it can't read.
+func TestDoctorFixUnderAnotherZmxDir(t *testing.T) {
+	staleProject := filepath.Join(t.TempDir(), "gone")
+	install := func(t *testing.T) (staleHooksInstall, string) {
+		t.Helper()
+		in := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+		projects, projectsFile := seedProjectsJSON(t, staleProject)
+		in.deps.ProjectStore = projects
+		return in, projectsFile
+	}
+
+	for name, record := range map[string]func(t *testing.T, stateDir string){
+		"another zmx dir recorded": func(t *testing.T, stateDir string) {
+			if err := state.RecordZmxDir(stateDir, zmx.CanonicalDir(t.TempDir())); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a record it can't read": func(t *testing.T, stateDir string) {
+			if err := os.WriteFile(state.ZmxDirRecordPath(stateDir), []byte("{"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run("under "+name+" it repairs nothing and exits non-zero", func(t *testing.T) {
+			in, projectsFile := install(t)
+			record(t, in.deps.StateDir)
+			hooksBefore, projectsBefore := readFileBytes(t, in.hooksPath), readFileBytes(t, projectsFile)
+
+			outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+			if !errors.Is(err, ErrDoctorUnhealthy) {
+				t.Errorf("Execute err = %v, want ErrDoctorUnhealthy", err)
+			}
+			out := outBuf.String()
+			if !strings.Contains(out, "  ✗ state's zmx dir: ") || !strings.HasSuffix(out, "\n"+fixRefusedLine+"\n") || strings.Count(out, "Portal doctor:") != 1 {
+				t.Errorf("output = %q, want one diagnosis naming the check, then %q", out, fixRefusedLine)
+			}
+			assertHooksFileUnchanged(t, in.hooksPath, hooksBefore)
+			if got := readFileBytes(t, projectsFile); !bytes.Equal(got, projectsBefore) {
+				t.Errorf("projects.json = %s, want %s untouched", got, projectsBefore)
+			}
+		})
+	}
+
+	t.Run("with no record it repairs", func(t *testing.T) {
+		in, projectsFile := install(t)
+
+		outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+		if err != nil {
+			t.Fatalf("Execute err = %v, want nil", err)
+		}
+		if out := outBuf.String(); strings.Contains(out, fixRefusedLine) || !strings.Contains(out, "Pruned 1 stale hook:") || !strings.Contains(out, "Pruned stale project: proj0") {
+			t.Errorf("output = %q, want both repairs made", out)
+		}
+		if got := readFileBytes(t, projectsFile); bytes.Contains(got, []byte(staleProject)) {
+			t.Errorf("projects.json = %s, want %s pruned", got, staleProject)
+		}
+	})
+}
+
+// A saver proved another state directory's says this state is paired with
+// another's sessions, a scratch state beside the shared hooks.json, so --fix
+// repairs nothing, saying why.
+func TestDoctorFixBesideAnotherStateDirsSaver(t *testing.T) {
+	staleProject := filepath.Join(t.TempDir(), "gone")
+	in := newStaleHooksInstall(t, hookstest.StaleHookSeed)
+	projects, projectsFile := seedProjectsJSON(t, staleProject)
+	in.deps.ProjectStore = projects
+	saver := runningSaver(t, in.deps.StateDir, doctorVersion)
+	saver.theirs = "/srv/portal/state"
+	in.deps.Saver = saver
+	hooksBefore, projectsBefore := readFileBytes(t, in.hooksPath), readFileBytes(t, projectsFile)
+
+	outBuf, _, err := runDoctorWith(t, in.deps, "--fix")
+
+	if !errors.Is(err, ErrDoctorUnhealthy) {
+		t.Errorf("Execute err = %v, want ErrDoctorUnhealthy", err)
+	}
+	want := "\nSkipped every repair: _portal-saver saves the state in /srv/portal/state, not this one\n"
+	if out := outBuf.String(); !strings.HasSuffix(out, want) || strings.Count(out, "Portal doctor:") != 1 {
+		t.Errorf("output = %q, want one diagnosis, then %q", out, want)
+	}
+	assertHooksFileUnchanged(t, in.hooksPath, hooksBefore)
+	if got := readFileBytes(t, projectsFile); !bytes.Equal(got, projectsBefore) {
+		t.Errorf("projects.json = %s, want %s untouched", got, projectsBefore)
+	}
+}
+
+func TestDoctorIsBootstrapExempt(t *testing.T) {
+	if !bootstrapExempt["doctor"] {
+		t.Error("bootstrapExempt[\"doctor\"] = false; want true: doctor must run no bootstrap")
 	}
 }
 
@@ -393,12 +724,7 @@ func TestDoctorIsRegisteredCommand(t *testing.T) {
 }
 
 func TestDoctorRejectsArgs(t *testing.T) {
-	dir := t.TempDir()
-	seedLiveDaemonPID(t, dir)
-	seedDaemonVersion(t, dir, "v9.9.9")
-	seedValidSessionsJSON(t, dir, 1)
-
-	if _, _, err := runDoctorWith(t, &DoctorDeps{StateDir: dir}, "unexpected"); err == nil {
+	if _, _, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}), "unexpected"); err == nil {
 		t.Error("Execute returned nil for `doctor unexpected`; want a NoArgs error")
 	}
 }
@@ -412,260 +738,77 @@ func TestDoctorSilenceFlags(t *testing.T) {
 	}
 }
 
-func TestDoctorUnhealthyStderrSilent(t *testing.T) {
-	dir := t.TempDir()
-	seedDeadDaemonPID(t, dir)
-
-	_, errBuf, err := runDoctor(t, dir)
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy", err)
-	}
-	if errBuf.Len() != 0 {
-		t.Errorf("expected silent stderr on unhealthy exit; got %q", errBuf.String())
-	}
-}
-
 func TestIsSilentExitErrorRecognisesDoctorUnhealthy(t *testing.T) {
 	if !IsSilentExitError(ErrDoctorUnhealthy) {
 		t.Error("IsSilentExitError(ErrDoctorUnhealthy) = false; want true")
 	}
 }
 
-// Duplicated rather than imported, so a drift in the production string is a
-// failure rather than a silent agreement.
-const doctorRuntimeNotRunningDetail = "Portal runtime not running — run portal open to start"
-
-func TestDoctorServerDownReportsRuntimeNotRunning(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-
-	deps := &DoctorDeps{
-		StateDir:      dir,
-		ServerRunning: func() bool { return false },
-		// Healthy probe returns: were the down-server gate bypassed these would
-		// produce PASS details and the assertions below would fail loudly.
-		SaverPresent: func() (bool, error) { return true, nil },
-		HookCounts:   func() (map[string]int, error) { return allHooksHealthy(), nil },
-	}
-	results, err := runDoctorDiagnosis(deps)
-	if err != nil {
-		t.Fatalf("runDoctorDiagnosis: %v", err)
-	}
-
-	for _, name := range []string{"daemon", "saver", "hooks"} {
-		got := findCheck(t, results, name)
-		if got.status != checkFail {
-			t.Errorf("%s status = %v; want checkFail when server is down", name, got.status)
+func TestDoctorExitCode(t *testing.T) {
+	t.Run("it exits unhealthy, silent on stderr, when a check fails", func(t *testing.T) {
+		outBuf, errBuf, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing}))
+		if err != ErrDoctorUnhealthy {
+			t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)
 		}
-		if got.detail != doctorRuntimeNotRunningDetail {
-			t.Errorf("%s detail = %q; want %q", name, got.detail, doctorRuntimeNotRunningDetail)
+		if errBuf.Len() != 0 {
+			t.Errorf("stderr = %q; want it silent on an unhealthy exit", errBuf.String())
 		}
-	}
-
-	if !doctorUnhealthy(results) {
-		t.Error("doctorUnhealthy = false; want true for a down server")
-	}
-
-	if got := findCheck(t, results, "state dir"); got.status != checkPass {
-		t.Errorf("state dir status = %v; want checkPass (server-independent)", got.status)
-	}
-	if got := findCheck(t, results, "sessions.json"); got.status != checkPass {
-		t.Errorf("sessions.json status = %v; want checkPass (server-independent)", got.status)
-	}
-}
-
-func TestRuntimeDownResult(t *testing.T) {
-	for _, name := range []string{"daemon", "saver", "hooks"} {
-		got := runtimeDownResult(name)
-		if got.name != name {
-			t.Errorf("runtimeDownResult(%q).name = %q; want %q", name, got.name, name)
-		}
-		if got.status != checkFail {
-			t.Errorf("runtimeDownResult(%q).status = %v; want checkFail", name, got.status)
-		}
-		if got.detail != doctorRuntimeNotRunningDetail {
-			t.Errorf("runtimeDownResult(%q).detail = %q; want %q", name, got.detail, doctorRuntimeNotRunningDetail)
-		}
-	}
-}
-
-func TestDoctorHooksCheck(t *testing.T) {
-	dir := t.TempDir()
-
-	newDeps := func(counts map[string]int) *DoctorDeps {
-		return withHealthyRuntime(&DoctorDeps{
-			StateDir:      dir,
-			ServerRunning: func() bool { return true },
-			SaverPresent:  func() (bool, error) { return true, nil },
-			HookCounts:    func() (map[string]int, error) { return counts, nil },
-		})
-	}
-
-	t.Run("one entry per event passes", func(t *testing.T) {
-		results, err := runDoctorDiagnosis(newDeps(allHooksHealthy()))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "hooks registered (one per event)" {
-			t.Errorf("detail = %q; want %q", got.detail, "hooks registered (one per event)")
+		if !strings.HasSuffix(outBuf.String(), "\n  10 of 11 checks passed\n") {
+			t.Errorf("report does not close with the partial summary:\n%s", outBuf.String())
 		}
 	})
 
-	t.Run("a duplicated event fails", func(t *testing.T) {
-		counts := allHooksHealthy()
-		counts["pane-focus-out"] = 3
-		results, err := runDoctorDiagnosis(newDeps(counts))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail", got.status)
-		}
-		if got.detail != "duplicate hook entries on pane-focus-out (3)" {
-			t.Errorf("detail = %q; want %q", got.detail, "duplicate hook entries on pane-focus-out (3)")
-		}
-	})
-
-	t.Run("duplicate reports first offending event in sorted order", func(t *testing.T) {
-		counts := allHooksHealthy()
-		counts["window-linked"] = 2
-		counts["client-attached"] = 2 // "client-attached" < "window-linked"
-		results, err := runDoctorDiagnosis(newDeps(counts))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.detail != "duplicate hook entries on client-attached (2)" {
-			t.Errorf("detail = %q; want %q (first in sorted order)", got.detail, "duplicate hook entries on client-attached (2)")
-		}
-	})
-
-	t.Run("a zero-count event fails as not registered", func(t *testing.T) {
-		counts := allHooksHealthy()
-		counts["client-attached"] = 0
-		results, err := runDoctorDiagnosis(newDeps(counts))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail", got.status)
-		}
-		if got.detail != "hooks not registered on client-attached" {
-			t.Errorf("detail = %q; want %q", got.detail, "hooks not registered on client-attached")
-		}
-	})
-
-	t.Run("duplicate takes precedence over a zero-count event", func(t *testing.T) {
-		counts := allHooksHealthy()
-		counts["session-renamed"] = 0
-		counts["window-linked"] = 2
-		results, err := runDoctorDiagnosis(newDeps(counts))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.detail != "duplicate hook entries on window-linked (2)" {
-			t.Errorf("detail = %q; want the duplicate message to win over the zero-count message", got.detail)
-		}
-	})
-
-	t.Run("transient read failure is not-evaluable and does not drive exit", func(t *testing.T) {
-		seedHealthyStateDir(t, dir)
-		deps := withHealthyRuntime(&DoctorDeps{
-			StateDir:      dir,
-			ServerRunning: func() bool { return true },
-			SaverPresent:  func() (bool, error) { return true, nil },
-			HookCounts:    func() (map[string]int, error) { return nil, errors.New("tmux transient") },
-		})
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "hooks")
-		if got.status != checkNotEvaluable {
-			t.Errorf("status = %v; want checkNotEvaluable on a transient hooks read", got.status)
-		}
-		if got.detail != "could not read hooks (transient tmux error)" {
-			t.Errorf("detail = %q; want %q", got.detail, "could not read hooks (transient tmux error)")
+	t.Run("it exits healthy when the only lines short of a pass are info and not evaluable", func(t *testing.T) {
+		fake := backendtest.New()
+		fake.Fail(backendtest.OpList, errors.New("transient"))
+		results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ListSessions: fake.List}))
+		for _, name := range []string{"sessions", "stale projects"} {
+			if got := findCheck(t, results, name); got.status != checkNotEvaluable {
+				t.Fatalf("setup: %s status = %v; want not evaluable", name, got.status)
+			}
 		}
 		if doctorUnhealthy(results) {
-			t.Error("a not-evaluable hooks check must not drive the exit code")
-		}
-	})
-}
-
-func TestDoctorSaverCheck(t *testing.T) {
-	dir := t.TempDir()
-
-	newDeps := func(present bool, saverErr error) *DoctorDeps {
-		return withHealthyRuntime(&DoctorDeps{
-			StateDir:      dir,
-			ServerRunning: func() bool { return true },
-			SaverPresent:  func() (bool, error) { return present, saverErr },
-			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
-		})
-	}
-
-	t.Run("present passes", func(t *testing.T) {
-		results, err := runDoctorDiagnosis(newDeps(true, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "saver")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "_portal-saver up" {
-			t.Errorf("detail = %q; want %q", got.detail, "_portal-saver up")
+			t.Error("doctorUnhealthy = true; info and not-evaluable lines never fail doctor")
 		}
 	})
 
-	t.Run("absent fails", func(t *testing.T) {
-		results, err := runDoctorDiagnosis(newDeps(false, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
+	t.Run("it fails for each failing check", func(t *testing.T) {
+		silent := func(t *testing.T) *DoctorDeps {
+			return &DoctorDeps{StateDir: t.TempDir(), ListSessions: silentSessions("wedged").List}
 		}
-		got := findCheck(t, results, "saver")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail", got.status)
+		corrupt := func(t *testing.T) *DoctorDeps {
+			dir := t.TempDir()
+			writeSessionsJSON(t, dir, []byte("{"))
+			return &DoctorDeps{StateDir: dir}
 		}
-		if got.detail != "_portal-saver not running" {
-			t.Errorf("detail = %q; want %q", got.detail, "_portal-saver not running")
+		staleProject := func(t *testing.T) *DoctorDeps {
+			store, _ := seedProjectsJSON(t, filepath.Join(t.TempDir(), "gone"))
+			return &DoctorDeps{StateDir: t.TempDir(), ProjectStore: store}
 		}
-	})
-
-	t.Run("transient error is not-evaluable and does not drive exit", func(t *testing.T) {
-		seedHealthyStateDir(t, dir)
-		results, err := runDoctorDiagnosis(newDeps(false, errors.New("tmux transient")))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "saver")
-		if got.status != checkNotEvaluable {
-			t.Errorf("status = %v; want checkNotEvaluable on a transient saver read", got.status)
-		}
-		if got.detail != "could not read saver (transient tmux error)" {
-			t.Errorf("detail = %q; want %q", got.detail, "could not read saver (transient tmux error)")
-		}
-		if doctorUnhealthy(results) {
-			t.Error("a not-evaluable saver check must not drive the exit code")
+		for name, build := range map[string]func(*testing.T) *DoctorDeps{
+			"zmx":            func(t *testing.T) *DoctorDeps { return &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing} },
+			"zmx dir":        func(t *testing.T) *DoctorDeps { return &DoctorDeps{StateDir: t.TempDir(), ZmxDir: "relative"} },
+			"sessions":       silent,
+			"sessions.json":  corrupt,
+			"stale projects": staleProject,
+		} {
+			t.Run(name, func(t *testing.T) {
+				results := diagnose(t, withHealthyRuntime(t, build(t)))
+				if got := findCheck(t, results, name); got.status != checkFail {
+					t.Fatalf("setup: %s status = %v; want checkFail", name, got.status)
+				}
+				if !doctorUnhealthy(results) {
+					t.Errorf("doctorUnhealthy = false; a failing %s check must fail doctor", name)
+				}
+			})
 		}
 	})
 }
 
 func TestDoctorHostTerminalLine(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-
-	hostDeps := func(id spawn.Identity, resolution spawn.Resolution) *DoctorDeps {
-		return withHealthyRuntime(&DoctorDeps{
-			StateDir: dir,
+	hostDeps := func(t *testing.T, id spawn.Identity, resolution spawn.Resolution) *DoctorDeps {
+		return withHealthyRuntime(t, &DoctorDeps{
+			StateDir: t.TempDir(),
 			Detector: fakeTerminalDetector{id: id},
 			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 				return nil, resolution
@@ -674,65 +817,31 @@ func TestDoctorHostTerminalLine(t *testing.T) {
 	}
 
 	t.Run("driven terminal reports supported", func(t *testing.T) {
-		deps := hostDeps(spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}, spawn.ResolutionNative)
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "host terminal")
-		if got.status != checkInfo {
-			t.Errorf("status = %v; want checkInfo", got.status)
-		}
-		if got.detail != "Ghostty (supported)" {
-			t.Errorf("detail = %q; want %q", got.detail, "Ghostty (supported)")
-		}
+		deps := hostDeps(t, spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}, spawn.ResolutionNative)
+		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "Ghostty (supported)")
 	})
 
 	t.Run("null identity reports unsupported remote session regardless of resolve", func(t *testing.T) {
 		// Resolve returns Native, which the NULL short-circuit must ignore.
-		deps := hostDeps(spawn.Identity{}, spawn.ResolutionNative)
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "host terminal")
-		if got.status != checkInfo {
-			t.Errorf("status = %v; want checkInfo", got.status)
-		}
-		if got.detail != "unsupported (remote session)" {
-			t.Errorf("detail = %q; want %q", got.detail, "unsupported (remote session)")
-		}
+		deps := hostDeps(t, spawn.Identity{}, spawn.ResolutionNative)
+		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "unsupported (remote session)")
+	})
+
+	t.Run("an unsure identity reports that it can't tell, not a remote session", func(t *testing.T) {
+		deps := hostDeps(t, spawn.Identity{Unsure: true}, spawn.ResolutionNative)
+		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "unsupported (can't tell which terminal Portal is running in)")
 	})
 
 	t.Run("recognised but undriven terminal reports unsupported", func(t *testing.T) {
-		deps := hostDeps(spawn.Identity{Name: "SomeTerm", BundleID: "com.some.term"}, spawn.ResolutionUnsupported)
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "host terminal")
-		if got.status != checkInfo {
-			t.Errorf("status = %v; want checkInfo", got.status)
-		}
-		if got.detail != "SomeTerm (unsupported)" {
-			t.Errorf("detail = %q; want %q", got.detail, "SomeTerm (unsupported)")
-		}
+		deps := hostDeps(t, spawn.Identity{Name: "SomeTerm", BundleID: "com.some.term"}, spawn.ResolutionUnsupported)
+		assertCheck(t, findCheck(t, diagnose(t, deps), "host terminal"), checkInfo, "SomeTerm (unsupported)")
 	})
 }
 
 func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 	t.Run("unsupported host with a healthy runtime stays healthy", func(t *testing.T) {
-		dir := t.TempDir()
-		seedHealthyStateDir(t, dir)
-		deps := withHealthyRuntime(&DoctorDeps{
-			StateDir: dir,
-			Detector: fakeTerminalDetector{},
-			Resolve:  doctorUnsupportedResolve,
-		})
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
+		store, _ := seedProjectsJSON(t)
+		results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ProjectStore: store}))
 		if got := findCheck(t, results, "host terminal"); got.detail != "unsupported (remote session)" {
 			t.Fatalf("setup: host terminal detail = %q; want the unsupported line", got.detail)
 		}
@@ -742,24 +851,17 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 	})
 
 	t.Run("supported host does not rescue a real check failure", func(t *testing.T) {
-		dir := t.TempDir()
-		seedDeadDaemonPID(t, dir) // the daemon check fails → genuine unhealthy
-		deps := withHealthyRuntime(&DoctorDeps{
-			StateDir: dir,
+		deps := withHealthyRuntime(t, &DoctorDeps{
+			StateDir: t.TempDir(),
+			LookPath: zmxMissing,
 			Detector: fakeTerminalDetector{id: spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}},
 			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 				return nil, spawn.ResolutionNative
 			},
 		})
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
+		results := diagnose(t, deps)
 		if got := findCheck(t, results, "host terminal"); got.detail != "Ghostty (supported)" {
 			t.Fatalf("setup: host terminal detail = %q; want the supported line", got.detail)
-		}
-		if got := findCheck(t, results, "daemon"); got.status != checkFail {
-			t.Fatalf("setup: daemon status = %v; want checkFail", got.status)
 		}
 		if !doctorUnhealthy(results) {
 			t.Error("doctorUnhealthy = false; a real check failure must stay unhealthy even with a supported host")
@@ -768,27 +870,21 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 }
 
 func TestDoctorCheckOrder(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-	results, err := runDoctorDiagnosis(withHealthyRuntime(&DoctorDeps{StateDir: dir}))
-	if err != nil {
-		t.Fatalf("runDoctorDiagnosis: %v", err)
+	results := diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir()}))
+	want := []string{"zmx", "zmx dir", "sessions", "saver", "daemon", "state dir", "state's zmx dir", "sessions.json", "stale hooks", "stale projects", "pending resumes", "key config", "host terminal", "resume mode"}
+	var got []string
+	for _, r := range results {
+		got = append(got, r.name)
 	}
-	want := []string{"daemon", "saver", "hooks", "state dir", "sessions.json", "stale hooks", "stale projects", "host terminal", "pending resumes", "resume mode"}
-	if len(results) != len(want) {
-		t.Fatalf("check count = %d, want %d: %+v", len(results), len(want), results)
-	}
-	for i, name := range want {
-		if results[i].name != name {
-			t.Errorf("results[%d].name = %q, want %q", i, results[i].name, name)
-		}
+	if !slices.Equal(got, want) {
+		t.Errorf("checks = %v; want %v", got, want)
 	}
 }
 
 func seedProjectsJSON(t *testing.T, paths ...string) (*project.Store, string) {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "projects.json")
-	var ps []project.Project
+	ps := []project.Project{}
 	for i, p := range paths {
 		ps = append(ps, project.Project{Path: p, Name: "proj" + strconv.Itoa(i)})
 	}
@@ -805,525 +901,16 @@ func seedProjectsJSON(t *testing.T, paths ...string) (*project.Store, string) {
 	return project.NewStore(file), file
 }
 
-func staleDeps(dir string, lister hooksweep.Reader, hookStore *hooks.Store, projectStore *project.Store) *DoctorDeps {
-	return withHealthyRuntime(&DoctorDeps{
-		StateDir:     dir,
-		HookLister:   lister,
-		HookStore:    hookStore,
-		ProjectStore: projectStore,
-	})
-}
-
-// seedStalePruneFixture stages a healthy install whose only anomalies are one
-// token-shaped hook entry and one stale project record, read through the given
-// live-pane enumeration. staleHookLister makes the entry genuinely stale; the
-// stand-down listers make the same fixture describe a prune that must not run.
-func seedStalePruneFixture(t *testing.T, stateDir string, lister *stubStaleSweepReader) (deps *DoctorDeps, hooksPath, projectsPath, liveDir, goneDir string) {
+// staleDeps is a healthy install whose project store is the one given.
+func staleDeps(t *testing.T, projectStore *project.Store) *DoctorDeps {
 	t.Helper()
-
-	seedHealthyStateDir(t, stateDir)
-	hookStore, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-	liveDir = t.TempDir()
-	goneDir = filepath.Join(t.TempDir(), "gone")
-	projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
-
-	return staleDeps(stateDir, lister, hookStore, projectStore), hooksPath, projectsPath, liveDir, goneDir
-}
-
-// staleHookLister excludes the seeded key from the live set, which makes it
-// stale, and its token shape makes it judgeable; the set's non-emptiness keeps
-// the hazard guard from deferring.
-func staleHookLister() *stubStaleSweepReader {
-	return &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}
-}
-
-// restoringHookLister reads the same live set through a set @portal-restoring
-// marker, so the sweep stands down before it can judge anything.
-func restoringHookLister() *stubStaleSweepReader {
-	lister := staleHookLister()
-	lister.restoring = true
-	return lister
-}
-
-func assertStalePrunesApplied(t *testing.T, hooksPath, projectsPath, liveDir, goneDir, out string) {
-	t.Helper()
-
-	hooksAfter := readFileBytes(t, hooksPath)
-	if len(hooksAfter) == 0 {
-		t.Fatalf("hooks.json is absent or empty after the prune — the prune removed the file rather than the stale entry")
-	}
-	if strings.Contains(string(hooksAfter), hookstest.ReapableSeedA) {
-		t.Errorf("stale hook %s not pruned from hooks.json:\n%s", hookstest.ReapableSeedA, hooksAfter)
-	}
-
-	projectsAfter := readFileBytes(t, projectsPath)
-	if len(projectsAfter) == 0 {
-		t.Fatalf("projects.json is absent or empty after the prune — the prune removed the file rather than the stale record")
-	}
-	if strings.Contains(string(projectsAfter), goneDir) {
-		t.Errorf("stale project %q not pruned from projects.json:\n%s", goneDir, projectsAfter)
-	}
-	if !strings.Contains(string(projectsAfter), liveDir) {
-		t.Errorf("live project %q wrongly pruned:\n%s", liveDir, projectsAfter)
-	}
-
-	var prunedHookLines []string
-	for line := range strings.SplitSeq(out, "\n") {
-		if strings.HasPrefix(line, "Pruned stale hook:") {
-			prunedHookLines = append(prunedHookLines, line)
-		}
-	}
-	wantHookLine := "Pruned stale hook: " + hookstest.ReapableSeedA
-	if len(prunedHookLines) != 1 || prunedHookLines[0] != wantHookLine {
-		t.Errorf("pruned-hook stdout lines = %q, want exactly [%q]\n%s", prunedHookLines, wantHookLine, out)
-	}
-	if !strings.Contains(out, "Pruned stale project: proj1 ("+goneDir+")") {
-		t.Errorf("missing pruned-project breadcrumb:\n%s", out)
-	}
-}
-
-// downServerDeferFixture wires a down server, whose empty live-pane
-// enumeration is indistinguishable from "every pane is gone" - so the
-// mass-deletion hazard guard defers the stale-hook prune. The filesystem-only
-// project prune has no such ambiguity and still runs.
-func downServerDeferFixture(t *testing.T, stateDir string) (deps *DoctorDeps, hooksPath, projectsPath, goneDir string) {
-	t.Helper()
-
-	// Token-shaped, so it is the hazard guard rather than the shape rule that
-	// spares the entry.
-	hookStore, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-	goneDir = filepath.Join(t.TempDir(), "gone")
-	projectStore, projectsPath := seedProjectsJSON(t, goneDir)
-
-	deps = &DoctorDeps{
-		StateDir:      stateDir,
-		ServerRunning: func() bool { return false },
-		HookLister:    &stubStaleSweepReader{rows: tokenRows()},
-		HookStore:     hookStore,
-		ProjectStore:  projectStore,
-		Detector:      fakeTerminalDetector{},
-		Resolve:       doctorUnsupportedResolve,
-	}
-	return deps, hooksPath, projectsPath, goneDir
-}
-
-func assertDownServerDeferral(t *testing.T, hooksBefore []byte, hooksPath, projectsPath, goneDir string, err error) {
-	t.Helper()
-
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy (server still down post-repair)", err)
-	}
-
-	assertHooksFileUnchanged(t, hooksPath, hooksBefore, "pruned on a down server (user commands must survive)")
-
-	projectsAfter := readFileBytes(t, projectsPath)
-	if len(projectsAfter) == 0 {
-		t.Fatalf("projects.json is absent or empty after the prune — the prune removed the file rather than the stale record")
-	}
-	if strings.Contains(string(projectsAfter), goneDir) {
-		t.Errorf("the filesystem-only stale-project prune did not run on a down server:\n%s", projectsAfter)
-	}
-}
-
-func TestDoctorStaleHooksCheck(t *testing.T) {
-	t.Run("persisted key with no live pane fails", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for a stale hook entry", got.status)
-		}
-		if got.detail != "1 stale hook entry" {
-			t.Errorf("detail = %q; want %q", got.detail, "1 stale hook entry")
-		}
-	})
-
-	t.Run("multiple stale entries use the plural count copy", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA, hookstest.ReapableSeedB)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedC)}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for stale hook entries", got.status)
-		}
-		if got.detail != "2 stale hook entries" {
-			t.Errorf("detail = %q; want %q", got.detail, "2 stale hook entries")
-		}
-	})
-
-	t.Run("zero live panes with hooks present is not-evaluable, never all-stale", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA, hookstest.ReapableSeedB)})
-		lister := &stubStaleSweepReader{rows: tokenRows()}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkNotEvaluable {
-			t.Errorf("status = %v; want checkNotEvaluable (never a mass-stale failure)", got.status)
-		}
-		if want := phraseFor(notEvaluableDetails, hooksweep.ReasonEmptyPaneRead); got.detail != want {
-			t.Errorf("detail = %q; want %q", got.detail, want)
-		}
-	})
-
-	// Zero stamped panes is the ordinary install until registration starts
-	// writing tokens, so the check must evaluate on the rows it was handed
-	// rather than stand down on an empty token set.
-	t.Run("it evaluates when rows are present and no pane is stamped", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{rows: unstampedRows(3)}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail (the pane rows make the count evaluable)", got.status)
-		}
-		if got.detail != "1 stale hook entry" {
-			t.Errorf("detail = %q; want %q", got.detail, "1 stale hook entry")
-		}
-	})
-
-	t.Run("it does not reach the no-hooks door with unstamped rows present", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody()})
-		lister := &stubStaleSweepReader{rows: unstampedRows(3)}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "no stale hooks" {
-			t.Errorf("detail = %q; want %q (the zero-row branch must not swallow a live server)", got.detail, "no stale hooks")
-		}
-	})
-
-	t.Run("live-pane enumeration error is not-evaluable", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{err: errors.New("tmux transient")}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkNotEvaluable {
-			t.Errorf("status = %v; want checkNotEvaluable on an enumeration error", got.status)
-		}
-		if want := phraseFor(notEvaluableDetails, hooksweep.ReasonPaneReadFailed); got.detail != want {
-			t.Errorf("detail = %q; want %q", got.detail, want)
-		}
-	})
-
-	t.Run("both empty passes as no hooks", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody()})
-		lister := &stubStaleSweepReader{rows: tokenRows()}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "no hooks" {
-			t.Errorf("detail = %q; want %q", got.detail, "no hooks")
-		}
-	})
-
-	t.Run("all persisted keys live passes", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, hookstest.LiveSeedB)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.LiveSeedC)}
-		results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale hooks")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "no stale hooks" {
-			t.Errorf("detail = %q; want %q", got.detail, "no stale hooks")
-		}
-	})
-
-	// The restore window: a skeleton's panes carry no token yet, so a count taken
-	// here would report every token-shaped key on the machine as lost.
-	t.Run("it reports not evaluable while the restore marker is set", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB), restoring: true}
-		got := staleHooksCheckResult(t, dir, lister, hookStore)
-		assertRestoreWindowResult(t, got)
-	})
-
-	// A read that failed stands the check down like a set marker, but says so
-	// in its own words: it establishes nothing about the marker.
-	t.Run("it reports a failed marker read as its own reason", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB), restoringErr: errors.New("tmux transient")}
-		got := staleHooksCheckResult(t, dir, lister, hookStore)
-		assertMarkerReadFailedResult(t, got)
-		if lister.calls != 0 {
-			t.Errorf("live pane enumerations = %d; want 0 (the failed marker read stands the check down first)", lister.calls)
-		}
-	})
-
-	t.Run("it reads the marker before the empty-live-set branch", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA, hookstest.ReapableSeedB)})
-		lister := &stubStaleSweepReader{rows: tokenRows(), restoring: true}
-		got := staleHooksCheckResult(t, dir, lister, hookStore)
-		assertRestoreWindowResult(t, got)
-	})
-
-	// The live enumeration the count is taken from must not run at all: the
-	// rendered result alone cannot tell a marker read that came first from one
-	// that merely overrode a count already computed.
-	t.Run("it reads the marker before counting", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB), restoring: true}
-		got := staleHooksCheckResult(t, dir, lister, hookStore)
-		assertRestoreWindowResult(t, got)
-		if lister.calls != 0 {
-			t.Errorf("live pane enumerations = %d; want 0 (the marker read stands the check down first)", lister.calls)
-		}
-	})
-
-	t.Run("it reports not evaluable with no server running", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		down := errors.New("no server running on /tmp/tmux-501/default")
-		deps := staleDeps(dir, &stubStaleSweepReader{err: down, restoringErr: down}, hookStore, nil)
-		deps.ServerRunning = func() bool { return false }
-
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		assertMarkerReadFailedResult(t, findCheck(t, results, "stale hooks"))
-	})
-
-	t.Run("it still fails on a genuinely stale token-shaped key alongside retained non-token-shaped entries", func(t *testing.T) {
-		dir := t.TempDir()
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA, hookstest.UnjudgeableSeedA, hookstest.UnjudgeableSeedB)})
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}
-		got := staleHooksCheckResult(t, dir, lister, hookStore)
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for the one stale token-shaped key", got.status)
-		}
-		if got.detail != "1 stale hook entry" {
-			t.Errorf("detail = %q; want %q (retained old-format keys are not counted)", got.detail, "1 stale hook entry")
-		}
-	})
-
-	t.Run("it keeps portal doctor at exit 0 in a restore window", func(t *testing.T) {
-		dir := t.TempDir()
-		seedHealthyStateDir(t, dir)
-		hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-		projectStore, _ := seedProjectsJSON(t, t.TempDir())
-		lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB), restoring: true}
-
-		outBuf, _, err := runDoctorWith(t, staleDeps(dir, lister, hookStore, projectStore))
-		if err != nil {
-			t.Fatalf("Execute err = %v; want nil (not-evaluable never drives the exit code)\n%s", err, outBuf.String())
-		}
-		if want := renderStaleHooksLine(hooksweep.ReasonRestoring); !strings.Contains(outBuf.String(), want) {
-			t.Errorf("report missing %q:\n%s", want, outBuf.String())
-		}
-	})
-}
-
-// staleHooksCheckResult runs the read-only diagnosis and returns its stale-hooks
-// line.
-func staleHooksCheckResult(t *testing.T, dir string, lister hooksweep.Reader, hookStore *hooks.Store) checkResult {
-	t.Helper()
-	results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-	if err != nil {
-		t.Fatalf("runDoctorDiagnosis: %v", err)
-	}
-	return findCheck(t, results, "stale hooks")
-}
-
-func assertRestoreWindowResult(t *testing.T, got checkResult) {
-	t.Helper()
-	if got.status != checkNotEvaluable {
-		t.Errorf("status = %v; want checkNotEvaluable in a restore window", got.status)
-	}
-	if want := phraseFor(notEvaluableDetails, hooksweep.ReasonRestoring); got.detail != want {
-		t.Errorf("detail = %q; want %q", got.detail, want)
-	}
-}
-
-// A server that is down is the routine state a user diagnoses in, so the
-// detail must name the read rather than assert a restore nothing is running.
-func assertMarkerReadFailedResult(t *testing.T, got checkResult) {
-	t.Helper()
-	if got.status != checkNotEvaluable {
-		t.Errorf("status = %v; want checkNotEvaluable on a failed marker read", got.status)
-	}
-	if want := phraseFor(notEvaluableDetails, hooksweep.ReasonMarkerReadFailed); got.detail != want {
-		t.Errorf("detail = %q; want %q", got.detail, want)
-	}
-}
-
-func TestDoctorStaleHooksParityWithPredicate(t *testing.T) {
-	t.Run("past-guard count equals the shared predicate", func(t *testing.T) {
-		cases := []struct {
-			name      string
-			persisted []string
-			live      []string
-		}{
-			{"one stale", []string{hookstest.ReapableSeedA}, []string{hookstest.LiveSeedA}},
-			{"two stale", []string{hookstest.ReapableSeedA, hookstest.ReapableSeedB}, []string{hookstest.LiveSeedC}},
-			{"one of three stale", []string{hookstest.LiveSeedA, hookstest.LiveSeedB, hookstest.ReapableSeedC}, []string{hookstest.LiveSeedA, hookstest.LiveSeedB}},
-			{"none stale", []string{hookstest.LiveSeedA}, []string{hookstest.LiveSeedA, hookstest.LiveSeedB}},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				dir := t.TempDir()
-				hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(tc.persisted...)})
-				lister := &stubStaleSweepReader{rows: tokenRows(tc.live...)}
-				results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, nil))
-				if err != nil {
-					t.Fatalf("runDoctorDiagnosis: %v", err)
-				}
-				got := findCheck(t, results, "stale hooks")
-
-				persisted, err := hookStore.Load(hooks.ViaInternal)
-				if err != nil {
-					t.Fatalf("load hooks: %v", err)
-				}
-				want := len(hooks.StaleKeys(persisted, tc.live))
-
-				wantDetail := "no stale hooks"
-				wantStatus := checkPass
-				if want > 0 {
-					wantDetail = pluralCount(want, "stale hook entry", "stale hook entries")
-					wantStatus = checkFail
-				}
-				if got.status != wantStatus {
-					t.Errorf("status = %v, want %v (predicate count %d)", got.status, wantStatus, want)
-				}
-				if got.detail != wantDetail {
-					t.Errorf("detail = %q, want %q (predicate count %d)", got.detail, wantDetail, want)
-				}
-			})
-		}
-	})
-
-	t.Run("hazard-guard paths map to not-evaluable or pass with no prune", func(t *testing.T) {
-		cases := []struct {
-			name       string
-			persisted  []string
-			lister     *stubStaleSweepReader
-			wantStatus checkStatus
-			wantDetail string
-		}{
-			{"enumeration error", []string{hookstest.ReapableSeedA}, &stubStaleSweepReader{err: errors.New("tmux transient")}, checkNotEvaluable, phraseFor(notEvaluableDetails, hooksweep.ReasonPaneReadFailed)},
-			{"empty live with hooks present", []string{hookstest.ReapableSeedA}, &stubStaleSweepReader{rows: tokenRows()}, checkNotEvaluable, phraseFor(notEvaluableDetails, hooksweep.ReasonEmptyPaneRead)},
-			{"empty live with no hooks", nil, &stubStaleSweepReader{rows: tokenRows()}, checkPass, "no hooks"},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				dir := t.TempDir()
-				hookStore, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(tc.persisted...)})
-				before := readFileBytes(t, hooksPath)
-				results, err := runDoctorDiagnosis(staleDeps(dir, tc.lister, hookStore, nil))
-				if err != nil {
-					t.Fatalf("runDoctorDiagnosis: %v", err)
-				}
-				got := findCheck(t, results, "stale hooks")
-				if got.status != tc.wantStatus {
-					t.Errorf("status = %v, want %v", got.status, tc.wantStatus)
-				}
-				if got.detail != tc.wantDetail {
-					t.Errorf("detail = %q, want %q", got.detail, tc.wantDetail)
-				}
-				assertHooksFileUnchanged(t, hooksPath, before, "mutated by diagnosis (read-only violated)")
-			})
-		}
-	})
-}
-
-func TestDoctorStaleProjectsParityWithPredicate(t *testing.T) {
-	t.Run("count equals the shared predicate", func(t *testing.T) {
-		dir := t.TempDir()
-		liveDir := t.TempDir()
-		goneA := filepath.Join(t.TempDir(), "gone-a")
-		goneB := filepath.Join(t.TempDir(), "gone-b")
-		projectStore, _ := seedProjectsJSON(t, liveDir, goneA, goneB)
-
-		results, err := runDoctorDiagnosis(staleDeps(dir, &stubStaleSweepReader{}, nil, projectStore))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-
-		stale, err := projectStore.StaleEntries()
-		if err != nil {
-			t.Fatalf("StaleEntries: %v", err)
-		}
-		want := len(stale)
-		if want != 2 {
-			t.Fatalf("StaleEntries count = %d, want 2 (fixture sanity)", want)
-		}
-		if got.status != checkFail {
-			t.Errorf("status = %v, want checkFail", got.status)
-		}
-		if got.detail != pluralCount(want, "stale project", "stale projects") {
-			t.Errorf("detail = %q, want %q", got.detail, pluralCount(want, "stale project", "stale projects"))
-		}
-	})
-
-	t.Run("load error is not-evaluable", func(t *testing.T) {
-		dir := t.TempDir()
-		// projects.json inside a 0o000 dir so Load fails with a permission error
-		// rather than ErrNotExist.
-		unreadableDir := filepath.Join(t.TempDir(), "noread")
-		if err := os.Mkdir(unreadableDir, 0o000); err != nil {
-			t.Fatalf("mkdir: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(unreadableDir, 0o700) })
-		projectStore := project.NewStore(filepath.Join(unreadableDir, "projects.json"))
-
-		results, err := runDoctorDiagnosis(staleDeps(dir, &stubStaleSweepReader{}, nil, projectStore))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-		if got.status != checkNotEvaluable {
-			t.Errorf("status = %v, want checkNotEvaluable on a load error", got.status)
-		}
-		if got.detail != projectStoreReadStandDownPhrase {
-			t.Errorf("detail = %q, want %q", got.detail, projectStoreReadStandDownPhrase)
-		}
-	})
+	dir := t.TempDir()
+	seedValidSessionsJSON(t, dir, 1)
+	return withHealthyRuntime(t, &DoctorDeps{StateDir: dir, ProjectStore: projectStore})
 }
 
 // runDoctorWith executes `portal doctor` with the given args against caller-wired
-// seams, returning its stdout and stderr. Unlike runDoctor, the caller wires
-// exactly the seams the scenario needs.
+// seams, returning its stdout and stderr.
 func runDoctorWith(t *testing.T, deps *DoctorDeps, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	t.Helper()
 	// terminals.json is read eagerly when the deps resolve; isolate it so
@@ -1341,281 +928,154 @@ func runDoctorWith(t *testing.T, deps *DoctorDeps, args ...string) (*bytes.Buffe
 	return outBuf, errBuf, err
 }
 
-func TestDoctorExecuteStaleEntryReturnsUnhealthy(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
+func TestDoctorStaleProjectsCheck(t *testing.T) {
+	t.Run("gone dir fails, live dir retained", func(t *testing.T) {
+		projectStore, _ := seedProjectsJSON(t, t.TempDir(), filepath.Join(t.TempDir(), "does-not-exist"))
+		assertCheck(t, findCheck(t, diagnose(t, staleDeps(t, projectStore)), "stale projects"), checkFail, "1 stale project")
+	})
 
-	// A persisted hook key with no matching live pane, against a non-empty live
-	// set, is genuinely stale.
-	hookStore, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-	lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)}
-	goneDir := filepath.Join(t.TempDir(), "gone")
-	projectStore, _ := seedProjectsJSON(t, goneDir)
+	t.Run("multiple stale projects use the plural count copy", func(t *testing.T) {
+		projectStore, _ := seedProjectsJSON(t, filepath.Join(t.TempDir(), "gone-a"), filepath.Join(t.TempDir(), "gone-b"))
+		assertCheck(t, findCheck(t, diagnose(t, staleDeps(t, projectStore)), "stale projects"), checkFail, "2 stale projects")
+	})
 
-	outBuf, errBuf, err := runDoctorWith(t, staleDeps(dir, lister, hookStore, projectStore))
-	if err != ErrDoctorUnhealthy {
-		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy on a stale hook/project over a healthy runtime", err)
-	}
-	if errBuf.Len() != 0 {
-		t.Errorf("expected silent stderr on unhealthy exit; got %q", errBuf.String())
-	}
+	t.Run("all live passes", func(t *testing.T) {
+		projectStore, _ := seedProjectsJSON(t, t.TempDir())
+		assertCheck(t, findCheck(t, diagnose(t, staleDeps(t, projectStore)), "stale projects"), checkPass, "no stale projects")
+	})
 
-	out := outBuf.String()
-	if !strings.Contains(out, "stale hooks: 1 stale hook entry") {
-		t.Errorf("report missing stale-hooks fail line:\n%s", out)
-	}
-	if !strings.Contains(out, "stale projects: 1 stale project") {
-		t.Errorf("report missing stale-projects fail line:\n%s", out)
-	}
-	if n := strings.Count(out, "Portal doctor:"); n != 1 {
-		t.Errorf("report count = %d; want 1 (plain doctor renders once, no --fix re-diagnosis):\n%s", n, out)
-	}
-	if n := strings.Count(out, " checks passed\n"); n != 1 {
-		t.Errorf("summary count = %d; want 1 (one per report render):\n%s", n, out)
-	}
-	if !strings.HasSuffix(out, "\n  5 of 7 checks passed\n") {
-		t.Errorf("report does not close with the partial summary:\n%s", out)
-	}
+	t.Run("count equals the shared predicate", func(t *testing.T) {
+		projectStore, _ := seedProjectsJSON(t, t.TempDir(), filepath.Join(t.TempDir(), "gone-a"), filepath.Join(t.TempDir(), "gone-b"))
+		stale, err := projectStore.StaleEntries()
+		if err != nil || len(stale) != 2 {
+			t.Fatalf("StaleEntries = (%d, %v); want 2 (fixture sanity)", len(stale), err)
+		}
+		got := findCheck(t, diagnose(t, staleDeps(t, projectStore)), "stale projects")
+		assertCheck(t, got, checkFail, pluralCount(len(stale), "stale project", "stale projects"))
+	})
+
+	t.Run("it reads projects.json without changing it", func(t *testing.T) {
+		projectStore, projectsPath := seedProjectsJSON(t, t.TempDir(), filepath.Join(t.TempDir(), "gone"))
+		before := readFileBytes(t, projectsPath)
+		diagnose(t, staleDeps(t, projectStore))
+		if after := readFileBytes(t, projectsPath); !bytes.Equal(before, after) {
+			t.Errorf("projects.json mutated by diagnosis\nbefore: %s\nafter:  %s", before, after)
+		}
+	})
 }
 
-func TestDoctorFixPrunesStaleEntriesThenRediagnosesClean(t *testing.T) {
-	deps, hooksPath, projectsPath, liveDir, goneDir := seedStalePruneFixture(t, t.TempDir(), staleHookLister())
+func TestDoctorFix(t *testing.T) {
+	t.Run("it prunes stale projects, then re-diagnoses clean", func(t *testing.T) {
+		liveDir := t.TempDir()
+		goneDir := filepath.Join(t.TempDir(), "gone")
+		projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
 
-	outBuf, _, err := runDoctorWith(t, deps, "--fix")
-	if err != nil {
-		t.Fatalf("Execute err = %v; want nil (healthy post-repair)", err)
-	}
+		outBuf, _, err := runDoctorWith(t, staleDeps(t, projectStore), "--fix")
+		if err != nil {
+			t.Fatalf("Execute err = %v; want nil (healthy post-repair)", err)
+		}
 
-	out := outBuf.String()
-	assertStalePrunesApplied(t, hooksPath, projectsPath, liveDir, goneDir, out)
+		after := string(readFileBytes(t, projectsPath))
+		if strings.Contains(after, goneDir) || !strings.Contains(after, liveDir) {
+			t.Errorf("projects.json after the prune = %s; want %s gone and %s kept", after, goneDir, liveDir)
+		}
+		out := outBuf.String()
+		if !strings.Contains(out, "\n  10 of 11 checks passed\nPruned stale project: proj1 ("+goneDir+")\nPortal doctor:\n") {
+			t.Errorf("want the failing report, the prune, then the re-diagnosis:\n%s", out)
+		}
+		if !strings.HasSuffix(out, "✓ stale projects: no stale projects\n    pending resumes: 0 sessions waiting to resume\n"+defaultKeyConfigLine+"\n    host terminal: unsupported (remote session)\n    resume mode: "+installResumeModeOf(nil).String()+"\n  11 checks passed\n") {
+			t.Errorf("post-repair report not clean:\n%s", out)
+		}
+	})
 
-	if n := strings.Count(out, "Portal doctor:"); n != 2 {
-		t.Errorf("report count = %d; want 2 (initial + post-repair):\n%s", n, out)
-	}
-	if !strings.Contains(out, "stale hooks: no stale hooks") {
-		t.Errorf("post-repair stale-hooks check not clean:\n%s", out)
-	}
-	if !strings.Contains(out, "stale projects: no stale projects") {
-		t.Errorf("post-repair stale-projects check not clean:\n%s", out)
-	}
-	if n := strings.Count(out, " checks passed\n"); n != 2 {
-		t.Errorf("summary count = %d; want 2 (one per report render):\n%s", n, out)
-	}
-	if !strings.HasSuffix(out, "\n  7 checks passed\n") {
-		t.Errorf("post-repair report does not close with the all-passed summary:\n%s", out)
-	}
+	t.Run("it exits on the re-diagnosis, which a repair cannot heal", func(t *testing.T) {
+		deps := staleDeps(t, nil)
+		deps.LookPath = zmxMissing
+		outBuf, _, err := runDoctorWith(t, deps, "--fix")
+		if err != ErrDoctorUnhealthy {
+			t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx still missing", err)
+		}
+		if n := strings.Count(outBuf.String(), "✗ zmx: "); n != 2 {
+			t.Errorf("zmx failure lines = %d; want one per report:\n%s", n, outBuf.String())
+		}
+	})
+
+	t.Run("it sweeps old logs without moving the exit code", func(t *testing.T) {
+		projectStore, _ := seedProjectsJSON(t)
+		deps := staleDeps(t, projectStore)
+		// A rotated log dated well before today: only a sweep running against
+		// deps.StateDir would delete it.
+		staleLog := filepath.Join(deps.StateDir, "portal.log.2000-01-01")
+		if err := os.WriteFile(staleLog, []byte("old\n"), 0o600); err != nil {
+			t.Fatalf("seed stale rotated log: %v", err)
+		}
+
+		outBuf, _, err := runDoctorWith(t, deps, "--fix")
+		if err != nil {
+			t.Fatalf("Execute err = %v; want nil — a log sweep must never drive the exit code", err)
+		}
+		if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
+			t.Errorf("stale rotated log not swept (stat err = %v)", statErr)
+		}
+		if n := strings.Count(outBuf.String(), "\n  11 checks passed\n"); n != 2 {
+			t.Errorf("all-passed summary count = %d; want 2:\n%s", n, outBuf.String())
+		}
+	})
 }
 
-func TestDoctorFixProtectsUserHooksWhenLiveSetEmptyOrErrored(t *testing.T) {
-	cases := []struct {
-		name   string
-		lister *stubStaleSweepReader
-	}{
-		{"empty live set", &stubStaleSweepReader{rows: tokenRows()}},
-		{"enumeration error", &stubStaleSweepReader{err: errors.New("tmux transient")}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			seedHealthyStateDir(t, dir)
-			hookStore, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA, hookstest.ReapableSeedB)})
-			before := readFileBytes(t, hooksPath)
+// Doctor's own host-terminal detection runs through the driver bound on the
+// zmx dir doctor judges, and only reads it: inside a session the dir doesn't
+// hold, it asks for the session's leader, finds none, and leaves the dir as
+// it was.
+func TestDoctorDetectsThroughTheZmxDirItJudges(t *testing.T) {
+	for _, args := range [][]string{nil, {"--fix"}} {
+		t.Run(strings.Join(append([]string{"doctor"}, args...), " "), func(t *testing.T) {
+			sink := logtest.Install(t)
+			t.Setenv("ZMX_SESSION", "dev")
+			deps := healthyDoctorDeps(t)
+			deps.Detector, deps.Resolve = nil, nil
+			t.Setenv("ZMX_DIR", deps.ZmxDir)
 
-			if _, _, err := runDoctorWith(t, staleDeps(dir, tc.lister, hookStore, nil), "--fix"); err != nil {
-				t.Fatalf("Execute err = %v; want nil (healthy runtime, hooks deferred)", err)
+			_, _, _ = runDoctorWith(t, deps, args...)
+
+			// --fix diagnoses twice, detecting each time.
+			recs := sink.Records().Matching("spawn", "detection transient failure")
+			if len(recs) == 0 {
+				t.Fatal("doctor did not detect the host terminal")
 			}
-
-			assertHooksFileUnchanged(t, hooksPath, before, "mutated on an empty/errored live set (user commands must survive)")
+			for _, rec := range recs {
+				if detail := rec.AttrString(t, "detail"); !strings.Contains(detail, `read the leader of session "dev"`) {
+					t.Errorf("detection detail = %q, want the leader read of dev", detail)
+				}
+			}
+			if entries, err := os.ReadDir(deps.ZmxDir); err != nil || len(entries) != 0 {
+				t.Errorf("zmx dir holds %v, %v after doctor; want it untouched", entries, err)
+			}
 		})
 	}
 }
 
-func TestDoctorFixDownServerPrunesProjectsButNotHooks(t *testing.T) {
-	deps, hooksPath, projectsPath, goneDir := downServerDeferFixture(t, t.TempDir())
-	hooksBefore := readFileBytes(t, hooksPath)
+// A session of another zmx directory is none of the one doctor judges, so
+// doctor detects as from outside a session, with no WARN for what is the
+// environment's state.
+func TestDoctorDetectsFromOutsideInASessionOfAnotherZmxDir(t *testing.T) {
+	sink := logtest.Install(t)
+	t.Setenv("ZMX_SESSION", "dev")
+	deps := healthyDoctorDeps(t)
+	deps.Detector, deps.Resolve = nil, nil
 
-	outBuf, _, execErr := runDoctorWith(t, deps, "--fix")
-	assertDownServerDeferral(t, hooksBefore, hooksPath, projectsPath, goneDir, execErr)
+	_, _, _ = runDoctorWith(t, deps)
 
-	out := outBuf.String()
-	if !strings.Contains(out, "Pruned stale project: proj0 ("+goneDir+")") {
-		t.Errorf("missing pruned-project breadcrumb:\n%s", out)
+	if warns := sink.Records().Matching("spawn", "detection transient failure"); len(warns) != 0 {
+		t.Errorf("doctor warned %+v for a session of another zmx dir", warns)
 	}
-	if n := strings.Count(out, " checks passed\n"); n != 2 {
-		t.Errorf("summary count = %d; want 2 (one per report render):\n%s", n, out)
-	}
-	if n := strings.Count(out, "\n  2 of 6 checks passed\n"); n != 1 {
-		t.Errorf("pre-repair summary missing or repeated (want exactly one \"2 of 6 checks passed\"):\n%s", out)
-	}
-	if !strings.HasSuffix(out, "\n  3 of 6 checks passed\n") {
-		t.Errorf("post-repair report does not close with the partial summary:\n%s", out)
-	}
-}
-
-func TestDoctorFixLogSweepNeverDrivesExit(t *testing.T) {
-	dir := t.TempDir()
-	seedHealthyStateDir(t, dir)
-
-	// A rotated log dated well before today: only a sweep running against
-	// deps.StateDir would delete it.
-	staleLog := filepath.Join(dir, "portal.log.2000-01-01")
-	if err := os.WriteFile(staleLog, []byte("old\n"), 0o600); err != nil {
-		t.Fatalf("seed stale rotated log: %v", err)
-	}
-
-	// nil stores leave the log-sweep as the only repair action, isolating its
-	// effect on the exit code.
-	deps := withHealthyRuntime(&DoctorDeps{StateDir: dir})
-	outBuf, _, err := runDoctorWith(t, deps, "--fix")
-	if err != nil {
-		t.Fatalf("Execute err = %v; want nil — a log-sweep must never drive the exit code", err)
-	}
-
-	if _, statErr := os.Stat(staleLog); !os.IsNotExist(statErr) {
-		t.Errorf("stale rotated log not swept (stat err = %v); log-sweep did not run against the state dir", statErr)
-	}
-
-	out := outBuf.String()
-	if n := strings.Count(out, "\n  6 checks passed\n"); n != 2 {
-		t.Errorf("all-passed summary count = %d; want 2 (one per report render, both unmoved by the sweep):\n%s", n, out)
-	}
-}
-
-func TestDoctorStaleProjectsCheck(t *testing.T) {
-	t.Run("gone dir fails, live dir retained", func(t *testing.T) {
-		dir := t.TempDir()
-		liveDir := t.TempDir()
-		goneDir := filepath.Join(t.TempDir(), "does-not-exist")
-		projectStore, _ := seedProjectsJSON(t, liveDir, goneDir)
-		results, err := runDoctorDiagnosis(staleDeps(dir, &stubStaleSweepReader{}, nil, projectStore))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for a gone-dir project", got.status)
-		}
-		if got.detail != "1 stale project" {
-			t.Errorf("detail = %q; want %q", got.detail, "1 stale project")
-		}
-	})
-
-	t.Run("multiple stale projects use the plural count copy", func(t *testing.T) {
-		dir := t.TempDir()
-		goneA := filepath.Join(t.TempDir(), "gone-a")
-		goneB := filepath.Join(t.TempDir(), "gone-b")
-		projectStore, _ := seedProjectsJSON(t, goneA, goneB)
-		results, err := runDoctorDiagnosis(staleDeps(dir, &stubStaleSweepReader{}, nil, projectStore))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail for gone-dir projects", got.status)
-		}
-		if got.detail != "2 stale projects" {
-			t.Errorf("detail = %q; want %q", got.detail, "2 stale projects")
-		}
-	})
-
-	t.Run("all live passes", func(t *testing.T) {
-		dir := t.TempDir()
-		liveDir := t.TempDir()
-		projectStore, _ := seedProjectsJSON(t, liveDir)
-		results, err := runDoctorDiagnosis(staleDeps(dir, &stubStaleSweepReader{}, nil, projectStore))
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-		if got.status != checkPass {
-			t.Errorf("status = %v; want checkPass", got.status)
-		}
-		if got.detail != "no stale projects" {
-			t.Errorf("detail = %q; want %q", got.detail, "no stale projects")
-		}
-	})
-
-	t.Run("evaluates with the server down (filesystem-only)", func(t *testing.T) {
-		goneDir := filepath.Join(t.TempDir(), "gone")
-		projectStore, _ := seedProjectsJSON(t, goneDir)
-		deps := &DoctorDeps{
-			StateDir:      t.TempDir(),
-			ServerRunning: func() bool { return false },
-			SaverPresent:  func() (bool, error) { return true, nil },
-			HookCounts:    func() (map[string]int, error) { return allHooksHealthy(), nil },
-			HookLister:    &stubStaleSweepReader{},
-			ProjectStore:  projectStore,
-		}
-		results, err := runDoctorDiagnosis(deps)
-		if err != nil {
-			t.Fatalf("runDoctorDiagnosis: %v", err)
-		}
-		got := findCheck(t, results, "stale projects")
-		if got.status != checkFail {
-			t.Errorf("status = %v; want checkFail — the stale-project check is filesystem-only and runs with the server down", got.status)
-		}
-	})
-}
-
-func TestDoctorStaleChecksAreReadOnly(t *testing.T) {
-	dir := t.TempDir()
-	hookStore, hooksPath := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.ReapableSeedA)})
-	liveDir := t.TempDir()
-	goneDir := filepath.Join(t.TempDir(), "gone")
-	projectStore, projectsPath := seedProjectsJSON(t, liveDir, goneDir)
-
-	hooksBefore := readFileBytes(t, hooksPath)
-	projectsBefore := readFileBytes(t, projectsPath)
-
-	lister := &stubStaleSweepReader{rows: tokenRows(hookstest.LiveSeedB)} // the seeded reapable key is stale
-	results, err := runDoctorDiagnosis(staleDeps(dir, lister, hookStore, projectStore))
-	if err != nil {
-		t.Fatalf("runDoctorDiagnosis: %v", err)
-	}
-	if got := findCheck(t, results, "stale hooks"); got.status != checkFail {
-		t.Fatalf("stale hooks status = %v; want checkFail (setup should be stale)", got.status)
-	}
-	if got := findCheck(t, results, "stale projects"); got.status != checkFail {
-		t.Fatalf("stale projects status = %v; want checkFail (setup should be stale)", got.status)
-	}
-
-	assertHooksFileUnchanged(t, hooksPath, hooksBefore, "mutated by diagnosis (read-only violated)")
-	if projectsAfter := readFileBytes(t, projectsPath); !bytes.Equal(projectsBefore, projectsAfter) {
-		t.Errorf("projects.json mutated by diagnosis (read-only violated)\nbefore: %s\nafter:  %s", projectsBefore, projectsAfter)
-	}
-}
-
-// assertSkippedPruneLine pins the exact line and its placement in the repair
-// block: a stand-down and a removal cannot co-occur, so the line stands where
-// the `Pruned stale hook:` lines would have. It is the whole of the repair's
-// stand-down reporting, so a second skipped-prune line — one cycle described
-// twice, or described in another reason's words — fails here too.
-func assertSkippedPruneLine(t *testing.T, out, want string) {
-	t.Helper()
-
-	if strings.Contains(out, "Pruned stale hook:") {
-		t.Errorf("doctor --fix reported a prune on a stand-down:\n%s", out)
-	}
-
-	lines := strings.Split(out, "\n")
-	skippedAt, projectAt := -1, -1
-	for i, line := range lines {
-		switch {
-		case line == want:
-			if skippedAt != -1 {
-				t.Errorf("skipped-prune line printed twice:\n%s", out)
-			}
-			skippedAt = i
-		case strings.HasPrefix(line, "Skipped stale hook prune:"):
-			t.Errorf("skipped-prune line = %q, want %q", line, want)
-		case strings.HasPrefix(line, "Pruned stale project:"):
-			projectAt = i
+	var routes []string
+	for _, rec := range sink.Records() {
+		if rec.HasAttr("detail") && strings.HasPrefix(rec.Msg, "detection") {
+			routes = append(routes, rec.AttrString(t, "detail"))
 		}
 	}
-	if skippedAt == -1 {
-		t.Fatalf("missing skipped-prune line %q:\n%s", want, out)
-	}
-	if projectAt != -1 && skippedAt > projectAt {
-		t.Errorf("skipped-prune line follows the project prune; want it in the hook-prune block:\n%s", out)
+	if len(routes) != 1 || !strings.HasPrefix(routes[0], "outside-session") {
+		t.Errorf("detection details = %q, want one, from outside a session", routes)
 	}
 }

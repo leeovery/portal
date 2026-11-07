@@ -10,22 +10,21 @@ import (
 )
 
 type restoreEmittingRunner struct {
-	m       int
-	started bool
+	m int
 }
 
-func (r *restoreEmittingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
+func (r *restoreEmittingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
 	if emit != nil {
 		for n := 1; n <= r.m; n++ {
-			emit(bootstrap.StepEvent{Index: 6, Name: "Restore", RestoreN: n, RestoreM: r.m})
+			emit(bootstrap.StepEvent{Index: 5, Name: "Restore", RestoreN: n, RestoreM: r.m})
 		}
 	}
-	return r.started, nil, nil
+	return nil, nil
 }
 
 func TestBootstrapProgressPipe_ForwardsRestoreNMOntoProgressMsg(t *testing.T) {
-	runner := &restoreEmittingRunner{m: 3, started: true}
+	runner := &restoreEmittingRunner{m: 3}
 	pipe := newBootstrapProgressPipe()
 	pipe.start(context.Background(), runner)
 
@@ -55,15 +54,15 @@ type blockingRunner struct {
 	done   chan struct{}
 }
 
-func (r *blockingRunner) Run(ctx context.Context) (bool, []bootstrap.Warning, error) {
+func (r *blockingRunner) Run(ctx context.Context) ([]bootstrap.Warning, error) {
 	emit := bootstrap.ProgressEmitterFromContextForTest(ctx)
 	for n := 1; n <= r.events; n++ {
 		if emit != nil {
-			emit(bootstrap.StepEvent{Index: 6, Name: "Restore", RestoreN: n, RestoreM: r.events})
+			emit(bootstrap.StepEvent{Index: 5, Name: "Restore", RestoreN: n, RestoreM: r.events})
 		}
 	}
 	close(r.done)
-	return true, nil, nil
+	return nil, nil
 }
 
 func TestBootstrapProgressPipe_SendUnblocksOnContextCancel(t *testing.T) {

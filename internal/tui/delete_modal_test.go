@@ -73,8 +73,8 @@ func TestDeleteModal_ConsequenceLine(t *testing.T) {
 			t.Errorf("consequence line must contain %q; got:\n%s", fragment, content)
 		}
 	}
-	if deleteModalContains(content, "Ends the tmux session") {
-		t.Errorf("delete consequence must NOT mention ending the tmux session (record-only); got:\n%s", content)
+	if deleteModalContains(content, killConsequence) {
+		t.Errorf("delete consequence must NOT read as kill's, ending the session (record-only); got:\n%s", content)
 	}
 	for _, fragment := range []string{"sessions", "files", "untouched"} {
 		if !deleteModalContains(content, fragment) {

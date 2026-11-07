@@ -63,7 +63,7 @@ type ConfigFile struct {
 }
 
 // ConfigFilePath declares Portal's config-file precedence, once and for every
-// reader of it: the file's own environment variable, else
+// reader of it: the file's own environment variable, made Absolute, else
 // <config base>/portal/<filename>, where the config base is $XDG_CONFIG_HOME
 // and then $HOME/.config. The lookup supplies every environment layer, so a
 // caller resolving against a subprocess's env slice resolves by the same rule
@@ -73,14 +73,17 @@ type ConfigFile struct {
 // migrates nothing. Only the home fallback reads outside the lookup, through
 // os.UserHomeDir.
 func ConfigFilePath(lookup Lookup, id ConfigFileID) (ConfigFile, error) {
-	if path := lookup(id.EnvVar); path != "" {
+	switch path, err := fromEnv(lookup, id.EnvVar); {
+	case err != nil:
+		return ConfigFile{}, err
+	case path != "":
 		return ConfigFile{Path: path, Overridden: true}, nil
 	}
 
-	base, err := ConfigBaseFrom(lookup)
+	portal, err := PortalDir(lookup)
 	if err != nil {
 		return ConfigFile{}, err
 	}
 
-	return ConfigFile{Path: filepath.Join(base, portalDirName, id.Filename)}, nil
+	return ConfigFile{Path: filepath.Join(portal, id.Filename)}, nil
 }

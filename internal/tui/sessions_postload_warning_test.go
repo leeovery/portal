@@ -5,27 +5,17 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
-type postloadStubLister struct{ sessions []tmux.Session }
+type postloadStubLister struct{ sessions []Session }
 
-func (l postloadStubLister) ListSessions() ([]tmux.Session, error) { return l.sessions, nil }
+func (l postloadStubLister) ListSessions() ([]Session, error) { return l.sessions, nil }
 
-func coldTUIModel(t *testing.T, sessions []tmux.Session) tea.Model {
+func coldTUIModel(t *testing.T, sessions []Session) tea.Model {
 	t.Helper()
 	lister := postloadStubLister{sessions: sessions}
 	receiver := func() tea.Msg { return nil }
-	m := New(lister, WithServerStarted(true), WithProgressReceiver(receiver))
-	var model tea.Model = m
-	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	return model
-}
-
-func warmStagingModel(t *testing.T) tea.Model {
-	t.Helper()
-	lister := postloadStubLister{sessions: []tmux.Session{}}
-	m := New(lister, WithServerStarted(true))
+	m := New(lister, WithBootstrapping(receiver))
 	var model tea.Model = m
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return model
@@ -84,7 +74,7 @@ func TestColdTUIWarnings_SurfaceWhenMinElapsedArmTransitions(t *testing.T) {
 func TestColdTUIWarnings_RendersInSessionsViewChrome(t *testing.T) {
 	const line = "the session saver is not running"
 	warnings := []BootstrapWarning{{Lines: []string{line}}}
-	model, _ := transitionWithWarnings(coldTUIModel(t, []tmux.Session{{Name: "dev", Windows: 1}}), warnings)
+	model, _ := transitionWithWarnings(coldTUIModel(t, []Session{{Name: "dev"}}), warnings)
 
 	content := model.(Model).View().Content
 	if !strings.Contains(content, line) {
@@ -108,14 +98,8 @@ func TestColdTUIWarnings_NoticeAppearsOnlyAfterPicker(t *testing.T) {
 	}
 }
 
-func TestColdTUIWarnings_ZeroWarningsNoNoticeNoFlush(t *testing.T) {
-	var flushCalled bool
-	restore := SetFlushWarningsToStderrForTest(func(_ []BootstrapWarning) {
-		flushCalled = true
-	})
-	t.Cleanup(restore)
-
-	model, cmd := transitionWithWarnings(coldTUIModel(t, nil), nil)
+func TestColdTUIWarnings_ZeroWarningsNoNotice(t *testing.T) {
+	model, _ := transitionWithWarnings(coldTUIModel(t, nil), nil)
 	m := model.(Model)
 
 	if m.ActivePage() != PageSessions {
@@ -123,30 +107,6 @@ func TestColdTUIWarnings_ZeroWarningsNoNoticeNoFlush(t *testing.T) {
 	}
 	if _, _, ok := m.activeNoticeBand(); ok {
 		t.Error("zero warnings must produce NO notice band")
-	}
-	if cmd != nil {
-		cmd()
-	}
-	if flushCalled {
-		t.Error("zero warnings must not flush to stderr (no spurious alt-screen toggle)")
-	}
-}
-
-func TestColdTUIWarnings_NoStderrFlush(t *testing.T) {
-	var flushCalled bool
-	restore := SetFlushWarningsToStderrForTest(func(_ []BootstrapWarning) {
-		flushCalled = true
-	})
-	t.Cleanup(restore)
-
-	warnings := []BootstrapWarning{{Lines: []string{"saver is down"}}}
-	model, cmd := transitionWithWarnings(coldTUIModel(t, nil), warnings)
-	if cmd != nil {
-		_ = cmd()
-	}
-	_ = model
-	if flushCalled {
-		t.Error("cold/TUI path must not flush warnings to stderr — the in-TUI band replaces it")
 	}
 }
 
@@ -207,33 +167,6 @@ func TestColdTUIWarnings_BestEffortStepDoesNotAbortBoot(t *testing.T) {
 	}
 	if _, _, ok := m.activeNoticeBand(); !ok {
 		t.Error("the soft warning must surface as a post-load notice band")
-	}
-}
-
-func TestWarmStagingWarnings_StillFlushToStderr(t *testing.T) {
-	var captured [][]string
-	restore := SetFlushWarningsToStderrForTest(func(warnings []BootstrapWarning) {
-		for _, w := range warnings {
-			captured = append(captured, append([]string{}, w.Lines...))
-		}
-	})
-	t.Cleanup(restore)
-
-	warnings := []BootstrapWarning{
-		{Lines: []string{"saver down"}},
-		{Lines: []string{"corrupt", "see log"}},
-	}
-	model, cmd := transitionWithWarnings(warmStagingModel(t), warnings)
-	if cmd == nil {
-		t.Fatal("warm/staging route must return the flushBufferedWarningsCmd")
-	}
-	cmd()
-
-	if len(captured) != 2 {
-		t.Fatalf("warm/staging flush captured %d warnings, want 2", len(captured))
-	}
-	if _, _, ok := model.(Model).activeNoticeBand(); ok {
-		t.Error("warm/staging route must NOT surface an in-TUI notice band")
 	}
 }
 

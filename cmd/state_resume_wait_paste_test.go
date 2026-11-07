@@ -177,8 +177,8 @@ func (h *arrivalHarness) answered() {
 	}
 }
 
-// A paste through a tmux buffer reaches the pane with its line feeds as
-// carriage returns; one case keeps them as line feeds regardless.
+// A terminal's paste reaches the session with its line feeds as carriage
+// returns; one case keeps them as line feeds regardless.
 var panelPastes = []struct {
 	name  string
 	paste string
@@ -233,7 +233,7 @@ func TestRunResumeWait_Pastes(t *testing.T) {
 
 				h.answered()
 				if h.probe.clearCalls != 1 {
-					t.Errorf("ClearMarker called %d times, want 1", h.probe.clearCalls)
+					t.Errorf("ClearPending called %d times, want 1", h.probe.clearCalls)
 				}
 				assertHookHandOff(t, h.probe, payload.Command)
 			})
@@ -560,8 +560,8 @@ func TestRunResumeWait_KeysTypedDuringAnAnswer(t *testing.T) {
 		during  func(cfg *resumeWaitConfig, typeKey func())
 	}{
 		{"Enter, typed into while the marker clears", samplePayload(), "\r", func(cfg *resumeWaitConfig, typeKey func()) {
-			clear := cfg.ClearMarker
-			cfg.ClearMarker = func() error {
+			clear := cfg.ClearPending
+			cfg.ClearPending = func() error {
 				typeKey()
 				return clear()
 			}
