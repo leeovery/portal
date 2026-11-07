@@ -18,7 +18,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 
   zmx's own `ctrl+\` detaches the way plain zmx does, straight to the shell, never the picker. The runner wraps `zmx attach` rather than speaking zmx's attach protocol itself; no floating menu, no pinned status bar.
 - **Picker rows.** No window count. The session label, plus the attached and waiting dots.
-- **Preview (Space).** The session's live screen and history from zmx, up to zmx's 10,000 lines, instead of the saved file, read again about once a second while the preview is open, so it shows the session live, holding the row the user scrolled to. Window and pane cycling go.
+- **Preview (Space).** The session's live screen and history from zmx, up to zmx's 10,000 lines, instead of the saved file, read again about once a second while the preview is open, so it shows the session live, holding the place the user scrolled to; a session whose resume-pending flag is raised shows the transcript its index entry names, since its History holds only the panel's screen. Window and pane cycling go.
 - **One terminal at a time.** Opening a session takes it from every other terminal showing it before Portal attaches, so zmx sizes and draws it for the opening terminal from its first frame. A Portal it is taken from lands on a screen saying the session is open on another device and where, offering to take it back or watch it; a raw `zmx attach` goes to its shell. Nothing is killed. See Taking a session.
 - **Opening several sessions in new windows (`m`).** Works as today: Ghostty on the Mac opens them, and Blink and rootshell get today's refusal. See Attach runner.
 - **Esc on the resume panel.** Detaches to the picker, as today.
