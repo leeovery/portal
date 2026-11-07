@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-11-07
+
+Portal now runs on zmx instead of tmux, so sessions persist and restore without a tmux server.
+
+💥 Breaking
+- Portal now requires zmx 1.0.1 or later instead of tmux — install zmx (Homebrew does it for you) and run `portal migrate` once before anything else.
+- Linux is no longer supported — release builds and the installer are macOS only.
+- Resume hooks are keyed by session name rather than tmux pane token — `portal migrate` moves your existing hooks and removes old pane-keyed entries.
+- Renaming a session now sets a display label and leaves the session name alone — `hook`, `kill` and `x <name>` keep addressing it by its original name, and an empty label or the original name resets it.
+- `xctl list --long` now shows name, label, attached state and directory instead of window count.
+- Session preview no longer shows tmux windows and panes — `←`/`→` and `Tab` no longer cycle them, and `↑`/`↓` step between sessions.
+
+✨ Added
+- `portal migrate` moves the tmux version's saved sessions and resume hooks to this version, backs up `hooks.json`, and prints a report of every session, renamed name and hook moved or removed.
+- Keys inside a session — `Alt+D` detaches to the picker, `Alt+Shift+D` to the shell, `Alt+Q` asks to kill the session — rebindable through `keys` in `prefs.json`.
+- `x <name>` brings back a saved session that isn't running, with its scrollback and resume hook, then attaches it.
+- Session labels, set with `portal rename` and printed with `portal current`, appear in rows, titles, previews and search.
+- Scrollback preview reads the session's live screen and up to 10,000 lines of history without attaching.
+- `xctl doctor` checks zmx, session responsiveness, the saver and its daemon, the zmx directory, kept sessions, pending resumes and key config.
+- Sessions that don't respond show a "not answering" badge and refuse to open, with a message explaining why.
+- Opening a session from the picker uses a Portal-run attach that detects the terminal, so multi-window opens work from inside a session.
+- The kill prompt can be opened for a session from inside it, with Enter to attach instead.
+- Help and other modals scroll with `↑`/`↓` and show "↑ more / ↓ more" hints when they don't fit the terminal.
+- The loading page shows a waiting note while another Portal finishes starting.
+- Hooks and state are guarded against a mismatched `ZMX_DIR` or state directory, with clear errors telling you how to proceed.
+- Relative paths in Portal's config environment variables (e.g. `XDG_CONFIG_HOME`) are resolved to absolute, so child processes see the same files.
+
+🔧 Changed
+- Preview loads in the background with a one-second limit, so a stuck session no longer freezes the picker.
+- The save daemon polls every 5 seconds and saves scrollback at most once a minute.
+- Stale hooks are removed by session name, with safeguards that hold the sweep back when many would be removed at once.
+- `portal uninstall` stops the save daemon with SIGTERM, then SIGKILL if needed, and leaves your files alone.
+- New session names are made zmx-compatible, and names zmx refuses get a compatible name on migration, with the reason in the report.
+- Spawned windows carry Portal's path, state and logging environment.
+- Pending-resume dots and the discard prompt now refer to sessions rather than panes.
+- Failed row actions (kill, label) now flash the error and refresh the list instead of dropping you out of the picker.
+- Long resume commands wrap only at spaces, so flags like `--model` are no longer split at a hyphen.
+- Multi-select on an undetected terminal now says the terminal couldn't be identified.
+
+🗑️ Removed
+- tmux integration: tmux hooks, the `state notify`, `commit-now` and `signal-hydrate` commands, and tmux-resurrect style restoration.
+
+🐛 Fixed
+- Concurrent Portal starts no longer restore a session twice — a lock makes later ones wait for the first.
+- Restore retries sessions that fail for a transient reason instead of giving up.
+- Session list pagination no longer pushes the footer off screen after a resize, filter or item change.
+- A failed session listing after the first one keeps the existing rows instead of closing the picker.
+- A mint failing with an unsupported backend protocol now shows a clear error, and other mint failures flash a message instead of failing silently.
+- Long current-session names in the title no longer push the filter hint off the row.
+
 ## [0.12.6] - 2026-11-03
 
 🐛 Fixed
