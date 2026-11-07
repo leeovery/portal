@@ -278,7 +278,10 @@ type Model struct {
 	originalBg string
 
 	history previewHistory
-	preview previewModel
+	// transcripts reads the transcript a waiting session was restored from,
+	// which its preview shows; nil previews its History.
+	transcripts TranscriptReader
+	preview     previewModel
 	// previewGen counts preview opens, so a read that lands after its preview
 	// has stepped on or closed is told apart from the one now showing.
 	previewGen uint64
@@ -1559,7 +1562,7 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	} else {
 		var open context.Context
 		open, m.endPreviewRead = context.WithCancel(context.Background())
-		cmd = m.history.read(open, s.Name, m.previewGen)
+		cmd = m.previewRead(open, s.Name, m.previewGen)
 	}
 	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
 	m.preview.th = m.themeState.active

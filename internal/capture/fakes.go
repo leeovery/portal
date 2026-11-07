@@ -9,6 +9,7 @@ package capture
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -201,6 +202,20 @@ func (h fakeHistory) History(_ context.Context, name string, _ int) ([]byte, err
 		return []byte(h.content), nil
 	}
 	return []byte("$ portal open\n(canned preview history)\n"), nil
+}
+
+// fakeTranscripts answers a session's saved transcript where transcripts
+// holds one; any other session has none.
+type fakeTranscripts struct {
+	transcripts map[string]string
+}
+
+func (t fakeTranscripts) Transcript(name string) ([]byte, error) {
+	vt, ok := t.transcripts[name]
+	if !ok {
+		return nil, fmt.Errorf("no saved transcript for %q", name)
+	}
+	return []byte(vt), nil
 }
 
 // zmxHistoryFile is a History answer zmx itself serialised, recorded by the zmx

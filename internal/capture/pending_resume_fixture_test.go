@@ -16,6 +16,7 @@ import (
 const (
 	pendingResumeFixture           = "sessions-pending-resume"
 	pendingResumeColourlessFixture = "sessions-pending-resume-colourless"
+	waitingTranscriptFixture       = "preview-waiting-transcript"
 )
 
 // One session per attached × pending combination the fixture seeds.
@@ -250,7 +251,7 @@ func TestPendingResumeFixtures_SeedNoToolName(t *testing.T) {
 }
 
 func TestFixtures_WithoutPendingSessionsWireNoReader(t *testing.T) {
-	pendingBearing := []string{pendingResumeFixture, pendingResumeColourlessFixture}
+	pendingBearing := []string{pendingResumeFixture, pendingResumeColourlessFixture, waitingTranscriptFixture}
 	for _, name := range buildBackedFixtureNames() {
 		if slices.Contains(pendingBearing, name) {
 			continue

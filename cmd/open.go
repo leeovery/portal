@@ -410,6 +410,7 @@ type tuiConfig struct {
 	aliasEditor      tui.AliasEditor
 	sessionCreator   tui.SessionCreator
 	history          tui.HistoryReader
+	transcripts      tui.TranscriptReader
 	dirRunner        resolver.CommandRunner
 	pendingReader    tui.PendingResumeReader
 	hydrating        tui.HydratingReader
@@ -482,6 +483,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 		ProjectEditor:    cfg.projectEditor,
 		AliasEditor:      cfg.aliasEditor,
 		History:          cfg.history,
+		Transcripts:      cfg.transcripts,
 		DirRunner:        cfg.dirRunner,
 		PendingReader:    cfg.pendingReader,
 		Hydrating:        cfg.hydrating,
@@ -656,6 +658,7 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 
 	cfg.currentSession = b.Current()
 	cfg.pendingReader, cfg.hydrating = pickerFlagReaders()
+	cfg.transcripts = pickerTranscripts()
 
 	m := buildTUIModel(cfg, launch.landing, launch.command)
 	// Staged rather than written: a direct write while the TUI holds the screen
