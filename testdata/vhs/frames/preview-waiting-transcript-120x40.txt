@@ -2,15 +2,15 @@
   ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │  ◉ preview tessera-proxy-Vb3kQw                                                                                  │
   ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-  │  $ make test                                                                                                     │
-  │  ok   tessera/proxy    1.84s                                                                                     │
-  │  ok   tessera/routes   0.62s                                                                                     │
-  │  $ git status --short                                                                                            │
-  │   M cmd/tessera-proxy/main.go                                                                                    │
-  │  $ ./bin/tessera-proxy --serve                                                                                   │
-  │  config ok · 3 routes · listening on :8080                                                                       │
-  │  ^C shutting down                                                                                                │
+  │  $ ./scripts/seed-fixtures --region north                                                                        │
+  │  seeding 14 orchards · 212 rows                                                                                  │
+  │  rows written: 212 · skipped: 0                                                                                  │
+  │  $ ./scripts/verify-ledger                                                                                       │
+  │  ledger balanced at 48,310 entries                                                                               │
   │  $                                                                                                               │
+  │                                                                                                                  │
+  │                                                                                                                  │
+  │                                                                                                                  │
   │                                                                                                                  │
   │                                                                                                                  │
   │                                                                                                                  │

@@ -81,7 +81,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "preview-zmx-history", present: []string{"tessera-proxy-Vb3kQw", "gap     after-tab", "wide 中文 end", "last row 000"}, absent: []string{"(history unavailable)", "example-host"}},
 		// A waiting session previews the transcript it was restored from, never
 		// its History, which holds only the resume panel's screen.
-		{fixture: "preview-waiting-transcript", present: []string{"tessera-proxy-Vb3kQw", "listening on :8080", "^C shutting down"}, absent: []string{"resume panel's screen"}},
+		{fixture: "preview-waiting-transcript", present: []string{"tessera-proxy-Vb3kQw", "seeding 14 orchards", "ledger balanced at 48,310 entries"}, absent: []string{"resume panel's screen", "kubectl rollout"}},
 		{fixture: "loading-screen", page: tui.PageLoading, present: []string{"Restoring sessions", "8", "12"}},
 		{fixture: "loading-error", page: tui.PageLoading, present: []string{"✗", "Portal failed to remove the bootstrapped latch"}},
 	}

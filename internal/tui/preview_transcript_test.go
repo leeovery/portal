@@ -30,12 +30,14 @@ func (f fakeTranscripts) Transcript(session string) ([]byte, error) {
 }
 
 // waitingModel is the picker on alpha, whose History is the panel's screen,
-// with the given sessions waiting on their resume panel.
+// with the given sessions' resume-pending flags raised as the preview reads
+// them, and its listing's snapshot agreeing.
 func waitingModel(t *testing.T, transcripts TranscriptReader, waiting ...string) Model {
 	t.Helper()
 	sessions := []Session{{Name: "alpha"}}
 	m := modelWithSeams(t, sessions, historyFor(t, "resume panel", sessions))
 	m.transcripts = transcripts
+	m.pendingReader = &pendingReaderStub{steps: [][]string{waiting}}
 	m.pendingSessions = map[string]struct{}{}
 	for _, name := range waiting {
 		m.pendingSessions[name] = struct{}{}
@@ -65,7 +67,7 @@ func TestPreviewOfAWaitingSessionDialsNoHistoryWhenItsTranscriptReads(t *testing
 	history := historyFor(t, "resume panel", sessions)
 	m := modelWithSeams(t, sessions, history)
 	m.transcripts = fakeTranscripts{by: map[string]string{"alpha": "saved"}}
-	m.pendingSessions = map[string]struct{}{"alpha": {}}
+	m.pendingReader = &pendingReaderStub{steps: [][]string{{"alpha"}}}
 
 	openPreviewOn(t, m)
 
@@ -89,6 +91,36 @@ func TestPreviewOfASessionNotWaitingShowsItsHistory(t *testing.T) {
 	}
 }
 
+// The listing's snapshot says alpha waits, but its panel has been answered
+// since: the session is live and has moved on, so its transcript is stale.
+func TestPreviewOfASessionWhosePanelClosedSinceTheListingShowsItsHistory(t *testing.T) {
+	var reads []string
+	m := waitingModel(t, fakeTranscripts{by: map[string]string{"alpha": "saved"}, reads: &reads}, "alpha")
+	m.pendingReader = &pendingReaderStub{steps: [][]string{{}}}
+
+	got := openPreviewOn(t, m)
+
+	if body := lastBodyRow(got.preview); body != "resume panel" {
+		t.Errorf("body = %q, want the History of a session no longer waiting", body)
+	}
+	if len(reads) != 0 {
+		t.Errorf("transcripts read %v, want none once the flag is down", reads)
+	}
+}
+
+// The listing missed alpha's panel, raised since: it waits now, so its
+// History holds only the panel.
+func TestPreviewOfASessionWaitingSinceTheListingShowsItsTranscript(t *testing.T) {
+	m := waitingModel(t, fakeTranscripts{by: map[string]string{"alpha": "saved"}})
+	m.pendingReader = &pendingReaderStub{steps: [][]string{{"alpha"}}}
+
+	got := openPreviewOn(t, m)
+
+	if body := lastBodyRow(got.preview); body != "saved" {
+		t.Errorf("body = %q, want the transcript of a session waiting now", body)
+	}
+}
+
 func TestPreviewOfAWaitingSessionFallsBackToItsHistory(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -108,6 +140,22 @@ func TestPreviewOfAWaitingSessionFallsBackToItsHistory(t *testing.T) {
 			}
 		})
 	}
+	t.Run("flags that can't be read", func(t *testing.T) {
+		m := waitingModel(t, fakeTranscripts{by: map[string]string{"alpha": "saved"}}, "alpha")
+		m.pendingReader = &pendingReaderStub{err: errors.New("permission denied")}
+
+		if body := lastBodyRow(openPreviewOn(t, m).preview); body != "resume panel" {
+			t.Errorf("body = %q, want the History", body)
+		}
+	})
+	t.Run("no flag reader", func(t *testing.T) {
+		m := waitingModel(t, fakeTranscripts{by: map[string]string{"alpha": "saved"}}, "alpha")
+		m.pendingReader = nil
+
+		if body := lastBodyRow(openPreviewOn(t, m).preview); body != "resume panel" {
+			t.Errorf("body = %q, want the History", body)
+		}
+	})
 }
 
 // endingTranscripts answers with a transcript, but ends the open it is read

@@ -3,11 +3,17 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 var transcriptCreated = time.Date(2026, 11, 7, 9, 30, 0, 0, time.UTC)
@@ -88,5 +94,61 @@ func TestPickerTranscripts_ReadsTheStateDir(t *testing.T) {
 	got, ok := pickerTranscripts().(indexTranscripts)
 	if !ok || got.dir != dir {
 		t.Errorf("pickerTranscripts() = %#v, want the state dir %s", got, dir)
+	}
+}
+
+// previewedBody is the picker, its state reads wired as runPicker wires them,
+// once its first listing lands and Space has previewed the session it lists.
+func previewedBody(t *testing.T, s backend.Session, history string) string {
+	t.Helper()
+	b := backendtest.New(s)
+	b.SetHistory(s.Name, []byte(history))
+	cfg := defaultTestTUIConfig()
+	cfg.lister = pickerLister{ctx: t.Context(), b: b}
+	cfg.history = b
+	cfg.wireStateReads()
+	m := update(t, buildTUIModel(cfg, pickerLanding{}, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
+	for _, msg := range drainCmd(t, m.Init()) {
+		m = update(t, m, msg)
+	}
+	updated, read := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m, ok := updated.(tui.Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want tui.Model", updated)
+	}
+	for _, msg := range drainCmd(t, read) {
+		m = update(t, m, msg)
+	}
+	return ansi.Strip(m.View().Content)
+}
+
+func TestPicker_PreviewsAWaitingSessionsTranscript(t *testing.T) {
+	const name = "api-x7Kd9a"
+	session := backend.Session{Name: name, Created: transcriptCreated, PID: 4242}
+	for _, tc := range []struct {
+		desc    string
+		waiting bool
+		want    string
+		notWant string
+	}{
+		{"while its resume-pending flag is raised", true, "saved transcript row", "resume panel screen"},
+		{"and its History once the flag is down", false, "resume panel screen", "saved transcript row"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			file := transcriptFile(t, name)
+			dir := seedIndex(t, sessionindex.Entry{Name: name, CreatedAt: transcriptCreated, PID: 4242, ScrollbackFile: file})
+			writeTranscript(t, dir, file, "saved transcript row\r\n")
+			if tc.waiting {
+				if err := state.ResumePending.Set(dir, name); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			view := previewedBody(t, session, "resume panel screen")
+
+			if !strings.Contains(view, tc.want) || strings.Contains(view, tc.notWant) {
+				t.Errorf("preview wants %q and not %q, shows:\n%s", tc.want, tc.notWant, view)
+			}
+		})
 	}
 }

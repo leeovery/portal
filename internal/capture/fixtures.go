@@ -1031,14 +1031,11 @@ func previewWaitingTranscriptFixture() *Fixture {
 	fx.pendingSessions = []string{"tessera-proxy-Vb3kQw"}
 	fx.history = "(the resume panel's screen, never previewed)\n"
 	fx.transcripts = map[string]string{
-		"tessera-proxy-Vb3kQw": "$ make test\r\n" +
-			"ok   tessera/proxy    1.84s\r\n" +
-			"ok   tessera/routes   0.62s\r\n" +
-			"$ git status --short\r\n" +
-			" M cmd/tessera-proxy/main.go\r\n" +
-			"$ ./bin/tessera-proxy --serve\r\n" +
-			"config ok · 3 routes · listening on :8080\r\n" +
-			"^C shutting down\r\n" +
+		"tessera-proxy-Vb3kQw": "$ ./scripts/seed-fixtures --region north\r\n" +
+			"seeding 14 orchards · 212 rows\r\n" +
+			"rows written: 212 · skipped: 0\r\n" +
+			"$ ./scripts/verify-ledger\r\n" +
+			"ledger balanced at 48,310 entries\r\n" +
 			"$ ",
 	}
 	return fx
