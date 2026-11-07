@@ -31,7 +31,7 @@ const (
 	finishesCopy   = ": it finishes the migration."
 )
 
-// How a session's name differs from its tmux session's own name, and why,
+// How a session's name differs from its tmux session's name, and why,
 // each told in the report beside the session.
 const (
 	replacedOneCopy   = "%s isn't allowed in a session name, so it became '-'"

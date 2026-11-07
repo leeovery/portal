@@ -152,8 +152,8 @@ func (n Naming) dirOf(cwd string) string {
 	return cwd
 }
 
-// migratingSession is a tmux session with panes to migrate: what its name
-// claimed, and its panes.
+// migratingSession is a tmux session with panes to migrate: its name,
+// trimmed of surrounding whitespace; what that claimed; and its panes.
 type migratingSession struct {
 	tmuxName string
 	claimed  claimed
@@ -202,7 +202,8 @@ func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
 			plan.Skipped = append(plan.Skipped, SkippedSession{Name: s.Name, Why: s.empty()})
 			continue
 		}
-		m := migratingSession{tmuxName: s.Name, claimed: n.claim(strings.TrimSpace(s.Name))}
+		tmuxName := strings.TrimSpace(s.Name)
+		m := migratingSession{tmuxName: tmuxName, claimed: n.claim(tmuxName)}
 		for _, p := range saved {
 			m.panes = append(m.panes, migratingPane{savedPane: p, dir: naming.dirOf(p.pane.CWD)})
 		}

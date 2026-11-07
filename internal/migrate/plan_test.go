@@ -89,13 +89,15 @@ func TestNewPlan_Names(t *testing.T) {
 		}
 	})
 
-	t.Run("a name too long is cut to fit, on a character boundary, never ending in '-'", func(t *testing.T) {
+	t.Run("a name too long is cut to fit, on a character boundary, never ending in a space or punctuation", func(t *testing.T) {
 		limit := zmxBackend(t).MaxNameLen()
 		for tmuxName, want := range map[string]named{
 			strings.Repeat("x", limit+9):              {strings.Repeat("x", limit), []string{cutWhy(limit)}},
 			strings.Repeat("é", limit):                {strings.Repeat("é", limit/2), []string{cutWhy(limit / 2)}},
 			strings.Repeat("x", limit-1) + "-tail":    {strings.Repeat("x", limit-1), []string{cutWhy(limit - 1)}},
 			strings.Repeat("x", limit-1) + " · topic": {strings.Repeat("x", limit-1), []string{cutWhy(limit - 1)}},
+			strings.Repeat("x", limit-4) + " · topic": {strings.Repeat("x", limit-4), []string{cutWhy(limit - 4)}},
+			strings.Repeat("x", limit-1) + "*z":       {strings.Repeat("x", limit-1), []string{cutWhy(limit - 1)}},
 			"a/" + strings.Repeat("x", limit):         {"a-" + strings.Repeat("x", limit-2), []string{slashReplaced, cutWhy(limit)}},
 		} {
 			assertNamed(t, planSessions(t, session(tmuxName, pane(0, orchard))), want)
@@ -143,6 +145,12 @@ func TestNewPlan_Names(t *testing.T) {
 			assertNamed(t, planOf(t, dir, nil, naming(t, "other", tc.taken)), tc.want)
 		})
 	}
+
+	t.Run("a name holding a space keeps an ending shaped like an id, taking a fresh one after it", func(t *testing.T) {
+		dir := legacyDir(t, []v1Session{session("kiln · user-search", pane(0, orchard))}, nil)
+
+		assertNamed(t, planOf(t, dir, nil, naming(t, "kiln · user-search")), named{"kiln · user-search-Gen001", []string{takenWhy("kiln · user-search")}})
+	})
 
 	t.Run("a name a name folding to it holds takes a fresh id", func(t *testing.T) {
 		dir := legacyDir(t, []v1Session{session("lantern", pane(0, orchard))}, nil)
@@ -257,6 +265,19 @@ func TestNewPlan_Labels(t *testing.T) {
 			t.Errorf("%q labelled %q (refused: %v), want %q", tmuxName, got.Label, got.LabelRefused, want)
 		}
 	}
+
+	t.Run("a further pane's label is the trimmed tmux name with its number, none when that is its name", func(t *testing.T) {
+		for _, tmuxName := range []string{"padded ", "  padded  "} {
+			plan := planSessions(t, session(tmuxName, pane(0, orchard), pane(1, orchard)))
+
+			if got := namesOf(plan); !slices.Equal(got, []string{"padded", "padded-2"}) {
+				t.Errorf("%q: names = %q", tmuxName, got)
+			}
+			if got := labelsOf(plan); !slices.Equal(got, []string{"", ""}) {
+				t.Errorf("%q: labels = %q, want none", tmuxName, got)
+			}
+		}
+	})
 
 	t.Run("a name holding ' · ' too long is cut, labelled with the whole tmux name", func(t *testing.T) {
 		limit := zmxBackend(t).MaxNameLen()

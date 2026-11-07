@@ -83,7 +83,7 @@ func (n *namer) compatible(given string) (made string, changed []string, ok bool
 	if len(replaced) > 0 {
 		changed = append(changed, replacedWhy(replaced))
 	}
-	if trimmed := strings.TrimLeftFunc(made, isEdgeTrimmed); trimmed != made {
+	if trimmed := strings.TrimLeftFunc(made, isSeparator); trimmed != made {
 		changed = append(changed, leadDroppedCopy)
 		made = trimmed
 	}
@@ -127,11 +127,16 @@ func replaceRefused(s string, refuses func(rune) bool) (string, []rune) {
 	return string(out), replaced
 }
 
-// isEdgeTrimmed reports whether r is dropped from the start of a name made
-// compatible, and from the end of one cut: zmx reads a leading '-' as a
-// flag, and a '-' or space left at either edge is a separator with nothing
-// beyond it.
-func isEdgeTrimmed(r rune) bool { return r == '-' || unicode.IsSpace(r) }
+// isSeparator reports whether r is dropped from the start of a name made
+// compatible, and from the end of a stem a fresh id joins: zmx reads a
+// leading '-' as a flag, and a '-' or space left at either edge is a
+// separator with nothing beyond it.
+func isSeparator(r rune) bool { return r == '-' || unicode.IsSpace(r) }
+
+// isCutTrimmed reports whether r is dropped from the end of a name cut: a
+// space or punctuation left there separated or marked what the cut took,
+// and some, such as a trailing '*', the backend refuses.
+func isCutTrimmed(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) }
 
 // replacedWhy says why the characters replaced became '-'.
 func replacedWhy(replaced []rune) string {
@@ -161,11 +166,11 @@ func (n *namer) fit(part, suffix string) (string, error) {
 	}
 }
 
-// shortened is part less its last character and any '-' or space that
-// leaves trailing, so a cut never ends a name in a separator.
+// shortened is part less its last character and any space or punctuation
+// that leaves trailing.
 func shortened(part string) string {
 	_, size := utf8.DecodeLastRuneInString(part)
-	return strings.TrimRightFunc(part[:len(part)-size], isEdgeTrimmed)
+	return strings.TrimRightFunc(part[:len(part)-size], isCutTrimmed)
 }
 
 // names names each pane of s: the first by the name its tmux name claimed,
@@ -224,7 +229,7 @@ func (n *namer) extra(first name, number int) (name, error) {
 // and any '-' or space that leaves trailing, cut to fit, drawing again while
 // the name is taken.
 func (n *namer) fresh(base string) (string, error) {
-	stem := strings.TrimRightFunc(idStem(base), isEdgeTrimmed)
+	stem := strings.TrimRightFunc(idStem(base), isSeparator)
 	for range maxAttempts {
 		id, err := n.mint()
 		if err != nil {
@@ -243,8 +248,13 @@ func (n *namer) fresh(base string) (string, error) {
 }
 
 // idStem is name less a trailing -<nanoid>, a pane token's width, when it
-// ends in one.
+// ends in one and holds no whitespace: a generated {project}-{nanoid} holds
+// none, and in a name typed with spaces the same shape is a word, such as
+// the "search" of "kiln · user-search".
 func idStem(name string) string {
+	if strings.ContainsFunc(name, unicode.IsSpace) {
+		return name
+	}
 	if i := strings.LastIndexByte(name, '-'); i > 0 && nanoid.IsTokenShaped(name[i+1:]) {
 		return name[:i]
 	}
