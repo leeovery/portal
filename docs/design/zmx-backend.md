@@ -14,7 +14,7 @@ Board: sitrep `sr-fpq124` (Portal on zmx). Branch: `zmx-backend`. Base: v0.12.5.
 - **Keys.** Portal runs `zmx attach` itself and adds these keys, the same from every terminal, each configurable (see Key config):
   - **Alt+D:** detach, back to the picker.
   - **Alt+Shift+D:** detach, straight to the shell.
-  - **Alt+Q:** ask to kill the session. It detaches to the picker, which opens on the kill prompt for that session: `y` kills it, Esc keeps it and stays in the picker, Enter keeps it and attaches it again. A mistaken Alt+Q costs a key, never a session.
+  - **Alt+Q:** ask to kill the session. It detaches to the picker, which opens on the kill prompt for that session: `y` kills it, `d` keeps it and stays in the picker, Esc keeps it and goes back into it. A mistaken Alt+Q costs a key, never a session.
 
   zmx's own `ctrl+\` detaches the way plain zmx does, straight to the shell, never the picker. The runner wraps `zmx attach` rather than speaking zmx's attach protocol itself; no floating menu, no pinned status bar.
 - **Picker rows.** No window count. The session label, plus the attached and waiting dots.

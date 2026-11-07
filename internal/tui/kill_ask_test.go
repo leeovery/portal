@@ -53,11 +53,11 @@ func selectedSessionName(t *testing.T, m Model) string {
 }
 
 func TestKillAsk_Opens(t *testing.T) {
-	t.Run("on the kill prompt for the session, its cursor on the session's row, offering Enter", func(t *testing.T) {
+	t.Run("on the kill prompt for the session, its cursor on the session's row, offering d", func(t *testing.T) {
 		m, _ := killAskModel(t, "bravo-d4e5f6", killAskSessions)
 
-		if m.modal != modalKillConfirm || !m.killOffersAttach {
-			t.Fatalf("modal = %v, offers attach %v; want the kill prompt offering Enter", m.modal, m.killOffersAttach)
+		if m.modal != modalKillConfirm || !m.killFromInside {
+			t.Fatalf("modal = %v, from inside %v; want the kill key's prompt", m.modal, m.killFromInside)
 		}
 		if m.pendingKill != killAskSessions[1] {
 			t.Errorf("pending kill = %+v, want the listed %+v", m.pendingKill, killAskSessions[1])
@@ -66,7 +66,7 @@ func TestKillAsk_Opens(t *testing.T) {
 			t.Errorf("cursor on %q, want the asked session's row", got)
 		}
 		view := ansi.Strip(m.View().Content)
-		for _, want := range []string{"Kill session?", "release checklist", "y kill", "⏎ attach", "esc cancel"} {
+		for _, want := range []string{"Kill session?", "release checklist", "y kill   d detach   esc cancel"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("the frame shows no %q:\n%s", want, view)
 			}
@@ -76,8 +76,8 @@ func TestKillAsk_Opens(t *testing.T) {
 	t.Run("on nothing for a session no longer listed", func(t *testing.T) {
 		m, _ := killAskModel(t, "gone-x9y8z7", killAskSessions)
 
-		if m.modal != modalNone || m.killOffersAttach {
-			t.Errorf("modal = %v, offers attach %v; want the plain picker", m.modal, m.killOffersAttach)
+		if m.modal != modalNone || m.killFromInside {
+			t.Errorf("modal = %v, from inside %v; want the plain picker", m.modal, m.killFromInside)
 		}
 		if m.activePage != PageSessions {
 			t.Errorf("page = %v, want the sessions page", m.activePage)
@@ -110,31 +110,31 @@ func TestKillAsk_Keys(t *testing.T) {
 		if killers.asked.killedName != "bravo-d4e5f6" || killers.k.killedName != "" {
 			t.Errorf("killed %q through the asked killer, %q through k's; want the asked session through the asked killer alone", killers.asked.killedName, killers.k.killedName)
 		}
-		if m.modal != modalNone || m.killOffersAttach || quits(next) || m.Selected() != "" {
-			t.Errorf("modal %v, offers attach %v, quits %v, selected %q; want the plain picker, open", m.modal, m.killOffersAttach, quits(next), m.Selected())
+		if m.modal != modalNone || m.killFromInside || quits(next) || m.Selected() != "" {
+			t.Errorf("modal %v, from inside %v, quits %v, selected %q; want the plain picker, open", m.modal, m.killFromInside, quits(next), m.Selected())
 		}
 	})
 
-	t.Run("Esc keeps it and stays in the picker, the cursor on it", func(t *testing.T) {
+	t.Run("d keeps it and stays in the picker, the cursor on it", func(t *testing.T) {
 		m, killers := killAskModel(t, "bravo-d4e5f6", killAskSessions)
 
-		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: 'd', Text: "d"})
 
 		if killers.asked.killedName != "" || cmd != nil {
 			t.Errorf("killed %q, cmd %v; want nothing done", killers.asked.killedName, cmd != nil)
 		}
-		if m.modal != modalNone || m.killOffersAttach || m.Selected() != "" {
-			t.Errorf("modal %v, offers attach %v, selected %q; want the plain picker", m.modal, m.killOffersAttach, m.Selected())
+		if m.modal != modalNone || m.killFromInside || m.Selected() != "" {
+			t.Errorf("modal %v, from inside %v, selected %q; want the plain picker", m.modal, m.killFromInside, m.Selected())
 		}
 		if got := selectedSessionName(t, m); got != "bravo-d4e5f6" {
 			t.Errorf("cursor on %q, want the kept session's row", got)
 		}
 	})
 
-	t.Run("Enter keeps it and attaches it again", func(t *testing.T) {
+	t.Run("Esc keeps it and goes back into it", func(t *testing.T) {
 		m, killers := killAskModel(t, "bravo-d4e5f6", killAskSessions)
 
-		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 		if killers.asked.killedName != "" {
 			t.Errorf("killed %q, want nothing killed", killers.asked.killedName)
@@ -144,36 +144,72 @@ func TestKillAsk_Keys(t *testing.T) {
 		}
 	})
 
-	t.Run("Enter on a session not answering flashes why, as picking it would", func(t *testing.T) {
+	t.Run("Esc on a session not answering flashes why, as picking it would", func(t *testing.T) {
 		sessions := []Session{{Name: "alpha-a1b2c3"}, {Name: "bravo-d4e5f6", NotAnswering: true}}
 		m, _ := killAskModel(t, "bravo-d4e5f6", sessions)
 
-		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 		assertFlashedAndOpen(t, m, cmd, "session bravo-d4e5f6 is not answering; nothing was opened", []string{"alpha-a1b2c3", "bravo-d4e5f6"})
 	})
 
-	t.Run("k's own prompt takes no Enter, after an ask as before one", func(t *testing.T) {
-		m, _ := killAskModel(t, "bravo-d4e5f6", killAskSessions)
+	t.Run("Enter does nothing", func(t *testing.T) {
+		m, killers := killAskModel(t, "bravo-d4e5f6", killAskSessions)
 
-		m, _ = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape}, tea.KeyPressMsg{Code: 'k', Text: "k"})
-		if m.modal != modalKillConfirm || m.killOffersAttach || m.pendingKill.Name != "bravo-d4e5f6" {
-			t.Fatalf("modal %v, offers attach %v, pending %q; want k's prompt on the kept session", m.modal, m.killOffersAttach, m.pendingKill.Name)
-		}
-		if view := ansi.Strip(m.View().Content); strings.Contains(view, "attach") {
-			t.Errorf("k's prompt offers to attach:\n%s", view)
-		}
 		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-		if m.modal != modalKillConfirm || m.Selected() != "" || cmd != nil {
-			t.Errorf("modal %v, selected %q, cmd %v; want Enter ignored", m.modal, m.Selected(), cmd != nil)
+		if m.modal != modalKillConfirm || !m.killFromInside || m.Selected() != "" || cmd != nil || killers.asked.killedName != "" {
+			t.Errorf("modal %v, from inside %v, selected %q, cmd %v, killed %q; want Enter ignored", m.modal, m.killFromInside, m.Selected(), cmd != nil, killers.asked.killedName)
+		}
+	})
+}
+
+// k's own prompt, opened once d has kept the asked session, is the plain one.
+func TestKillAsk_KsOwnPromptAfterAnAsk(t *testing.T) {
+	kPrompt := func(t *testing.T) (Model, askKillers) {
+		t.Helper()
+		m, killers := killAskModel(t, "bravo-d4e5f6", killAskSessions)
+		m, _ = pressKeys(m, tea.KeyPressMsg{Code: 'd', Text: "d"}, tea.KeyPressMsg{Code: 'k', Text: "k"})
+		if m.modal != modalKillConfirm || m.killFromInside || m.pendingKill.Name != "bravo-d4e5f6" {
+			t.Fatalf("modal %v, from inside %v, pending %q; want k's prompt on the kept session", m.modal, m.killFromInside, m.pendingKill.Name)
+		}
+		return m, killers
+	}
+
+	t.Run("reads y kill, esc cancel, and offers no d", func(t *testing.T) {
+		m, _ := kPrompt(t)
+
+		view := ansi.Strip(m.View().Content)
+		if !strings.Contains(view, "y kill   esc cancel") || strings.Contains(view, "detach") {
+			t.Errorf("k's prompt reads, want y kill then esc cancel and no d:\n%s", view)
 		}
 	})
 
-	t.Run("k's own y kills through k's killer, after an ask as before one", func(t *testing.T) {
-		m, killers := killAskModel(t, "bravo-d4e5f6", killAskSessions)
+	t.Run("Esc keeps it and stays in the picker", func(t *testing.T) {
+		m, _ := kPrompt(t)
 
-		m, _ = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape}, tea.KeyPressMsg{Code: 'k', Text: "k"})
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+		if m.modal != modalNone || m.Selected() != "" || cmd != nil {
+			t.Errorf("modal %v, selected %q, cmd %v; want the plain picker", m.modal, m.Selected(), cmd != nil)
+		}
+	})
+
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: 'd', Text: "d"}} {
+		t.Run(key.String()+" does nothing", func(t *testing.T) {
+			m, _ := kPrompt(t)
+
+			m, cmd := pressKeys(m, key)
+
+			if m.modal != modalKillConfirm || m.Selected() != "" || cmd != nil {
+				t.Errorf("modal %v, selected %q, cmd %v; want the key ignored", m.modal, m.Selected(), cmd != nil)
+			}
+		})
+	}
+
+	t.Run("y kills through k's killer", func(t *testing.T) {
+		m, killers := kPrompt(t)
+
 		_, cmd := pressKeys(m, tea.KeyPressMsg{Code: 'y', Text: "y"})
 		_ = cmd()
 
@@ -204,11 +240,11 @@ func TestKillAsk_KeysTypedAhead(t *testing.T) {
 		}
 	})
 
-	t.Run("the rows landing before the projects open the prompt, so Enter attaches the asked session", func(t *testing.T) {
+	t.Run("the rows landing before the projects open the prompt, so Esc attaches the asked session", func(t *testing.T) {
 		m, _ := killAskPicker(t, "bravo-d4e5f6", killAskSessions)
 		m = deliver(t, m, SessionsMsg{Sessions: killAskSessions})
 
-		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 		if m.Selected() != "bravo-d4e5f6" || !quits(cmd) {
 			t.Errorf("selected %q, quits %v; want the asked session attached, not the first row", m.Selected(), quits(cmd))

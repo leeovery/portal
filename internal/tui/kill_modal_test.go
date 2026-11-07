@@ -136,7 +136,7 @@ func TestKillModal_Colourless(t *testing.T) {
 	}
 }
 
-func TestKillModal_AskOffersAttach(t *testing.T) {
+func TestKillModal_AskOffersDetach(t *testing.T) {
 	footerOf := func(t *testing.T, content string) string {
 		t.Helper()
 		lines := strings.Split(content, "\n")
@@ -146,20 +146,20 @@ func TestKillModal_AskOffersAttach(t *testing.T) {
 		return lines[len(lines)-2]
 	}
 
-	t.Run("its footer offers Enter between the kill and the cancel", func(t *testing.T) {
+	t.Run("its footer offers d between the kill and the cancel", func(t *testing.T) {
 		footer := ansi.Strip(footerOf(t, renderKillModalContent("aviva-proxy-qNyfEO", true, testDarkTheme(t), false)))
 
-		kill, attach, cancel := strings.Index(footer, "y kill"), strings.Index(footer, "⏎ attach"), strings.Index(footer, "esc cancel")
-		if kill < 0 || attach < kill || cancel < attach {
-			t.Errorf("footer = %q, want y kill, then ⏎ attach, then esc cancel", footer)
+		kill, detach, cancel := strings.Index(footer, "y kill"), strings.Index(footer, "d detach"), strings.Index(footer, "esc cancel")
+		if kill < 0 || detach < kill || cancel < detach {
+			t.Errorf("footer = %q, want y kill, then d detach, then esc cancel", footer)
 		}
 	})
 
-	t.Run("Enter reads as a key like the others, never as destructive", func(t *testing.T) {
+	t.Run("d reads as a key like the others, never as destructive", func(t *testing.T) {
 		for _, th := range []theme.Theme{testDarkTheme(t), testLightTheme(t)} {
 			footer := footerOf(t, renderKillModalContent("aviva-proxy-qNyfEO", true, th, false))
-			if want := headerStyle(th.AccentKey, th, false).Render(killKeyAttach); !strings.Contains(footer, want) {
-				t.Errorf("[%v] ⏎ is not drawn as accent.key draws a key:\n%q", themeLabel(th), footer)
+			if want := headerStyle(th.AccentKey, th, false).Render(killKeyDetach); !strings.Contains(footer, want) {
+				t.Errorf("[%v] d is not drawn as accent.key draws a key:\n%q", themeLabel(th), footer)
 			}
 			if seq := tokenFgSeq(t, th.StateDestructive); strings.Contains(footer, seq) {
 				t.Errorf("[%v] the footer carries state.destructive %q:\n%q", themeLabel(th), seq, footer)
@@ -167,20 +167,20 @@ func TestKillModal_AskOffersAttach(t *testing.T) {
 		}
 	})
 
-	t.Run("colourless, Enter keeps its glyph and its word", func(t *testing.T) {
+	t.Run("colourless, d keeps its key and its word", func(t *testing.T) {
 		content := renderKillModalContent("aviva-proxy-qNyfEO", true, testDarkTheme(t), true)
 
-		if !killModalContains(content, "⏎ attach") {
-			t.Errorf("the colourless footer lost ⏎ attach:\n%s", content)
+		if !killModalContains(content, "d detach") {
+			t.Errorf("the colourless footer lost d detach:\n%s", content)
 		}
 		if seq := tokenFgSeq(t, testDarkTheme(t).AccentKey); strings.Contains(content, seq) {
 			t.Errorf("the colourless modal paints accent.key %q", seq)
 		}
 	})
 
-	t.Run("k's own prompt offers no Enter", func(t *testing.T) {
-		if content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false); killModalContains(content, "attach") {
-			t.Errorf("k's prompt offers to attach:\n%s", content)
+	t.Run("k's own prompt offers no d", func(t *testing.T) {
+		if content := renderKillModalContent("aviva-proxy-qNyfEO", false, testDarkTheme(t), false); killModalContains(content, "detach") {
+			t.Errorf("k's prompt offers to detach:\n%s", content)
 		}
 	})
 }

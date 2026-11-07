@@ -407,14 +407,14 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		return fake, rec, stateDir
 	}
 
-	t.Run("the picker opens on the kill prompt for the session, offering to attach it again", func(t *testing.T) {
+	t.Run("the picker opens on the kill prompt for the session, offering d and Esc back into it", func(t *testing.T) {
 		fake, _, _ := stage(t)
-		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typed('q')})
+		pickers := stageRealPickers(t, fake, []pickerStep{typed('d'), typed('q')})
 
 		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		for _, want := range []string{prompt, "blog-c3d4", "y kill", "⏎ attach", "esc cancel"} {
+		for _, want := range []string{prompt, "blog-c3d4", "y kill   d detach   esc cancel"} {
 			if !strings.Contains(pickers.opened[0], want) {
 				t.Errorf("the picker shows no %q:\n%s", want, pickers.opened[0])
 			}
@@ -459,9 +459,9 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		}
 	})
 
-	t.Run("k's own y on it, once Esc has kept it and it has gone meanwhile, is refused as k's kill always is", func(t *testing.T) {
+	t.Run("k's own y on it, once d has kept it and it has gone meanwhile, is refused as k's kill always is", func(t *testing.T) {
 		fake, _, _ := stage(t)
-		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typed('k'), typedAndLanded('y'), typed('q')})
+		pickers := stageRealPickers(t, fake, []pickerStep{typed('d'), typed('k'), typedAndLanded('y'), typed('q')})
 		pickers.landed = func() {
 			if err := fake.Kill(context.Background(), "blog-c3d4"); err != nil {
 				t.Fatal(err)
@@ -471,24 +471,24 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		if afterK := pickers.shown[0][1]; !strings.Contains(afterK, prompt) || strings.Contains(afterK, "⏎ attach") {
-			t.Fatalf("after Esc then k the picker shows, want k's own prompt:\n%s", afterK)
+		if afterK := pickers.shown[0][1]; !strings.Contains(afterK, prompt) || strings.Contains(afterK, "detach") {
+			t.Fatalf("after d then k the picker shows, want k's own prompt:\n%s", afterK)
 		}
 		if afterY := pickers.shown[0][2]; !strings.Contains(afterY, "No session found: blog-c3d4") {
 			t.Errorf("after k's y the picker shows, want the gone session's refusal:\n%s", afterY)
 		}
 	})
 
-	t.Run("Esc keeps it and stays in the picker, the cursor on it", func(t *testing.T) {
+	t.Run("d keeps it and stays in the picker, the cursor on it", func(t *testing.T) {
 		fake, rec, _ := stage(t)
 		rec.answer(outcome(attachkeys.DetachToShell))
-		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape), typedCode(tea.KeyEnter)})
+		pickers := stageRealPickers(t, fake, []pickerStep{typed('d'), typedCode(tea.KeyEnter)})
 
 		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
 			t.Fatalf("openSession: %v", err)
 		}
-		if afterEsc := pickers.shown[0][0]; strings.Contains(afterEsc, prompt) || !strings.Contains(afterEsc, "blog-c3d4") {
-			t.Errorf("after Esc the picker shows, want its rows, the session kept:\n%s", afterEsc)
+		if afterD := pickers.shown[0][0]; strings.Contains(afterD, prompt) || !strings.Contains(afterD, "blog-c3d4") {
+			t.Errorf("after d the picker shows, want its rows, the session kept:\n%s", afterD)
 		}
 		// Enter on the list picks the row the cursor is on.
 		if want := []string{"blog-c3d4", "blog-c3d4"}; !slices.Equal(ranSessions(rec), want) {
@@ -499,10 +499,10 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		}
 	})
 
-	t.Run("Enter keeps it and attaches it again", func(t *testing.T) {
+	t.Run("Esc keeps it and goes back into it", func(t *testing.T) {
 		fake, rec, _ := stage(t)
 		rec.answer(outcome(attachkeys.DetachToShell))
-		stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)})
+		stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape)})
 
 		if err := openSession(contextCommand(), "blog-c3d4"); err != nil {
 			t.Fatalf("openSession: %v", err)
@@ -515,9 +515,9 @@ func TestAttach_KillKeyAsksInThePicker(t *testing.T) {
 		}
 	})
 
-	t.Run("Enter on a session killed elsewhere meanwhile reopens the picker, worded as kill words it", func(t *testing.T) {
+	t.Run("Esc on a session killed elsewhere meanwhile reopens the picker, worded as kill words it", func(t *testing.T) {
 		fake, rec, _ := stage(t)
-		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEnter)}, []pickerStep{typed('q')})
+		pickers := stageRealPickers(t, fake, []pickerStep{typedCode(tea.KeyEscape)}, []pickerStep{typed('q')})
 		pickers.landed = func() {
 			if len(pickers.opened) == 1 {
 				_ = fake.Kill(context.Background(), "blog-c3d4")

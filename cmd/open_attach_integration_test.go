@@ -349,7 +349,7 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("the kill key's Enter keeps the session and attaches it again", func(t *testing.T) {
+	t.Run("the kill key's Esc keeps the session and goes back into it", func(t *testing.T) {
 		p, name := openOnTerminal(t, binary)
 		p.echoes(t, 6, 7)
 
@@ -358,7 +358,7 @@ func TestPortalOpenAttachesThroughTheRunnerAgainstZmx(t *testing.T) {
 		p.awaitClients(t, name, 0)
 		p.awaitAfter(t, mark, killPrompt)
 
-		p.typeIn(t, "\r")
+		p.typeIn(t, "\x1b")
 		p.awaitClients(t, name, 1)
 		p.echoes(t, 7, 7)
 
