@@ -3,9 +3,10 @@
 # Builds a release's binaries on this Mac before mint tags it: mint's pre_tag
 # runs it, with the version about to be tagged in MINT_NEW_VERSION. It builds
 # HEAD in a checkout of its own outside the repository, portal for arm64 and
-# amd64, checks each reports the version, then archives and sums them under
-# the names the Homebrew formula reads, and keeps them, with the commit
-# built, in ~/Library/Caches/portal/release/<version>/, in place of any other
+# amd64, checks each is built from that commit, unmodified and with no build
+# tags, and reports the version, then archives and sums them under the names
+# the Homebrew formula reads, and keeps them, with the commit built, in
+# ~/Library/Caches/portal/release/<version>/, in place of any other
 # version's, for scripts/release-upload once the release is made. Any failure
 # exits non-zero, so mint stops before the tag. It runs each binary to check
 # its version, so it needs an Apple-silicon Mac with Rosetta. Nothing is
@@ -60,10 +61,28 @@ arch_flag() {
 	esac
 }
 
-# build builds version $2 from the checkout $1 for arch $3 into $4.
+# build builds version $2 from the checkout $1 for arch $3 into $4. What
+# decides what's compiled comes from this command alone, never the caller's
+# Go environment or go env file: an inherited GOFLAGS=-tags=integration would
+# compile the test sandboxes into the release.
 build() {
-	(cd "$1" && CGO_ENABLED=0 GOOS=darwin GOARCH=$3 go build -trimpath \
+	(cd "$1" && env -u GOFLAGS -u GOEXPERIMENT -u GOAMD64 -u GOARM64 GOENV=off GOWORK=off \
+		CGO_ENABLED=0 GOOS=darwin GOARCH="$3" go build -trimpath \
 		-ldflags "-s -w -X github.com/leeovery/portal/cmd.version=$2" -o "$4" .)
+}
+
+# check_build_info checks from the build info Go stamps in the binary $1 that
+# it was built with no build tags, from the commit $2, with nothing modified.
+check_build_info() {
+	local info
+	info=$(go version -m "$1") || release_fail "go version -m can't read $1's build info."
+	if grep -q $'^\tbuild\t-tags=' <<<"$info" ||
+		! grep -qx $'\tbuild\tvcs.revision='"$2" <<<"$info" ||
+		! grep -qx $'\tbuild\tvcs.modified=false' <<<"$info"; then
+		echo "$info"
+		release_fail "$1 isn't built from $2 alone with no build tags, as its build info above says."
+	fi
+	echo "$1 is built from $2, unmodified, with no build tags"
 }
 
 # cant_run says why the binary $1, built for arch $2, doesn't run here, and
@@ -156,6 +175,7 @@ main() {
 	for arch in "${release_arches[@]}"; do
 		bin=$work/bin/darwin_$arch/portal
 		build "$work/tree" "$version" "$arch" "$bin"
+		check_build_info "$bin" "$commit"
 		check_binary "$bin" "$arch" "$version" "$work/home"
 	done
 	for arch in "${release_arches[@]}"; do
