@@ -442,9 +442,11 @@ func TestBackendAgainstZmx(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		mustCreate(t, b, "where", dir, "sh", "-c", `echo "at=$(pwd -P) size=$(stty size)"; sleep 1000`)
+		// The shell compares the directory itself: printed, a long TMPDIR's
+		// path wraps at the session's width.
+		mustCreate(t, b, "where", dir, "sh", "-c", `if [ "$(pwd -P)" = "$1" ]; then at=dir; else at="other:$(pwd -P)"; fi; echo "at=$at size=$(stty size)"; sleep 1000`, "sh", realDir(t, dir))
 
-		awaitHistory(t, b, "where", "at="+realDir(t, dir)+" size=24 120")
+		awaitHistory(t, b, "where", "at=dir size=24 120")
 		if got := session(t, b, "where").Dir; got != realDir(t, dir) {
 			t.Errorf("Dir = %q, want %q", got, realDir(t, dir))
 		}
