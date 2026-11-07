@@ -46,6 +46,29 @@ func (r Registry) mustTakeFile(session, ext string) string {
 	return path
 }
 
+// SetOpened runs f between each open of a take lock's file and the lock on
+// it, for the rest of t.
+func SetOpened(t testing.TB, f func(path string)) {
+	t.Helper()
+	old := opened
+	opened = f
+	t.Cleanup(func() { opened = old })
+}
+
+// SetRemoveLockFile has a holder remove its lock's file through f, for the
+// rest of t.
+func SetRemoveLockFile(t testing.TB, f func(path string) error) {
+	t.Helper()
+	old := removeLockFile
+	removeLockFile = f
+	t.Cleanup(func() { removeLockFile = old })
+}
+
+// SweepTakes runs the sweep of take files a runner registering runs, and
+// RemoveUnheld its removal of one lock's file.
+func (r Registry) SweepTakes()      { r.sweepTakes() }
+func RemoveUnheld(path string) bool { return removeUnheld(path) }
+
 // SetBootID has the registry read the current boot's id through read for the
 // rest of t.
 func SetBootID(t testing.TB, read func() (string, error)) {

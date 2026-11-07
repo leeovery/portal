@@ -29,8 +29,11 @@ const takeWait = 2 * time.Second
 // the leader and then its Info; its detach; its wait for the session to be
 // alone, whose reads and detaches that wait's bound cuts short; and its
 // attach's wait to lead, whose reads it cuts short too; with takeLockSlack
-// over. A holder still holding past it is stuck, and the take goes on
-// without the lock rather than queue behind it.
+// over. The bound is each waiter's own, from its own start, and flock serves
+// waiters in no order, so of three takes of a session at once the third may
+// wait out two holds and go on without the lock beside the second, which is
+// not stuck. A take that goes on without it is logged, and its attach is at
+// worst drawn for the other terminal until its first keystroke.
 func takeLockWait() time.Duration {
 	return runnerreg.AskBound() + 2*saverhost.ReadCeiling + saverhost.DetachCeiling + 2*takeWait + takeLockSlack
 }
@@ -111,11 +114,14 @@ func (c attachConnector) lockTake(ctx context.Context, name string) (release fun
 // environment: a reader (the saver's capture, a preview's read, a listing's
 // probe, a zmx run) sends none, so even one zmx makes the leader, as a zmx
 // run's resize can, answers none, and no reader shows in the table, so none
-// holds a session. The leader counts a client zmx switched onto name from
-// another session, whose process still names the one it left; and that
-// process holds the session it left only while something else is connected
-// there. Either way of holding it is enough; what neither read can tell is an
-// error, so nothing is detached on it.
+// holds a session. A Portal runner's client always tracks runnertoken.Var
+// and a raw zmx attach tracks zmx's default list, so each answers one; a raw
+// one started with no variables to track answers none, and holds the
+// session only as the table shows it. The leader counts a client zmx
+// switched onto name from another session, whose process still names the
+// one it left; and that process holds the session it left only while
+// something else is connected there. Either way of holding it is enough;
+// what neither read can tell is an error, so nothing is detached on it.
 func (c attachConnector) held(ctx context.Context, name string) (bool, error) {
 	leader, leaderErr := c.backend.LeaderEnv(ctx, name)
 	if len(leader) > 0 {

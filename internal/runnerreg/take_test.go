@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/runnertoken"
+	"golang.org/x/sys/unix"
 )
 
 // asAnotherProcess has a take judge every runner this test registers
@@ -323,6 +325,27 @@ func TestLockTake(t *testing.T) {
 		}
 	})
 
+	// A take that locked the file between the two would find it still there
+	// and hold the lock beside the next take to make one.
+	t.Run("its release removes the file while it still holds the lock", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		release, err := r.LockTake(t.Context(), "api-x7Kd9a", time.Second)
+		if err != nil {
+			t.Fatalf("LockTake: %v", err)
+		}
+		var asRemoved error
+		runnerreg.SetRemoveLockFile(t, func(path string) error {
+			asRemoved = tryLock(path)
+			return os.Remove(path)
+		})
+
+		release()
+
+		if !errors.Is(asRemoved, fileutil.ErrLockTimedOut) {
+			t.Errorf("a lock tried as the file went = %v, want it refused, the lock still held", asRemoved)
+		}
+	})
+
 	// The release removes the lock's file, so a take waiting on it locks a
 	// file no longer there, which locks nothing: it must lock the one there
 	// now, or the next take would hold the lock beside it.
@@ -332,6 +355,8 @@ func TestLockTake(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LockTake: %v", err)
 		}
+		waiterOpened := make(chan struct{})
+		onFirstOpen(t, func() { close(waiterOpened) })
 		waited := make(chan func(), 1)
 		go func() {
 			release, err := r.LockTake(context.Background(), "api-x7Kd9a", 5*time.Second)
@@ -340,9 +365,7 @@ func TestLockTake(t *testing.T) {
 			}
 			waited <- release
 		}()
-		// Long enough for the waiter to open the file first holds, whose
-		// release then removes it.
-		time.Sleep(100 * time.Millisecond)
+		<-waiterOpened
 
 		first()
 		second := <-waited
@@ -353,6 +376,24 @@ func TestLockTake(t *testing.T) {
 
 		if _, err := r.LockTake(t.Context(), "api-x7Kd9a", 30*time.Millisecond); !errors.Is(err, fileutil.ErrLockTimedOut) {
 			t.Errorf("LockTake beside the waiter's = %v, want it held off", err)
+		}
+	})
+
+	t.Run("a take whose file is removed under it as its wait runs out gives up", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		holder, err := r.LockTake(t.Context(), "api-x7Kd9a", time.Second)
+		if err != nil {
+			t.Fatalf("LockTake: %v", err)
+		}
+		onFirstOpen(t, holder)
+
+		release, err := r.LockTake(t.Context(), "api-x7Kd9a", 0)
+
+		if !errors.Is(err, fileutil.ErrLockTimedOut) {
+			t.Errorf("LockTake = %v, want it timed out: the file it locked holds nothing, and its wait has run out", err)
+		}
+		if release != nil {
+			release()
 		}
 	})
 
@@ -380,6 +421,29 @@ func TestLockTake(t *testing.T) {
 			t.Error("LockTake = nil, want the read-only registry's refusal")
 		}
 	})
+}
+
+// onFirstOpen runs f as the next open of a take lock's file opens it, before
+// its lock: once, so a take f makes runs as any other.
+func onFirstOpen(t *testing.T, f func()) {
+	t.Helper()
+	var fired atomic.Bool
+	runnerreg.SetOpened(t, func(string) {
+		if fired.CompareAndSwap(false, true) {
+			f()
+		}
+	})
+}
+
+// tryLock tries a lock on the file at path through a description of its
+// own, as another take would, without waiting: ErrLockTimedOut while another
+// holds it.
+func tryLock(path string) error {
+	f, err := fileutil.LockWithin(context.Background(), path, fileutil.LockSpec{Flag: os.O_RDWR, How: unix.LOCK_EX, Poll: time.Millisecond})
+	if err == nil {
+		_ = f.Close()
+	}
+	return err
 }
 
 // aged makes path's file look written hours ago.
@@ -415,6 +479,48 @@ func TestTakeSweep(t *testing.T) {
 		}
 		if got := sink.Records().Matching("attach", "stale take removed").AtExactLevel(slog.LevelDebug); len(got) != 2 {
 			t.Errorf("removals logged = %d, want one for each file", len(got))
+		}
+	})
+
+	t.Run("it leaves a lock's file another take made between its open of the old one and its lock", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		path := r.TakeLockPath("api-x7Kd9a")
+		holder, err := r.LockTake(t.Context(), "api-x7Kd9a", time.Second)
+		if err != nil {
+			t.Fatalf("LockTake: %v", err)
+		}
+		aged(t, path)
+		next := func() {}
+		onFirstOpen(t, func() {
+			holder()
+			if next, err = r.LockTake(context.Background(), "api-x7Kd9a", time.Second); err != nil {
+				t.Errorf("the next take's LockTake: %v", err)
+			}
+		})
+
+		r.SweepTakes()
+		defer next()
+
+		if !exists(t, path) {
+			t.Error("the sweep removed the file the next take holds")
+		}
+		if err := tryLock(path); !errors.Is(err, fileutil.ErrLockTimedOut) {
+			t.Errorf("a lock beside the next take's = %v, want it refused", err)
+		}
+	})
+
+	t.Run("a lock's file gone by the time it opens it is nothing to remove, and it makes none", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		path := r.TakeLockPath("api-x7Kd9a")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		if runnerreg.RemoveUnheld(path) {
+			t.Error("RemoveUnheld = true for a file not there, want nothing removed")
+		}
+		if exists(t, path) {
+			t.Error("the sweep made the lock's file")
 		}
 	})
 

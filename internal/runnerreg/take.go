@@ -38,6 +38,14 @@ const takeLife = time.Hour
 // variable so a test's process can stand in for another runner's.
 var selfPID = os.Getpid()
 
+// opened runs between the open of a lock's file and the lock on it, and
+// removeLockFile removes a lock's file its caller holds the lock on:
+// variables so a test can put another take's steps between them.
+var (
+	opened         = func(path string) {}
+	removeLockFile = os.Remove
+)
+
 // taking is a take as recorded: where its session went, and when.
 type taking struct {
 	By string    `json:"by"`
@@ -88,7 +96,7 @@ func (r Registry) LockTake(ctx context.Context, session string, wait time.Durati
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		f, err := lockFile(ctx, path, time.Until(deadline))
+		f, err := lockFile(ctx, path, os.O_RDWR|os.O_CREATE, time.Until(deadline))
 		if err != nil {
 			return nil, err
 		}
@@ -102,12 +110,19 @@ func (r Registry) LockTake(ctx context.Context, session string, wait time.Durati
 	}
 }
 
-// lockFile locks the file at path, making it if it isn't there, waiting up
-// to wait for another holder.
-func lockFile(ctx context.Context, path string, wait time.Duration) (*os.File, error) {
-	return fileutil.LockWithin(ctx, path, fileutil.LockSpec{
-		Flag: os.O_RDWR | os.O_CREATE, How: unix.LOCK_EX, Wait: wait, Poll: takeLockPoll,
-	})
+// lockFile opens the file at path with flag and locks it, waiting up to
+// wait for another holder.
+func lockFile(ctx context.Context, path string, flag int, wait time.Duration) (*os.File, error) {
+	f, err := os.OpenFile(path, flag, 0o600)
+	if err != nil {
+		return nil, &fileutil.LockError{Step: fileutil.LockOpen, Path: path, Err: err}
+	}
+	opened(path)
+	if err := fileutil.LockOpened(ctx, f, fileutil.LockSpec{How: unix.LOCK_EX, Wait: wait, Poll: takeLockPoll}); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // isAt reports whether f, a lock's file, is still the file at path: a holder
@@ -121,9 +136,11 @@ func isAt(f *os.File, path string) bool {
 	return err == nil && os.SameFile(held, there)
 }
 
-// removeHeld removes path, the file f locks, then lets the lock go.
+// removeHeld removes path, the file f locks, then lets the lock go: in that
+// order, since a take that locked the file between the two would find it
+// still there and hold the lock beside the next take to make one.
 func removeHeld(f *os.File, path string) {
-	_ = os.Remove(path)
+	_ = removeLockFile(path)
 	_ = f.Close()
 }
 
@@ -211,9 +228,10 @@ func removeStaleTake(path string) bool {
 }
 
 // removeUnheld removes the lock's file at path if no take holds it, and
-// reports whether it did.
+// reports whether it did. A file gone is nothing to remove, and one replaced
+// between its open and its lock is another take's.
 func removeUnheld(path string) bool {
-	f, err := lockFile(context.Background(), path, 0)
+	f, err := lockFile(context.Background(), path, os.O_RDWR, 0)
 	if err != nil {
 		return false
 	}

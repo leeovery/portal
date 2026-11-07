@@ -93,10 +93,18 @@ func (s *daemonSubject) Program(t *testing.T, pid int) string {
 }
 
 func (s *daemonSubject) Lacks(b backendtest.Behaviour) string {
-	if b == backendtest.Creating {
+	switch b {
+	case backendtest.Creating:
 		return "the daemon run has no zmx to create a session with"
+	case backendtest.RunClients:
+		return "the daemon run has no zmx to run a command with"
 	}
 	return lacks(s.t, s.dir, b)
+}
+
+// RunConnected is never asked: the subject lacks RunClients.
+func (s *daemonSubject) RunConnected(t *testing.T, session string) {
+	t.Fatalf("RunConnected(%s) asked of a subject with no zmx", session)
 }
 
 // fixtureListing is how List reports a session answering Info with the
