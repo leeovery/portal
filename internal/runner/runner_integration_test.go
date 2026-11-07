@@ -167,22 +167,38 @@ func TestRunOverZmx(t *testing.T) {
 		z.assertEndedByZmx(t)
 	})
 
-	t.Run("the session ending exits to the shell", func(t *testing.T) {
+	t.Run("a detach from elsewhere drops the child, and the session lives on", func(t *testing.T) {
+		z := attachZmx(t, nil)
+
+		if err := z.b.Detach(t.Context(), sessionName); err != nil {
+			t.Fatalf("Detach: %v", err)
+		}
+		out, err := z.h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Dropped: true}) {
+			t.Errorf("Run = %+v, %v; want the child dropped", out, err)
+		}
+		z.assertEndedByZmx(t)
+		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || !alive {
+			t.Errorf("Exists = %v, %v after the detach, want the session alive", alive, err)
+		}
+	})
+
+	t.Run("the session ending drops the child, gone by the time the attach ends", func(t *testing.T) {
 		z := attachZmx(t, nil)
 
 		z.h.term.typeIn(t, "exit\r")
 		out, err := z.h.finish(t)
 
-		if err != nil || out != (runner.Outcome{}) {
-			t.Errorf("Run = %+v, %v; want the shell with status 0", out, err)
+		if err != nil || out != (runner.Outcome{Dropped: true}) {
+			t.Errorf("Run = %+v, %v; want the child dropped, status 0", out, err)
+		}
+		// zmx unlinks the session's socket before it hangs up on its clients,
+		// so a caller judging the drop finds the session gone.
+		if alive, err := z.b.Exists(t.Context(), sessionName); err != nil || alive {
+			t.Errorf("Exists = %v, %v as the attach ends, want the session gone", alive, err)
 		}
 		z.assertEndedByZmx(t)
-		if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
-			alive, err := z.b.Exists(t.Context(), sessionName)
-			return err == nil && !alive
-		}) {
-			t.Errorf("the session outlived its shell's exit")
-		}
 	})
 }
 

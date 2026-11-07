@@ -173,6 +173,35 @@ func TestRun_ChildEndingOnItsOwnExitsToTheShell(t *testing.T) {
 		})
 	}
 
+	t.Run("zmx dropping the child, as a session's end or a detach from elsewhere does, is a drop", func(t *testing.T) {
+		h := attach(t, modeZmx)
+		h.ready(t)
+
+		_ = syscall.Kill(h.child(), syscall.SIGUSR1)
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{Dropped: true}) {
+			t.Errorf("Run = %+v, %v; want the child dropped", out, err)
+		}
+		if out.Picker() {
+			t.Error("Picker() = true for a drop, want the caller to judge it")
+		}
+	})
+
+	t.Run("a drop once zmx's detach key has been passed on, in any form, is no drop: the user may have detached", func(t *testing.T) {
+		h := attach(t, modeZmx)
+		h.ready(t)
+
+		h.term.typeIn(t, "\x1b[92;5u")
+		h.term.await(t, "in:1b5b39323b3575")
+		_ = syscall.Kill(h.child(), syscall.SIGUSR1)
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{}) {
+			t.Errorf("Run = %+v, %v; want the shell with status 0, no drop", out, err)
+		}
+	})
+
 	t.Run("the child's last output reaches the terminal", func(t *testing.T) {
 		h := attach(t, modeExit)
 		h.ready(t)
@@ -623,7 +652,7 @@ func TestRun_ResetsATerminalTheChildsLastOutputNeverReached(t *testing.T) {
 	tm.record() // the terminal takes output again
 	out, err := h.finish(t)
 
-	if err != nil || out != (runner.Outcome{}) {
+	if err != nil || out != (runner.Outcome{Dropped: true}) {
 		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
 	}
 	if got := reset.AttrString(t, "reason"); got != "drain" {
@@ -653,7 +682,7 @@ func TestRun_StopsWaitingForATerminalThatHangsUp(t *testing.T) {
 	_ = tm.user.Close()
 	out, err := h.finish(t)
 
-	if err != nil || out != (runner.Outcome{}) {
+	if err != nil || out != (runner.Outcome{Dropped: true}) {
 		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
 	}
 }
@@ -676,7 +705,7 @@ func TestRun_DeliversOutputThatOutlivesTheChild(t *testing.T) {
 	tm.record()
 	out, err := h.finish(t)
 
-	if err != nil || out != (runner.Outcome{}) {
+	if err != nil || out != (runner.Outcome{Dropped: true}) {
 		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
 	}
 	tm.await(t, lastOutput)
@@ -720,7 +749,7 @@ func TestRun_ResetsATerminalThatRefusedTheChildsOutput(t *testing.T) {
 	tm.typeIn(t, "x")
 	out, err := h.finish(t)
 
-	if err != nil || out != (runner.Outcome{}) {
+	if err != nil || out != (runner.Outcome{Dropped: true}) {
 		t.Errorf("Run = %+v, %v; want the child's own clean exit", out, err)
 	}
 	if got := waitForReset(t, sink).AttrString(t, "reason"); got != "drain" {

@@ -76,11 +76,22 @@ func LockWithin(ctx context.Context, path string, spec LockSpec) (*os.File, erro
 	if err != nil {
 		return nil, &LockError{Step: LockOpen, Path: path, Err: err}
 	}
-	if step, err := awaitLock(ctx, f, spec); err != nil {
+	if err := LockOpened(ctx, f, spec); err != nil {
 		_ = f.Close()
-		return nil, &LockError{Step: step, Path: path, Err: err}
+		return nil, err
 	}
 	return f, nil
+}
+
+// LockOpened takes spec.How's lock on f, already open, as LockWithin does
+// once it has opened its file, for a caller that opens the file itself;
+// spec.Flag plays no part. Its LockError names f's path. f stays open either
+// way.
+func LockOpened(ctx context.Context, f *os.File, spec LockSpec) error {
+	if step, err := awaitLock(ctx, f, spec); err != nil {
+		return &LockError{Step: step, Path: f.Name(), Err: err}
+	}
+	return nil
 }
 
 // awaitLock is LockWithin's tries on the open f, reporting the step that

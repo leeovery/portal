@@ -41,7 +41,10 @@ type Fixture struct {
 	search *tui.SearchForm
 	// killAsk opens the picker as the kill key does from inside the session it
 	// names: on that session's kill prompt.
-	killAsk            string
+	killAsk string
+	// taken opens the picker as an attach another terminal took does: on the
+	// screen saying so.
+	taken              tui.Taken
 	initialMultiSelect []string
 	initialCursor      string
 	// Independent of the `--theme` palette: the union is what the panel lists —
@@ -109,6 +112,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		InitialMode: f.initialMode,
 		Search:      f.search,
 		KillAsk:     f.killAsk,
+		Taken:       f.taken,
 		Command:     f.command,
 		CWD:         fixtureHome,
 		Home:        fixtureHome,
@@ -184,6 +188,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsFilteringFixture,
 		sessionsKillConfirmFixture,
 		sessionsKillAskFixture,
+		sessionsTakenFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -468,12 +473,21 @@ func sessionsKillConfirmFixture() *Fixture {
 	return fx
 }
 
-// The prompt the kill key asks for from inside a session: k's own, offering
-// Enter to attach the session again.
+// The prompt the kill key asks for from inside a session: k's own, offering d
+// to go to the picker beside it.
 func sessionsKillAskFixture() *Fixture {
 	fx := sessionsByProjectLabelledFixture()
 	fx.name = "sessions-kill-ask"
 	fx.killAsk = "orchard-pipeline-Hq7wNe"
+	return fx
+}
+
+// The screen an attach another terminal took lands on, naming the session by
+// its label and saying where it went.
+func sessionsTakenFixture() *Fixture {
+	fx := sessionsByProjectLabelledFixture()
+	fx.name = "sessions-taken"
+	fx.taken = tui.Taken{Session: "orchard-pipeline-Hq7wNe", By: "SSH from 192.0.2.20"}
 	return fx
 }
 

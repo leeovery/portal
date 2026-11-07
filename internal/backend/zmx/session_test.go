@@ -124,12 +124,13 @@ func TestPerSessionCalls(t *testing.T) {
 // environment, Kill by unlinking its socket and hanging up, DetachAll by
 // hanging up.
 func anyRequest(info, screen []byte) func(*daemon, net.Conn) {
-	return ledRequest(info, screen, func() []byte { return nil })
+	return ledRequest(info, screen, func() []byte { return nil }, func() {})
 }
 
 // ledRequest is anyRequest answering EnvGet with what leader returns then:
-// the tracked environment of the client leading the session.
-func ledRequest(info, screen []byte, leader func() []byte) func(*daemon, net.Conn) {
+// the tracked environment of the client leading the session; and calling
+// detached on DetachAll, which leaves no client to lead it.
+func ledRequest(info, screen []byte, leader func() []byte, detached func()) func(*daemon, net.Conn) {
 	return func(d *daemon, c net.Conn) {
 		r, err := d.read(c)
 		if err != nil {
@@ -144,6 +145,9 @@ func ledRequest(info, screen []byte, leader func() []byte) func(*daemon, net.Con
 			_, _ = c.Write(frame(21, 1, leader()))
 		case 5:
 			_ = os.Remove(d.path)
+			return
+		case 4:
+			detached()
 			return
 		default:
 			return

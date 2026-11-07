@@ -23,15 +23,22 @@ const (
 	reqSwitch         = "switch"
 	reqDetachToPicker = "detach-to-picker"
 	reqConfirmSession = "confirm-session"
+	reqTake           = "take"
 )
 
-// namesSession is whether each request names a session. A request missing
-// from it is unknown.
-var namesSession = map[string]bool{
-	reqSwitch:         true,
-	reqDetachToPicker: false,
-	reqConfirmSession: true,
+// carries is which of the optional fields each request carries: one it
+// carries it needs, not empty, and one it doesn't it refuses, given empty or
+// null too. A request missing from it is unknown.
+var carries = map[string]carried{
+	reqSwitch:         {session: true},
+	reqDetachToPicker: {},
+	reqConfirmSession: {session: true},
+	reqTake:           {session: true, by: true},
 }
+
+// carried is which of the optional fields a request carries: the session it
+// names, and by, where a session taken went.
+type carried struct{ session, by bool }
 
 // maxMessage bounds a request and an answer.
 const maxMessage = 4 << 10
@@ -45,6 +52,11 @@ var timeout = 2 * time.Second
 // answers at once, so the caller hears of every request a runner took.
 const answerGrace = 500 * time.Millisecond
 
+// AskBound is the longest a request keeps its caller: its deadline, then the
+// grace its answer has. A request asked of every runner on a session asks
+// them all at once, so it keeps its caller as long.
+func AskBound() time.Duration { return timeout + answerGrace }
+
 // errOtherPID is an answer from a process other than the runner registered.
 var errOtherPID = errors.New("answered as another process")
 
@@ -52,14 +64,21 @@ type request struct {
 	Version  int       `json:"version"`
 	Request  string    `json:"request"`
 	Session  string    `json:"session,omitempty"`
+	By       string    `json:"by,omitempty"`
 	Deadline time.Time `json:"deadline"`
-	// sessionGiven is whether the request read carried a session at all, an
-	// empty or null one included.
-	sessionGiven bool
+	// sessionGiven and byGiven are whether the request read carried each of
+	// those fields at all, an empty or null one included.
+	sessionGiven, byGiven bool
 }
 
 func (q *request) fields() fields {
-	return fields{"version": &q.Version, "request": &q.Request, "session": &given{into: &q.Session, given: &q.sessionGiven}, "deadline": &q.Deadline}
+	return fields{
+		"version":  &q.Version,
+		"request":  &q.Request,
+		"session":  &given{into: &q.Session, given: &q.sessionGiven},
+		"by":       &given{into: &q.By, given: &q.byGiven},
+		"deadline": &q.Deadline,
+	}
 }
 
 // given decodes a field into into, recording that the field was given,
@@ -77,18 +96,43 @@ func (g *given) UnmarshalJSON(data []byte) error {
 
 // check refuses a request the runner would not understand in full.
 func (q request) check() error {
-	named, known := namesSession[q.Request]
+	c, known := carries[q.Request]
 	switch {
 	case q.Version != Version:
 		return fmt.Errorf("protocol version %d, where this runner speaks %d", q.Version, Version)
 	case !known:
 		return fmt.Errorf("unknown request %q", q.Request)
-	case named && q.Session == "":
-		return fmt.Errorf("%s names no session", q.Request)
-	case !named && q.sessionGiven:
-		return fmt.Errorf("%s takes no session", q.Request)
-	case q.Deadline.IsZero():
+	}
+	for _, f := range []optional{
+		{name: "session", carried: c.session, value: q.Session, given: q.sessionGiven},
+		{name: "by", carried: c.by, value: q.By, given: q.byGiven},
+	} {
+		if err := f.check(q.Request); err != nil {
+			return err
+		}
+	}
+	if q.Deadline.IsZero() {
 		return fmt.Errorf("%s names no deadline", q.Request)
+	}
+	return nil
+}
+
+// optional is one of a request's optional fields as read: whether the
+// request carries it, its value, and whether it was given at all.
+type optional struct {
+	name           string
+	carried, given bool
+	value          string
+}
+
+// check refuses the field missing from request, which carries it, or given
+// to request, which doesn't.
+func (f optional) check(request string) error {
+	switch {
+	case f.carried && f.value == "":
+		return fmt.Errorf("%s names no %s", request, f.name)
+	case !f.carried && f.given:
+		return fmt.Errorf("%s takes no %s", request, f.name)
 	}
 	return nil
 }

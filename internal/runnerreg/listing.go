@@ -174,6 +174,10 @@ func (r *relay) ConfirmSession(ctx context.Context, session string) error {
 	return r.deliver(ctx, runner.Request{Confirm: session})
 }
 
+func (r *relay) Take(ctx context.Context, session, by string) error {
+	return r.deliver(ctx, runner.Request{Take: session, By: by})
+}
+
 // deliver hands req to the attach under way, carrying ctx's deadline, and
 // returns the attach's answer: nil once it has taken the request, which is
 // its acceptance, or, for a request to confirm, its confirmation.

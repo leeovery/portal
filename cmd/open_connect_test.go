@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,7 +44,10 @@ type attachRecorder struct {
 	results    []runResult
 	execs      []execCall
 	markerSeen bool
-	runners    runnersFake
+	// releasedAtExec is how many take locks had been released as the last
+	// exec ran.
+	releasedAtExec int32
+	runners        runnersFake
 }
 
 type runResult struct {
@@ -77,6 +82,7 @@ func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outco
 
 func (r *attachRecorder) Exec(argv0 string, argv, env []string) error {
 	r.execs = append(r.execs, execCall{argv0: argv0, argv: argv, env: env})
+	r.releasedAtExec = r.runners.unlocks.Load()
 	if r.sink != nil && len(r.sink.Records().Matching("process", "exec")) > 0 {
 		r.markerSeen = true
 	}
@@ -162,7 +168,29 @@ type runnersFake struct {
 	events    []string
 	listed    bool
 	backend   runnerreg.Backend
+	// takes and records are each take asked and recorded; onTake, if set,
+	// answers each take, as the runners on its session would, and none
+	// answering is no runner to ask. onRecord, if set, runs as each take is
+	// recorded.
+	takes     []takeCall
+	records   []takeCall
+	onTake    func(session string) (int, error)
+	onRecord  func()
+	recordErr error
+	// takenBy answers every TakenBy, which takenSince records.
+	takenBy    string
+	takenSince []time.Time
+	// locked is the session of each take lock held, in turn, and unlocks
+	// counts their releases, which may come from the goroutine awaiting the
+	// attach's lead; lockErr fails each hold.
+	locked  []string
+	unlocks atomic.Int32
+	lockErr error
+	// confirm, if set, is each attach's Confirm.
+	confirm func(context.Context) error
 }
+
+type takeCall struct{ session, by string }
 
 // runnerToken is the token runnersFake lists every runner under.
 const runnerToken = "tok123"
@@ -179,8 +207,38 @@ func (f *runnersFake) Switch(_ context.Context, token, current, target string) e
 	return f.switchErr
 }
 
+func (f *runnersFake) Take(_ context.Context, session, by string) (int, error) {
+	f.takes = append(f.takes, takeCall{session, by})
+	if f.onTake == nil {
+		return 0, runnertoken.ErrNoRunner
+	}
+	return f.onTake(session)
+}
+
+func (f *runnersFake) RecordTake(session, by string) error {
+	f.records = append(f.records, takeCall{session, by})
+	if f.onRecord != nil {
+		f.onRecord()
+	}
+	return f.recordErr
+}
+
+func (f *runnersFake) TakenBy(_ string, since time.Time) string {
+	f.takenSince = append(f.takenSince, since)
+	return f.takenBy
+}
+
+func (f *runnersFake) LockTake(_ context.Context, session string, _ time.Duration) (func(), error) {
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
+	f.locked = append(f.locked, session)
+	return sync.OnceFunc(func() { f.unlocks.Add(1) }), nil
+}
+
 func (f *runnersFake) Attach(cfg *runner.Config) {
 	cfg.Command = f.backend.Track(cfg.Command, runnertoken.Var, runnerToken)
+	cfg.Confirm = f.confirm
 	session := cfg.Session
 	cfg.Began = func() {
 		if f.listed {

@@ -48,6 +48,16 @@ func fileStem(name string) string {
 	return name + "-" + hex.EncodeToString(sum[:])[:stemHashLen]
 }
 
+// SessionStem is fileStem of name, for a file of the session's that another
+// package keeps under the state directory. A name that is not a single path
+// element is refused with ErrUnsafeName.
+func SessionStem(name string) (string, error) {
+	if err := checkFileName(name); err != nil {
+		return "", err
+	}
+	return fileStem(name), nil
+}
+
 // nameOfStem is the session a file stem is fileStem of, and false for a file
 // name that is no session's stem.
 func nameOfStem(stem string) (string, bool) {

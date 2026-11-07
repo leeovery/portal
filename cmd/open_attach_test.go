@@ -26,12 +26,13 @@ import (
 )
 
 // pickerScript stands in for the picker an attach's end asks for: it records
-// the flash each opens on, and the session whose kill prompt it opens on, and
-// answers with picks in turn, quitting once they run out.
+// the flash each opens on, and the session whose kill prompt or taken screen
+// it opens on, and answers with picks in turn, quitting once they run out.
 type pickerScript struct {
 	picks   []string
 	flashes []string
 	kills   []string
+	taken   []tui.Taken
 	err     error
 	// onOpen runs as each picker opens.
 	onOpen func()
@@ -43,6 +44,7 @@ func stagePicker(t *testing.T, picks ...string) *pickerScript {
 	withFuncSeam(t, &reopenPickerFunc, func(_ *cobra.Command, _ backend.Backend, landing pickerLanding) (string, error) {
 		p.flashes = append(p.flashes, landing.flash)
 		p.kills = append(p.kills, landing.kill)
+		p.taken = append(p.taken, landing.taken)
 		if p.onOpen != nil {
 			p.onOpen()
 		}

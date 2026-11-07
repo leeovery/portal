@@ -36,7 +36,7 @@ Portal folds that into two shell functions and a picker:
 - **Commands come back when you ask.** Per-session commands return via resume hooks: each session comes back holding a panel showing its command, which runs when you answer it, so a reboot doesn't start every dev server you ever left open.
 - **A keyboard-driven picker.** A colourful picker that owns its own canvas, with an in-app `?` keymap on every page. Six themes ship — Tokyo Night, Tokyo Night Day, Nord, Nord Wave, GitLab Dark Grey, and Horizon — switched with `t` and matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
 - **Session grouping and tags.** Flip the list between flat, by project, and by tag with one key. Tags live on directories, so every session opened there inherits them.
-- **Scrollback preview.** Hit `Space` for a read-only peek at any session's screen and scrollback, read live, without attaching; a session waiting on its resume panel shows the transcript it was restored from.
+- **Scrollback preview.** Hit `Space` for a read-only peek at any session's screen and scrollback, kept live while it's open, without attaching; a session waiting on its resume panel shows the transcript it was restored from.
 - **Multi-window open.** Name several targets (`x work api db`) or mark them with `m` in the picker and press `Enter` to open each in its own host-terminal window — rebuild your post-reboot window layout in one action instead of by hand. Ghostty works out of the box; other terminals via a `terminals.json` recipe.
 
 ## Install
@@ -114,7 +114,7 @@ The same screens render in light mode and under `NO_COLOR` (see [Configuration](
                                                             └─▶ resume hooks wait on a panel
 ```
 
-- **Opening.** Portal runs `zmx attach` itself and stays running while you're attached, watching for [its own keys](#keys-in-a-session); inside a session it switches the terminal you typed in, so sessions never nest. See [`x` (open)](#x-open).
+- **Opening.** Portal runs `zmx attach` itself and stays running while you're attached, watching for [its own keys](#keys-in-a-session); inside a session it switches the terminal you typed in, so sessions never nest. Opening a session [takes it from any other terminal](#one-terminal-at-a-time) showing it, so it is drawn for yours from the first frame. See [`x` (open)](#x-open).
 - **Saving.** A daemon in a hidden `_portal-saver` session reads zmx's sessions every 5 seconds and writes what changed — the sessions there are, each one's working directory and, at most once a minute, its ANSI scrollback — under `state/` (see [Configuration](#configuration)).
 - **Restoring.** After a reboot, the first command that needs your sessions brings the saver back and rebuilds every saved session that isn't already live. See [Automatic Bootstrap & Restoration](#automatic-bootstrap--restoration).
 - **Resuming.** A session with a resume hook comes back holding the [resume panel](#resume-panel); `Enter` runs its command, `d` discards it, `Esc` sends the terminal back to the picker and leaves it waiting.
@@ -372,10 +372,12 @@ A session row ends in up to two status dots, packed to the right: the attached d
 
 `Space` on the highlighted session opens a Quick Look-style preview of that
 session's screen and scrollback, read live from the session, so you can tell
-similarly-named sessions apart without attaching. A session waiting on its
+similarly-named sessions apart without attaching. While it is open it reads the
+session again about once a second, so it follows the session as it changes,
+holding the place you scrolled to. A session waiting on its
 [resume panel](#resume-panel) shows the transcript it was restored from instead,
-since its own screen holds only the panel. The preview is read-only:
-opening and closing it changes nothing about the session.
+since its own screen holds only the panel. The preview is read-only: opening and
+closing it changes nothing about the session.
 
 | Key | Action |
 |---|---|
@@ -388,7 +390,10 @@ The preview shows the session's screen with up to 10,000 lines of history above 
 drawn as the terminal would draw it. The frame shows the session name and a footer of
 key hints, styled in a cyan "peek mode" so a preview never looks like the session
 itself. A session that doesn't answer in time renders `(session not answering)`; one
-whose history can't be read renders `(history unavailable)`.
+whose history can't be read renders `(history unavailable)`. Each stays only until the
+session gives a read: the preview keeps reading, so a session that comes back to life shows
+in it, and a read that fails once the preview shows the session leaves what it shows as it
+was.
 
 ### Multi-Select Mode
 
@@ -484,6 +489,39 @@ the log and `xctl doctor` say why. Changes apply from the next attach.
 attached through catches them before ssh sees them, so a Portal on the remote machine gets none.
 Nothing is lost, since a detach only detaches and `Alt+Q` only asks. To drive the remote Portal's
 keys, bind other ones in the remote machine's `prefs.json`; the local Portal passes them through.
+
+### One terminal at a time
+
+Opening a session takes it from every other terminal showing it, before Portal attaches, so
+the session is sized and drawn for the terminal you opened it in from its first frame. Every
+attach Portal makes does it: `x <name>`, a pick in the picker, a switch typed inside a Portal
+attach, and going back in from the kill prompt or the screen below. Nothing is killed and
+nothing is typed into the session; Portal's own `_` sessions are never taken. Only terminals
+are taken: what reads a session without one, such as Portal's saver or a preview, never makes
+Portal take it, though a take does close a read under way at that moment, which then reads
+again (a preview keeps what it shows meanwhile). Two terminals opening one session at once end
+with the later one attached.
+
+A plain `zmx attach` on the session is detached to its shell. A Portal attached there lands on
+a screen saying where the session went:
+
+```
+⇄ Open on another device
+
+release checklist
+
+Taken by SSH from 192.168.1.20.
+
+⏎ take it back   space watch   esc picker
+```
+
+The last line of the message reads `SSH from <address>` when the session was taken over ssh,
+`<App> on this Mac` when the taking terminal names its app, such as `Ghostty on this Mac`, and
+`another terminal on this Mac` otherwise. `Enter` takes the session back, `Space` watches it in
+the [preview](#scrollback-preview), live and read-only, with `Esc` back to this screen, and `Esc`
+goes to the picker, its cursor on the session. A detach from anywhere else lands on the same
+screen, without the line saying where, only while another terminal has the session; one that
+leaves no terminal on it, such as `zmx detach` typed in the session, exits to the shell.
 
 ## Session Grouping & Tags
 
@@ -613,7 +651,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `prefs.json` | UI preferences: last-used session-list grouping mode; the theme setting — `theme` for a pinned theme, or the `theme_light` / `theme_dark` pair; `resume_mode`, holding `eager` or `lazy` — the install-wide default a resume hook that names no mode of its own inherits; and `keys`, the [keys in a session](#keys-in-a-session) | `PORTAL_PREFS_FILE` |
 | `terminals.json` | Host-terminal window recipes for [multi-select](#multi-select-mode) / multi-target `x` on custom terminals (Ghostty is built in). User-authored, read-only. | `PORTAL_TERMINALS_FILE` |
 | `themes/` | Drop-in theme files (`<slug>.theme`); see [docs/theming.md](docs/theming.md). Portal never creates it — no directory simply means no drop-ins. | `PORTAL_THEMES_DIR` |
-| `state/` | Saved sessions + scrollback for automatic restoration on reboot. Contains: `sessions.json` (the session index: each session's label, directories and creation), `scrollback/*.bin` (each session's saved scrollback, a file per creation), `daemon.pid` + `daemon.version` (liveness markers), `bootstrapped` (the record that the last bootstrap finished), `zmx-dir` (the zmx directory this state belongs to; see [The zmx directory](#the-zmx-directory)), `restoring`, `hydrating/` and `resume-pending/` (flags), the `*.lock` files, `runners/` (an entry and a control socket per attached Portal, for switching and new windows), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
+| `state/` | Saved sessions + scrollback for automatic restoration on reboot. Contains: `sessions.json` (the session index: each session's label, directories and creation), `scrollback/*.bin` (each session's saved scrollback, a file per creation), `daemon.pid` + `daemon.version` (liveness markers), `bootstrapped` (the record that the last bootstrap finished), `zmx-dir` (the zmx directory this state belongs to; see [The zmx directory](#the-zmx-directory)), `restoring`, `hydrating/` and `resume-pending/` (flags), the `*.lock` files, `runners/` (an entry and a control socket per attached Portal, for switching and new windows, and `takes/`, each session's last take's record and the lock its takes hold; see [One terminal at a time](#one-terminal-at-a-time)), `spawn-acks/` (each new window's receipt, cleaned once its burst counts it), `portal.log` (structured, rotating diagnostics; see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Two of those overrides end in `_DIR` rather than `_FILE`: `themes/` and `state/` resolve a directory, not a single file.
 

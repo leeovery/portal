@@ -52,6 +52,10 @@ type Handler interface {
 	// session, sure of it or confirmed so, ending nothing. It returns nil if
 	// so, or why not.
 	ConfirmSession(ctx context.Context, session string) error
+	// Take asks the runner to let session go to another terminal, by, ending
+	// its attach as taken. It returns once the runner has accepted, or with
+	// why it won't.
+	Take(ctx context.Context, session, by string) error
 }
 
 // Registration is this process's entry in the registry, its socket served
@@ -146,11 +150,7 @@ func (g *Registration) listen() error {
 	if err := checkSocketPath(path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(g.registry.dir, 0o700); err != nil {
-		return err
-	}
-	// MkdirAll leaves a directory that already exists as it is.
-	if err := os.Chmod(g.registry.dir, 0o700); err != nil {
+	if err := g.registry.makeDir(); err != nil {
 		return err
 	}
 	ln, err := net.Listen("unix", path)
@@ -165,6 +165,15 @@ func (g *Registration) listen() error {
 	return nil
 }
 
+// makeDir makes the registry's directory, which only this user can reach.
+func (r Registry) makeDir() error {
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll leaves a directory that already exists as it is.
+	return os.Chmod(r.dir, 0o700)
+}
+
 // write writes the entry naming this process on session, in the current
 // boot. A write lands once its rename does.
 func (g *Registration) write(session string) error {
@@ -172,7 +181,12 @@ func (g *Registration) write(session string) error {
 	if err != nil {
 		return err
 	}
-	path := g.registry.entryPath(g.token)
+	return writeFile(g.registry.entryPath(g.token), data)
+}
+
+// writeFile writes data to the registry's file at path, only this user
+// reading it. A write lands once its rename does.
+func writeFile(path string, data []byte) error {
 	return fileutil.AtomicWrite0600(path, data, fileutil.ReportUnsynced(func(err error) {
 		logger.Warn("unsynced", "op", "unsynced", "path", path, "error", err, "error_class", fileutil.ClassifyWriteError(err))
 	}))
@@ -276,6 +290,8 @@ func (g *Registration) carryOut(q request) error {
 		return g.handler.Switch(ctx, q.Session)
 	case reqConfirmSession:
 		return g.handler.ConfirmSession(ctx, q.Session)
+	case reqTake:
+		return g.handler.Take(ctx, q.Session, q.By)
 	}
 	return g.handler.DetachToPicker(ctx)
 }

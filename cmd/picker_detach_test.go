@@ -24,6 +24,7 @@ type detachHandler struct {
 
 func (h *detachHandler) Switch(context.Context, string) error         { return errors.ErrUnsupported }
 func (h *detachHandler) ConfirmSession(context.Context, string) error { return errors.ErrUnsupported }
+func (h *detachHandler) Take(context.Context, string, string) error   { return errors.ErrUnsupported }
 
 func (h *detachHandler) DetachToPicker(context.Context) error {
 	h.mu.Lock()

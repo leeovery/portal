@@ -62,6 +62,9 @@ type pickerLanding struct {
 	// kill is the session the kill key asked to kill from inside it: the
 	// picker opens on its kill prompt, whose Esc attaches it again.
 	kill string
+	// taken is the session another terminal took from this one: the picker
+	// opens on the screen saying so, whose Enter takes it back.
+	taken tui.Taken
 }
 
 // validateOpenArgs refuses a search form beside anything else, a command scoped
