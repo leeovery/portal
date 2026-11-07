@@ -20,4 +20,4 @@ diff_exclude = [
 ]
 
 [release]
-diff_exclude = ["internal/capture/fixtures.go"]
+diff_exclude = ["internal/capture/fixtures.go", ".github/workflows/", "CLAUDE.md", "docs/design/", "internal/backend/zmx/testdata/", "internal/backendtest/", "internal/capture/", "cmd/capturetool/", "internal/commandertest/", "internal/commitlock/commitlocktest.go", "internal/devversion/testdata/", "internal/fileutil/synctest.go", "internal/harnesstest/", "internal/hookstest/", "internal/portalbintest/", "internal/portaltest/", "internal/proctest/", "internal/restoretest/", "internal/sourceguardtest/", "internal/spawntest/", "internal/statetest/", "internal/state/commitlocktest.go", "internal/tmuxtest/", "internal/transienttest/", "internal/zmxtest/", "main_test.go", "scripts/zmx-build", "scripts/zmx-commit", ".gitignore", "go.sum"]
