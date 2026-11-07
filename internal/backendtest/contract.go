@@ -31,6 +31,11 @@ type Subject interface {
 	// with variable=value lead the held session, answering, and returns once
 	// it does.
 	Lead(t *testing.T, session, variable, value string)
+	// RunConnected starts a zmx run on the held session that stays
+	// connected, so zmx makes it the leader of a session no client leads,
+	// and returns once zmx has taken its command. Contract asks it only of a
+	// subject that can show RunClients.
+	RunConnected(t *testing.T, session string)
 	// Program names the program the process pid runs, read without the
 	// backend, "" for no such process. Contract asks it only of a subject
 	// that can show Creating, for the pid of a session Create made.
@@ -82,6 +87,8 @@ const (
 	HangingUpSessions
 	// HistorylessSessions is holding a session in the Historyless state.
 	HistorylessSessions
+	// RunClients is a zmx run connected to a session.
+	RunClients
 )
 
 // perSession is each call but Exists that acts on one held session, Kill last
@@ -619,6 +626,21 @@ func leaderContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 
 		if env, err := s.Backend().LeaderEnv(t.Context(), "work"); err != nil || len(env) != 0 {
 			t.Errorf("LeaderEnv = %+v, %v; want none once every client is detached", env, err)
+		}
+	})
+
+	// A take reads a leader's environment as a terminal holding the session,
+	// so a run, which leads with none, must never answer one.
+	t.Run("a zmx run still connected, which zmx makes the leader, answers no environment", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(RunClients); why != "" {
+			t.Skip(why)
+		}
+		s.Hold(t, "work", Answering)
+		s.RunConnected(t, "work")
+
+		if env, err := s.Backend().LeaderEnv(t.Context(), "work"); err != nil || len(env) != 0 {
+			t.Errorf("LeaderEnv = %+v, %v; want none", env, err)
 		}
 	})
 

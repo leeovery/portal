@@ -281,3 +281,29 @@ func TestLockWithin(t *testing.T) {
 		}
 	})
 }
+
+func TestLockOpened(t *testing.T) {
+	t.Run("it locks a file opened already, as LockWithin does, naming its path when it can't", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "x.lock")
+		holder := holdLock(t, path, unix.LOCK_EX)
+		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+
+		err = fileutil.LockOpened(t.Context(), f, exclusive(0))
+		var lockErr *fileutil.LockError
+		if !errors.As(err, &lockErr) || lockErr.Step != fileutil.LockTimedOut || lockErr.Path != path {
+			t.Fatalf("LockOpened beside a holder = %v, want the bound passing on %s", err, path)
+		}
+
+		_ = holder.Close()
+		if err := fileutil.LockOpened(t.Context(), f, exclusive(0)); err != nil {
+			t.Fatalf("LockOpened once the holder let go = %v", err)
+		}
+		if lockFree(t, path) {
+			t.Error("the lock is free while the file it locked is open")
+		}
+	})
+}

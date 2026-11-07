@@ -45,6 +45,11 @@ func (s fakeSubject) Lead(_ *testing.T, session, variable, value string) {
 	s.f.SetLeaderEnv(session, backend.ClientEnv{{Name: variable, Value: value}})
 }
 
+// RunConnected is never asked: the Fake runs no zmx.
+func (s fakeSubject) RunConnected(t *testing.T, session string) {
+	t.Fatalf("RunConnected(%s) asked of a Fake, which runs no zmx", session)
+}
+
 // Program names the program of the command Create made the session holding
 // pid with: the Fake runs no process, so a session's pid stands for its
 // command's.
@@ -65,6 +70,8 @@ func (s fakeSubject) Lacks(b backendtest.Behaviour) string {
 		return "the Fake has no directory to measure a name against"
 	case backendtest.AttachEnvironment:
 		return "the Fake's attach command runs no zmx, so carries no environment"
+	case backendtest.RunClients:
+		return "the Fake runs no zmx, so no zmx run"
 	}
 	return ""
 }

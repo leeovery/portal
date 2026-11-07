@@ -29,8 +29,8 @@ const takeAt = "SSH from 192.0.2.20"
 var aTerminal = []backend.ClientProcess{{PID: 4242, Env: []string{"ZMX_DIR=/tmp/zx-open-test"}}}
 
 // aLeader is the tracked environment zmx answers for a client leading a
-// session: never empty, since it names each variable it tracks that the
-// client's environment lacks.
+// session: a variable it tracks that the client's environment lacks, as a
+// raw zmx attach on zmx's default list answers.
 var aLeader = backend.ClientEnv{{Name: "SSH_CONNECTION", Unset: true}}
 
 // terminalOn is a Fake holding name with a terminal attached: the process
