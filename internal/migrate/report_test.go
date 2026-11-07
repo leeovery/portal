@@ -58,24 +58,25 @@ Each migrated session with a resume hook waits on its resume panel the first tim
 
 Sessions (tmux name → name):
   lantern → lantern
-  tidepool · flaky test (window 0, pane 0) → tidepool
-  tidepool · flaky test (window 0, pane 1) → tidepool-2
+  tidepool · flaky test (window 0, pane 0) → tidepool · flaky test
+  tidepool · flaky test (window 0, pane 1) → tidepool · flaky test-2
   quarry → quarry-Gen001
-  bell · ding\a → bell
-  flow-v1/27 · api → flow-v1-27
+  bell · ding\a → bell · ding-
+  flow-v1/27 · api → flow-v1-27 · api
 
 Names made compatible (tmux name → name):
   quarry → quarry-Gen001: quarry was taken, so it has a new id
-  flow-v1/27 · api → flow-v1-27: '/' isn't allowed in a session name, so it became '-'
+  bell · ding\a → bell · ding-: '\a' isn't allowed in a session name, so it became '-'
+  flow-v1/27 · api → flow-v1-27 · api: '/' isn't allowed in a session name, so it became '-'
 
 Labels dropped:
-  bell: label refused: it holds a control or formatting character, such as a newline, tab or escape
+  bell · ding-: label refused: it holds a control or formatting character, such as a newline, tab or escape
 
 Skipped:
   empty: version 1 saved no windows for it
 
 Restored without scrollback:
-  tidepool-2: its scrollback file, scrollback/tidepool__0.1.bin, is gone from the tmux version's state
+  tidepool · flaky test-2: its scrollback file, scrollback/tidepool__0.1.bin, is gone from the tmux version's state
 
 Resume hooks moved:
   tokLan → lantern
@@ -230,7 +231,8 @@ func TestReport(t *testing.T) {
 		}
 		var movedTo []string
 		for _, line := range blockOf(t, blocks, "Resume hooks moved:") {
-			movedTo = append(movedTo, strings.Fields(line)[2])
+			_, to, _ := strings.Cut(line, " → ")
+			movedTo = append(movedTo, to)
 		}
 		if !slices.IsSortedFunc(movedTo, func(a, b string) int { return slices.Index(order, a) - slices.Index(order, b) }) {
 			t.Errorf("hooks moved to %v, want them in the sessions' order %v", movedTo, order)

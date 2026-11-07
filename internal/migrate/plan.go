@@ -3,6 +3,7 @@ package migrate
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -24,7 +25,7 @@ type Session struct {
 	From TmuxPane
 	Name string
 	// Changed says, in plain words and in order, how Name differs from the
-	// tmux session's own name and why: none when it doesn't, a pane's
+	// tmux session's name and why: none when it doesn't, a pane's
 	// number aside. A pane numbered after a changed first name carries the
 	// first's.
 	Changed []string
@@ -151,11 +152,11 @@ func (n Naming) dirOf(cwd string) string {
 	return cwd
 }
 
-// migratingSession is a tmux session with panes to migrate: what its own
-// name claimed, and its panes.
+// migratingSession is a tmux session with panes to migrate: what its name
+// claimed, and its panes.
 type migratingSession struct {
 	tmuxName string
-	own      claimed
+	claimed  claimed
 	panes    []migratingPane
 }
 
@@ -166,17 +167,17 @@ type migratingPane struct {
 }
 
 // NewPlan works out what migrating legacy writes, given hooks.json's keys.
-//   - Every tmux session's own name, its name up to " · " trimmed, is made
-//     a name Validate takes and reserved first, unless it is taken, folding
-//     case as a filesystem may: by Naming.Taken or an earlier session's. A
-//     name Validate refuses is made compatible: each character Refuses
-//     refuses becomes '-', a run of '-' that joins collapsing to one, a
-//     leading '-' or space is dropped, and a name too long is cut to fit.
-//     With nothing of it left, or a name Validate still refuses, such as a
-//     reserved word, the session takes a generated {project}-{nanoid}, by
-//     the minting rule, the project its first pane's dir's last element. A
-//     name taken keeps its stem, less any -<nanoid> it ends in, and takes a
-//     fresh nanoid, cut to fit and drawn again while taken. Each of a
+//   - Every tmux session's name, trimmed of surrounding whitespace, is
+//     made a name Validate takes and reserved first, unless it is taken,
+//     folding case as a filesystem may: by Naming.Taken or an earlier
+//     session's. A name Validate refuses is made compatible: each character
+//     Refuses refuses becomes '-', a run of '-' that joins collapsing to
+//     one, a leading '-' or space is dropped, and a name too long is cut to
+//     fit. With nothing of it left, or a name Validate still refuses, such
+//     as a reserved word, the session takes a generated {project}-{nanoid},
+//     by the minting rule, the project its first pane's dir's last element.
+//     A name taken keeps its stem, less any -<nanoid> it ends in, and takes
+//     a fresh nanoid, cut to fit and drawn again while taken. Each of a
 //     session's other panes then takes the first's name with the lowest free
 //     number above the last pane's, -2, -3 and so on, or a fresh nanoid on
 //     the first's stem once the number makes it too long.
@@ -201,7 +202,7 @@ func NewPlan(legacy Legacy, hookKeys []string, naming Naming) (Plan, error) {
 			plan.Skipped = append(plan.Skipped, SkippedSession{Name: s.Name, Why: s.empty()})
 			continue
 		}
-		m := migratingSession{tmuxName: s.Name, own: n.claim(ownName(s.Name))}
+		m := migratingSession{tmuxName: s.Name, claimed: n.claim(strings.TrimSpace(s.Name))}
 		for _, p := range saved {
 			m.panes = append(m.panes, migratingPane{savedPane: p, dir: naming.dirOf(p.pane.CWD)})
 		}

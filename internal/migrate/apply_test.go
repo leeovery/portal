@@ -42,7 +42,7 @@ var migratingBackup = `{
   "tokLan": {"on-resume": "claude --resume lantern"},
   "tokTd2": {"on-resume": {"command": "claude --resume tidepool", "resume": "eager", "nickname": "kept"}},
   "lantern": {"on-resume": "set by hand"},
-  "tidepool · flaky test:0.0": {"on-resume": "claude --resume coords"},
+  "tidepool/web · flaky test:0.0": {"on-resume": "claude --resume coords"},
   "tokGon": {"on-resume": "claude --resume gone"}
 }`
 
@@ -50,7 +50,7 @@ func newMigrating(t *testing.T) migrating {
 	t.Helper()
 	sessions := []v1Session{
 		session("lantern", pane(0, orchard).token("tokLan").scrollback("scrollback/pane-tokLan.bin")),
-		session("tidepool · flaky test",
+		session("tidepool/web · flaky test",
 			pane(0, orchard).scrollback("scrollback/tidepool___flaky_test-0b1c2d3e__0.0.bin"),
 			pane(1, orchard+"/web").token("tokTd2").scrollback("scrollback/gone.bin")),
 	}
@@ -109,8 +109,8 @@ func TestBuild(t *testing.T) {
 
 		want := []sessionindex.Entry{
 			{Name: "lantern", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "lantern"), Owed: true, ResumeLazy: true},
-			{Name: "tidepool", Label: "tidepool · flaky test", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "tidepool"), Owed: true, ResumeLazy: true},
-			{Name: "tidepool-2", Label: "tidepool · flaky test-2", Dir: orchard, Cwd: orchard + "/web", Owed: true, ResumeLazy: true},
+			{Name: "tidepool-web · flaky test", Label: "tidepool/web · flaky test", Dir: orchard, Cwd: orchard, ScrollbackFile: scrollbackFile(t, "tidepool-web · flaky test"), Owed: true, ResumeLazy: true},
+			{Name: "tidepool-web · flaky test-2", Label: "tidepool/web · flaky test-2", Dir: orchard, Cwd: orchard + "/web", Owed: true, ResumeLazy: true},
 		}
 		if got := readIndex(t, m.dir).Entries(); !slices.Equal(got, want) {
 			t.Errorf("entries = %+v\nwant %+v", got, want)
@@ -123,8 +123,8 @@ func TestBuild(t *testing.T) {
 
 		idx := readIndex(t, m.dir)
 		for name, source := range map[string]string{
-			"lantern":  "scrollback/pane-tokLan.bin",
-			"tidepool": "scrollback/tidepool___flaky_test-0b1c2d3e__0.0.bin",
+			"lantern":                   "scrollback/pane-tokLan.bin",
+			"tidepool-web · flaky test": "scrollback/tidepool___flaky_test-0b1c2d3e__0.0.bin",
 		} {
 			entry, _ := idx.Lookup(name)
 			path, err := state.ScrollbackPath(m.dir, entry)
@@ -144,7 +144,7 @@ func TestBuild(t *testing.T) {
 	t.Run("a pane whose scrollback file is missing gets an entry naming none, and nothing is copied for it", func(t *testing.T) {
 		m := newMigrating(t)
 		if missing := m.plan.Sessions[2].Transcript.Missing; !errors.Is(missing, fs.ErrNotExist) {
-			t.Fatalf("tidepool-2's transcript missing for %v, want an absent file", missing)
+			t.Fatalf("tidepool-web · flaky test-2's transcript missing for %v, want an absent file", missing)
 		}
 		m.build(t)
 
@@ -229,7 +229,7 @@ func TestBuild(t *testing.T) {
 	t.Run("an entry under a planned name that isn't migrate's is refused, its sessions.json unchanged", func(t *testing.T) {
 		m := newMigrating(t)
 		if _, err := sessionindex.Update(mkdir(t, m.dir), "cli", func(idx *sessionindex.Index) error {
-			return idx.SetLabel("tidepool", "made since the plan")
+			return idx.SetLabel("tidepool-web · flaky test", "made since the plan")
 		}); err != nil {
 			t.Fatalf("seed an entry: %v", err)
 		}
@@ -251,10 +251,10 @@ func TestRewriteHooks(t *testing.T) {
 		m.rewriteHooks(t)
 
 		after := rawHooks(t, m.hooksPath)
-		if got := slices.Sorted(maps.Keys(after)); !slices.Equal(got, []string{"lantern", "tidepool-2"}) {
+		if got := slices.Sorted(maps.Keys(after)); !slices.Equal(got, []string{"lantern", "tidepool-web · flaky test-2"}) {
 			t.Fatalf("keys = %v, want the two sessions' names alone", got)
 		}
-		for from, to := range map[string]string{"tokLan": "lantern", "tokTd2": "tidepool-2"} {
+		for from, to := range map[string]string{"tokLan": "lantern", "tokTd2": "tidepool-web · flaky test-2"} {
 			if got, want := compact(t, after[to]), compact(t, backup[from]); got != want {
 				t.Errorf("%s = %s, want %s as %s held it", to, got, want, from)
 			}

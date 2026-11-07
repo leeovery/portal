@@ -14,20 +14,9 @@ import (
 	"github.com/leeovery/portal/internal/session"
 )
 
-// labelSeparator divides a tmux session's name from the words its user added
-// after it.
-const labelSeparator = " · "
-
 // maxAttempts bounds the nanoids a name draws while the names it composes
 // are taken, as a mint's does.
 const maxAttempts = 10
-
-// ownName is a tmux session's own name: its name up to " · ", trimmed of
-// surrounding whitespace.
-func ownName(tmuxName string) string {
-	given, _, _ := strings.Cut(tmuxName, labelSeparator)
-	return strings.TrimSpace(given)
-}
 
 // withNumber is s for the first pane, and s with the pane's number for another.
 func withNumber(s string, number int) string {
@@ -37,7 +26,7 @@ func withNumber(s string, number int) string {
 	return fmt.Sprintf("%s-%d", s, number)
 }
 
-// name is a pane's planned name; how it differs from its tmux session's own
+// name is a pane's planned name; how it differs from its tmux session's
 // name, and why, in order, none when it doesn't; and its number: 1 for a
 // session's first pane, and for another the number its name carries, or
 // would have carried had it fit.
@@ -47,10 +36,10 @@ type name struct {
 	number  int
 }
 
-// claimed is what a tmux session's own name became before its panes are
-// named: the name the backend takes made of it, empty when nothing of it
-// makes one; how it was changed and why, or why nothing makes one; and
-// whether it was free, and so reserved.
+// claimed is what a tmux session's name, trimmed of surrounding whitespace,
+// became before its panes are named: the name the backend takes made of it,
+// empty when nothing of it makes one; how it was changed and why, or why
+// nothing makes one; and whether it was free, and so reserved.
 type claimed struct {
 	name     string
 	changed  []string
@@ -66,9 +55,10 @@ type namer struct {
 	taken    []string
 }
 
-// claim makes own a name the backend takes, and reserves it when it is free.
-func (n *namer) claim(own string) claimed {
-	made, changed, ok := n.compatible(own)
+// claim makes tmuxName a name the backend takes, and reserves it when it is
+// free.
+func (n *namer) claim(tmuxName string) claimed {
+	made, changed, ok := n.compatible(tmuxName)
 	if !ok {
 		return claimed{changed: changed}
 	}
@@ -79,17 +69,17 @@ func (n *namer) claim(own string) claimed {
 	return claimed{name: made, changed: changed, reserved: !held}
 }
 
-// compatible is own as a name the backend takes, and how it was changed and
+// compatible is given as a name the backend takes, and how it was changed and
 // why: as it is when the backend takes it; otherwise each character it
 // refuses becomes '-', a run of '-' that joins collapsing to one, then a '-'
 // or space it would start with is dropped, and a name too long is cut to
 // fit. With nothing left, or a name the backend still refuses, such as a
 // reserved word, ok is false and changed says why.
-func (n *namer) compatible(own string) (made string, changed []string, ok bool) {
-	if n.validate(own) == nil {
-		return own, nil, true
+func (n *namer) compatible(given string) (made string, changed []string, ok bool) {
+	if n.validate(given) == nil {
+		return given, nil, true
 	}
-	made, replaced := replaceRefused(own, n.refuses)
+	made, replaced := replaceRefused(given, n.refuses)
 	if len(replaced) > 0 {
 		changed = append(changed, replacedWhy(replaced))
 	}
@@ -178,7 +168,7 @@ func shortened(part string) string {
 	return strings.TrimRightFunc(part[:len(part)-size], isEdgeTrimmed)
 }
 
-// names names each pane of s: the first by the name its own name claimed,
+// names names each pane of s: the first by the name its tmux name claimed,
 // a fresh id on its stem when another holds it, or a generated name when
 // nothing of it makes one; each other by the first's with the lowest free
 // number above the last pane's, or a fresh id on the first's stem once the
@@ -201,16 +191,16 @@ func (n *namer) names(s migratingSession) ([]name, error) {
 
 // first is the name of s's first pane.
 func (n *namer) first(s migratingSession) (name, error) {
-	own := s.own
+	c := s.claimed
 	switch {
-	case own.name == "":
+	case c.name == "":
 		generated, err := n.generate(s.panes[0].dir)
-		return name{name: generated, changed: own.changed, number: 1}, err
-	case own.reserved:
-		return name{name: own.name, changed: own.changed, number: 1}, nil
+		return name{name: generated, changed: c.changed, number: 1}, err
+	case c.reserved:
+		return name{name: c.name, changed: c.changed, number: 1}, nil
 	}
-	fresh, err := n.fresh(own.name)
-	return name{name: fresh, changed: slices.Concat(own.changed, []string{fmt.Sprintf(takenCopy, own.name)}), number: 1}, err
+	fresh, err := n.fresh(c.name)
+	return name{name: fresh, changed: slices.Concat(c.changed, []string{fmt.Sprintf(takenCopy, c.name)}), number: 1}, err
 }
 
 // extra is first's name with the lowest free number from number on, or,

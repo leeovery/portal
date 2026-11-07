@@ -43,8 +43,9 @@ type fixtureSession struct {
 }
 
 // realisticSessions is thirty tmux sessions as the tmux version saved them.
-// Every name is invented. One session has two panes; one name is too long for
-// zmx; one is a live zmx session's already; one works outside any repository.
+// Every name is invented. One session has two panes; two names are too long
+// for zmx, one of them holding " · "; one is a live zmx session's already; one
+// works outside any repository.
 var realisticSessions = []fixtureSession{
 	{"orchard-pipeline-Hq7wNe · api review", "orchard-pipeline", []fixturePane{{"k3f9qz", byToken, tokenKey}, {"p8Lm2x", byToken, tokenKey}}},
 	{"lantern-9fKq2L", "lantern", []fixturePane{{"Tq4n8B", byToken, tokenKey}}},
@@ -200,27 +201,22 @@ func TestRealisticFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("each takes its tmux name up to ' · ', labelled with the whole of it", func(t *testing.T) {
+	t.Run("each takes its whole tmux name, storing no label", func(t *testing.T) {
 		for _, fixture := range realisticSessions {
 			got := byAddress[fixture.tmux+":0.0"]
 			if got.Changed != nil {
 				continue
 			}
-			given, _, topic := strings.Cut(fixture.tmux, " · ")
-			if got.Name != given {
-				t.Errorf("%q named %q, want %q", fixture.tmux, got.Name, given)
+			if got.Name != fixture.tmux {
+				t.Errorf("%q named %q, want it whole", fixture.tmux, got.Name)
 			}
-			wantLabel := ""
-			if topic {
-				wantLabel = fixture.tmux
-			}
-			if got.Label != wantLabel || got.LabelRefused != nil {
-				t.Errorf("%q labelled %q (refused: %v), want %q", fixture.tmux, got.Label, got.LabelRefused, wantLabel)
+			if got.Label != "" || got.LabelRefused != nil {
+				t.Errorf("%q labelled %q (refused: %v), want none", fixture.tmux, got.Label, got.LabelRefused)
 			}
 		}
 	})
 
-	t.Run("the name a live session holds takes a fresh id and the name too long is cut, each labelled with the tmux name", func(t *testing.T) {
+	t.Run("the name a live session holds takes a fresh id and each name too long is cut, each labelled with the tmux name", func(t *testing.T) {
 		var changed []string
 		for _, s := range plan.Sessions {
 			if s.Changed != nil {
@@ -229,6 +225,7 @@ func TestRealisticFixture(t *testing.T) {
 		}
 		want := []string{
 			"quarry-Pm4sT1 → quarry-Gen001: quarry-Pm4sT1 was taken, so it has a new id",
+			realisticSessions[28].tmux + " → basalt-Fn8qX1 · a topic long enough that the label alone would never fit i: too long, so it was cut to 74 characters",
 			realisticSessions[29].tmux + " → cinder-a-session-name-typed-out-by-hand-long-enough-to-overflow-zmx-sockets: too long, so it was cut to 75 characters",
 		}
 		if !slices.Equal(changed, want) {
@@ -238,11 +235,11 @@ func TestRealisticFixture(t *testing.T) {
 
 	t.Run("the two-pane session becomes <name> and <name>-2", func(t *testing.T) {
 		first, second := byAddress[realisticSessions[0].tmux+":0.0"], byAddress[realisticSessions[0].tmux+":0.1"]
-		if first.Name != "orchard-pipeline-Hq7wNe" || second.Name != "orchard-pipeline-Hq7wNe-2" {
+		if first.Name != realisticSessions[0].tmux || second.Name != realisticSessions[0].tmux+"-2" {
 			t.Errorf("names %q and %q", first.Name, second.Name)
 		}
-		if second.Label != realisticSessions[0].tmux+"-2" {
-			t.Errorf("second label %q", second.Label)
+		if second.Label != "" {
+			t.Errorf("second label %q, want none", second.Label)
 		}
 	})
 
