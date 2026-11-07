@@ -315,18 +315,29 @@ func TestCheckPoisoned(t *testing.T) {
 }
 
 func TestSessionEnv(t *testing.T) {
-	t.Run("it passes only PATH, TERM, USER, TMPDIR, TMUX_TMPDIR and the locale, with its own HOME and SHELL", func(t *testing.T) {
+	t.Run("it passes only PATH, USER, TMPDIR, TMUX_TMPDIR and the locale, with its own HOME, SHELL and TERM", func(t *testing.T) {
 		environ := []string{
-			"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C",
+			"PATH=/usr/bin", "TERM=xterm-ghostty", "TERMINFO=/Applications/Ghostty.app/Contents/Resources/terminfo",
+			"USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C",
 			"HOME=/Users/lee", "SHELL=/bin/zsh", "ZMX_DIR=/Users/lee/.local/state/zmx", "ZMX_SESSION=live",
 			"ZMX_SESSION_PREFIX=pre-", "TMUX=/tmp/tmux", "SSH_AUTH_SOCK=/agent", "LCX=no",
 		}
 
 		got := sessionEnv(environ, "/tmp/home")
 
-		want := []string{"PATH=/usr/bin", "TERM=xterm-ghostty", "USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C", "HOME=/tmp/home", "SHELL=/bin/sh"}
+		want := []string{"PATH=/usr/bin", "USER=lee", "TMPDIR=/var/t", "TMUX_TMPDIR=" + PoisonedTmpdir, "LANG=en_GB.UTF-8", "LC_ALL=C", "HOME=/tmp/home", "SHELL=/bin/sh", "TERM=xterm-256color"}
 		if !slices.Equal(got, want) {
 			t.Errorf("sessionEnv = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("it gives a session a TERM every macOS terminfo carries, whatever the caller's", func(t *testing.T) {
+		for _, term := range [][]string{nil, {"TERM=dumb"}, {"TERM="}, {"TERM=xterm-ghostty"}} {
+			got := sessionEnv(term, "/tmp/home")
+
+			if want := []string{"HOME=/tmp/home", "SHELL=/bin/sh", "TERM=xterm-256color"}; !slices.Equal(got, want) {
+				t.Errorf("sessionEnv(%q) = %q, want %q", term, got, want)
+			}
 		}
 	})
 }
