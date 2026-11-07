@@ -373,7 +373,50 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 		}
 	})
 
-	t.Run("a redraw inside an arrival hands the arrival on", func(t *testing.T) {
+	// zmx's SIGWINCH on every attach opens the settle window, so a key typed
+	// as a session is opened can still be arriving when the redraw comes due.
+	t.Run("a redraw that comes due inside an arrival waits for it, and a key alone still answers", func(t *testing.T) {
+		t.Run("Enter", func(t *testing.T) {
+			payload := drawnPayload()
+			h := startArrivals(t, payload)
+			h.probe.lookup = foundHook(payload.Command)
+
+			h.arrive("\r")
+			h.resizeSettled()
+			h.quiet()
+
+			h.answered()
+			assertHookHandOff(t, h.probe, payload.Command)
+		})
+		t.Run("d", func(t *testing.T) {
+			payload := drawnPayload()
+			h := startArrivals(t, payload)
+
+			h.arrive("d")
+			h.resizeSettled()
+			h.quiet()
+
+			h.answered()
+			assertHandOff(t, h.probe, opened(payload))
+			assertNoStateTouched(t, h.probe)
+		})
+		t.Run("Escape, then the redraw", func(t *testing.T) {
+			payload := drawnPayload()
+			h := startArrivals(t, payload)
+
+			h.arrive("\x1b")
+			h.resizeSettled()
+			h.quiet()
+
+			h.answered()
+			if h.probe.backCalls != 1 {
+				t.Errorf("BackToPicker called %d times, want 1", h.probe.backCalls)
+			}
+			assertHandOff(t, h.probe, payload)
+		})
+	})
+
+	t.Run("a redraw that comes due inside a paste answers nothing, and redraws once it ends", func(t *testing.T) {
 		for _, tc := range []struct {
 			name     string
 			arriving bool
@@ -387,12 +430,13 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 				h := startArrivals(t, start)
 
 				h.arrive("echo o")
-				h.sizes.deliver(h.winch)
-				h.awaitSettle() <- time.Now()
+				h.resizeSettled()
+				h.arrive("ne\r")
+				h.quiet()
 
 				h.answered()
 				want := start
-				want.InputArriving = true
+				want.InputArriving = false
 				assertHandOff(t, h.probe, want)
 				assertNoStateTouched(t, h.probe)
 			})
@@ -414,6 +458,19 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 		want.InputArriving = false
 		assertHandOff(t, h.probe, want)
 	})
+}
+
+// resizeSettled delivers a size change and elapses the settle window it opens,
+// returning once the wait has taken the window's end, and so before any
+// answer to the listen in flight.
+func (h *arrivalHarness) resizeSettled() {
+	h.t.Helper()
+	h.sizes.deliver(h.winch)
+	timer := h.awaitSettle()
+	timer <- time.Now()
+	if !harnesstest.PollUntil(h.t, resumeArrivalTestBudget, time.Millisecond, func() bool { return len(timer) == 0 }) {
+		h.t.Fatal("the wait never took the settle window's end")
+	}
 }
 
 func (h *arrivalHarness) awaitSettle() chan time.Time {

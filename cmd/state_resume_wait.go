@@ -198,9 +198,10 @@ func (a *resumeArrival) end() (key byte, alone bool) {
 }
 
 // The pending redraw dies with the process image a dispatched key execs, so a
-// key answered inside a settle window cancels nothing. A redraw inside an
-// arrival hands the arrival to the next waiter, so the rest of it answers
-// nothing there either.
+// key answered inside a settle window cancels nothing. A redraw that comes due
+// inside an arrival waits for the arrival to end and be judged: zmx's SIGWINCH
+// on every attach opens the window, so a key typed as the session is opened
+// may still be arriving as it closes, and a redraw then would drop it.
 func resumeWaitLoop(cfg resumeWaitConfig) error {
 	keys := resumeKeysFor(cfg.Screen)
 	reader := startResumeReader(cfg.In, cfg.AwaitInput)
@@ -210,6 +211,7 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 	// Only the window start-up opened compares the size before it redraws: a
 	// SIGWINCH may be zmx attaching a client at an unchanged size.
 	signalled := false
+	redrawDue := false
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	cfg.InputArriving = false
 	outstanding := false
@@ -225,6 +227,9 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			if read.quiet {
 				if ended, err := keys.answer(cfg, &arrival); ended {
 					return err
+				}
+				if redrawDue {
+					return resumeRedraw(cfg)
 				}
 				continue
 			}
@@ -249,7 +254,10 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			if !signalled && resumeSizeUnchanged(cfg) {
 				continue
 			}
-			cfg.InputArriving = arrival.open()
+			if arrival.open() {
+				redrawDue = true
+				continue
+			}
 			return resumeRedraw(cfg)
 		}
 	}

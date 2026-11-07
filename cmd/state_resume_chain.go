@@ -60,8 +60,8 @@ type resumeChainPayload struct {
 	DropInput bool
 
 	// InputArriving tells a waiter its session was handed over while input
-	// was still arriving, so what arrives first belongs to that input and
-	// answers nothing.
+	// was still arriving, as a draw whose input drop failed hands it over, so
+	// what arrives first belongs to that input and answers nothing.
 	InputArriving bool
 }
 

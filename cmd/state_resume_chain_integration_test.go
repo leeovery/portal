@@ -78,8 +78,8 @@ func (w *waitingWorld) awaitPanel(t *testing.T) {
 }
 
 // awaitWaiterAt waits for a waiter on the session to start at cols by rows,
-// as the log's process start records it: a key typed while the redraw a
-// resize asks for is pending is dropped with the panel it was typed to.
+// as the log's process start records it: the redraw the attach asked for has
+// landed, so the session's tty is at the terminal's size.
 func (w *waitingWorld) awaitWaiterAt(t *testing.T, cols, rows int) {
 	t.Helper()
 	size := "--width " + strconv.Itoa(cols) + " --height " + strconv.Itoa(rows)
