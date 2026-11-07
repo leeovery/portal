@@ -58,8 +58,8 @@ type Deps struct {
 	// failed to do what was asked.
 	Flash string
 	// KillAsk is the session the kill key asked to kill from inside it: the
-	// picker opens on its kill prompt once its row is listed, which Enter
-	// answers by attaching it again. Keys typed before then are dropped.
+	// picker opens on its kill prompt once its row is listed, whose Esc
+	// attaches it again. Keys typed before then are dropped.
 	KillAsk string
 	// AskedKiller kills on y at the prompt KillAsk opens; without one, no
 	// prompt opens.
