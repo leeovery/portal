@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
 )
@@ -78,36 +80,57 @@ func TestTaken_Opens(t *testing.T) {
 		}
 	})
 
-	t.Run("saying where the session went, and offering its three keys", func(t *testing.T) {
+	t.Run("titled, naming the session, saying where it went, and offering its three keys", func(t *testing.T) {
 		m := takenModel(t, takenOverSSHAsk, takenSessions)
 
 		view := ansi.Strip(m.View().Content)
-		for _, want := range []string{"release checklist is open on another device", "(SSH from 192.168.1.20)", "⏎ take it back   space watch   esc picker"} {
-			if !strings.Contains(view, want) {
-				t.Errorf("the frame shows no %q:\n%s", want, view)
-			}
+		want := []string{"⇄ Open on another device", "release checklist", "", "Taken by SSH from 192.168.1.20.", "⏎ take it back   space watch   esc picker"}
+		if rows := modalRows(view); !slices.Equal(rows, want) {
+			t.Errorf("the modal reads %q, want %q", rows, want)
 		}
 		if strings.Contains(view, "alpha-a1b2c3") {
 			t.Errorf("the frame shows the session list behind the modal:\n%s", view)
 		}
 	})
 
-	t.Run("saying only that it is open on another device when where is unknown", func(t *testing.T) {
+	t.Run("naming the session alone when where it went is unknown", func(t *testing.T) {
 		m := takenModel(t, Taken{Session: "alpha-a1b2c3"}, takenSessions)
 
-		view := ansi.Strip(m.View().Content)
-		if !strings.Contains(view, "alpha-a1b2c3 is open on another device") || strings.Contains(view, "(") {
-			t.Errorf("the frame reads, want the first line alone:\n%s", view)
+		rows := modalRows(ansi.Strip(m.View().Content))
+		want := []string{"⇄ Open on another device", "alpha-a1b2c3", "⏎ take it back   space watch   esc picker"}
+		if !slices.Equal(rows, want) {
+			t.Errorf("the modal reads %q, want %q", rows, want)
 		}
 	})
 
-	t.Run("in no danger colour", func(t *testing.T) {
+	t.Run("titled as the help modal is, the session in the accent, bold, where it went muted, and nothing in a danger colour", func(t *testing.T) {
 		th := testDarkTheme(t)
 		danger := headerStyle(th.StateDestructive, th, false).Render("x")
-		dangerSGR := danger[:strings.Index(danger, "x")]
 
-		if frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "SSH from 192.168.1.20", 120, 40, th, false); strings.Contains(frame, dangerSGR) {
+		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "SSH from 192.168.1.20", 120, 40, th, false)
+
+		if strings.Contains(frame, danger[:strings.Index(danger, "x")]) {
 			t.Error("the modal paints in state.destructive")
+		}
+		if title := modalTitle(takenTitleGlyph, takenTitle, th, false); !strings.Contains(frame, title) {
+			t.Error("the title is not drawn as the help modal draws its own")
+		}
+		if name := headerStyle(th.AccentPrimary, th, false).Bold(true).Render("bravo-d4e5f6"); !strings.Contains(frame, name) {
+			t.Error("the session's name is not bold in accent.primary")
+		}
+		if by := headerStyle(th.TextMuted, th, false).Render("Taken by SSH from 192.168.1.20."); !strings.Contains(frame, by) {
+			t.Error("where the session went is not in text.muted")
+		}
+	})
+
+	t.Run("under NO_COLOR, the title's glyph and bold still carry it", func(t *testing.T) {
+		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "", 120, 40, testDarkTheme(t), true)
+
+		bold := lipgloss.NewStyle().Bold(true)
+		for _, want := range []string{bold.Render("⇄"), bold.Render("Open on another device"), bold.Render("bravo-d4e5f6")} {
+			if !strings.Contains(frame, want) {
+				t.Errorf("the colourless frame holds no %q", want)
+			}
 		}
 	})
 
@@ -124,6 +147,20 @@ func TestTaken_Opens(t *testing.T) {
 			t.Errorf("modal = %v, want none", m.modal)
 		}
 	})
+}
+
+// modalRows is the text of each row inside the modal frame shows, its
+// dividers left out.
+func modalRows(frame string) []string {
+	var rows []string
+	for line := range strings.SplitSeq(frame, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "│") {
+			continue
+		}
+		rows = append(rows, strings.TrimSpace(strings.Trim(line, "│")))
+	}
+	return rows
 }
 
 func TestTaken_Keys(t *testing.T) {

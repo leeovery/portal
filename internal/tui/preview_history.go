@@ -38,13 +38,29 @@ func newPreviewHistory(reader HistoryReader) previewHistory {
 	return previewHistory{reader: reader, ceiling: previewHistoryCeiling}
 }
 
-// previewBodyMsg carries a preview's body back from its read. Gen is the
-// open it was read for, so a body that lands after the user has stepped on
-// or left is dropped rather than drawn over the session now showing.
+// previewBodyMsg carries a preview's body back from its read, and what kind
+// of body it is. Gen is the open it was read for, so a body that lands after
+// the user has stepped on or left is dropped rather than drawn over the
+// session now showing.
 type previewBodyMsg struct {
 	gen  uint64
 	body string
+	kind bodyKind
 }
+
+// bodyKind is what a read found.
+type bodyKind int
+
+const (
+	// bodyRead is the session's screen and history, or the transcript a
+	// waiting session previews.
+	bodyRead bodyKind = iota
+	// bodyGone is the line saying the session is gone.
+	bodyGone
+	// bodyPassing is a line saying why there is no body, for a reason that
+	// may pass: the session not answering in time, or its history unreadable.
+	bodyPassing
+)
 
 // PreviewRefreshEvery is how long an open preview shows a body before it
 // reads its session again, so it shows the session live.
@@ -72,20 +88,21 @@ func previewTick(gen uint64, every time.Duration) tea.Cmd {
 // close ends it.
 func (h previewHistory) read(open context.Context, session string, gen uint64) tea.Cmd {
 	return func() tea.Msg {
-		body, ok := h.body(open, session)
+		body, kind, ok := h.body(open, session)
 		if !ok {
 			return nil
 		}
-		return previewBodyMsg{gen: gen, body: body}
+		return previewBodyMsg{gen: gen, body: body, kind: kind}
 	}
 }
 
-// body is the preview body for session: its whole history, drawn, or a line
-// saying why there is none. ok is false once open has ended, before the
-// history is dialled or, if it ends during the read, drawn.
-func (h previewHistory) body(open context.Context, session string) (body string, ok bool) {
+// body is the preview body for session, and its kind: its whole history,
+// drawn, or a line saying why there is none. ok is false once open has
+// ended, before the history is dialled or, if it ends during the read,
+// drawn.
+func (h previewHistory) body(open context.Context, session string) (body string, kind bodyKind, ok bool) {
 	if open.Err() != nil {
-		return "", false
+		return "", 0, false
 	}
 	ctx, cancel := context.WithTimeoutCause(open, h.ceiling,
 		fmt.Errorf("preview read got no answer in %s: %w", h.ceiling, backend.ErrTimeout))
@@ -94,14 +111,14 @@ func (h previewHistory) body(open context.Context, session string) (body string,
 	vt, err := h.reader.History(ctx, session, 0)
 	switch {
 	case open.Err() != nil:
-		return "", false
+		return "", 0, false
 	case err == nil:
-		return renderHistory(vt), true
+		return renderHistory(vt), bodyRead, true
 	case errors.Is(err, backend.ErrNoSuchSession):
-		return previewSessionGone, true
+		return previewSessionGone, bodyGone, true
 	case errors.Is(err, backend.ErrTimeout):
-		return previewNotAnswering, true
+		return previewNotAnswering, bodyPassing, true
 	default:
-		return previewHistoryUnavailable, true
+		return previewHistoryUnavailable, bodyPassing, true
 	}
 }

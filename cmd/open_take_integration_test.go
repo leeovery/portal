@@ -14,8 +14,12 @@ import (
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
-// takenScreen is on the screen an attach another terminal took lands on.
-const takenScreen = " is open on another device"
+// takenTitle and takenBy are on the screen an attach another terminal took
+// lands on: its title, and the line saying where the session went.
+const (
+	takenTitle = "Open on another device"
+	takenBy    = "Taken by "
+)
 
 // The environments a take reads where the session went from: over SSH, and
 // in Ghostty on this Mac, an SSH_CONNECTION the developer's own shell may
@@ -64,10 +68,19 @@ func (w *portalWorld) awaitReportedSize(t *testing.T, session, want string) {
 // another terminal took session, and where it went when by is not empty.
 func (p *portalTerm) awaitTaken(t *testing.T, mark int, session, by string) {
 	t.Helper()
-	p.awaitAfter(t, mark, session+takenScreen)
+	p.awaitAfter(t, mark, takenTitle)
+	p.awaitAfter(t, mark, session)
 	if by != "" {
-		p.awaitAfter(t, mark, "("+by+")")
+		p.awaitAfter(t, mark, takenBy+by+".")
 	}
+}
+
+// opener is a Portal opening a session, the size its terminal is and where
+// a take reads it is.
+type opener struct {
+	p     *portalTerm
+	size  string
+	where string
 }
 
 func TestPortalOpenTakesTheSessionAgainstZmx(t *testing.T) {
@@ -122,6 +135,35 @@ func TestPortalOpenTakesTheSessionAgainstZmx(t *testing.T) {
 		}
 	})
 
+	t.Run("two Portals opening a session at once end with one attached, the session sized for it, and the other on the screen saying where it went", func(t *testing.T) {
+		w := newPortalWorld(t, binary)
+		w.createRunning(t, "alpha", sizeReporter)
+		if code := w.portal(t, "list").exitCode(t); code != 0 {
+			t.Fatalf("the bootstrap's list exited %d, want 0", code)
+		}
+
+		a := opener{w.portalWith(t, pty.Winsize{Rows: 40, Cols: 120}, inGhostty, "open", "alpha"), "40x120", "Ghostty on this Mac"}
+		b := opener{w.portalWith(t, pty.Winsize{Rows: 30, Cols: 100}, overSSH, "open", "alpha"), "30x100", "SSH from 192.0.2.20"}
+
+		winner, loser := a, b
+		if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+			if strings.Contains(a.p.shownSince(0), takenTitle) {
+				winner, loser = b, a
+				return true
+			}
+			return strings.Contains(b.p.shownSince(0), takenTitle)
+		}) {
+			t.Fatalf("neither terminal shows the taken screen; the first shows:\n%s\nthe second:\n%s", a.p.shownSince(0), b.p.shownSince(0))
+		}
+		loser.p.awaitTaken(t, 0, "alpha", winner.where)
+		winner.p.awaitLeading(t, "alpha")
+		w.awaitClients(t, "alpha", 1)
+		w.awaitReportedSize(t, "alpha", winner.size)
+		if shown := winner.p.shownSince(0); strings.Contains(shown, takenTitle) {
+			t.Errorf("the attached Portal was taken from too:\n%s", shown)
+		}
+	})
+
 	t.Run("a raw zmx client is detached by the take, back at its shell", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		w.create(t, "alpha")
@@ -151,7 +193,7 @@ func TestPortalOpenTakesTheSessionAgainstZmx(t *testing.T) {
 		second.echoes(t, 6, 7)
 	})
 
-	t.Run("a detach from elsewhere with no take lands on the screen saying only another device has it, and Enter takes it back", func(t *testing.T) {
+	t.Run("a detach from elsewhere with no take, leaving no terminal on the session, exits to the shell", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
 		p, name := w.openProject(t)
 		mark := p.mark()
@@ -160,12 +202,14 @@ func TestPortalOpenTakesTheSessionAgainstZmx(t *testing.T) {
 			t.Fatalf("detach %s: %v", name, err)
 		}
 
-		p.awaitTaken(t, mark, name, "")
-		if shown := p.shownSince(mark); strings.Contains(shown, "(SSH from") || strings.Contains(shown, "on this Mac)") {
-			t.Errorf("the screen says where a detach with no take went:\n%s", shown)
+		if code := p.exitCode(t); code != 0 {
+			t.Errorf("portal exited %d, want 0", code)
 		}
-		p.typeIn(t, "\r")
-		p.awaitLeading(t, name)
-		p.echoes(t, 6, 7)
+		if shown := p.shownSince(mark); strings.Contains(shown, takenTitle) || strings.Contains(shown, pickerMark) {
+			t.Errorf("a detach no terminal took landed on a screen:\n%s", shown)
+		}
+		if !w.alive(t, name) {
+			t.Error("the session ended")
+		}
 	})
 }

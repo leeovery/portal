@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backendtest"
 )
 
@@ -142,41 +143,155 @@ func TestPreviewRefresh(t *testing.T) {
 	})
 }
 
-func TestPreviewRefresh_HoldsTheScroll(t *testing.T) {
-	// lines is a history of n numbered lines, ending on its last.
-	lines := func(n int) string {
-		rows := make([]string, n)
-		for i := range rows {
-			rows[i] = fmt.Sprintf("line %d", i+1)
-		}
-		return strings.Join(rows, "\r\n")
+// numbered is a history of the numbered lines from first to last.
+func numbered(first, last int) string {
+	rows := make([]string, 0, last-first+1)
+	for i := first; i <= last; i++ {
+		rows = append(rows, fmt.Sprintf("line %d", i))
 	}
-	refreshed := func(t *testing.T, m Model, history *backendtest.Fake, tick tea.Cmd, vt string) Model {
-		t.Helper()
-		history.SetHistory("alpha", []byte(vt))
-		updated, read := m.Update(tickOf(t, tick))
-		return asModel(t, dropCmd(asModel(t, updated).Update(read())))
-	}
+	return strings.Join(rows, "\r\n")
+}
 
-	t.Run("a preview scrolled up stays at the row the user moved to", func(t *testing.T) {
-		m, history, tick := refreshingPreview(t, lines(200))
-		m, _ = pressKeys(m, tea.KeyPressMsg{Code: 'k', Text: "k"}, tea.KeyPressMsg{Code: 'k', Text: "k"}, tea.KeyPressMsg{Code: 'k', Text: "k"})
+// refreshed is m once its tick's read lands, the session's history now vt.
+func refreshed(t *testing.T, m Model, history *backendtest.Fake, tick tea.Cmd, vt string) (Model, tea.Cmd) {
+	t.Helper()
+	history.SetHistory("alpha", []byte(vt))
+	updated, read := m.Update(tickOf(t, tick))
+	updated, next := asModel(t, updated).Update(read())
+	return asModel(t, updated), next
+}
+
+// scrolledUp is m with its preview scrolled up n rows.
+func scrolledUp(m Model, n int) Model {
+	for range n {
+		m, _ = pressKeys(m, tea.KeyPressMsg{Code: 'k', Text: "k"})
+	}
+	return m
+}
+
+// topRow is the row at the top of the preview's view.
+func topRow(m Model) string {
+	return previewBody(m.preview)[0]
+}
+
+func TestPreviewRefresh_HoldsTheScroll(t *testing.T) {
+	t.Run("a preview scrolled up stays on the rows the user moved to", func(t *testing.T) {
+		m, history, tick := refreshingPreview(t, numbered(1, 200))
+		m = scrolledUp(m, 3)
+		top, offset := topRow(m), m.preview.viewport.YOffset()
+
+		m, _ = refreshed(t, m, history, tick, numbered(1, 205))
+
+		if got := m.preview.viewport.YOffset(); got != offset || topRow(m) != top {
+			t.Errorf("offset %d showing %q after the refresh, want %d showing %q", got, topRow(m), offset, top)
+		}
+	})
+
+	t.Run("a history at its cap, losing rows from its top as it grows, keeps the same rows in view", func(t *testing.T) {
+		m, history, tick := refreshingPreview(t, numbered(1, 200))
+		m = scrolledUp(m, 3)
+		top := topRow(m)
+
+		m, _ = refreshed(t, m, history, tick, numbered(6, 205))
+
+		if got := topRow(m); got != top {
+			t.Errorf("the view shows %q at its top after the refresh, want the %q the user was reading", got, top)
+		}
+	})
+
+	t.Run("rows no longer in the history leave the view at the row it was", func(t *testing.T) {
+		m, history, tick := refreshingPreview(t, numbered(1, 200))
+		m = scrolledUp(m, 3)
 		offset := m.preview.viewport.YOffset()
 
-		m = refreshed(t, m, history, tick, lines(205))
+		m, _ = refreshed(t, m, history, tick, strings.ReplaceAll(numbered(1, 200), "line", "row"))
 
 		if got := m.preview.viewport.YOffset(); got != offset {
-			t.Errorf("offset = %d after the refresh, want the %d the user scrolled to", got, offset)
+			t.Errorf("offset = %d, want the %d it was", got, offset)
 		}
 	})
 
 	t.Run("a preview at its bottom follows the session's new bottom", func(t *testing.T) {
-		m, history, tick := refreshingPreview(t, lines(200))
+		m, history, tick := refreshingPreview(t, numbered(1, 200))
 
-		m = refreshed(t, m, history, tick, lines(205))
+		m, _ = refreshed(t, m, history, tick, numbered(1, 205))
 
 		if !m.preview.viewport.AtBottom() || lastBodyRow(m.preview) != "line 205" {
 			t.Errorf("at bottom %v, last row %q; want the new bottom", m.preview.viewport.AtBottom(), lastBodyRow(m.preview))
+		}
+	})
+}
+
+func TestPreviewRefresh_FailedReads(t *testing.T) {
+	for _, err := range []error{backend.ErrTimeout, backend.ErrHistoryUnavailable} {
+		t.Run("a read failing with "+err.Error()+" keeps the body and the place, and the refresh goes on", func(t *testing.T) {
+			m, history, tick := refreshingPreview(t, numbered(1, 200))
+			m = scrolledUp(m, 3)
+			top, offset := topRow(m), m.preview.viewport.YOffset()
+			history.Fail(backendtest.OpHistory, err)
+
+			m, next := refreshed(t, m, history, tick, numbered(1, 205))
+
+			if got := m.preview.viewport.YOffset(); got != offset || topRow(m) != top {
+				t.Errorf("offset %d showing %q, want the body kept at %d showing %q", got, topRow(m), offset, top)
+			}
+			tickOf(t, next)
+		})
+	}
+
+	t.Run("a read failing before any body came says why", func(t *testing.T) {
+		sessions := []Session{{Name: "alpha"}}
+		history := historyFor(t, "hi", sessions)
+		history.Fail(backendtest.OpHistory, backend.ErrTimeout)
+		m := modelWithSeams(t, sessions, history)
+		m.previewRefresh = refreshEvery
+
+		m, read := pressKeys(m, keySpaceMsg())
+		m = landRead(t, m, read)
+
+		if got := lastBodyRow(m.preview); got != previewNotAnswering {
+			t.Errorf("body = %q, want %q", got, previewNotAnswering)
+		}
+	})
+
+	t.Run("a body after failed reads replaces the line saying why", func(t *testing.T) {
+		sessions := []Session{{Name: "alpha"}}
+		history := historyFor(t, "hi", sessions)
+		history.Fail(backendtest.OpHistory, backend.ErrTimeout)
+		m := modelWithSeams(t, sessions, history)
+		m.previewRefresh = refreshEvery
+		m, read := pressKeys(m, keySpaceMsg())
+		updated, tick := m.Update(read())
+		history.Fail(backendtest.OpHistory, nil)
+
+		m, _ = refreshed(t, asModel(t, updated), history, tick, "back")
+
+		if got := lastBodyRow(m.preview); got != "back" {
+			t.Errorf("body = %q, want the session's own", got)
+		}
+	})
+}
+
+func TestPreviewRefresh_ASessionListedNotAnswering(t *testing.T) {
+	t.Run("ticks with nothing dialled, and comes alive once it answers", func(t *testing.T) {
+		sessions := []Session{{Name: "alpha", NotAnswering: true}}
+		history := historyFor(t, "awake", sessions)
+		m := modelWithSeams(t, sessions, history)
+		m.previewRefresh = refreshEvery
+
+		m, tick := pressKeys(m, keySpaceMsg())
+		if got := lastBodyRow(m.preview); got != previewNotAnswering {
+			t.Fatalf("body = %q at once, want %q", got, previewNotAnswering)
+		}
+		if calls := historyCalls(history); len(calls) != 0 {
+			t.Errorf("History read %v as the preview opened, want none", calls)
+		}
+
+		updated, read := m.Update(tickOf(t, tick))
+		m = landRead(t, asModel(t, updated), read)
+
+		if got := lastBodyRow(m.preview); got != "awake" {
+			t.Errorf("body = %q after the tick, want the session's own", got)
 		}
 	})
 }

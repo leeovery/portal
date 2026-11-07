@@ -33,7 +33,7 @@ func openedPreview(t *testing.T, session string, history HistoryReader, width, h
 // bodyOf is h's body for session, read for an open that never ends.
 func bodyOf(t *testing.T, h previewHistory, session string) string {
 	t.Helper()
-	body, ok := h.body(context.Background(), session)
+	body, _, ok := h.body(context.Background(), session)
 	if !ok {
 		t.Fatalf("body(%q) ok=false for an open that never ended", session)
 	}

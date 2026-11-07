@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/runnerreg"
 	"github.com/leeovery/portal/internal/runnertoken"
@@ -241,6 +242,52 @@ func TestTakeRecord(t *testing.T) {
 		}
 		if exists(t, r.TakePath()) {
 			t.Error("a read-only registry wrote the record")
+		}
+	})
+}
+
+func TestLockTake(t *testing.T) {
+	t.Run("a take holding the lock holds off the next until it releases", func(t *testing.T) {
+		r := runnerreg.New(stateDir(t))
+		release, err := r.LockTake(t.Context(), time.Second)
+		if err != nil {
+			t.Fatalf("LockTake: %v", err)
+		}
+
+		if _, err := r.LockTake(t.Context(), 30*time.Millisecond); !errors.Is(err, fileutil.ErrLockTimedOut) {
+			t.Errorf("LockTake while held = %v, want it timed out", err)
+		}
+		release()
+		release()
+		next, err := r.LockTake(t.Context(), time.Second)
+		if err != nil {
+			t.Fatalf("LockTake once released: %v", err)
+		}
+		next()
+	})
+
+	t.Run("the lock is no runner's, and a runner registering leaves it", func(t *testing.T) {
+		asAnotherProcess(t)
+		r := runnerreg.New(stateDir(t))
+		release, err := r.LockTake(t.Context(), time.Second)
+		if err != nil {
+			t.Fatalf("LockTake: %v", err)
+		}
+		defer release()
+
+		register(t, r, "tok123", "blog-c3d4", &handler{})
+
+		if _, err := r.Take(t.Context(), "api-x7Kd9a", "Ghostty on this Mac"); !errors.Is(err, runnertoken.ErrNoRunner) {
+			t.Errorf("Take = %v, want no runner on the session", err)
+		}
+		if !exists(t, r.TakeLockPath()) {
+			t.Error("the lock is gone")
+		}
+	})
+
+	t.Run("a read-only registry takes nothing", func(t *testing.T) {
+		if _, err := runnerreg.New(stateDir(t)).ReadOnly().LockTake(t.Context(), time.Second); err == nil {
+			t.Error("LockTake = nil, want the read-only registry's refusal")
 		}
 	})
 }

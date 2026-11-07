@@ -19,8 +19,11 @@ const (
 )
 
 type destructiveConfirmSpec struct {
-	// title heads the confirmation in its own compartment; empty, it has none.
+	// title heads the confirmation in its own compartment, drawn as a
+	// destructive act's title; header, a rendered row, heads it there
+	// instead, for a confirmation that destroys nothing.
 	title      string
+	header     string
 	targetName string
 	// Pre-rendered rows standing in for the single name row, for a target that
 	// does not fit one. Empty leaves the name row in place.
@@ -48,8 +51,7 @@ func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colou
 // destructiveConfirmLayout is the framed confirmation as a modal fits it: its
 // title and key hints hold still, and its body scrolls.
 func destructiveConfirmLayout(spec destructiveConfirmSpec, th theme.Theme, colourless bool) panelLayout {
-	compartments := destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless)
-	return panelLayout{compartments: compartments, head: len(compartments) - 2, foot: 1}
+	return panelLayout{compartments: destructiveConfirmCompartments(spec, destructiveBodyWidth, th, colourless), head: 1, foot: 1}
 }
 
 // The confirmation's parts, so a caller that cannot afford the frame stacks the
@@ -57,13 +59,13 @@ func destructiveConfirmLayout(spec destructiveConfirmSpec, th theme.Theme, colou
 // wrapWidth is the width the consequence is wrapped at: the framed path passes
 // the panel's own, a pane passes its own.
 func destructiveConfirmCompartments(spec destructiveConfirmSpec, wrapWidth int, th theme.Theme, colourless bool) [][]string {
+	header := spec.header
+	if header == "" {
+		header = destructiveHeaderRow(spec.title, th, colourless)
+	}
 	body := destructiveBodyRows(spec, wrapWidth, th, colourless)
 	footer := []string{destructiveFooterRow(spec, th, colourless)}
-	if spec.title == "" {
-		return [][]string{body, footer}
-	}
-	header := []string{destructiveHeaderRow(spec.title, th, colourless)}
-	return [][]string{header, body, footer}
+	return [][]string{{header}, body, footer}
 }
 
 // Glyph + bold carry the destructive signal under NO_COLOR, where the hue drops.

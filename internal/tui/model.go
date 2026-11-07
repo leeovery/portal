@@ -1613,7 +1613,8 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 
 // openSessionPreview opens the preview on s with its body still to come, and
 // returns the read that brings it. A session the listing already found not
-// answering says so at once, with nothing dialled. ok is false, and nothing
+// answering says so at once, with nothing dialled until the refresh's first
+// tick, so the preview comes alive once it answers. ok is false, and nothing
 // opens, when no history is wired.
 func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	if m.history.reader == nil {
@@ -1621,11 +1622,12 @@ func (m *Model) openSessionPreview(s Session) (cmd tea.Cmd, ok bool) {
 	}
 	m.endRead()
 	m.previewGen++
+	m.previewOpen, m.endPreviewRead = context.WithCancel(context.Background())
 	body := previewLoading
 	if s.NotAnswering {
 		body = previewNotAnswering
+		cmd = previewTick(m.previewGen, m.previewRefresh)
 	} else {
-		m.previewOpen, m.endPreviewRead = context.WithCancel(context.Background())
 		cmd = m.previewRead(m.previewOpen, s.Name, m.previewGen)
 	}
 	m.preview = NewPreviewModel(s, body, m.contentWidth(), m.contentHeight())
@@ -2067,7 +2069,7 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if m.activePage != pagePreview || msg.gen != m.previewGen {
 			return m, nil
 		}
-		m.preview.setBody(msg.body)
+		m.preview.land(msg.body, msg.kind)
 		return m, previewTick(msg.gen, m.previewRefresh)
 	case previewTickMsg:
 		if m.activePage != pagePreview || msg.gen != m.previewGen || m.previewOpen == nil {

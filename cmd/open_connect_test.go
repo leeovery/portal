@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,6 +176,15 @@ type runnersFake struct {
 	// takenBy answers every TakenBy, which takenSince records.
 	takenBy    string
 	takenSince []time.Time
+	// locks counts the take lock's holds and unlocks their releases, which
+	// may come from the goroutine awaiting the attach's lead; lockErr fails
+	// each hold, and onLock, if set, runs as each is taken.
+	locks   int
+	unlocks atomic.Int32
+	lockErr error
+	onLock  func()
+	// confirm, if set, is each attach's Confirm.
+	confirm func(context.Context) error
 }
 
 type takeCall struct{ session, by string }
@@ -214,8 +225,20 @@ func (f *runnersFake) TakenBy(_ string, since time.Time) string {
 	return f.takenBy
 }
 
+func (f *runnersFake) LockTake(context.Context, time.Duration) (func(), error) {
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
+	f.locks++
+	if f.onLock != nil {
+		f.onLock()
+	}
+	return sync.OnceFunc(func() { f.unlocks.Add(1) }), nil
+}
+
 func (f *runnersFake) Attach(cfg *runner.Config) {
 	cfg.Command = f.backend.Track(cfg.Command, runnertoken.Var, runnerToken)
+	cfg.Confirm = f.confirm
 	session := cfg.Session
 	cfg.Began = func() {
 		if f.listed {

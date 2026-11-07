@@ -119,9 +119,9 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 	return reopenPickerFunc(c.cmd, c.backend, landing)
 }
 
-// attach runs one attach, once the take has left the session no other
-// client. An exec returns only if it fails, so beside its error the outcome
-// is the zero one.
+// attach runs one attach, once the take has left no other terminal on the
+// session, holding the take lock until the attach leads it. An exec returns
+// only if it fails, so beside its error the outcome is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
@@ -144,18 +144,23 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 		Scanner: attachkeys.NewMatcher(attachBindings(name)),
 	}
 	listing.Attach(&cfg)
+	release := c.take(ctx, name)
+	defer release()
+	attached, ended := context.WithCancel(ctx)
+	defer ended()
 	listed := cfg.Began
 	cfg.Began = func() {
 		if listed != nil {
 			listed()
 		}
 		c.acked()
+		go c.awaitLead(attached, name, cfg.Confirm, release)
 	}
 	defer listing.Ended()
-	c.take(ctx, name)
 	began := time.Now()
 	out, err := c.run(ctx, cfg)
 	if errors.Is(err, runner.ErrNoTerminal) {
+		release()
 		return runner.Outcome{}, c.exec(command)
 	}
 	return c.takenAway(name, out, began), err

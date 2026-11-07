@@ -15,7 +15,10 @@ type Taken struct {
 }
 
 const (
-	takenElsewhere = " is open on another device"
+	takenTitleGlyph = "⇄"
+	takenTitle      = "Open on another device"
+	takenByLead     = "Taken by "
+	takenByEnd      = "."
 
 	takenKeyBack     = "⏎"
 	takenLabelBack   = "take it back"
@@ -65,18 +68,19 @@ func printableOf(s string) string {
 	}, s)
 }
 
-// takenModalSpec is the kill prompt's confirmation, untitled and in neutral
-// tokens, since nothing is lost, for the session another terminal took,
-// shown as name: that it is open on another device, then where it went, by,
-// when that is known. Enter takes it back, Space watches it, and Esc goes to
-// the picker.
+// takenModalSpec is the kill prompt's confirmation, titled as the help modal
+// is and in no destructive colour, since nothing is lost, for the session
+// another terminal took, shown as name in the accent: then where it went,
+// by, when that is known. Enter takes it back, Space watches it, and Esc
+// goes to the picker.
 func takenModalSpec(name, by string, th theme.Theme, colourless bool) destructiveConfirmSpec {
-	lines := wrappedLines(name+takenElsewhere, destructiveBodyWidth)
+	lines := wrappedLines(name, destructiveBodyWidth)
 	rows := make([]string, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(line))
+		rows = append(rows, headerStyle(th.AccentPrimary, th, colourless).Bold(true).Render(line))
 	}
 	spec := destructiveConfirmSpec{
+		header:       modalTitle(takenTitleGlyph, takenTitle, th, colourless),
 		targetRows:   rows,
 		confirmKey:   takenKeyBack,
 		confirmLabel: takenLabelBack,
@@ -84,7 +88,7 @@ func takenModalSpec(name, by string, th theme.Theme, colourless bool) destructiv
 		cancelLabel:  takenLabelPicker,
 	}
 	if by != "" {
-		spec.extraBodyRows = destructiveConsequenceRows("("+by+")", destructiveBodyWidth, th, colourless)
+		spec.consequence = takenByLead + by + takenByEnd
 	}
 	return spec
 }

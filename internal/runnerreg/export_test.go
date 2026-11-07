@@ -36,6 +36,9 @@ func SetSelf(t testing.TB, pid int) {
 // TakePath is where the last take's record lives.
 func (r Registry) TakePath() string { return r.takePath() }
 
+// TakeLockPath is the lock takes hold.
+func (r Registry) TakeLockPath() string { return r.takeLockPath() }
+
 // SetBootID has the registry read the current boot's id through read for the
 // rest of t.
 func SetBootID(t testing.TB, read func() (string, error)) {

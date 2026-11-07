@@ -130,7 +130,8 @@ type Outcome struct {
 	// and nothing of this terminal's asked it to: no detach Run sent, and no
 	// zmx detach key in the input Run passed on. zmx's client so exits when
 	// zmx drops it: as the session ends, or as a detach from elsewhere
-	// detaches it.
+	// detaches it. An unsure Run reports none, since the session the child
+	// was dropped from need not be cfg.Session.
 	Dropped bool
 }
 
@@ -295,7 +296,8 @@ func (a *attach) await(ctx context.Context) ending {
 // exit is the end of an attach whose child exited by itself.
 func (a *attach) exit() ending {
 	code := exitCode(a.child.ProcessState)
-	return ending{out: Outcome{ExitCode: code, Dropped: code == 0 && !a.zmxKeyed.Load()}, reason: "exit"}
+	dropped := code == 0 && !a.zmxKeyed.Load() && !a.unsure.Load()
+	return ending{out: Outcome{ExitCode: code, Dropped: dropped}, reason: "exit"}
 }
 
 // act carries out an action, whatever asked for it, detaching the child.

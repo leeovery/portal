@@ -390,6 +390,17 @@ func TestRun_Unsure(t *testing.T) {
 		goesOn(t, h, requests)
 	})
 
+	t.Run("zmx dropping the child is no drop: the session it was dropped from need not be the attach's", func(t *testing.T) {
+		h := unsure(t)
+
+		_ = syscall.Kill(h.child(), syscall.SIGUSR1)
+		out, err := h.finish(t)
+
+		if err != nil || out != (runner.Outcome{}) {
+			t.Errorf("Run = %+v, %v; want an end of the child's own, no drop", out, err)
+		}
+	})
+
 	t.Run("the detach keys still detach", func(t *testing.T) {
 		for key, action := range map[string]attachkeys.Action{keyDetach: attachkeys.Detach, keyDetachToShell: attachkeys.DetachToShell} {
 			h := unsure(t)
