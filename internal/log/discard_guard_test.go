@@ -72,6 +72,24 @@ var logger = slog.New(slog.NewJSONHandler(io.Discard, nil))
 			wantFindings: []string{paint + ":8"},
 		},
 		{
+			name: "it fails for a handler on io/ioutil's Discard, under either name",
+			files: map[string]string{paint: `package fixture
+
+import (
+	"io/ioutil"
+	"log/slog"
+	old "io/ioutil"
+)
+
+var (
+	text = slog.New(slog.NewTextHandler(ioutil.Discard, nil))
+	json = slog.New(slog.NewJSONHandler(old.Discard, nil))
+)
+`},
+			wantScanned:  1,
+			wantFindings: []string{paint + ":10", paint + ":11"},
+		},
+		{
 			name: "it reads the packages under the names a file imports them by",
 			files: map[string]string{paint: `package fixture
 
@@ -197,25 +215,29 @@ func scanForDiscardConstruction(t harnesstest.TestingT, opts ...sourceguardtest.
 	return scan
 }
 
+// discardPackages are the packages that export Discard, the writer that
+// throws away what it is given: io, and io/ioutil, which still re-exports it.
+var discardPackages = []string{"io", "io/ioutil"}
+
 // discardSites are the sites in source that build a discard-backed handler:
 // slog.DiscardHandler, or slog.NewTextHandler or slog.NewJSONHandler handed
-// io.Discard, read under the names the file imports log/slog and io by. A
-// dot import names neither package, and none is in the tree.
+// io.Discard or ioutil.Discard, read under the names the file imports those
+// packages by. A dot import names no package, and none is in the tree.
 func discardSites(source sourceguardtest.ParsedSource) []string {
-	slogName := importName(source.File, "log/slog")
-	if slogName == "" {
+	slogNames := importNames(source.File, "log/slog")
+	if len(slogNames) == 0 {
 		return nil
 	}
-	ioName := importName(source.File, "io")
+	discardNames := importNames(source.File, discardPackages...)
 	var sites []string
 	ast.Inspect(source.File, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.SelectorExpr:
-			if refersTo(n, slogName, "DiscardHandler") {
+			if refersTo(n, slogNames, "DiscardHandler") {
 				sites = append(sites, siteOf(source, n))
 			}
 		case *ast.CallExpr:
-			if handsDiscardToHandler(n, slogName, ioName) {
+			if handsDiscardToHandler(n, slogNames, discardNames) {
 				sites = append(sites, siteOf(source, n))
 			}
 		}
@@ -225,40 +247,42 @@ func discardSites(source sourceguardtest.ParsedSource) []string {
 }
 
 // handsDiscardToHandler reports whether call builds a text or JSON handler
-// writing to io.Discard.
-func handsDiscardToHandler(call *ast.CallExpr, slogName, ioName string) bool {
-	if len(call.Args) == 0 || !refersTo(call.Args[0], ioName, "Discard") {
+// writing to Discard, from a package imported under one of discardNames.
+func handsDiscardToHandler(call *ast.CallExpr, slogNames, discardNames []string) bool {
+	if len(call.Args) == 0 || !refersTo(call.Args[0], discardNames, "Discard") {
 		return false
 	}
-	return refersTo(call.Fun, slogName, "NewTextHandler") || refersTo(call.Fun, slogName, "NewJSONHandler")
+	return refersTo(call.Fun, slogNames, "NewTextHandler") || refersTo(call.Fun, slogNames, "NewJSONHandler")
 }
 
-// refersTo reports whether expr is pkg.name, pkg being the name a file
-// imports a package by.
-func refersTo(expr ast.Expr, pkg, name string) bool {
+// refersTo reports whether expr is pkg.name, pkg being one of the names a
+// file imports a package by.
+func refersTo(expr ast.Expr, pkgs []string, name string) bool {
 	sel, ok := expr.(*ast.SelectorExpr)
-	if !ok || pkg == "" {
+	if !ok || sel.Sel.Name != name {
 		return false
 	}
 	x, ok := sel.X.(*ast.Ident)
-	return ok && x.Name == pkg && sel.Sel.Name == name
+	return ok && slices.Contains(pkgs, x.Name)
 }
 
-// importName is the name file imports path by, empty when it doesn't, or
-// imports it blank or with a dot.
-func importName(file *ast.File, path string) string {
+// importNames are the names file imports any of paths by, leaving out a
+// blank or dot import, which names none.
+func importNames(file *ast.File, paths ...string) []string {
+	var names []string
 	for _, spec := range file.Imports {
-		if imported, err := strconv.Unquote(spec.Path.Value); err != nil || imported != path {
+		imported, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || !slices.Contains(paths, imported) {
 			continue
 		}
-		if spec.Name == nil {
-			return filepath.Base(path)
-		}
-		if name := spec.Name.Name; name != "_" && name != "." {
-			return name
+		switch {
+		case spec.Name == nil:
+			names = append(names, filepath.Base(imported))
+		case spec.Name.Name != "_" && spec.Name.Name != ".":
+			names = append(names, spec.Name.Name)
 		}
 	}
-	return ""
+	return names
 }
 
 func siteOf(source sourceguardtest.ParsedSource, n ast.Node) string {
