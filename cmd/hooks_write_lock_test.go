@@ -125,10 +125,10 @@ func TestHookRmLockTimeout(t *testing.T) {
 		assertHooksFileUnchanged(t, got.hooksFile, got.before)
 	})
 
-	t.Run("it exits non-zero on the --pane-key path", func(t *testing.T) {
+	t.Run("it exits non-zero on the --key path", func(t *testing.T) {
 		got := runRmCase(t, rmCase{
 			seeded:   oneEntry,
-			extra:    []string{"--pane-key", hookstest.SubjectSeedA},
+			extra:    []string{"--key", hookstest.SubjectSeedA},
 			holdLock: true,
 			wantErr:  true,
 		})

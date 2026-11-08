@@ -23,7 +23,6 @@ import (
 func TestMain(m *testing.M) {
 	errs := []error{
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
-		os.Setenv("TMUX_TMPDIR", zmxtest.PoisonedTmpdir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	}
@@ -445,6 +444,19 @@ func TestPoisonsTheZmxEnv(t *testing.T) {
 		t.Errorf("ZMX_DIR appears %d times, want once", n)
 	}
 	for _, key := range []string{"ZMX_SESSION", "ZMX_SESSION_PREFIX"} {
+		if got, ok := envValue(env, key); ok {
+			t.Errorf("%s = %q survives in the env, want it dropped", key, got)
+		}
+	}
+}
+
+func TestDropsTheDevelopersTmuxPane(t *testing.T) {
+	t.Setenv("TMUX", "/private/tmp/tmux-501/default,4242,0")
+	t.Setenv("TMUX_PANE", "%3")
+
+	env, _ := portaltest.IsolateStateForTest(t)
+
+	for _, key := range []string{"TMUX", "TMUX_PANE"} {
 		if got, ok := envValue(env, key); ok {
 			t.Errorf("%s = %q survives in the env, want it dropped", key, got)
 		}

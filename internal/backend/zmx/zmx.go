@@ -113,9 +113,11 @@ func New(cfg Config) (*Backend, error) {
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
-// DisplayCommand is command as zmx reports it, as the package's
-// DisplayCommand renders it.
-func (b *Backend) DisplayCommand(command []string) string { return DisplayCommand(command) }
+// CommandBegins reports whether shown is how zmx reports a command that
+// begins with start, as the package's CommandBegins judges it.
+func (b *Backend) CommandBegins(shown string, start []string) bool {
+	return CommandBegins(shown, start)
+}
 
 // ReachEnv is the environment another process needs to reach the sessions b
 // does: b's directory. Every zmx Portal runs has ZMX_SESSION_PREFIX removed,
@@ -352,10 +354,10 @@ func SessionMarks(name string, reach []string) ([]string, error) {
 
 // ProtocolVersion is the socket protocol version that the daemon of the live
 // session name speaks, read from the header of its answer to Info alone. Any
-// version but ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no
-// answer, so ErrTimeout: it reads the request as a frame still awaiting
-// payload, and the output it broadcasts meanwhile is no answer. A socket that
-// refuses connections is ErrRefusing.
+// version but ProtocolVersion is unsupported. A daemon of a framing with no
+// version byte may give no answer, so ErrTimeout: it can read the request as
+// a frame still awaiting payload, and the output it broadcasts meanwhile is
+// no answer. A socket that refuses connections is ErrRefusing.
 func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()

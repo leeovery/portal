@@ -27,7 +27,7 @@ func TestTextHandler_RendersComponentAsPrefixAndOmitsFromAttrs(t *testing.T) {
 	h := newTextHandler(&buf, slog.LevelInfo, 12345, "0.5.0", "hydrate")
 	h = h.WithAttrs([]slog.Attr{slog.String("component", "hydrate")})
 
-	handleRecord(t, h, newRecord(slog.LevelInfo, "ok", slog.String("pane_key", "foo:0.0")))
+	handleRecord(t, h, newRecord(slog.LevelInfo, "ok", slog.String("session", "foo")))
 
 	line := buf.String()
 	if !strings.Contains(line, " hydrate: ok ") {
@@ -45,11 +45,11 @@ func TestTextHandler_AppendsBaselinesInTrailingOrder(t *testing.T) {
 
 	took, _ := time.ParseDuration("1.2s")
 	handleRecord(t, h, newRecord(slog.LevelInfo, "ok",
-		slog.String("pane_key", "foo:0.0"),
+		slog.String("session", "foo"),
 		slog.Duration("took", took),
 	))
 
-	want := "2026-05-29T08:38:00Z INFO hydrate: ok pane_key=foo:0.0 took=1.2s pid=12345 version=0.5.0 process_role=hydrate\n"
+	want := "2026-05-29T08:38:00Z INFO hydrate: ok session=foo took=1.2s pid=12345 version=0.5.0 process_role=hydrate\n"
 	if got := buf.String(); got != want {
 		t.Errorf("rendered line mismatch:\n got: %q\nwant: %q", got, want)
 	}

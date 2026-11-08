@@ -79,12 +79,6 @@ func runningLatch() (state.Latch, error) {
 // and every restored session run bootstrapExe, which restore refuses unless
 // it is named portal.
 func (p *productionBootstrap) runner() (bootstrap.Runner, error) {
-	return p.runnerTelling(nil)
-}
-
-// runnerTelling is the bootstrap, telling restored the result of the restore
-// it runs, if it runs one; a nil restored hears nothing.
-func (p *productionBootstrap) runnerTelling(restored func(restore.Result)) (bootstrap.Runner, error) {
 	exe, err := bootstrapExe()
 	if err != nil {
 		return nil, fmt.Errorf("find Portal's own executable: %w", err)
@@ -93,16 +87,12 @@ func (p *productionBootstrap) runnerTelling(restored func(restore.Result)) (boot
 	if err != nil {
 		return nil, err
 	}
-	var restoring bootstrap.Restorer = restorer
-	if restored != nil {
-		restoring = toldRestorer{Restorer: restorer, told: restored}
-	}
 	ensurer, err := p.host.Ensurer(saverhost.Daemon{Exe: exe, Version: Version()})
 	if err != nil {
 		return nil, err
 	}
 	steps := &bootstrap.Orchestrator{
-		Zmx:       zmxCheck{dir: zmx.DirFor(os.Environ())},
+		Zmx:       productionZmxCheck(zmx.DirFor(os.Environ())),
 		ZmxDir:    p.owner,
 		Latch:     latchFile{dir: p.dir, latch: p.running, bootErr: p.bootErr},
 		Restoring: restoringFlag(p.dir),
@@ -117,23 +107,10 @@ func (p *productionBootstrap) runnerTelling(restored func(restore.Result)) (boot
 		FlagSweeper: &bootstrap.FlagSweepCore{Dir: p.dir, List: p.backend.List, RunsHelper: restorer.RunsHelper, Logger: bootstrapLogger},
 		Saver:       bootSaver{Ensurer: ensurer, host: p.host, saverDaemon: newSaverDaemon(p.dir)},
 		Protocol:    zmx.ProtocolVersion,
-		Restore:     restoring,
+		Restore:     restorer,
 		Logger:      bootstrapLogger,
 	}
 	return bootstrap.Locked{Lock: bootstrapLock(p.dir), Owed: p.gate.Owed, Bootstrap: steps, Logger: bootstrapLogger}, nil
-}
-
-// toldRestorer is a restore whose result it tells, as it returns it. Its
-// progress sink is the restore's own.
-type toldRestorer struct {
-	*restore.Restorer
-	told func(restore.Result)
-}
-
-func (r toldRestorer) Restore(ctx context.Context) restore.Result {
-	res := r.Restorer.Restore(ctx)
-	r.told(res)
-	return res
 }
 
 // holdBootstrapLock takes bootstrap.lock in the state directory dir alone, as
@@ -163,24 +140,58 @@ func savedEntries(dir string) int {
 	return idx.Len()
 }
 
-// zmxCheck is the bootstrap's first step over the zmx directory dir: zmx is
-// on PATH and runs.
-type zmxCheck struct{ dir string }
+// zmxCheck is the bootstrap's first step over the zmx directory dir, and
+// doctor's zmx line: zmx is on PATH, as lookPath finds it, runs, and is no
+// release older than the first that speaks Portal's protocol.
+type zmxCheck struct {
+	dir      string
+	lookPath func(file string) (string, error)
+}
+
+// productionZmxCheck checks the zmx on PATH over the zmx directory dir.
+func productionZmxCheck(dir string) zmxCheck {
+	return zmxCheck{dir: dir, lookPath: exec.LookPath}
+}
 
 func (c zmxCheck) CheckZmx(ctx context.Context) error {
-	binary, err := exec.LookPath(zmxProgram)
+	_, err := c.Find(ctx)
+	return err
+}
+
+// Find is the path of the zmx on PATH, once checked, or why the check fails,
+// worded for the user.
+func (c zmxCheck) Find(ctx context.Context) (string, error) {
+	binary, err := c.lookPath(zmxProgram)
 	if err != nil {
-		return errZmxMissing
+		return "", errZmxMissing
 	}
 	driver, err := bindZmxAt(binary, c.dir)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := driver.Runs(ctx); err != nil {
-		return fmt.Errorf("zmx at %s doesn't run: %w", binary, err)
+	err = driver.Runs(ctx)
+	if older, ok := errors.AsType[*zmx.OlderReleaseError](err); ok {
+		return "", &olderZmxError{binary: binary, older: older}
 	}
-	return nil
+	if err != nil {
+		return "", fmt.Errorf("zmx at %s doesn't run: %w", binary, err)
+	}
+	return binary, nil
 }
+
+// olderZmxError is the zmx at binary, a release older than the first that
+// speaks Portal's protocol, worded for the user.
+type olderZmxError struct {
+	binary string
+	older  *zmx.OlderReleaseError
+}
+
+func (e *olderZmxError) Error() string {
+	return fmt.Sprintf("Portal can't use zmx %s at %s: it needs zmx %s or later, the first release that speaks the protocol Portal uses. Upgrade zmx.",
+		e.older.Release, e.binary, zmx.FirstRelease)
+}
+
+func (e *olderZmxError) Unwrap() error { return e.older }
 
 // restoringFlag is the restoring flag in the state directory it names.
 type restoringFlag string
@@ -192,8 +203,6 @@ func (dir restoringFlag) Lower() (bool, error) { return state.Restoring.Clear(st
 var (
 	_ bootstrap.Restorer            = (*restore.Restorer)(nil)
 	_ bootstrap.RestoreProgressSink = (*restore.Restorer)(nil)
-	_ bootstrap.Restorer            = toldRestorer{}
-	_ bootstrap.RestoreProgressSink = toldRestorer{}
 )
 
 // bootSaver is the saver's lifecycle as the bootstrap's saver step asks for
@@ -213,7 +222,6 @@ func (s bootSaver) CheckStateDir(ctx context.Context) error { return s.host.Chec
 // protocol it speaks.
 type saverZmx interface {
 	ProtocolVersion(ctx context.Context, name string) (int, error)
-	OlderZmx(ctx context.Context, name string) (bool, error)
 	KillByCLI(ctx context.Context, name string) error
 	EndDaemon(ctx context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error
 }
@@ -238,25 +246,17 @@ func newSaverDaemon(stateDir string) saverDaemon {
 }
 
 // Protocol is the protocol version the saver session's daemon answers in:
-// bootstrap.ErrSaverGone for a session gone, and bootstrap.ErrOlderZmx for a
-// daemon that takes Portal's request and answers it nothing, but answers zmx
-// 0.8.1's framing.
+// bootstrap.ErrSaverGone for a session gone.
 func (d saverDaemon) Protocol(ctx context.Context) (int, error) {
 	driver, err := d.driver()
 	if err != nil {
 		return 0, err
 	}
 	version, err := driver.ProtocolVersion(ctx, saver.SessionName)
-	switch {
-	case errors.Is(err, backend.ErrNoSuchSession):
+	if errors.Is(err, backend.ErrNoSuchSession) {
 		return 0, fmt.Errorf("%w: %w", bootstrap.ErrSaverGone, err)
-	case !errors.Is(err, backend.ErrTimeout) || errors.Is(err, zmx.ErrRefusing):
-		return version, err
 	}
-	if older, _ := driver.OlderZmx(ctx, saver.SessionName); older {
-		return 0, fmt.Errorf("%w: %w", bootstrap.ErrOlderZmx, err)
-	}
-	return 0, err
+	return version, err
 }
 
 // End ends the saver session's daemon, whatever protocol it speaks, by a
@@ -305,10 +305,10 @@ func (d saverDaemon) endBySignal(ctx context.Context, driver saverZmx) error {
 }
 
 // unusable reports whether the saver session's daemon speaks a protocol
-// Portal can't use: an older zmx's, or one other than Portal's.
+// Portal can't use: one other than Portal's.
 func (d saverDaemon) unusable(ctx context.Context) bool {
 	speaks, err := d.Protocol(ctx)
-	return errors.Is(err, bootstrap.ErrOlderZmx) || err == nil && speaks != zmx.ProtocolVersion
+	return err == nil && speaks != zmx.ProtocolVersion
 }
 
 // latchFile is latch in the state directory dir. Its write fails with

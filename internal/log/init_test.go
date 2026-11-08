@@ -229,7 +229,7 @@ func TestInit_ProcessStartQuotesAnArgumentHoldingASpace(t *testing.T) {
 	snapshotInitState(t)
 	prevArgs := os.Args
 	t.Cleanup(func() { os.Args = prevArgs })
-	os.Args = []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "portal-xn85z5 zmw rework", "--lazy"}
+	os.Args = []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "portal-xn85z5 zmw rework", "--file", "/tmp/s.vt"}
 
 	dir := t.TempDir()
 	if err := Init(dir, "0.5.0", "hydrate"); err != nil {
@@ -240,7 +240,7 @@ func TestInit_ProcessStartQuotesAnArgumentHoldingASpace(t *testing.T) {
 	if len(starts) != 1 {
 		t.Fatalf("got %d process:start lines, want exactly 1", len(starts))
 	}
-	const want = "state hydrate --session 'portal-xn85z5 zmw rework' --lazy"
+	const want = "state hydrate --session 'portal-xn85z5 zmw rework' --file /tmp/s.vt"
 	if got := starts[0].attrs["args"]; got != want {
 		t.Errorf("start args = %q, want %q", got, want)
 	}

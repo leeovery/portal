@@ -181,10 +181,6 @@ func TestAccessors(t *testing.T) {
 			{"daemon.lock", state.DaemonLock(dir), filepath.Join(dir, "daemon.lock")},
 			{"portal.log", state.PortalLog(dir), filepath.Join(dir, "portal.log")},
 			{"scrollback dir", state.ScrollbackDir(dir), filepath.Join(dir, "scrollback")},
-			{"the tmux version's migrated state, beside it", state.TmuxStateDir(dir), "/tmp/state-tmux"},
-			{"the tmux version's migrated state, beside it given with a trailing separator", state.TmuxStateDir(dir + "/"), "/tmp/state-tmux"},
-			{"a migration's staging dir, beside it", state.MigrationStagingDir(dir), "/tmp/state-migrating"},
-			{"a migration's staging dir, beside it given with a trailing separator", state.MigrationStagingDir(dir + "/"), "/tmp/state-migrating"},
 		}
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {

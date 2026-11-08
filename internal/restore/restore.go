@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -878,31 +877,18 @@ func (r *run) warn(msg, name string, attrs ...any) {
 	r.logger.Warn(msg, append([]any{"session", name}, attrs...)...)
 }
 
-// command is the hydrate helper's argv for the entry's session, resuming it
-// lazily when the entry asks it to, and naming its transcript only when it
-// has one to replay.
+// command is the hydrate helper's argv for the entry's session, naming its
+// transcript only when it has one to replay.
 func (r *run) command(e sessionindex.Entry) []string {
 	argv := r.helper(e.Name)
-	if e.ResumeLazy {
-		argv = append(argv, lazyFlag)
-	}
 	if file, ok := r.transcript(e); ok {
 		argv = append(argv, fileFlag, file)
 	}
 	return argv
 }
 
-const (
-	// lazyFlag has the hydrate helper resume its session lazily, whatever
-	// mode its hook registers.
-	lazyFlag = "--lazy"
-	// fileFlag names the transcript the hydrate helper replays.
-	fileFlag = "--file"
-)
-
-// trailingFlags are the flags that may follow the helper's argv, each the
-// first of what follows when present: lazyFlag comes before fileFlag.
-var trailingFlags = []string{lazyFlag, fileFlag}
+// fileFlag names the transcript the hydrate helper replays.
+const fileFlag = "--file"
 
 // helper is the hydrate helper's argv for the named session, before the
 // transcript it may name.
@@ -917,11 +903,11 @@ func helperAt(exe, name string) []string {
 }
 
 // RunsHelper reports whether s was made running the hydrate helper restore
-// gives every session it restores, for s's own name, with a transcript or
-// without: such a session's hydrating flag is its helper's to lower, never
-// restore's or a sweep's. Any binary named portal counts, wherever it is: a
-// session restored by one at another path, a dev build or another install,
-// keeps its flag under this one. The path is read from s's command as
+// gives every session it restores, for s's own name, followed by its
+// transcript's arguments, or any others, or none: such a session's hydrating
+// flag is its helper's to lower, never restore's or a sweep's. Any binary
+// named portal counts, wherever it is: a session restored by one at another
+// path, a dev build or another install, keeps its flag under this one. The path is read from s's command as
 // reported, as the words before one of its spaces, and counts only when the
 // helper run from it would be reported as s's command is: so the words
 // `env X=1 /x/portal`, which that path's own argument would show quoted, name
@@ -932,7 +918,7 @@ func (r *Restorer) RunsHelper(s backend.Session) bool {
 		if end < len(s.Command) && s.Command[end] != ' ' {
 			continue
 		}
-		if path, ok := portalPath(s.Command[:end]); ok && r.showsHelper(s.Command, helperAt(path, s.Name)) {
+		if path, ok := portalPath(s.Command[:end]); ok && r.backend.CommandBegins(s.Command, helperAt(path, s.Name)) {
 			return true
 		}
 	}
@@ -947,38 +933,6 @@ func portalPath(word string) (string, bool) {
 		path = strings.ReplaceAll(strings.TrimSuffix(quoted, "'"), `'\''`, "'")
 	}
 	return path, filepath.Base(path) == exeName
-}
-
-// showsHelper reports whether shown is the command the backend reports of a
-// session made running argv, a hydrate helper, followed by its trailing
-// flags or not. zmx cuts the command it reports before the first argument
-// that would take it past 256 bytes, marking the cut with "..." where that
-// fits: a cut within argv shows as argv alone does, flags or not, and one
-// after it shows argv whole, then what fits of the flags, or the mark alone
-// when even the first of them doesn't.
-func (r *Restorer) showsHelper(shown string, argv []string) bool {
-	alone := r.backend.DisplayCommand(argv)
-	switch {
-	case shown == alone:
-		return true
-	case alone != r.uncut(argv):
-		return false
-	case strings.HasPrefix(shown, alone+" "):
-		return true
-	}
-	return slices.ContainsFunc(trailingFlags, func(first string) bool {
-		return shown == r.backend.DisplayCommand(slices.Concat(argv, []string{first}))
-	})
-}
-
-// uncut is argv as the backend shows each of its arguments, joined by
-// spaces, however long that is.
-func (r *Restorer) uncut(argv []string) string {
-	words := make([]string, len(argv))
-	for i, arg := range argv {
-		words[i] = r.backend.DisplayCommand([]string{arg})
-	}
-	return strings.Join(words, " ")
 }
 
 // transcript is the file holding the entry's saved transcript, and whether

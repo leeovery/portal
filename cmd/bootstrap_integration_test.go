@@ -964,163 +964,50 @@ func TestSlowProbesLeaveTheSaverSavingAgainstZmx(t *testing.T) {
 	}
 }
 
-// olderZmxFirst is the environment of w with older, a zmx 0.8.1 build, first
-// on PATH: only the portal under test finds it, the test's own zmx calls
-// running the pinned build.
-func (w *bootWorld) olderZmxFirst(t *testing.T, older string) []string {
+// zmxFirst is the environment of w with a zmx running script under /bin/sh
+// first on PATH, and that zmx's path: only the portal under test finds it,
+// the test's own zmx calls running the pinned build.
+func (w *bootWorld) zmxFirst(t *testing.T, script string) (env []string, binary string) {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.Symlink(older, filepath.Join(dir, "zmx")); err != nil {
+	binary = filepath.Join(dir, "zmx")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return append(slices.Clone(w.env), "PATH="+dir+string(os.PathListSeparator)+filepath.Dir(zmxtest.Binary(t))+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := "PATH=" + dir + string(os.PathListSeparator) + filepath.Dir(zmxtest.Binary(t)) + string(os.PathListSeparator) + os.Getenv("PATH")
+	return append(slices.Clone(w.env), path), binary
 }
 
-// olderSaver leaves a saver session made on older, a zmx 0.8.1 build,
-// running this portal's daemon, as a bootstrap cut short between making it
-// and ending it leaves one, and waits for the daemon to hold its lock.
-func (w *bootWorld) olderSaver(t *testing.T, older string) {
-	t.Helper()
-	start := exec.Command(older, "attach", saver.SessionName, w.binary, "state", "daemon")
-	start.Env = w.env
-	start.Dir = t.TempDir()
-	if out, err := start.CombinedOutput(); err != nil {
-		t.Fatalf("make the saver on zmx 0.8.1: %v\n%s", err, out)
-	}
-	if !harnesstest.PollUntil(t, bootSettle, 20*time.Millisecond, func() bool {
-		return strings.Contains(w.log(), "daemon: lock acquired ")
-	}) {
-		t.Fatalf("the daemon in the saver on zmx 0.8.1 never took its lock\n--- portal.log ---\n%s", w.log())
-	}
-}
+// A zmx whose version line reads a release older than the first that speaks
+// Portal's protocol is refused at the bootstrap's first step, nothing made
+// and no latch written, on every command until the supported zmx is first on
+// PATH, which recovers.
+func TestBootstrapRefusesAZmxReleaseTooOldAgainstZmx(t *testing.T) {
+	w := newBootWorld(t)
+	w.save(t, "proj-saved")
+	env, binary := w.zmxFirst(t, `if [ "$1" = version ]; then printf 'zmx\t\t0.9.2\n'; exit 0; fi; echo "zmx $* run past the refusal" >&2; exit 1`)
+	fatal := "Portal can't use zmx 0.9.2 at " + binary + ": it needs zmx 1.0.0 or later, the first release that speaks the protocol Portal uses. Upgrade zmx."
 
-// Decisions 63 and 68: a saver on zmx 0.8.1, found or made, is ended, and the
-// bootstrap goes on as if no saver ran, so the fatal shows on every command
-// until the supported zmx is first on PATH, which recovers.
-func TestBootstrapRefusesOlderZmxAgainstZmx(t *testing.T) {
-	older := zmxtest.OlderBinary(t)
-
-	t.Run("a saver it makes on zmx 0.8.1 is ended, and fatal on every command until the supported zmx recovers", func(t *testing.T) {
-		w := newBootWorld(t)
-		w.save(t, "proj-saved")
-		env := w.olderZmxFirst(t, older)
-
-		for i := range 2 {
-			list := w.command("list", "--short")
-			list.Env = env
-			out, err := list.CombinedOutput()
-
-			if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() == 0 {
-				t.Fatalf("portal list %d = %v; want it to fail\n%s", i, err, out)
-			}
-			if !strings.Contains(string(out), olderZmxFatal) {
-				t.Errorf("portal list %d's output = %q, want %q", i, out, olderZmxFatal)
-			}
-			if n := strings.Count(w.log(), "zmx kill ended the session"); n != i+1 {
-				t.Errorf("savers ended = %d after command %d, want %d\n--- portal.log ---\n%s", n, i, i+1, w.log())
-			}
-			w.awaitNoSessions(t)
-			w.assertLatchGone(t)
-			w.assertRestoring(t, false)
-		}
-
-		if got, want := w.portal(t, "list", "--short"), "proj-saved\n"; got != want {
-			t.Errorf("portal list on the supported zmx = %q, want %q", got, want)
-		}
-		w.saverPID(t)
-		w.awaitNoFlags(t)
-	})
-
-	t.Run("a saver on zmx 0.8.1 left behind is ended, and the next command on the supported zmx replaces it", func(t *testing.T) {
-		w := newBootWorld(t)
-		w.save(t, "proj-saved")
-		w.olderSaver(t, older)
-
-		if got, want := w.portal(t, "list", "--short"), "proj-saved\n"; got != want {
-			t.Errorf("portal list = %q, want %q", got, want)
-		}
-		if !strings.Contains(w.log(), "bootstrap: saver ended ") {
-			t.Errorf("portal.log records no saver ended\n--- portal.log ---\n%s", w.log())
-		}
-		w.saverPID(t)
-		if n := w.bootstraps(); n != 1 {
-			t.Errorf("bootstraps = %d, want one\n--- portal.log ---\n%s", n, w.log())
-		}
-		w.awaitNoFlags(t)
-	})
-
-	// Decision 75: inside a session path_helper puts Homebrew's zmx 0.8.1
-	// first on PATH, past a bootstrap that judged the saver Portal's.
-	t.Run("a warm mint on zmx 0.8.1 is ended, fatal, and recorded nowhere", func(t *testing.T) {
-		w := newBootWorld(t)
-		w.portal(t, "list")
-		work := t.TempDir()
-
-		open := w.command("open", "-p", work)
-		open.Env = w.olderZmxFirst(t, older)
-		out, err := open.CombinedOutput()
-
-		if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() == 0 {
-			t.Fatalf("portal open -p = %v; want it to fail\n%s", err, out)
-		}
-		if !strings.Contains(string(out), olderZmxFatal) {
-			t.Errorf("portal open -p's output = %q, want %q", out, olderZmxFatal)
-		}
-		if made := w.userSessions(t); len(made) != 0 {
-			t.Errorf("user sessions = %v, want none: the session zmx 0.8.1 made is ended", made)
-		}
-		if idx, err := sessionindex.Read(w.dir.StateDir); err != nil || idx.Len() != 0 {
-			t.Errorf("sessions.json = %+v, %v; want no entry", idx, err)
-		}
-	})
-
-	t.Run("a restore under the saver found, on zmx 0.8.1, stops with the fatal, and the supported zmx restores it", func(t *testing.T) {
-		w := newBootWorld(t)
-		w.portal(t, "list")
-		pid := w.saverPID(t)
-		w.save(t, "proj-saved")
-		w.oweBootstrap(t)
-
+	for i := range 2 {
 		list := w.command("list", "--short")
-		list.Env = w.olderZmxFirst(t, older)
+		list.Env = env
 		out, err := list.CombinedOutput()
 
 		if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() == 0 {
-			t.Fatalf("portal list = %v; want it to fail\n%s", err, out)
+			t.Fatalf("portal list %d = %v; want it to fail\n%s", i, err, out)
 		}
-		if !strings.Contains(string(out), olderZmxFatal) {
-			t.Errorf("portal list's output = %q, want %q", out, olderZmxFatal)
+		if !strings.Contains(string(out), fatal) {
+			t.Errorf("portal list %d's output = %q, want %q", i, out, fatal)
 		}
-		if made := w.userSessions(t); len(made) != 0 {
-			t.Errorf("user sessions = %v, want none: the session zmx 0.8.1 made is ended", made)
-		}
-		if _, held := w.entry("proj-saved"); !held {
-			t.Error("proj-saved's entry is gone, want it kept for the next restore")
+		if sessions, err := w.dir.Backend.List(t.Context()); err != nil || len(sessions) != 0 {
+			t.Errorf("sessions after portal list %d = %+v, %v; want none: nothing made", i, sessions, err)
 		}
 		w.assertLatchGone(t)
-		w.assertRestoring(t, false)
-		if got := w.saverPID(t); got != pid {
-			t.Errorf("saver pid = %d, want %d kept: it speaks Portal's protocol", got, pid)
-		}
-
-		if got, want := w.portal(t, "list", "--short"), "proj-saved\n"; got != want {
-			t.Errorf("portal list on the supported zmx = %q, want %q", got, want)
-		}
-		w.awaitNoFlags(t)
-	})
-}
-
-// olderZmxFatal is the bootstrap's fatal for a saver on zmx 0.8.1.
-const olderZmxFatal = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.1 or later."
-
-// awaitNoSessions waits for the zmx directory to hold no session.
-func (w *bootWorld) awaitNoSessions(t *testing.T) {
-	t.Helper()
-	if !harnesstest.PollUntil(t, bootSettle, 20*time.Millisecond, func() bool {
-		sessions, err := w.dir.Backend.List(t.Context())
-		return err == nil && len(sessions) == 0
-	}) {
-		sessions, err := w.dir.Backend.List(t.Context())
-		t.Errorf("sessions = %+v, %v; want none: the saver ended and nothing restored", sessions, err)
 	}
+
+	if got, want := w.portal(t, "list", "--short"), "proj-saved\n"; got != want {
+		t.Errorf("portal list on the supported zmx = %q, want %q", got, want)
+	}
+	w.saverPID(t)
+	w.awaitNoFlags(t)
 }

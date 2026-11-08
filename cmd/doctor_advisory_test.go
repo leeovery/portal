@@ -243,7 +243,7 @@ func TestAdvisories_NeverDriveExitCode(t *testing.T) {
 
 func TestAdvisories_FailingCheckAndAdvisoriesShareOneSummary(t *testing.T) {
 	deps := healthyDoctorDeps(t)
-	deps.LookPath = zmxMissing
+	deps.Zmx = zmxMissing
 
 	if _, _, err := runDoctorWith(t, deps); err != ErrDoctorUnhealthy {
 		t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)

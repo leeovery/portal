@@ -24,6 +24,7 @@ import (
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/sessionindex"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/spawn"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -34,9 +35,9 @@ func doctorUnsupportedResolve(spawn.Identity) (spawn.Adapter, spawn.Resolution) 
 	return nil, spawn.ResolutionUnsupported
 }
 
-func zmxFound(string) (string, error) { return doctorZmxPath, nil }
+func zmxFound(context.Context) (string, error) { return doctorZmxPath, nil }
 
-func zmxMissing(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
+func zmxMissing(context.Context) (string, error) { return "", errZmxMissing }
 
 // protocolAnswers stands in for the driver's protocol read: each named session
 // answers with its version or its error, and any other is ErrNoSuchSession.
@@ -100,8 +101,8 @@ func withHealthyRuntime(t *testing.T, deps *DoctorDeps) *DoctorDeps {
 	if deps.ZmxDir == "" {
 		deps.ZmxDir = t.TempDir()
 	}
-	if deps.LookPath == nil {
-		deps.LookPath = zmxFound
+	if deps.Zmx == nil {
+		deps.Zmx = zmxFound
 	}
 	if deps.ProtocolVersion == nil {
 		deps.ProtocolVersion = protocolOne
@@ -273,20 +274,37 @@ func TestDoctorZmxBinaryCheck(t *testing.T) {
 		assertCheck(t, got, checkPass, doctorZmxPath)
 	})
 
-	t.Run("it fails naming the zmx it needs when zmx is not on PATH", func(t *testing.T) {
-		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing})), "zmx")
+	t.Run("it fails with why Portal can't use the zmx it found, or found none", func(t *testing.T) {
+		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), Zmx: zmxMissing})), "zmx")
 		assertCheck(t, got, checkFail, "zmx not found on PATH; Portal needs zmx 1.0.1 or later")
 	})
 
-	t.Run("it looks up the zmx program", func(t *testing.T) {
-		var looked []string
-		lookPath := func(file string) (string, error) {
-			looked = append(looked, file)
-			return doctorZmxPath, nil
+	t.Run("it judges the zmx on PATH as the bootstrap's first step does, refusing a release too old for Portal's protocol", func(t *testing.T) {
+		binary := pathWithZmx(t, `printf 'zmx\t\t0.9.2\n'`)
+
+		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), Zmx: findZmxReadOnly})), "zmx")
+
+		assertCheck(t, got, checkFail, "Portal can't use zmx 0.9.2 at "+binary+": it needs zmx 1.0.0 or later, the first release that speaks the protocol Portal uses. Upgrade zmx.")
+	})
+
+	// zmx version makes the directory it is bound to, as the fake does.
+	t.Run("it runs zmx bound to a scratch directory it removes, never making the zmx dir it judges", func(t *testing.T) {
+		ran := filepath.Join(t.TempDir(), "zmx-dir")
+		binary := pathWithZmx(t, `/bin/mkdir -p "$ZMX_DIR/logs" && printf '%s' "$ZMX_DIR" > `+shellquote.Single(ran)+` && printf 'zmx\t\t1.0.1\n'`)
+		zmxDir := filepath.Join(t.TempDir(), "zmx")
+
+		got := findCheck(t, diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), ZmxDir: zmxDir, Zmx: findZmxReadOnly})), "zmx")
+
+		assertCheck(t, got, checkPass, binary)
+		scratch, err := os.ReadFile(ran)
+		if err != nil {
+			t.Fatalf("zmx never ran: %v", err)
 		}
-		diagnose(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: lookPath}))
-		if !slices.Equal(looked, []string{"zmx"}) {
-			t.Errorf("looked up %v; want [zmx]", looked)
+		if _, err := os.Stat(zmxDir); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat the zmx dir after doctor = %v, want it never made", err)
+		}
+		if _, err := os.Stat(string(scratch)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stat the scratch dir zmx ran in, %s, after doctor = %v, want it removed", scratch, err)
 		}
 	})
 }
@@ -504,7 +522,7 @@ func TestDoctorSessionsJSONStates(t *testing.T) {
 }
 
 const (
-	legacyIndexDetail = "from the tmux version of Portal; run portal migrate"
+	legacyIndexDetail = `from the tmux version of Portal, which this version can't use; see "Coming from the tmux version" in Portal's README`
 	newerIndexDetail  = "version 3, from a newer Portal; this one reads version 2"
 )
 
@@ -746,7 +764,7 @@ func TestIsSilentExitErrorRecognisesDoctorUnhealthy(t *testing.T) {
 
 func TestDoctorExitCode(t *testing.T) {
 	t.Run("it exits unhealthy, silent on stderr, when a check fails", func(t *testing.T) {
-		outBuf, errBuf, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing}))
+		outBuf, errBuf, err := runDoctorWith(t, withHealthyRuntime(t, &DoctorDeps{StateDir: t.TempDir(), Zmx: zmxMissing}))
 		if err != ErrDoctorUnhealthy {
 			t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx missing", err)
 		}
@@ -786,7 +804,7 @@ func TestDoctorExitCode(t *testing.T) {
 			return &DoctorDeps{StateDir: t.TempDir(), ProjectStore: store}
 		}
 		for name, build := range map[string]func(*testing.T) *DoctorDeps{
-			"zmx":            func(t *testing.T) *DoctorDeps { return &DoctorDeps{StateDir: t.TempDir(), LookPath: zmxMissing} },
+			"zmx":            func(t *testing.T) *DoctorDeps { return &DoctorDeps{StateDir: t.TempDir(), Zmx: zmxMissing} },
 			"zmx dir":        func(t *testing.T) *DoctorDeps { return &DoctorDeps{StateDir: t.TempDir(), ZmxDir: "relative"} },
 			"sessions":       silent,
 			"sessions.json":  corrupt,
@@ -853,7 +871,7 @@ func TestDoctorHostTerminalNeverDrivesExit(t *testing.T) {
 	t.Run("supported host does not rescue a real check failure", func(t *testing.T) {
 		deps := withHealthyRuntime(t, &DoctorDeps{
 			StateDir: t.TempDir(),
-			LookPath: zmxMissing,
+			Zmx:      zmxMissing,
 			Detector: fakeTerminalDetector{id: spawn.Identity{Name: "Ghostty", BundleID: "com.mitchellh.ghostty"}},
 			Resolve: func(spawn.Identity) (spawn.Adapter, spawn.Resolution) {
 				return nil, spawn.ResolutionNative
@@ -990,7 +1008,7 @@ func TestDoctorFix(t *testing.T) {
 
 	t.Run("it exits on the re-diagnosis, which a repair cannot heal", func(t *testing.T) {
 		deps := staleDeps(t, nil)
-		deps.LookPath = zmxMissing
+		deps.Zmx = zmxMissing
 		outBuf, _, err := runDoctorWith(t, deps, "--fix")
 		if err != ErrDoctorUnhealthy {
 			t.Fatalf("Execute err = %v; want ErrDoctorUnhealthy with zmx still missing", err)

@@ -233,9 +233,9 @@ func TestLockWait(t *testing.T) {
 	// doesn't hold has it, reads whether that spelling answers.
 	lookup := 2 * saverhost.ReadCeiling
 	// After its Create, a session's restore runs the longer of the Create's
-	// refusal of an older zmx's session, a read and a zmx kill, and the second
-	// ask of a Create that read back no creation or failed otherwise: a
-	// lookup, backend.RecheckAfter's wait and a lookup again.
+	// refusal of a session of another protocol, a read of it and a zmx kill,
+	// and the second ask of a Create that read back no creation or failed
+	// otherwise: a lookup, backend.RecheckAfter's wait and a lookup again.
 	refusal := saverhost.ReadCeiling + saverhost.KillCeiling + saverhost.RunGrace
 	askAgain := 2*lookup + backend.RecheckAfter
 	each := saverhost.CreateCeiling + saverhost.RunGrace + max(refusal, askAgain) + commitlock.Bound()

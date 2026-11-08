@@ -55,12 +55,12 @@ func StateDirMark(dir string) string {
 // proof proves a process the saver's daemon of one backend's sessions and one
 // state directory: a portal state daemon by its program and argv, carrying
 // every mark in the environment it was exec'd with. A daemon on argv alone,
-// such as another install's, the tmux version's among them, lacks a mark: the
-// saver session's name, the backend's directory, or the state directory. The
-// argv is read with the environment, from the one read, so a pid reused since
-// the identity's read proves nothing. A process that has finished exiting is
-// gone, asked before it is identified and again once ps names it no daemon,
-// as ps shows a zombie.
+// such as another install's, lacks a mark: the saver session's name, the
+// backend's directory, or the state directory. The argv is read with the
+// environment, from the one read, so a pid reused since the identity's read
+// proves nothing. A process that has finished exiting is gone, asked before
+// it is identified and again once ps names it no daemon, as ps shows a
+// zombie.
 type proof struct {
 	// marks are the backend's marks of the saver session. stateDir is the
 	// Host's state directory, and state its mark, which another state

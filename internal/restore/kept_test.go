@@ -280,7 +280,7 @@ func TestBringBack(t *testing.T) {
 		w.assertFailedKeepingEntry(t, saved)
 	})
 
-	t.Run("a refusal of a session an older zmx made is returned as that refusal", func(t *testing.T) {
+	t.Run("a refusal of a session of another protocol is returned as that refusal", func(t *testing.T) {
 		w := newWorld(t)
 		saved := entry(t, "work")
 		w.save(t, saved)

@@ -14,8 +14,6 @@ const (
 	daemonLockName    = "daemon.lock"
 	portalLogName     = "portal.log"
 	scrollbackSubdir  = "scrollback"
-	tmuxStateName     = "state-tmux"
-	stagingName       = "state-migrating"
 )
 
 // Dir resolves the absolute path to Portal's state directory: $PORTAL_STATE_DIR
@@ -55,25 +53,3 @@ func DaemonLock(dir string) string { return filepath.Join(dir, daemonLockName) }
 func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }
 
 func ScrollbackDir(dir string) string { return filepath.Join(dir, scrollbackSubdir) }
-
-// TmuxStateDir is where the migration from the tmux version moves that
-// version's state: state-tmux, beside the state directory dir. It exists only
-// once that migration has run. dir is cleaned first: filepath.Dir of a path
-// ending in a separator is that path itself.
-func TmuxStateDir(dir string) string {
-	return sibling(dir, tmuxStateName)
-}
-
-// MigrationStagingDir is where the migration from the tmux version builds the
-// zmx version's state before swapping it in: state-migrating, beside the
-// state directory dir. It exists only while a migration is under way, or
-// after one cut short.
-func MigrationStagingDir(dir string) string {
-	return sibling(dir, stagingName)
-}
-
-// sibling is name beside the directory dir. dir is cleaned first:
-// filepath.Dir of a path ending in a separator is that path itself.
-func sibling(dir, name string) string {
-	return filepath.Join(filepath.Dir(filepath.Clean(dir)), name)
-}

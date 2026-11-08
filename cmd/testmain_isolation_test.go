@@ -1,6 +1,6 @@
 package cmd
 
-// TestMain poisons the PORTAL_* config paths, TMUX, ZMX_DIR and the terminal
+// TestMain poisons the PORTAL_* config paths, ZMX_DIR and the terminal
 // adapters package-wide so a test that forgets to isolate fails loudly, and HOME
 // to a per-run temp directory — with XDG_CONFIG_HOME emptied so HOME is what
 // decides — so one that resolves a default config path lands there instead of
@@ -11,6 +11,7 @@ package cmd
 // poison sits under /dev/null, so no read of it can pass for an empty listing.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/migrate"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/spawn"
@@ -94,7 +94,7 @@ func TestMain(m *testing.M) {
 
 	// A real directory rather than a /nonexistent path: a resolve against an absent
 	// home succeeds and then fails at the write, so only a writable home can stand in
-	// for the developer's for the migration and for what a resolve goes on to create.
+	// for the developer's and for what a resolve goes on to create.
 	homeDir, err := os.MkdirTemp("", "portal-test-home")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmd tests: creating the package-wide temp HOME: %v\n", err)
@@ -114,12 +114,10 @@ func TestMain(m *testing.M) {
 	os.Setenv("PORTAL_THEMES_DIR", "/nonexistent/portal-test-must-isolate-themes")
 	os.Setenv("PORTAL_PREFS_FILE", "/nonexistent/portal-test-must-isolate-prefs.json")
 	os.Setenv("PORTAL_TERMINALS_FILE", "/nonexistent/portal-test-must-isolate-terminals.json")
-	os.Setenv("TMUX", "/nonexistent/portal-test-must-set-tmux-socket,0,0")
 	// ZMX_SESSION would turn an attach into a switch of a live session, and
 	// ZMX_SESSION_PREFIX would rename every session a test names.
 	for _, err := range []error{
 		os.Setenv("ZMX_DIR", zmxtest.PoisonedDir),
-		os.Setenv("TMUX_TMPDIR", zmxtest.PoisonedTmpdir),
 		os.Unsetenv("ZMX_SESSION"),
 		os.Unsetenv("ZMX_SESSION_PREFIX"),
 	} {
@@ -141,11 +139,6 @@ func TestMain(m *testing.M) {
 	osExit = func(code int) {
 		panic(fmt.Sprintf("cmd tests: osExit(%d) reached without withOsExitFake", code))
 	}
-	// The hold waits for a resize that never comes, so a test reaching it
-	// unstaged would hang until the package's timeout; it panics here instead.
-	upgradeHoldFunc = func(upgradeHold) {
-		panic("cmd tests: an earlier version's form was held without withFuncSeam(&upgradeHoldFunc)")
-	}
 	// A test's backend reports pids that are live processes on the
 	// developer's machine, none of them the test's.
 	signalProcess = func(pid int, sig syscall.Signal) error {
@@ -156,11 +149,9 @@ func TestMain(m *testing.M) {
 	bootstrapExe = func() (string, error) {
 		panic("cmd tests: bootstrapExe reached without withBootstrapDeps")
 	}
-	// Plain tmux reaches whichever server $TMUX names; the poison above makes
-	// that a dead socket, which reads as no server, so a test reaching it
-	// would pass in silence rather than fail.
-	migrateTmux = func() migrate.TmuxServer {
-		panic("cmd tests: migrateTmux reached without withMigrateDeps")
+	// It runs the zmx on PATH, the developer's own.
+	doctorZmx = func(context.Context) (string, error) {
+		panic("cmd tests: doctor's zmx check reached without DoctorDeps.Zmx")
 	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed

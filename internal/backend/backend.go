@@ -335,8 +335,9 @@ type Backend interface {
 	// refuses, and every call on a session List reports accepts its name,
 	// but AttachCommand refuses one the backend's own attach would misread.
 	ValidateName(name string) error
-	// DisplayCommand is command as Session.Command reports a session Create
-	// made running it, so a caller can tell a session running its command
-	// from one running anything else.
-	DisplayCommand(command []string) string
+	// CommandBegins reports whether shown, a command as Session.Command
+	// reports it, can be that of a session Create made running start followed
+	// by further arguments or none, so a caller can tell a session running a
+	// command it began from one running anything else.
+	CommandBegins(shown string, start []string) bool
 }

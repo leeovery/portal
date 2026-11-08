@@ -44,9 +44,6 @@ const (
 )
 
 var (
-	// ErrOlderZmx is a saver whose daemon gives Portal's zmx protocol no
-	// answer but answers zmx 0.8.1's framing: a zmx Portal doesn't support.
-	ErrOlderZmx = errors.New("the saver's daemon speaks zmx 0.8.1's framing")
 	// ErrSaverGone is a saver session gone by the time its daemon is asked
 	// its protocol.
 	ErrSaverGone = errors.New("the saver session is gone")
@@ -63,8 +60,9 @@ type Runner interface {
 	Run(ctx context.Context) ([]Warning, error)
 }
 
-// ZmxChecker checks that the zmx binary is on PATH and runs. Its error is
-// worded for the user, who reads it as the bootstrap's fatal.
+// ZmxChecker checks that the zmx binary is on PATH, runs, and is no release
+// older than the first that speaks Portal's protocol. Its error is worded for
+// the user, who reads it as the bootstrap's fatal.
 type ZmxChecker interface {
 	CheckZmx(ctx context.Context) error
 }
@@ -107,8 +105,7 @@ type Saver interface {
 	// saver proved another state directory's among them.
 	EnsureSaver(ctx context.Context, made func(context.Context) error) error
 	// Protocol is the zmx protocol the saver session's daemon speaks:
-	// ErrOlderZmx for an older zmx's daemon, and ErrSaverGone for a saver
-	// session gone.
+	// ErrSaverGone for a saver session gone.
 	Protocol(ctx context.Context) (int, error)
 	// End ends the saver session's daemon, whatever protocol it speaks, by a
 	// signal to the one process proved that daemon. One proved another state
@@ -408,7 +405,7 @@ func (p *pass) saverPresent(ctx context.Context) bool {
 
 // judgeMade judges the saver EnsureSaver made: one Portal can't use is ended,
 // first by the zmx that made it, and fatal; one gone at once is a saver down,
-// the restore left unfinished, as it is by one that answers neither protocol.
+// the restore left unfinished, as it is by one that answers no protocol.
 func (p *pass) judgeMade(ctx context.Context) *FatalError {
 	unusable, err := p.judge(ctx)
 	switch {
@@ -428,13 +425,10 @@ func (p *pass) judgeMade(ctx context.Context) *FatalError {
 
 // judge is decision 63's judgement of the saver session's daemon: nil for
 // one that speaks Portal's protocol; the fatal for one Portal can't use, that
-// speaks another or answers an older zmx's framing; and an error for one that
-// answers neither.
+// speaks another; and an error for one that answers no protocol.
 func (p *pass) judge(ctx context.Context) (*FatalError, error) {
 	speaks, err := p.Saver.Protocol(ctx)
 	switch {
-	case errors.Is(err, ErrOlderZmx):
-		return NewFatal(OlderZmxMessage, err), nil
 	case err != nil:
 		return nil, fmt.Errorf("judge the saver's zmx protocol: %w", err)
 	case speaks != p.Protocol:

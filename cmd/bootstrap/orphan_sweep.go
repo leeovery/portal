@@ -23,9 +23,9 @@ type OrphanSweeper interface {
 // before its kill, the saver's daemon of this backend's sessions and this
 // state directory, and that is neither the saver session's own process nor
 // this one. Argv alone never kills: a sweep would otherwise kill another
-// install's daemon, the tmux version's among them, or another state
-// directory's, each lacking one of the saver session's marks. Every field
-// must be supplied; a sweep missing one kills nothing.
+// install's daemon, or another state directory's, each lacking one of the
+// saver session's marks. Every field must be supplied; a sweep missing one
+// kills nothing.
 type OrphanSweepCore struct {
 	// Pgrep finds the candidates. No default: shelling out would pull
 	// os/exec into this pure-orchestration package.

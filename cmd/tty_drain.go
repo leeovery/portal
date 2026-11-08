@@ -28,8 +28,7 @@ type ttyDrain struct {
 // resumeInputDrain settles for as long as the waiter waits for a session to
 // fall quiet, the gap it judges one arrival by. What keeps the input arriving
 // is the session's zmx daemon writing the rest of an attached client's input
-// into the pty. The figure is kept from the tmux version, whose server wrote
-// it within its own event loop; the gap under zmx has not been measured.
+// into the pty; the gap it leaves has not been measured.
 var resumeInputDrain = ttyDrain{settle: resumeInputQuiet, bound: time.Second}
 
 // drain runs with canonical processing off, because a canonical terminal

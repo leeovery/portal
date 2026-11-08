@@ -36,12 +36,12 @@ var (
 // conn is one connection to a session's daemon. Its reads and writes fail
 // once the context it was dialled with ends.
 //
-// A conn sends one frame, never two, and send refuses a second. A zmx 0.8.1
-// daemon, which can share the directory, reads this protocol's 8-byte header
-// as its own 8-byte header with the length in bytes 1-4, so every frame Portal
-// sends reads to it as one still awaiting payload, and it waits. A second
-// frame on the connection would complete the first, and the bytes after it
-// would be read as frames of their own, Input among them: keystrokes into the
+// A conn sends one frame, never two, and send refuses a second. A daemon of
+// another framing, which can share the directory, may read this protocol's
+// header as one whose length lies elsewhere, so that a frame Portal sends
+// reads to it as one still awaiting payload, and it waits. A second frame on
+// the connection would complete the first, and the bytes after it would be
+// read as frames of their own, Input among them: keystrokes into the
 // session's shell.
 type conn struct {
 	nc   net.Conn
@@ -101,8 +101,8 @@ func (c *conn) header() (header, error) {
 // Unsupported, and returns the protocol version its header carries. Frames of
 // other tags are the session's broadcast output, skipped as await skips them,
 // but only in this protocol: the length of a frame in any other cannot be
-// trusted, and a zmx 0.8.1 daemon's output frame carries its length in bytes
-// 1-4, so its byte 1 is no version at all.
+// trusted, and in a framing with no version byte, byte 1 of an output frame
+// is no version at all.
 func (c *conn) answerVersion() (uint8, error) {
 	for {
 		h, err := c.header()

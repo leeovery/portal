@@ -108,9 +108,9 @@ func sessionNameKey(n int, role string) string {
 }
 
 // The named seed keys the suites share, and the only route to one: a fixture
-// names the seed whose role it means — reapable, live, tmux-era or plain
-// subject — so a name cannot drift onto a key of another half, and no package
-// re-derives a key of its own.
+// names the seed whose role it means — reapable, live or plain subject — so a
+// name cannot drift onto a key of another half, and no package re-derives a
+// key of its own.
 var (
 	// The reapable half: session names a fixture neither lists nor indexes, so
 	// an entry under one is reaped. A fixture keying its subject on one of
@@ -127,13 +127,6 @@ var (
 	LiveSeedA = sessionNameKey(4, "live")
 	LiveSeedB = sessionNameKey(5, "live")
 	LiveSeedC = sessionNameKey(6, "live")
-
-	// The tmux-era half: keys the tmux version wrote, a pane token and the
-	// older `<session>:<window>.<pane>` coordinates. No zmx session carries
-	// one, so the rule judges them as it judges any other key.
-	TmuxEraSeedA = "k3f9qz"
-	TmuxEraSeedB = "old-session:0.0"
-	TmuxEraSeedC = "old-session:1.2"
 
 	// The subject half: names carrying no staleness role at all, for a fixture
 	// measuring something else — a listing's ordering, a registration's write,

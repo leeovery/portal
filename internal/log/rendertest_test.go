@@ -13,7 +13,7 @@ func TestRenderLineForTest_ByteIdenticalToHandle(t *testing.T) {
 	const message = "tick complete"
 	attrs := []slog.Attr{
 		slog.Duration("took", 12*time.Millisecond),
-		slog.String("pane_key", "foo:0.0"),
+		slog.String("session", "foo"),
 	}
 
 	var buf bytes.Buffer
@@ -34,7 +34,7 @@ func TestRenderLineForTest_ByteIdenticalToHandle(t *testing.T) {
 func TestRenderLineForTest_IncludesPrefixBaselinesAndNewline(t *testing.T) {
 	ts := time.Date(2026, 6, 9, 10, 15, 30, 0, time.UTC)
 	got := RenderLineForTest(t, ts, slog.LevelWarn, "daemon", "tick complete",
-		slog.String("pane_key", "foo:0.0"))
+		slog.String("session", "foo"))
 
 	parsed, ok := ParseLogLine(got)
 	if !ok {
@@ -51,7 +51,7 @@ func TestRenderLineForTest_IncludesPrefixBaselinesAndNewline(t *testing.T) {
 	}
 	for _, want := range []string{
 		" daemon: tick complete ",
-		"pane_key=foo:0.0",
+		"session=foo",
 		"pid=",
 		"version=",
 		"process_role=",

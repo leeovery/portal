@@ -1,12 +1,8 @@
 package hooksweep
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -80,98 +76,7 @@ func TestSweepRule(t *testing.T) {
 			t.Errorf("file holds %v, want the listed and the indexed keys", got)
 		}
 	})
-
-	// hooks.json is shared with the tmux version, whose keys name no zmx
-	// session: a state dir and a zmx dir pointed somewhere fresh would judge
-	// every one stale.
-	for _, key := range []string{hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB} {
-		t.Run("it stands down rather than reap "+key+", a key the tmux version wrote, warning once", func(t *testing.T) {
-			w := newWorld(t, hookstest.LiveSeedA)
-			store, path := hookstest.StageStore(t, hookstest.Staging{
-				Seed: hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, key),
-			})
-			before := hookstest.HooksFileBytes(t, path)
-			persisted, err := store.Load(hooks.ViaInternal)
-			if err != nil {
-				t.Fatalf("load: %v", err)
-			}
-			sink := logtest.Install(t)
-
-			outcome, err := Run(t.Context(), w.sources(), store)
-			if err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
-				t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
-			}
-			hookstest.AssertHooksFileUnchanged(t, path, before, "rewritten by a cycle that stood down")
-			rec := sink.Records().WithMessage(standDownMsg).AtExactLevel(slog.LevelWarn).Only(t, "the stand-down's warning")
-			if got := rec.AttrString(t, "reason"); got != string(ReasonTmuxKeys) {
-				t.Errorf("reason = %q, want %q", got, ReasonTmuxKeys)
-			}
-			if stale, d := Stale(t.Context(), w.sources(), persisted); d.Reason() != ReasonTmuxKeys || len(stale) != 0 {
-				t.Errorf("Stale = (%v, %q), want none, declined as %q", stale, d.Reason(), ReasonTmuxKeys)
-			}
-		})
-	}
-
-	t.Run("it judges a key in the tmux version's shape that a listed session names as that session's", func(t *testing.T) {
-		survives(t, newWorld(t, hookstest.TmuxEraSeedA), hookstest.TmuxEraSeedA)
-	})
-
-	// Migration moves the tmux version's state to state-tmux and its keys out
-	// of hooks.json, so a key in their shape is a zmx name: a project called
-	// fabric names its sessions so.
-	t.Run("once the tmux version's state is migrated, it reaps a stale name in a token's shape, warning nothing", func(t *testing.T) {
-		w := newWorld(t, hookstest.LiveSeedA)
-		if err := os.Mkdir(state.TmuxStateDir(w.dir), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
-		persisted, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		sink := logtest.Install(t)
-
-		if stale, d := Stale(t.Context(), w.sources(), persisted); d.Declined() || !slices.Equal(stale, []string{sixAlphanumerics}) {
-			t.Errorf("Stale = (%v, %q), want [%s] and no stand-down", stale, d.Reason(), sixAlphanumerics)
-		}
-		outcome, err := Run(t.Context(), w.sources(), store)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if outcome.DeclineReason != "" || !slices.Equal(outcome.Removed, []string{sixAlphanumerics}) {
-			t.Errorf("Run = %+v, want [%s] removed", outcome, sixAlphanumerics)
-		}
-		if warnings := sink.Records().AtOrAboveLevel(slog.LevelWarn); len(warnings) != 0 {
-			t.Errorf("logged %v, want no warning", warnings)
-		}
-	})
-
-	t.Run("a state-tmux path that can't be read holds the guard", func(t *testing.T) {
-		w := newWorld(t, hookstest.LiveSeedA)
-		path := state.TmuxStateDir(w.dir)
-		if err := os.Symlink(filepath.Base(path), path); err != nil { // a loop: every stat of it fails
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(path); err == nil || errors.Is(err, fs.ErrNotExist) {
-			t.Fatalf("stat %s = %v, want a failure other than not-exist; the case is vacuous", path, err)
-		}
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: hooksBody(hookstest.LiveSeedA, sixAlphanumerics)})
-
-		outcome, err := Run(t.Context(), w.sources(), store)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if outcome.DeclineReason != ReasonTmuxKeys || len(outcome.Removed) != 0 {
-			t.Errorf("Run = %+v, want nothing removed, declined as %q", outcome, ReasonTmuxKeys)
-		}
-	})
 }
-
-// sixAlphanumerics is a session name in a pane token's shape.
-const sixAlphanumerics = "fabric"
 
 // A hook goes with its session's entry, so a sweep reaping three keys or more
 // that are half of hooks.json or more is judging it against the wrong state:
@@ -274,21 +179,6 @@ func standDownCases() []standDownCase {
 		{name: "an index from a newer Portal", reason: ReasonIndexUnusable, listed: true, stage: writeVersion(sessionindex.SchemaVersion + 1)},
 		{name: "a corrupt index", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
 			w.writeIndexBytes(t, []byte(`{"version": 2, "sessions": [`))
-		}},
-		// Between its renames, a migration's index is in its staging dir,
-		// and the state dir holds none: every rewritten key would be stale.
-		{name: "a migration cut short beside the state dir", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
-			w.besideMigration(t, func(staging string) {
-				writeFileAt(t, filepath.Join(staging, "sessions.json"), `{"version": 2, "sessions": []}`)
-			})
-		}},
-		{name: "a migration it can't rule out", reason: ReasonIndexUnusable, listed: true, stage: func(t *testing.T, w *world) {
-			w.besideMigration(t, func(staging string) {
-				if err := os.Remove(staging); err != nil {
-					t.Fatal(err)
-				}
-				writeFileAt(t, staging, "not a dir")
-			})
 		}},
 		{name: "the restoring flag raised", reason: ReasonRestoring, stage: func(t *testing.T, w *world) {
 			w.raiseRestoring(t)

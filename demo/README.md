@@ -132,7 +132,7 @@ it's drawn in, at a moment into its play, and as its last `Show` ends, which is 
 tape plays under `testing/synctest` at its header's grid, its keys pressed at their times. A
 fixture's still is held to its golden frame's text. The tests also hold every tape to the header,
 its grid to the size its program draws, and its `Set Theme` to the theme's canvas, text and
-selection; to running nothing but `demo/out/capturetool`, so never `portal`, zmx or tmux; to naming
+selection; to running nothing but `demo/out/capturetool`, so never `portal` or zmx; to naming
 a scenario or fixture that exists; and to quitting its program while hidden, so no frame shows a
 quit and nothing it types reaches the shell. `record.sh` lists stills only of tapes there are.
 

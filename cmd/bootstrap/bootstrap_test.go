@@ -474,14 +474,10 @@ var theirs = &saverhost.OtherStateDirError{StateDir: "/tmp/scratch/state", Other
 
 const theirsMessage = "The _portal-saver running in this zmx directory saves Portal's state in /srv/portal/state, not this Portal's state in /tmp/scratch/state. Run it with PORTAL_STATE_DIR=/srv/portal/state, or give it a zmx directory of its own with ZMX_DIR. If the state in /srv/portal/state is gone, end its saver with zmx kill _portal-saver."
 
-// olderZmx is the fatal of a saver answering zmx 0.8.1's framing.
-const olderZmx = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.1 or later."
-
 // anotherProtocol is the fatal of a saver speaking protocol 2.
 const anotherProtocol = "Portal can't use this zmx: its sessions speak protocol 2, and Portal speaks 1. Upgrade Portal, or install the zmx release it supports."
 
 var (
-	older   = answer{err: fmt.Errorf("%w: no answer in 1s", ErrOlderZmx)}
 	another = answer{speaks: 2}
 	neither = answer{err: errBoom}
 	portals = answer{speaks: portalProtocol}
@@ -490,38 +486,36 @@ var (
 // decision 68: a saver found that Portal can't use is ended, and the pass
 // goes on as if no saver ran.
 func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
-	for name, verdict := range map[string]answer{"answers zmx 0.8.1's framing": older, "speaks another protocol": another} {
-		t.Run("one that "+name+" is ended, then sessions are marked owed, a saver made and judged, and restored", func(t *testing.T) {
-			r := newRecorder()
-			r.Answers = []answer{verdict, portals}
-			sink := &logtest.Sink{}
+	t.Run("one that speaks another protocol is ended, then sessions are marked owed, a saver made and judged, and restored", func(t *testing.T) {
+		r := newRecorder()
+		r.Answers = []answer{another, portals}
+		sink := &logtest.Sink{}
 
-			if warnings := runPass(t, r, sink); len(warnings) != 0 {
-				t.Errorf("warnings = %v, want none", warnings)
-			}
+		if warnings := runPass(t, r, sink); len(warnings) != 0 {
+			t.Errorf("warnings = %v, want none", warnings)
+		}
 
-			want := []string{
-				"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
-				"Present", "Protocol", "End", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
-			}
-			if !slices.Equal(r.calls, want) {
-				t.Errorf("calls = %v, want %v", r.calls, want)
-			}
-			rec := sink.Records().WithMessage("saver ended").AtExactLevel(slog.LevelInfo).Only(t, "the saver ended")
-			if got := rec.AttrString(t, "detail"); !strings.Contains(got, "Portal ended the saver running on it") {
-				t.Errorf("detail = %q, want the saver's verdict and its end", got)
-			}
-		})
-	}
+		want := []string{
+			"CheckZmx", "CheckStateDir", "ClaimZmxDir", "RemoveLatch", "Lower", "SweepOrphanDaemons", "SweepStaleFlags",
+			"Present", "Protocol", "End", "MarkOwed", "EnsureSaver", "Create", "Protocol", "Raise", "Restore", "Lower", "WriteLatch",
+		}
+		if !slices.Equal(r.calls, want) {
+			t.Errorf("calls = %v, want %v", r.calls, want)
+		}
+		rec := sink.Records().WithMessage("saver ended").AtExactLevel(slog.LevelInfo).Only(t, "the saver ended")
+		if got := rec.AttrString(t, "detail"); !strings.Contains(got, "speaks zmx protocol 2, not 1; Portal ended the saver running on it") {
+			t.Errorf("detail = %q, want the saver's verdict and its end", got)
+		}
+	})
 
 	t.Run("one ended, with the zmx on PATH still one Portal can't use, ends the one it makes too, and is fatal", func(t *testing.T) {
 		r := newRecorder()
-		r.Answers = []answer{older}
+		r.Answers = []answer{another}
 
 		fatal := fatalOf(t, r)
 
-		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver {
-			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, olderZmx, indexEnsureSaver)
+		if fatal.UserMessage != anotherProtocol || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, anotherProtocol, indexEnsureSaver)
 		}
 		if r.count("End") != 1 || r.count("EndMade") != 1 || !r.called("MarkOwed") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
 			t.Errorf("calls = %v, want the saver found ended, then the one made, the owed marks written, and nothing restored", r.calls)
@@ -533,38 +527,33 @@ func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
 
 	// The judgement's own fatal names a zmx to install, which leaves this
 	// saver running: every command after would find it, still unended.
-	for name, verdict := range map[string]answer{"answers zmx 0.8.1's framing": older, "speaks another protocol": another} {
-		t.Run("one that "+name+" it can't end is the fatal naming the way out, nothing made, and the cause names the saver left", func(t *testing.T) {
-			r := newRecorder()
-			r.Answers = []answer{verdict}
-			r.EndErr = errors.New("no one process is proved the session's zmx daemon")
+	t.Run("one that speaks another protocol it can't end is the fatal naming the way out, nothing made, and the cause names the saver left", func(t *testing.T) {
+		r := newRecorder()
+		r.Answers = []answer{another}
+		r.EndErr = errors.New("no one process is proved the session's zmx daemon")
 
-			fatal := fatalOf(t, r)
+		fatal := fatalOf(t, r)
 
-			if fatal.UserMessage != SaverLeftMessage || fatal.Step != indexEnsureSaver {
-				t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, SaverLeftMessage, indexEnsureSaver)
+		if fatal.UserMessage != SaverLeftMessage || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, SaverLeftMessage, indexEnsureSaver)
+		}
+		if !strings.Contains(fatal.Cause.Error(), "speaks zmx protocol 2, not 1; Portal couldn't end the saver running on it, which is left: no one process") {
+			t.Errorf("cause = %v, want it to carry the verdict and name the saver left", fatal.Cause)
+		}
+		for _, call := range []string{"MarkOwed", "EnsureSaver", "Create", "Raise", "Restore", "WriteLatch"} {
+			if r.called(call) {
+				t.Errorf("calls = %v, want no %s past a saver it couldn't end", r.calls, call)
 			}
-			if !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver running on it, which is left: no one process") {
-				t.Errorf("cause = %v, want it to name the saver left", fatal.Cause)
-			}
-			if verdict == older && !errors.Is(fatal, ErrOlderZmx) {
-				t.Errorf("cause = %v, want it to carry the verdict", fatal.Cause)
-			}
-			for _, call := range []string{"MarkOwed", "EnsureSaver", "Create", "Raise", "Restore", "WriteLatch"} {
-				if r.called(call) {
-					t.Errorf("calls = %v, want no %s past a saver it couldn't end", r.calls, call)
-				}
-			}
-		})
-	}
+		}
+	})
 
-	// Step 1 reads the saver through Portal's protocol, which an older zmx's
-	// daemon doesn't answer, so only the end finds it another state
+	// Step 1 reads the saver through Portal's protocol, which a daemon of
+	// another doesn't answer, so only the end finds it another state
 	// directory's: SaverLeftMessage would have the user end that state's
 	// saver.
 	t.Run("one the end finds another state directory's is that state directory's refusal, nothing made", func(t *testing.T) {
 		r := newRecorder()
-		r.Answers = []answer{older}
+		r.Answers = []answer{another}
 		r.EndErr = fmt.Errorf("end the daemon of session %q: %w", "_portal-saver", theirs)
 
 		fatal := fatalOf(t, r)
@@ -582,48 +571,46 @@ func TestOrchestratorRun_EndsASaverFoundThatPortalCantUse(t *testing.T) {
 
 // decision 63: the saver made is judged before restore creates anything.
 func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
-	for name, verdict := range map[string]answer{"answers zmx 0.8.1's framing": older, "speaks another protocol": another} {
-		t.Run("one that "+name+" is ended, and fatal before restore creates anything", func(t *testing.T) {
-			r := newRecorder()
-			r.SaverUp = false
-			r.Answers = []answer{verdict}
+	t.Run("one that speaks another protocol is ended, and fatal before restore creates anything", func(t *testing.T) {
+		r := newRecorder()
+		r.SaverUp = false
+		r.Answers = []answer{another}
 
-			fatal := fatalOf(t, r)
+		fatal := fatalOf(t, r)
 
-			if want := map[bool]string{true: olderZmx, false: anotherProtocol}[verdict == older]; fatal.UserMessage != want || fatal.Step != indexEnsureSaver {
-				t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, want, indexEnsureSaver)
-			}
-			if !r.called("EndMade") || r.called("End") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
-				t.Errorf("calls = %v, want the saver made ended as made, and no restore and no latch", r.calls)
-			}
-		})
-	}
+		if fatal.UserMessage != anotherProtocol || fatal.Step != indexEnsureSaver {
+			t.Errorf("fatal = %q at step %d, want %q at step %d", fatal.UserMessage, fatal.Step, anotherProtocol, indexEnsureSaver)
+		}
+		if !r.called("EndMade") || r.called("End") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
+			t.Errorf("calls = %v, want the saver made ended as made, and no restore and no latch", r.calls)
+		}
+	})
 
 	t.Run("one it can't end is left, and the fatal's cause says so", func(t *testing.T) {
 		r := newRecorder()
 		r.SaverUp = false
-		r.Answers = []answer{older}
+		r.Answers = []answer{another}
 		r.EndMadeErr = errors.New("its socket outlived SIGTERM")
 
 		fatal := fatalOf(t, r)
 
-		if !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver it made on it, which is left: its socket outlived SIGTERM") || fatal.UserMessage != olderZmx {
-			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
+		if !strings.Contains(fatal.Cause.Error(), "Portal couldn't end the saver it made on it, which is left: its socket outlived SIGTERM") || fatal.UserMessage != anotherProtocol {
+			t.Errorf("fatal = %q, cause %v; want the judgement's fatal, its cause naming the saver left", fatal.UserMessage, fatal.Cause)
 		}
 	})
 
 	// decision 75: the backend's create judges what it made, ending a session
-	// of zmx 0.8.1's with that zmx's kill, or its daemon's proved signal,
-	// before it refuses it, so the pass ends nothing again.
-	t.Run("one the create refuses as zmx 0.8.1's is fatal, nothing ended again, and nothing restored", func(t *testing.T) {
+	// of another protocol with that zmx's kill before it refuses it, so the
+	// pass ends nothing again.
+	t.Run("one the create refuses as speaking another protocol is fatal, nothing ended again, and nothing restored", func(t *testing.T) {
 		r := newRecorder()
 		r.SaverUp = false
 		r.CreateErr = fmt.Errorf("create the saver session: %w; zmx kill ended the session", backend.ErrUnsupportedProtocol)
 
 		fatal := fatalOf(t, r)
 
-		if fatal.UserMessage != olderZmx || fatal.Step != indexEnsureSaver || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
-			t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, olderZmx, indexEnsureSaver)
+		if fatal.UserMessage != UnsupportedCreateMessage || fatal.Step != indexEnsureSaver || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+			t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, UnsupportedCreateMessage, indexEnsureSaver)
 		}
 		if r.called("End") || r.called("EndMade") || r.called("Raise") || r.called("Restore") || r.called("WriteLatch") {
 			t.Errorf("calls = %v, want nothing ended after the create's own end, and no restore and no latch", r.calls)
@@ -633,22 +620,22 @@ func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
 	t.Run("one the create refuses and couldn't end is fatal, its cause the create's saying so", func(t *testing.T) {
 		r := newRecorder()
 		r.SaverUp = false
-		r.CreateErr = fmt.Errorf("create the saver session: %w; the session is left running: zmx kill failed; then: no one process is proved the session's zmx daemon", backend.ErrUnsupportedProtocol)
+		r.CreateErr = fmt.Errorf("create the saver session: %w; the session is left running: zmx kill failed", backend.ErrUnsupportedProtocol)
 
 		fatal := fatalOf(t, r)
 
-		if fatal.UserMessage != olderZmx || !errors.Is(fatal.Cause, r.CreateErr) {
-			t.Errorf("fatal = %q, cause %v; want the older-zmx fatal carrying the create's refusal", fatal.UserMessage, fatal.Cause)
+		if fatal.UserMessage != UnsupportedCreateMessage || !errors.Is(fatal.Cause, r.CreateErr) {
+			t.Errorf("fatal = %q, cause %v; want the unsupported-create fatal carrying the create's refusal", fatal.UserMessage, fatal.Cause)
 		}
 	})
 
-	t.Run("one it recycles that answers zmx 0.8.1's framing is fatal, and ended", func(t *testing.T) {
+	t.Run("one it recycles that speaks another protocol is fatal, and ended", func(t *testing.T) {
 		r := newRecorder()
 		r.Recycles = true
-		r.Answers = []answer{portals, older}
+		r.Answers = []answer{portals, another}
 
-		if fatal := fatalOf(t, r); fatal.UserMessage != olderZmx || !r.called("EndMade") || r.called("Restore") {
-			t.Errorf("fatal = %q, calls %v; want the older-zmx fatal, the made saver ended, no restore", fatal.UserMessage, r.calls)
+		if fatal := fatalOf(t, r); fatal.UserMessage != anotherProtocol || !r.called("EndMade") || r.called("Restore") {
+			t.Errorf("fatal = %q, calls %v; want the judgement's fatal, the made saver ended, no restore", fatal.UserMessage, r.calls)
 		}
 	})
 
@@ -695,7 +682,7 @@ func TestOrchestratorRun_JudgesTheSaverItMakes(t *testing.T) {
 
 func TestOrchestratorRun_LeavesASaverItCantJudgeBe(t *testing.T) {
 	for name, found := range map[string]bool{"found": true, "made": false} {
-		t.Run("a saver "+name+" that answers neither leaves the restore unfinished, with nothing more made", func(t *testing.T) {
+		t.Run("a saver "+name+" that answers no protocol leaves the restore unfinished, with nothing more made", func(t *testing.T) {
 			r := newRecorder()
 			r.SaverUp = found
 			r.Answers = []answer{neither}
@@ -883,16 +870,17 @@ func TestOrchestratorRun_RestoreWarnings(t *testing.T) {
 	}
 }
 
-// decision 75: a zmx 0.8.1 first on PATH makes every create fail alike, so a
-// restore the backend refused a session to stops there, with the fatal.
+// decision 75: a zmx of another protocol first on PATH makes every create
+// fail alike, so a restore the backend refused a session to stops there, with
+// the fatal.
 func TestOrchestratorRun_RestoreStoppedByAnUnsupportedCreateIsFatal(t *testing.T) {
 	r := newRecorder()
 	r.Result = restore.Result{Failed: 1, Unsupported: fmt.Errorf("create session %q: %w", "work", backend.ErrUnsupportedProtocol)}
 
 	fatal := fatalOf(t, r)
 
-	if fatal.UserMessage != olderZmx || fatal.Step != indexRestore || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
-		t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, olderZmx, indexRestore)
+	if fatal.UserMessage != UnsupportedCreateMessage || fatal.Step != indexRestore || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("fatal = %q at step %d (%v), want %q at step %d carrying the refusal", fatal.UserMessage, fatal.Step, fatal.Cause, UnsupportedCreateMessage, indexRestore)
 	}
 	if want := wantAllCalls[:len(wantAllCalls)-1]; !slices.Equal(r.calls, want) || r.Raised {
 		t.Errorf("calls = %v, want %v: the flag lowered, no latch", r.calls, want)

@@ -168,12 +168,6 @@ func AtomicWrite(path string, data []byte, opts ...WriteOption) error {
 	return nil
 }
 
-// SyncDir orders the renames just made in the directory dir ahead of any
-// later write, as AtomicWrite orders its own rename: a rename of a directory,
-// which no AtomicWrite makes, persists ahead of what follows it. A filesystem
-// that makes no such sync is passed over, as AtomicWrite passes it over.
-func SyncDir(dir string) error { return syncDir(dir) }
-
 var (
 	syncFile = syncFileData
 	syncDir  = syncDirectory

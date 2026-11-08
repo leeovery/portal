@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,8 +66,10 @@ type DoctorDeps struct {
 	ThemesDir string
 	// ZmxDir is the zmx dir the dir check judges and, unless a test injects
 	// its own, the one the sessions are listed and probed in.
-	ZmxDir       string
-	LookPath     func(file string) (string, error)
+	ZmxDir string
+	// Zmx finds the zmx on PATH and checks it as the bootstrap's first step
+	// does: its path, or why Portal can't use it, worded for the user.
+	Zmx          func(ctx context.Context) (string, error)
 	ListSessions func(ctx context.Context) ([]backend.Session, error)
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
@@ -108,8 +109,8 @@ func resolveDoctorDeps() *DoctorDeps {
 	if deps.ZmxDir == "" {
 		deps.ZmxDir = zmx.DirFor(os.Environ())
 	}
-	if deps.LookPath == nil {
-		deps.LookPath = exec.LookPath
+	if deps.Zmx == nil {
+		deps.Zmx = doctorZmx
 	}
 	if deps.Version == "" {
 		deps.Version = Version()
@@ -233,23 +234,19 @@ var doctorCmd = &cobra.Command{
 }
 
 // The lines of a --fix that repaired nothing: the state's zmx dir check
-// failed, the saver saves another state, or a migration is cut short, or may
-// be.
+// failed, or the saver saves another state.
 const (
-	fixRefusedLine        = "Skipped every repair: state's zmx dir failed"
-	fixOtherStateDirLine  = "Skipped every repair: " + saver.SessionName + " saves the state in %s, not this one"
-	fixCutShortLine       = "Skipped every repair: a migration was cut short; run portal migrate to finish it"
-	fixCutShortUnreadLine = "Skipped every repair: can't tell whether a migration was cut short"
+	fixRefusedLine       = "Skipped every repair: state's zmx dir failed"
+	fixOtherStateDirLine = "Skipped every repair: " + saver.SessionName + " saves the state in %s, not this one"
 )
 
 // fixRefusal is why --fix makes no repair, empty when it may make them. The
 // repairs write state, so a state directory that belongs to another zmx
 // directory gets none, nor one beside a saver proved another state
 // directory's, which says this state is a scratch one paired with another's
-// sessions, nor one a migration cut short left holding no index of the
-// migrated sessions; a prune in any of them would reap hooks that are
-// another's. The diagnosis names why. A state directory that can't be
-// resolved is the repairs' own to skip.
+// sessions; a prune in either would reap hooks that are another's. The
+// diagnosis names why. A state directory that can't be resolved is the
+// repairs' own to skip.
 func fixRefusal(ctx context.Context, deps *DoctorDeps) string {
 	dir, err := doctorStateDir(deps)
 	if err != nil {
@@ -260,12 +257,6 @@ func fixRefusal(ctx context.Context, deps *DoctorDeps) string {
 	}
 	if other := otherStateDir(ctx, deps.Saver); other != nil {
 		return fmt.Sprintf(fixOtherStateDirLine, other.Other)
-	}
-	switch cut, err := state.MigrationCutShort(dir); {
-	case err != nil:
-		return fixCutShortUnreadLine
-	case cut:
-		return fixCutShortLine
 	}
 	return ""
 }
@@ -322,7 +313,6 @@ const (
 	indexStandDownPhrase         = "could not read sessions.json"
 	noSessionsStandDownPhrase    = "no sessions listed or saved"
 	lockStandDownPhrase          = "hooks.json is locked"
-	tmuxKeysStandDownPhrase      = "hooks.json holds keys in the tmux version's shape"
 	massReapStandDownPhrase      = "half or more of hooks.json's keys name no session listed or saved"
 )
 
@@ -362,15 +352,14 @@ var skippedPrunePhrases = map[hooksweep.Reason]string{
 	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase,
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase,
-	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase,
 	hooksweep.ReasonMassReap:            massReapStandDownPhrase,
 }
 
 // notEvaluableDetails renders a stand-down reason as the reason the count
 // cannot be taken, so the diagnosis reports exactly what the reaper declined
-// to judge. A restore, an install with no sessions, a held lock, the tmux
-// version's keys and a mass reap held are states, so they say the count waits
-// on them; the rest name the read that failed.
+// to judge. A restore, an install with no sessions, a held lock and a mass
+// reap held are states, so they say the count waits on them; the rest name
+// the read that failed.
 var notEvaluableDetails = map[hooksweep.Reason]string{
 	hooksweep.ReasonRestoring:           restoreStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonRestoringReadFailed: restoringReadStandDownPhrase,
@@ -379,7 +368,6 @@ var notEvaluableDetails = map[hooksweep.Reason]string{
 	hooksweep.ReasonIndexUnusable:       indexStandDownPhrase,
 	hooksweep.ReasonNoSessions:          noSessionsStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonLockTimeout:         lockStandDownPhrase + " (not evaluable)",
-	hooksweep.ReasonTmuxKeys:            tmuxKeysStandDownPhrase + " (not evaluable)",
 	hooksweep.ReasonMassReap:            massReapStandDownPhrase + " (not evaluable)",
 }
 
@@ -450,7 +438,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	saverRead := readSaverPresence(ctx, deps.Saver)
 
 	results := []checkResult{
-		checkZmxBinary(deps.LookPath),
+		checkZmxBinary(ctx, deps.Zmx),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
 		checkSaver(saverRead, idle),
@@ -475,13 +463,30 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	return results, nil
 }
 
-func checkZmxBinary(lookPath func(string) (string, error)) checkResult {
+// checkZmxBinary shows the zmx find finds, or why Portal can't use it.
+func checkZmxBinary(ctx context.Context, find func(context.Context) (string, error)) checkResult {
 	const name = "zmx"
-	path, err := lookPath(zmxProgram)
+	path, err := find(ctx)
 	if err != nil {
-		return checkResult{name: name, status: checkFail, detail: errZmxMissing.Error()}
+		return checkResult{name: name, status: checkFail, detail: err.Error()}
 	}
 	return checkResult{name: name, status: checkPass, detail: path}
+}
+
+// doctorZmx is the zmx line's check of the zmx on PATH. cmd's TestMain makes
+// it panic: a test that reaches it would run the developer's zmx.
+var doctorZmx = findZmxReadOnly
+
+// findZmxReadOnly is the bootstrap's own check of the zmx on PATH, bound to
+// a scratch directory it removes after: zmx version makes the directory it
+// is bound to, which doctor's read-only path never makes.
+func findZmxReadOnly(ctx context.Context) (string, error) {
+	scratch, err := os.MkdirTemp("", "portal-doctor-zmx-")
+	if err != nil {
+		return "", fmt.Errorf("make a scratch directory to run zmx in: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	return productionZmxCheck(scratch).Find(ctx)
 }
 
 // zmx makes its directory with its first session, so one not made yet holds
@@ -750,28 +755,13 @@ func checkDirReadable(name, dir string) checkResult {
 	return checkResult{name: name, status: checkPass, detail: dir}
 }
 
-// The sessions.json check's failures while a migration is cut short.
-const (
-	// cutShortDetail is a migration cut short: where the migrated state waits.
-	cutShortDetail = "a migration was cut short, its state waiting in %s; run portal migrate to finish it"
-	// cutShortUnreadDetail is a migration doctor can't rule out: why.
-	cutShortUnreadDetail = "can't tell whether a migration was cut short: %v"
-)
-
-// An absent sessions.json is a fresh install, told apart from an empty index,
-// and from a state dir a migration cut short left without one. Doctor is
-// exempt from the root's stop on an unusable index and on a migration cut
-// short, so it names each itself.
+// An absent sessions.json is a fresh install, told apart from an empty index.
+// Doctor is exempt from the root's stop on an unusable index, so it names one
+// itself.
 func checkSessionsJSON(dir string, dirErr error) checkResult {
 	const name = "sessions.json"
 	if dirErr != nil {
 		return checkResult{name: name, status: checkFail, detail: "unresolvable"}
-	}
-	switch cut, err := state.MigrationCutShort(dir); {
-	case err != nil:
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortUnreadDetail, err)}
-	case cut:
-		return checkResult{name: name, status: checkFail, detail: fmt.Sprintf(cutShortDetail, state.MigrationStagingDir(dir))}
 	}
 	if _, err := os.Stat(sessionindex.Path(dir)); errors.Is(err, fs.ErrNotExist) {
 		return checkResult{name: name, status: checkPass, detail: "no sessions indexed yet"}
@@ -785,7 +775,7 @@ func checkSessionsJSON(dir string, dirErr error) checkResult {
 
 func unusableIndexDetail(err error) string {
 	if errors.Is(err, sessionindex.ErrLegacyIndex) {
-		return "from the tmux version of Portal; run portal migrate"
+		return `from the tmux version of Portal, which this version can't use; see "Coming from the tmux version" in Portal's README`
 	}
 	if versionErr, ok := errors.AsType[*sessionindex.VersionError](err); ok && versionErr.Found > sessionindex.SchemaVersion {
 		return fmt.Sprintf("version %d, from a newer Portal; this one reads version %d", versionErr.Found, sessionindex.SchemaVersion)

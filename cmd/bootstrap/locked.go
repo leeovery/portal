@@ -40,14 +40,15 @@ const (
 	// of whether that spelling answers.
 	lookup = 2 * saverhost.ReadCeiling
 	// restoreSessionRun is a session restore makes: its Create, a run of the
-	// binary, with its grace; then the longer of the Create's refusal of a
-	// session an older zmx made (a read in that zmx's framing and its zmx
-	// kill, a run of the binary) and a second ask: of a Create that read back
-	// no creation, that lookup finding none, or of one that failed otherwise,
-	// a lookup, then backend.RecheckAfter's wait and a lookup again. Its
-	// record waits on commit.lock besides.
-	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace +
-		max(saverhost.ReadCeiling+saverhost.KillCeiling+saverhost.RunGrace, 2*lookup+backend.RecheckAfter)
+	// binary, with its grace, then the Create's read of whether a session it
+	// read back no answer from speaks another protocol; then the longer of
+	// the refusal of one that does (its zmx kill, a run of the binary) and a
+	// second ask: of a Create that read back no creation, that lookup
+	// finding none, or of one that failed otherwise, a lookup, then
+	// backend.RecheckAfter's wait and a lookup again. Its record waits on
+	// commit.lock besides.
+	restoreSessionRun = saverhost.CreateCeiling + saverhost.RunGrace + saverhost.ReadCeiling +
+		max(saverhost.KillCeiling+saverhost.RunGrace, 2*lookup+backend.RecheckAfter)
 	// lockSlack covers what no bound does: pgrep and the proofs' ps calls,
 	// and the flag, latch and index files.
 	lockSlack = 15 * time.Second

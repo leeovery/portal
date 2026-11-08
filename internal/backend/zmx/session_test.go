@@ -622,15 +622,15 @@ func TestProtocolVersion(t *testing.T) {
 		}
 	})
 
-	// A zmx 0.8.1 daemon broadcasts its session's output to every client,
-	// a probe included, in its own frame layout: byte 1 is the low byte of the
-	// frame's length, not a version.
-	t.Run("it reads no version from a zmx 0.8.1 daemon's output", func(t *testing.T) {
+	// A daemon broadcasts its session's output to every client, a probe
+	// included, in its own frame layout: in one with no version byte, byte 1
+	// may be the low byte of the frame's length.
+	t.Run("it reads no version from output in a framing with no version byte", func(t *testing.T) {
 		dir := socketDir(t)
-		serve(t, dir, "old", broadcastingOldOutput(143))
+		serve(t, dir, "unversioned", broadcastingUnversionedOutput(143))
 
-		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "old"); !errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("ProtocolVersion of a 0.8.1 daemon broadcasting output = %d, %v; want ErrTimeout", got, err)
+		if got, err := newBackend(t, dir).ProtocolVersion(t.Context(), "unversioned"); !errors.Is(err, backend.ErrTimeout) {
+			t.Errorf("ProtocolVersion of a daemon broadcasting unversioned output = %d, %v; want ErrTimeout", got, err)
 		}
 	})
 
@@ -665,10 +665,10 @@ func TestProtocolVersion(t *testing.T) {
 	})
 }
 
-// broadcastingOldOutput writes, before reading anything, zmx 0.8.1 output
-// frames: a 1-byte tag, a u32 length at bytes 1-4, padded to 8, and the
-// payload. Then it holds the connection.
-func broadcastingOldOutput(length uint32) func(*daemon, net.Conn) {
+// broadcastingUnversionedOutput writes, before reading anything, output
+// frames of a framing with no version byte: a 1-byte tag, a u32 length at
+// bytes 1-4, padded to 8, and the payload. Then it holds the connection.
+func broadcastingUnversionedOutput(length uint32) func(*daemon, net.Conn) {
 	return func(_ *daemon, c net.Conn) {
 		h := make([]byte, 8)
 		h[0] = 1

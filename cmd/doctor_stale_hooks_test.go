@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -38,29 +37,6 @@ func TestDoctorStaleHooksCheck(t *testing.T) {
 	t.Run("it counts in the plural", func(t *testing.T) {
 		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.ReapableSeedB))
 		assertCheck(t, staleHooksCheck(t, install), checkFail, "2 stale hook entries")
-	})
-
-	// The sweep won't reap the tmux version's keys, so the count waits on
-	// them, and says so.
-	t.Run("it is not evaluable while hooks.json holds keys in the tmux version's shape, saying why", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB))
-
-		outBuf, _, err := runDoctorWith(t, install.deps)
-
-		if err != nil {
-			t.Errorf("Execute err = %v; want nil: a stand-down never moves the exit code", err)
-		}
-		if want := "  · stale hooks: " + tmuxKeysStandDownPhrase + " (not evaluable)\n"; !strings.Contains(outBuf.String(), want) {
-			t.Errorf("report missing %q:\n%s", want, outBuf.String())
-		}
-	})
-
-	t.Run("once the tmux version's state is migrated, it counts a name in a token's shape as any other", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.LiveSeedB, "fabric"))
-		if err := os.Mkdir(state.TmuxStateDir(install.deps.StateDir), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		assertCheck(t, staleHooksCheck(t, install), checkFail, "1 stale hook entry")
 	})
 
 	t.Run("it passes when a listed session or an index entry names every key", func(t *testing.T) {
@@ -286,20 +262,6 @@ func TestDoctorFixPrunesStaleHooks(t *testing.T) {
 		}
 		if want := "Pruned 2 stale hooks:\n  " + hookstest.ReapableSeedA + "\n  " + hookstest.ReapableSeedB + "\n"; !strings.Contains(outBuf.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, outBuf.String())
-		}
-	})
-
-	t.Run("it prunes nothing while hooks.json holds keys in the tmux version's shape, saying why", func(t *testing.T) {
-		install := newStaleHooksInstall(t, hooksBody(hookstest.LiveSeedA, hookstest.ReapableSeedA, hookstest.TmuxEraSeedB))
-		before := readFileBytes(t, install.hooksPath)
-
-		outBuf, _, _ := runDoctorWith(t, install.deps, "--fix")
-
-		if want := "Skipped stale hook prune: " + tmuxKeysStandDownPhrase + "\n"; !strings.Contains(outBuf.String(), want) {
-			t.Errorf("output missing %q:\n%s", want, outBuf.String())
-		}
-		if after := readFileBytes(t, install.hooksPath); !bytes.Equal(after, before) {
-			t.Errorf("hooks.json changed under a prune that stood down:\n%s", after)
 		}
 	})
 

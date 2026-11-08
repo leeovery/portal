@@ -13,9 +13,8 @@ import (
 type IDGenerator = nanoid.Generator
 
 // FallbackProject is the project part of a name whose project sanitises to
-// nothing. A name is never the nanoid alone: a bare nanoid is token-shaped,
-// and the tmux version's daemon, which shares hooks.json, reaps a token-shaped
-// key that names none of its panes.
+// nothing, so every generated name keeps the {project}-{nanoid} form rather
+// than opening with the "-" zmx reads as a flag.
 const FallbackProject = "session"
 
 // leadingDropped are the characters a generated name may not open with: zmx

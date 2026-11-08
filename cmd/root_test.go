@@ -81,7 +81,7 @@ func resetRootCmd() {
 		_ = f.Value.Set("false")
 		f.Changed = false
 	}
-	if f := hooksRmCmd.Flags().Lookup("pane-key"); f != nil {
+	if f := hooksRmCmd.Flags().Lookup("key"); f != nil {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
@@ -381,13 +381,13 @@ func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 	}
 }
 
-// decision 75: a mint whose create the backend refused, because a zmx 0.8.1
-// first on PATH made the session, fails with the older-zmx fatal, as a
-// bootstrap meeting that zmx does.
-func TestExecute_UnsupportedCreateIsTheOlderZmxFatal(t *testing.T) {
+// A mint whose create the backend refused, because the zmx first on PATH
+// made a session of another protocol, fails with the unsupported-create
+// fatal, as a bootstrap meeting that zmx does.
+func TestExecute_UnsupportedCreateIsItsFatal(t *testing.T) {
 	fake, _ := stageAttach(t)
 	stageMint(t, fake, time.Date(2026, 11, 3, 9, 30, 0, 0, time.UTC))
-	fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w; zmx kill ended the session", "x", backend.ErrUnsupportedProtocol))
+	fake.SpeakOtherProtocol()
 
 	var stderr bytes.Buffer
 	originalWriter := fatalErrorStderr
@@ -399,10 +399,10 @@ func TestExecute_UnsupportedCreateIsTheOlderZmxFatal(t *testing.T) {
 	err := Execute()
 
 	fatal, ok := errors.AsType[*bootstrap.FatalError](err)
-	if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
-		t.Fatalf("Execute = %v, want the older-zmx fatal carrying the refusal", err)
+	if !ok || fatal.UserMessage != bootstrap.UnsupportedCreateMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
+		t.Fatalf("Execute = %v, want the unsupported-create fatal carrying the refusal", err)
 	}
-	if got, want := stderr.String(), bootstrap.OlderZmxMessage+"\n"; got != want {
+	if got, want := stderr.String(), bootstrap.UnsupportedCreateMessage+"\n"; got != want {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }
@@ -508,11 +508,11 @@ func nonDefaultFlagValue(t *testing.T, f *pflag.Flag) string {
 }
 
 // The one mapping from a create's error to its fatal, shared by the picker's
-// mint and Execute: the older-zmx fatal for a refusal, and none otherwise.
+// mint and Execute: the unsupported-create fatal for a refusal, and none otherwise.
 func TestCreateFatal(t *testing.T) {
 	refusal := fmt.Errorf("create session %q: %w", "x", backend.ErrUnsupportedProtocol)
-	if fatal, ok := errors.AsType[*bootstrap.FatalError](createFatal(refusal)); !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
-		t.Errorf("createFatal(refusal) = %v, want the older-zmx fatal carrying it", createFatal(refusal))
+	if fatal, ok := errors.AsType[*bootstrap.FatalError](createFatal(refusal)); !ok || fatal.UserMessage != bootstrap.UnsupportedCreateMessage || !errors.Is(fatal, backend.ErrUnsupportedProtocol) {
+		t.Errorf("createFatal(refusal) = %v, want the unsupported-create fatal carrying it", createFatal(refusal))
 	}
 	if err := createFatal(errors.New("boom")); err != nil {
 		t.Errorf("createFatal(boom) = %#v, want nil", err)

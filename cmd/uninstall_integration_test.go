@@ -20,7 +20,6 @@ import (
 	"github.com/leeovery/portal/internal/saver"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/xdg"
-	"github.com/leeovery/portal/internal/zmxtest"
 )
 
 func TestUninstallAgainstZmx(t *testing.T) {
@@ -31,7 +30,7 @@ func TestUninstallAgainstZmx(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A pre-token key, which no sweep reaps.
-	hookstest.SeedHooksJSON(t, d.Env, map[string]string{"work:0.0": "make dev"})
+	hookstest.SeedHooksJSON(t, d.Env, map[string]string{"work": "make dev"})
 	configDir, err := xdg.PortalDir(xdg.EnvSlice(d.Env))
 	if err != nil {
 		t.Fatal(err)
@@ -101,33 +100,6 @@ func TestUninstallRefusesAnUnprovedSaverAgainstZmx(t *testing.T) {
 	}
 	if held, err := d.Backend.Exists(t.Context(), saver.SessionName); err != nil || !held {
 		t.Errorf("Exists(%s) = %v, %v; want the saver left", saver.SessionName, held, err)
-	}
-}
-
-// Decision 68: uninstall ends a saver whose daemon speaks zmx 0.8.1, which it
-// can't read to stop, as the bootstrap ends one.
-func TestUninstallEndsASaverOnOlderZmxAgainstZmx(t *testing.T) {
-	older := zmxtest.OlderBinary(t)
-	w := newBootWorld(t)
-	w.olderSaver(t, older)
-	configDir, err := xdg.PortalDir(xdg.EnvSlice(w.env))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := w.command("uninstall").CombinedOutput()
-
-	if err != nil {
-		t.Fatalf("portal uninstall: %v\n%s\n--- portal.log ---\n%s", err, out, w.log())
-	}
-	want := "Portal's save daemon stopped. Saved sessions and config are untouched at " + configDir + "/.\n" +
-		"To remove Portal completely, uninstall the binary and delete that directory.\n"
-	if string(out) != want {
-		t.Errorf("output = %q, want %q", out, want)
-	}
-	w.awaitNoSessions(t)
-	if pids, err := portaltest.PgrepPortalDaemons(); err != nil || len(pids) != 0 {
-		t.Errorf("PgrepPortalDaemons = %v, %v; want the saver's daemon gone with it", pids, err)
 	}
 }
 

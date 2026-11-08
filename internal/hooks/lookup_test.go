@@ -39,42 +39,42 @@ func TestLookupOnResume(t *testing.T) {
 	t.Run("returns no-hook when hooks.json is missing", func(t *testing.T) {
 		store := hooks.NewStore(filepath.Join(t.TempDir(), "hooks.json"))
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("returns no-hook when hooks.json is malformed JSON", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: "{not json"})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("returns no-hook when the hook-key is absent", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"other-session:0.0":{"on-resume":"echo hi"}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"other-session":{"on-resume":"echo hi"}}`})
 
-		got, err := store.LookupOnResume("missing-session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("missing-session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("returns no-hook when the key has no on-resume event", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-attach":"echo attached"}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-attach":"echo attached"}}`})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("returns no-hook when the on-resume command is empty string", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":""}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":""}}`})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("it reports the command and no mode for a string-form entry", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":"echo hello world; ls -la"}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":"echo hello world; ls -la"}}`})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertHook(t, got, err, "echo hello world; ls -la", resumemode.Unset)
 	})
 
@@ -82,10 +82,10 @@ func TestLookupOnResume(t *testing.T) {
 		for _, mode := range []resumemode.Mode{resumemode.Eager, resumemode.Lazy} {
 			t.Run(mode.String(), func(t *testing.T) {
 				store, _ := hookstest.StageStore(t, hookstest.Staging{
-					Seed: `{"session:0.0":{"on-resume":{"command":"claude --resume abc","resume":"` + mode.String() + `"}}}`,
+					Seed: `{"session":{"on-resume":{"command":"claude --resume abc","resume":"` + mode.String() + `"}}}`,
 				})
 
-				got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+				got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 				assertHook(t, got, err, "claude --resume abc", mode)
 			})
 		}
@@ -105,43 +105,43 @@ func TestLookupOnResume(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":` + tt.entry + `}}`})
+				store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":` + tt.entry + `}}`})
 
-				got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+				got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 				assertHook(t, got, err, "echo hi", resumemode.Unset)
 			})
 		}
 	})
 
 	t.Run("it reports a miss for an object carrying no command key", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":{"resume":"eager"}}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":{"resume":"eager"}}}`})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("it reports a miss for an object whose command is empty", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":{"command":"","resume":"eager"}}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":{"command":"","resume":"eager"}}}`})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		assertNoHook(t, got, err)
 	})
 
 	t.Run("it reports a miss for a value that is neither a string nor an object", func(t *testing.T) {
 		for _, value := range []string{"7", "true", "null", `["echo hi"]`} {
 			t.Run(value, func(t *testing.T) {
-				store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session:0.0":{"on-resume":` + value + `}}`})
+				store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"session":{"on-resume":` + value + `}}`})
 
-				got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+				got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 				assertNoHook(t, got, err)
 			})
 		}
 	})
 
 	t.Run("round-trips hook keys containing colons in the session name", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"work:foo:0.0":{"on-resume":"ls"}}`})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"work:foo":{"on-resume":"ls"}}`})
 
-		got, err := store.LookupOnResume("work:foo:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("work:foo", hooks.ViaHydrate)
 		assertHook(t, got, err, "ls", resumemode.Unset)
 	})
 
@@ -173,7 +173,7 @@ func TestLookupOnResume(t *testing.T) {
 		// error propagates rather than degrading to "no hook".
 		store, _ := hookstest.StageStore(t, hookstest.Staging{Unreadable: true})
 
-		got, err := store.LookupOnResume("session:0.0", hooks.ViaHydrate)
+		got, err := store.LookupOnResume("session", hooks.ViaHydrate)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}

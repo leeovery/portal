@@ -36,12 +36,12 @@ func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 
 // unisolatedKeys are dropped from the environment the slice starts from: a
 // subprocess runs in no tmux pane and no zmx session of the developer's.
-var unisolatedKeys = []string{"TMUX_PANE", "ZMX_SESSION", "ZMX_SESSION_PREFIX"}
+var unisolatedKeys = []string{"TMUX", "TMUX_PANE", "ZMX_SESSION", "ZMX_SESSION_PREFIX"}
 
 // isolate sets up IsolateStateForTest's isolation in the process and returns
 // the entries that carry it to a subprocess: the scrubbed home and shell
 // files, every Portal path in the scratch config, the sandbox registry, and
-// tmux and zmx poisoned.
+// zmx poisoned.
 func isolate(t *testing.T) (isolation []string, stateDir string) {
 	t.Helper()
 
@@ -128,16 +128,9 @@ func isolate(t *testing.T) (isolation []string, stateDir string) {
 		"HISTFILE=" + os.DevNull,
 		"ZDOTDIR=" + zdotdir,
 		state.SandboxRegistryEnv + "=" + registryPath,
-		// Poison TMUX so a subprocess cannot silently attach to the developer's
-		// real server; one that needs a server appends its own TMUX after this
+		// A subprocess that needs sessions appends its own ZMX_DIR after this
 		// slice (exec.Cmd env dedupe is last-wins), and one that forgets fails
 		// loudly.
-		"TMUX=" + PoisonedTmuxSocket + ",0,0",
-		// A zmx session drops TMUX, so a plain tmux run in one would find the
-		// default socket under TMUX_TMPDIR: poisoned, it fails loudly.
-		"TMUX_TMPDIR=" + zmxtest.PoisonedTmpdir,
-		// The same for zmx: a subprocess that needs sessions appends its own
-		// ZMX_DIR.
 		"ZMX_DIR=" + zmxtest.PoisonedDir,
 	}, paths...)
 	return isolation, stateDir
@@ -226,11 +219,6 @@ func installBackstopCleanup(t backstopT, devStateDir string, pre map[string]Fing
 		reportStateDirDelta(t.Errorf, devStateDir, pre)
 	})
 }
-
-// PoisonedTmuxSocket is the deliberately-invalid tmux socket path baked into
-// IsolateStateForTest's env. A subprocess that needs a real test server must
-// override TMUX by appending its own after that slice.
-const PoisonedTmuxSocket = "/nonexistent/portal-test-must-set-tmux-socket"
 
 func filterEnvKeys(env []string, keys ...string) []string {
 	out := make([]string, 0, len(env))

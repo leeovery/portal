@@ -272,7 +272,7 @@ func TestHydrate_ARecordThatFailsNeverHoldsTheHandOff(t *testing.T) {
 			withBackendDeps(t, BackendDeps{Backend: stalledBackend{w.backend}})
 			cfg.SessionBound = 20 * time.Millisecond
 		}},
-		{name: "the index is the tmux version's", cause: "portal migrate", stage: func(t *testing.T, w *hydrateWorld, _ *hydrateConfig) {
+		{name: "the index is a version 1 index", cause: "this version can't use", stage: func(t *testing.T, w *hydrateWorld, _ *hydrateConfig) {
 			if err := os.WriteFile(sessionindex.Path(w.stateDir), []byte(legacyIndexBody), 0o600); err != nil {
 				t.Fatal(err)
 			}

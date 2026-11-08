@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/commitlock"
 	"github.com/leeovery/portal/internal/logtest"
@@ -1095,49 +1096,6 @@ func TestRestore_HelperArgv(t *testing.T) {
 		}
 	})
 
-	// decision 6: a session portal migrate made waits on its resume panel at
-	// its first restore, whatever its hook's mode.
-	t.Run("it resumes an entry marked lazy lazily, ahead of its transcript", func(t *testing.T) {
-		w := newWorld(t)
-		e, path := w.saveTranscript(t, entry(t, "work"))
-		e.ResumeLazy = true
-		w.save(t, e)
-
-		w.r.Restore(t.Context())
-
-		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy", "--file", path); !slices.Equal(got, want) {
-			t.Errorf("command = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it resumes an entry marked lazy lazily with no transcript", func(t *testing.T) {
-		w := newWorld(t)
-		e := entry(t, "work")
-		e.ResumeLazy = true
-		w.save(t, e)
-
-		w.r.Restore(t.Context())
-
-		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
-			t.Errorf("command = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("it brings back a kept entry marked lazy lazily", func(t *testing.T) {
-		w := newWorld(t)
-		e := entry(t, "work")
-		e.ResumeLazy = true
-		w.save(t, e)
-
-		if _, err := w.r.BringBack(t.Context(), "work"); err != nil {
-			t.Fatalf("BringBack: %v", err)
-		}
-
-		if got, want := w.onlyCreate(t).Command, append(slices.Clone(bare), "--lazy"); !slices.Equal(got, want) {
-			t.Errorf("command = %q, want %q", got, want)
-		}
-	})
-
 	t.Run("it names none that is no transcript of the session", func(t *testing.T) {
 		w := newWorld(t)
 		e, _ := w.saveTranscript(t, entry(t, "notes"))
@@ -1184,8 +1142,8 @@ func TestRunsHelper(t *testing.T) {
 	}{
 		{"a portal at another path", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work"}},
 		{"a portal at another path, replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--file", "/tmp/work.vt"}},
-		{"a portal at another path, resuming lazily", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy"}},
-		{"a portal at another path, resuming lazily and replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--lazy", "--file", "/tmp/work.vt"}},
+		{"a portal at another path, given a flag shorter than the transcript's", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "-t", "/tmp/work.vt"}},
+		{"a portal at another path, given flags longer than the transcript's", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--transcript-at", "/tmp/work.vt", "--quiet"}},
 		{"a portal at a path the shell would read specially", []string{"/Users/lee/My Apps/it's/portal", "state", "hydrate", "--session", "work"}},
 	} {
 		t.Run("it counts the helper run by "+tc.name, func(t *testing.T) {
@@ -1237,7 +1195,6 @@ func TestRunsHelper(t *testing.T) {
 	// bytes, marking the cut with "..." where that fits. The helper's own
 	// arguments, with "work", run to 29 bytes past its path.
 	transcript := []string{"--file", "/tmp/work.vt"}
-	lazily := slices.Concat([]string{"--lazy"}, transcript)
 	for _, tc := range []struct {
 		name    string
 		command []string
@@ -1246,11 +1203,8 @@ func TestRunsHelper(t *testing.T) {
 		{"the helper, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), transcript), true},
 		{"the helper, whole, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), transcript), true},
 		{"the helper, whole, its transcript's path cut", slices.Concat(helperAt(portalPathOf(215), "work"), transcript), true},
-		{"the helper resuming lazily, cut within its own arguments", slices.Concat(helperAt(portalPathOf(237), "work"), lazily), true},
-		{"the helper, whole, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work"), lazily), true},
-		{"the helper, whole, resuming lazily, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(214), "work"), lazily), true},
-		{"the helper for another name, its lazy flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), lazily), false},
 		{"the helper for another name, its transcript's flag cut", slices.Concat(helperAt(portalPathOf(221), "work-2"), transcript), false},
+		{"the helper for a name its session's begins, cut within that name", slices.Concat(helperAt(portalPathOf(226), "work-2"), transcript), false},
 		{"a binary not named portal, cut", slices.Concat(helperAt(portalPathOf(237)+"-dev", "work"), transcript), false},
 		{"another of portal's commands, cut", []string{portalPathOf(237), "state", "resume-wait", "--session", "work"}, false},
 	} {
@@ -1260,8 +1214,49 @@ func TestRunsHelper(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if whole := uncut(w.fake, tc.command); s.Command == whole || len(s.Command) > 256 {
+			if whole := uncut(tc.command); s.Command == whole || len(s.Command) > 256 {
 				t.Fatalf("command = %q, want it cut from %q", s.Command, whole)
+			}
+
+			if got := w.r.RunsHelper(s); got != tc.counted {
+				t.Errorf("RunsHelper(%q) = %v, want %v", s.Command, got, tc.counted)
+			}
+		})
+	}
+
+	// Whatever arguments follow the helper's own, a flag shorter than the
+	// transcript's or longer, the cut falls where it falls: after one of
+	// them, before the first with the mark, or with no room for the mark.
+	// Each case pins what the report shows after the helper's arguments.
+	short := []string{"-t", "/tmp/work.vt"}
+	long := []string{"--transcript-at", "/tmp/work.vt"}
+	for _, tc := range []struct {
+		name     string
+		path     int
+		helperOf string
+		trailing []string
+		after    string
+		counted  bool
+	}{
+		{"a short flag, its value cut", 212, "work", short, " -t...", true},
+		{"a short flag, its value cut with no room for the mark", 224, "work", short, " -t", true},
+		{"a short flag cut, with no room for the mark", 225, "work", short, "", true},
+		{"a long flag, its value cut with no room for the mark", 211, "work", long, " --transcript-at", true},
+		{"a long flag cut", 212, "work", long, "...", true},
+		{"a long flag cut, the mark filling the last byte", 224, "work", long, "...", true},
+		{"a long flag cut, with no room for the mark", 225, "work", long, "", true},
+		{"a long flag cut, the helper's for another name", 212, "work-2", long, "...", false},
+		{"a long flag cut, the helper's for a name its session's begins with", 213, "wor", long, "...", false},
+	} {
+		t.Run(fmt.Sprintf("it counts the helper followed by %s: %v", tc.name, tc.counted), func(t *testing.T) {
+			w := newWorld(t)
+			helper := helperAt(portalPathOf(tc.path), tc.helperOf)
+			s, err := w.fake.Create(t.Context(), "work", t.TempDir(), slices.Concat(helper, tc.trailing))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := uncut(helper) + tc.after; s.Command != want {
+				t.Fatalf("command = %q, want %q", s.Command, want)
 			}
 
 			if got := w.r.RunsHelper(s); got != tc.counted {
@@ -1283,12 +1278,12 @@ func portalPathOf(n int) string {
 	return "/" + strings.Repeat("d", n-len(base)-1) + base
 }
 
-// uncut is command as the backend shows each of its arguments, joined by
-// spaces, however long that is.
-func uncut(b backend.Backend, command []string) string {
+// uncut is command as zmx shows each of its arguments, joined by spaces,
+// however long that is.
+func uncut(command []string) string {
 	words := make([]string, len(command))
 	for i, arg := range command {
-		words[i] = b.DisplayCommand([]string{arg})
+		words[i] = zmx.DisplayCommand([]string{arg})
 	}
 	return strings.Join(words, " ")
 }

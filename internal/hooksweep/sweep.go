@@ -3,13 +3,10 @@ package hooksweep
 import (
 	"context"
 	"errors"
-	"os"
-	"regexp"
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/sessionindex"
 	"github.com/leeovery/portal/internal/state"
 )
@@ -47,10 +44,6 @@ type Outcome struct {
 // errNoStateDir declines a judgement handed no state directory, whose flag
 // and index reads would otherwise resolve against the working directory.
 var errNoStateDir = errors.New("no state directory")
-
-// errMigrationCutShort declines a judgement while portal migrate is cut
-// short between its renames.
-var errMigrationCutShort = errors.New("a migration is cut short, its index in the staging dir")
 
 // restoringStandDown reports whether hook-staleness work may run at all. Both
 // the sweep and the diagnosis take it before they judge a single key, so
@@ -95,17 +88,8 @@ func listedNames(ctx context.Context, list func(context.Context) ([]backend.Sess
 // indexedNames is every name sessions.json holds an entry for: a saved
 // session awaiting its restore keeps its hook. An index this version must not
 // read — version 1, corrupt or newer — or can't read at all protects nothing
-// it can name, so the judgement stands down on it. So does a migration cut
-// short beside dir (state.MigrationCutShort), or one it can't rule out: the
-// index of the migrated sessions waits in its staging dir, and every key
-// rewritten for them would read as stale.
+// it can name, so the judgement stands down on it.
 func indexedNames(dir string) ([]string, StandDown) {
-	switch cut, err := state.MigrationCutShort(dir); {
-	case err != nil:
-		return nil, decline(ReasonIndexUnusable, "error", err)
-	case cut:
-		return nil, decline(ReasonIndexUnusable, "error", errMigrationCutShort)
-	}
 	idx, err := sessionindex.Read(dir)
 	if err != nil {
 		return nil, decline(ReasonIndexUnusable, "error", err)
@@ -130,37 +114,6 @@ func nothingProtects(listed, indexed []string) StandDown {
 	return StandDown{}
 }
 
-// paneCoordinates is the shape of the hook keys the tmux version wrote before
-// its pane tokens: <session>:<window>.<pane>.
-var paneCoordinates = regexp.MustCompile(`^[^:]+:[0-9]+\.[0-9]+$`)
-
-// tmuxShaped reports whether key has the shape of a key the tmux version
-// wrote: a pane token, or a pane's coordinates.
-func tmuxShaped(key string) bool {
-	return nanoid.IsTokenShaped(key) || paneCoordinates.MatchString(key)
-}
-
-// tmuxKeysStandDown stands the judgement down, until the tmux version's state
-// is migrated beside dir, rather than remove any of the stale keys in the
-// shape of that version's. hooks.json is shared with that version, whose
-// keys name no zmx session: beside a state dir and a zmx dir pointed
-// somewhere fresh, as a dev build's are, each would be stale, and its hook
-// lost. A key in that shape that a session or an entry names is a zmx
-// session's, and never stale. Once migrated, a key in that shape is an
-// ordinary zmx name, as many a session's is, and judged as any other.
-func tmuxKeysStandDown(dir string, stale []string) StandDown {
-	n := 0
-	for _, key := range stale {
-		if tmuxShaped(key) {
-			n++
-		}
-	}
-	if n > 0 && !tmuxStateMigrated(dir) {
-		return decline(ReasonTmuxKeys, "entries", n)
-	}
-	return StandDown{}
-}
-
 // massReapAt is the fewest keys whose removal in one sweep can be a mass
 // reap, held when they are at least half of hooks.json besides.
 const massReapAt = 3
@@ -178,14 +131,6 @@ func massReapStandDown(stale []string, persisted int) StandDown {
 		return decline(ReasonMassReap, "entries", n)
 	}
 	return StandDown{}
-}
-
-// tmuxStateMigrated reports whether the tmux version's state has been
-// migrated beside dir: state.TmuxStateDir exists, a directory. A stat that
-// fails, however it fails, counts as not migrated, so the guard holds.
-func tmuxStateMigrated(dir string) bool {
-	info, err := os.Stat(state.TmuxStateDir(dir))
-	return err == nil && info.IsDir()
 }
 
 // Stale reports the keys of persisted the sweep would remove at this moment,
@@ -211,20 +156,10 @@ func Stale(ctx context.Context, src Sources, persisted hooks.Snapshot) ([]string
 		return nil, d
 	}
 	stale := hooks.StaleKeys(persisted, listed, indexed)
-	if d := staleStandDown(src.StateDir, stale, len(persisted)); d.Declined() {
+	if d := massReapStandDown(stale, len(persisted)); d.Declined() {
 		return nil, d
 	}
 	return stale, StandDown{}
-}
-
-// staleStandDown is the stand-down the stale keys of persisted entries
-// themselves call for: the tmux version's keys not yet migrated, or a mass
-// reap.
-func staleStandDown(dir string, stale []string, persisted int) StandDown {
-	if d := tmuxKeysStandDown(dir, stale); d.Declined() {
-		return d
-	}
-	return massReapStandDown(stale, persisted)
 }
 
 // A store holding nothing to sweep is an answer, not a failure: it aborts the
@@ -272,7 +207,7 @@ func (c *clean) indexing() ([]string, error) {
 		d = nothingProtects(c.listed, indexed)
 	}
 	if !d.Declined() {
-		d = staleStandDown(c.src.StateDir, hooks.StaleKeys(c.snapshot, c.listed, indexed), len(c.snapshot))
+		d = massReapStandDown(hooks.StaleKeys(c.snapshot, c.listed, indexed), len(c.snapshot))
 	}
 	if d.Declined() {
 		return nil, declinedError{d}

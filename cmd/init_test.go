@@ -22,15 +22,6 @@ func emitInitScript(t *testing.T, shell string, args ...string) string {
 	return buf.String()
 }
 
-func TestInit_PrintsItsScriptOnAVersion1State(t *testing.T) {
-	stageVersion1State(t)
-	refuseBootstrap(t)
-
-	if out := emitInitScript(t, "zsh"); !strings.Contains(out, "function x() { portal open \"$@\" }") {
-		t.Errorf("init on a version 1 state printed %q, want its script", out)
-	}
-}
-
 func TestInitZsh(t *testing.T) {
 	tests := []struct {
 		name      string

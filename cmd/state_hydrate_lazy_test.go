@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -171,80 +170,6 @@ func TestHydrateLazy_PinnedLazyBeatsAnEagerInstall(t *testing.T) {
 	}
 }
 
-// decision 6: a restore asking lazy (--lazy, which restore passes for an entry
-// marked resume_lazy, as portal migrate marks every entry it makes) parks the
-// session on its panel whatever its hook's mode.
-func TestHydrateLazy_ARestoreAskingLazyParksWhateverTheMode(t *testing.T) {
-	cases := []struct {
-		name         string
-		registration resumemode.Mode
-		install      string
-	}{
-		{name: "pinned eager", registration: resumemode.Eager, install: ""},
-		{name: "naming no mode under an eager install", registration: resumemode.Unset, install: "eager"},
-		{name: "pinned lazy", registration: resumemode.Lazy, install: "eager"},
-	}
-	for _, tc := range cases {
-		for _, tail := range hydrateTails() {
-			t.Run(tc.name+"/"+tail.name, func(t *testing.T) {
-				exec := &stubExecShell{}
-				cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", tc.registration), lazyPrefs(t, tc.install), exec)
-				cfg.Lazy = true
-
-				lazyRun(t, tail, cfg)
-
-				if exec.target != "/bin/sh" {
-					t.Fatalf("exec target = %q, want /bin/sh", exec.target)
-				}
-				if want := lazyChainArgs(t, "echo hi"); !reflect.DeepEqual(exec.args, want) {
-					t.Errorf("exec args = %v, want the parked chain %v", exec.args, want)
-				}
-				if !flagRaisedAt(t, lazyFlag(t)) {
-					t.Error("the parked session's flag is not raised")
-				}
-			})
-		}
-	}
-}
-
-func TestHydrateLazy_ARestoreAskingLazyWithNoHookRestoresAsToday(t *testing.T) {
-	exec := &stubExecShell{}
-	cfg := lazyConfig(t, emptyHookStore(t), lazyPrefs(t, ""), exec)
-	cfg.Lazy = true
-
-	lazyRun(t, hydrateTails()[0], cfg)
-
-	if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"-zsh"}) {
-		t.Errorf("exec = %q %v, want the login shell -zsh: there is nothing to wait for", exec.target, exec.args)
-	}
-	assertNoFlag(t)
-}
-
-func TestHydrateLazy_TheLazyFlagReachesTheHelper(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want bool
-	}{
-		{args: []string{"--session", hydrateSession}, want: false},
-		{args: []string{"--session", hydrateSession, "--lazy"}, want: true},
-		{args: []string{"--session", hydrateSession, "--lazy", "--file", "/tmp/s.bin"}, want: true},
-	} {
-		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
-			newHydrateWorld(t)
-			var got hydrateConfig
-			withFuncSeam(t, &hydrateRunFunc, func(_ context.Context, cfg hydrateConfig) { got = cfg })
-
-			if _, _, err := runRootCmd(t, append([]string{"state", "hydrate"}, tc.args...)...); err != nil {
-				t.Fatalf("state hydrate: %v", err)
-			}
-
-			if got.Lazy != tc.want {
-				t.Errorf("Lazy = %v, want %v", got.Lazy, tc.want)
-			}
-		})
-	}
-}
-
 func TestHydrateLazy_RaisesTheFlagBeforeTheRestoreEnds(t *testing.T) {
 	for _, tail := range hydrateTails() {
 		t.Run(tail.name, func(t *testing.T) {
@@ -388,45 +313,6 @@ func TestHydrateLazy_FiresTheHookOnEveryTailWhenTheFlagCannotBeRaised(t *testing
 			assertOneFlagRefusalWarn(t, sink, hydrateSession)
 			assertNoFlag(t)
 		})
-	}
-}
-
-// A restore asking lazy whose park fails hands the session its shell, never
-// the hook, whatever the hook's mode: the session asked to wait, not to run
-// its hook now.
-func TestHydrateLazy_ARestoreAskingLazyGivesTheShellWhenTheFlagCannotBeRaised(t *testing.T) {
-	refusals := map[string]func(t *testing.T, cfg *hydrateConfig){
-		"the executable can't be resolved": func(_ *testing.T, cfg *hydrateConfig) {
-			cfg.ResolveExe = func() (string, error) { return "", errors.New("no executable") }
-		},
-		"the flag can't be raised": func(_ *testing.T, cfg *hydrateConfig) {
-			cfg.SetPending = func(string, string) error { return errors.New("disk full") }
-		},
-	}
-	for name, refuse := range refusals {
-		for _, mode := range []resumemode.Mode{resumemode.Eager, resumemode.Lazy} {
-			for _, tail := range hydrateTails() {
-				t.Run(name+"/"+mode.String()+"/"+tail.name, func(t *testing.T) {
-					exec := &stubExecShell{}
-					logger, sink := newCaptureLoggerForComponent(t, "hydrate")
-					cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", mode), lazyPrefs(t, ""), exec)
-					cfg.Logger = logger
-					cfg.Lazy = true
-					refuse(t, &cfg)
-
-					lazyRun(t, tail, cfg)
-
-					if exec.target != "/bin/zsh" || !reflect.DeepEqual(exec.args, []string{"-zsh"}) {
-						t.Errorf("exec = %q %v, want the login shell -zsh, the hook unfired", exec.target, exec.args)
-					}
-					assertOneFlagRefusalWarn(t, sink, hydrateSession)
-					if warn := execLogLine(t, sink.Body(), "WARN", "set resume pending flag failed"); !strings.Contains(warn, "its hook unfired") {
-						t.Errorf("refusal WARN = %q, want it saying the hook goes unfired", warn)
-					}
-					assertNoFlag(t)
-				})
-			}
-		}
 	}
 }
 

@@ -6230,7 +6230,7 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("loading view no longer names tmux", func(t *testing.T) {
+	t.Run("loading view never names tmux", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tui.Session{}}
 		m := tui.New(lister, tui.WithBootstrapping(idleBootstrap))
 		var model tea.Model = m

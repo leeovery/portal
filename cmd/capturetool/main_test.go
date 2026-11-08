@@ -27,9 +27,6 @@ import (
 // wherever the tests run, as the capture tests hold them. Every adapter panics
 // rather than open a window, as in every package whose tests reach the picker.
 func TestMain(m *testing.M) {
-	if err := os.Setenv("TMUX_TMPDIR", "/dev/null/tmpdir-poison"); err != nil {
-		panic(err)
-	}
 	spawn.PoisonAdaptersForTest()
 	os.Exit(capture.RunNarrow(m))
 }

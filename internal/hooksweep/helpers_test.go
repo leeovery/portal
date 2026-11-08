@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,27 +97,6 @@ func (w *world) writeIndexBytes(t *testing.T, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(sessionindex.Path(w.dir), data, 0o600); err != nil {
 		t.Fatalf("write sessions.json: %v", err)
-	}
-}
-
-// besideMigration moves w's state dir into a root of its own, beside
-// state-tmux/ and a migration's staging dir, which stage then fills.
-func (w *world) besideMigration(t *testing.T, stage func(staging string)) {
-	t.Helper()
-	w.dir = filepath.Join(t.TempDir(), "state")
-	for _, dir := range []string{w.dir, state.TmuxStateDir(w.dir), state.MigrationStagingDir(w.dir)} {
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stage(state.MigrationStagingDir(w.dir))
-}
-
-// writeFileAt writes body at path.
-func writeFileAt(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }
 

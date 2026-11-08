@@ -120,7 +120,7 @@ func TestSweepOrphanDaemons(t *testing.T) {
 	})
 
 	for name, err := range map[string]error{
-		"lacks the saver session's marks, as the tmux Portal's daemon does": errNotTheSaversDaemon,
+		"lacks the saver session's marks, as another install's daemon does": errNotTheSaversDaemon,
 		"can't be read":                     errUnprovable,
 		"has gone before its proof is read": errGoneBeforeItsProof,
 	} {

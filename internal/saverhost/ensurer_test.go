@@ -499,7 +499,7 @@ func TestEnsureSaver(t *testing.T) {
 	t.Run("it judges the saver it creates before waiting for its daemon, and the judge's error ends it there", func(t *testing.T) {
 		dir := t.TempDir()
 		fake := backendtest.New()
-		refused := errors.New("an older zmx")
+		refused := errors.New("a zmx Portal can't use")
 		judged := 0
 		start := time.Now()
 

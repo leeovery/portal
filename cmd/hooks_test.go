@@ -147,7 +147,7 @@ func TestHooksListLocationColumn(t *testing.T) {
 		hooksFileInTempDir(t, map[string]map[string]string{
 			hookSessionA:           {"on-resume": "npm start"},
 			hookstest.SubjectSeedA: {"on-resume": "claude --resume abc"},
-			hookstest.TmuxEraSeedA: {"on-resume": "make dev"},
+			hookstest.SubjectSeedB: {"on-resume": "make dev"},
 			"gone-Zx81Qa":          {"on-resume": "true"},
 		})
 		inSession(t, "", backend.Session{Name: hookSessionA})
@@ -479,16 +479,16 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it removes the --pane-key entry verbatim, outside any session", func(t *testing.T) {
+	t.Run("it removes the --key entry verbatim, outside any session", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
 			hookstest.SubjectSeedA: {"on-resume": "claude --resume xyz"},
-			hookstest.TmuxEraSeedA: {"on-resume": "npm start"},
+			hookstest.SubjectSeedB: {"on-resume": "npm start"},
 		})
 		inSession(t, "")
 
-		for _, key := range []string{hookstest.SubjectSeedA, hookstest.TmuxEraSeedA} {
-			if _, err := runHookRm(t, "--pane-key", key); err != nil {
-				t.Fatalf("hook rm --pane-key %s: %v", key, err)
+		for _, key := range []string{hookstest.SubjectSeedA, hookstest.SubjectSeedB} {
+			if _, err := runHookRm(t, "--key", key); err != nil {
+				t.Fatalf("hook rm --key %s: %v", key, err)
 			}
 		}
 
@@ -497,15 +497,15 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it takes --pane-key over the current session", func(t *testing.T) {
+	t.Run("it takes --key over the current session", func(t *testing.T) {
 		_, hooksFile := hooksFileInTempDir(t, map[string]map[string]string{
 			hookSessionA: {"on-resume": "npm start"},
 			hookSessionB: {"on-resume": "make dev"},
 		})
 		inSession(t, hookSessionA)
 
-		if _, err := runHookRm(t, "--pane-key", hookSessionB); err != nil {
-			t.Fatalf("hook rm --pane-key: %v", err)
+		if _, err := runHookRm(t, "--key", hookSessionB); err != nil {
+			t.Fatalf("hook rm --key: %v", err)
 		}
 
 		data := readHooksJSON(t, hooksFile)
@@ -514,15 +514,15 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("it describes --pane-key as a verbatim hook key", func(t *testing.T) {
-		flag := hooksRmCmd.Flags().Lookup("pane-key")
+	t.Run("it describes --key as a verbatim hook key", func(t *testing.T) {
+		flag := hooksRmCmd.Flags().Lookup("key")
 		if flag == nil {
-			t.Fatal("hook rm has no --pane-key flag")
+			t.Fatal("hook rm has no --key flag")
 		}
 
-		want := "Hook key of the entry to remove, taken verbatim — any key, including an old-format one (defaults to the current session's name)"
+		want := "Hook key of the entry to remove, taken verbatim (defaults to the current session's name)"
 		if flag.Usage != want {
-			t.Errorf("--pane-key usage = %q, want %q", flag.Usage, want)
+			t.Errorf("--key usage = %q, want %q", flag.Usage, want)
 		}
 	})
 }

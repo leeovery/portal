@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/backend"
+	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/sessionindex"
@@ -615,7 +616,7 @@ func TestRestore_CountsWhatTheListingsShow(t *testing.T) {
 		saved.Owed = true
 		w.save(t, saved)
 		w.createWith(func(_ context.Context, name, _ string, command []string) (backend.Session, error) {
-			w.fake.Add(backend.Session{Name: name, PID: 7, Command: w.fake.DisplayCommand(command)})
+			w.fake.Add(backend.Session{Name: name, PID: 7, Command: zmx.DisplayCommand(command)})
 			return backend.Session{Name: name}, nil
 		})
 		w.witness.listing = func(n int) {

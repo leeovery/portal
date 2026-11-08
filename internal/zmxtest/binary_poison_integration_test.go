@@ -31,16 +31,13 @@ func TestBinaryPoisonProcess(t *testing.T) {
 }
 
 func TestBinary_RefusesAnUnpoisonedEnvironment(t *testing.T) {
-	for name, value := range map[string]string{"ZMX_DIR": "/Users/lee/.local/state/zmx", "TMUX_TMPDIR": ""} {
-		t.Run(name, func(t *testing.T) {
-			child := exec.Command(os.Args[0], "-test.run=^"+binaryPoisonProcessName+"$")
-			child.Env = append(os.Environ(), binaryPoisonEnv+"="+name+"="+value)
+	const name, value = "ZMX_DIR", "/Users/lee/.local/state/zmx"
+	child := exec.Command(os.Args[0], "-test.run=^"+binaryPoisonProcessName+"$")
+	child.Env = append(os.Environ(), binaryPoisonEnv+"="+name+"="+value)
 
-			out, err := child.CombinedOutput()
+	out, err := child.CombinedOutput()
 
-			if err == nil || !strings.Contains(string(out), name+" is ") {
-				t.Errorf("Binary with %s=%q: %v\n%s\nwant the test failed naming %s", name, value, err, out, name)
-			}
-		})
+	if err == nil || !strings.Contains(string(out), name+" is ") {
+		t.Errorf("Binary with %s=%q: %v\n%s\nwant the test failed naming %s", name, value, err, out, name)
 	}
 }

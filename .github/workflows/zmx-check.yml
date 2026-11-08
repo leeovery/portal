@@ -5,12 +5,10 @@ name: zmx check
 # branch: every test that runs a real zmx. The release leg takes the macOS
 # build zmx publishes, the one Homebrew installs, rather than building the
 # release's source: 1.0.0's published macOS builds carried Linux's ioctl
-# numbers, which a build from source never shows. The tests of how Portal treats
-# zmx 0.8.1 (zmxtest.OlderBinary) skip here: 0.8.1 never changes, so the local
-# integration lane covers them. A leg tests only a zmx newer than the last
-# passing run (a release published, or a main commit made, since it started),
-# since one that passed already is known to work; a run started by hand tests
-# both legs whatever their age. zmxtest.Binary fails a test these
+# numbers, which a build from source never shows. A leg tests only a zmx newer
+# than the last passing run (a release published, or a main commit made, since
+# it started), since one that passed already is known to work; a run started
+# by hand tests both legs whatever their age. zmxtest.Binary fails a test these
 # lines don't run, and reads them strictly (internal/zmxtest/weeklycheck.go):
 # keep each to -tags integration, -p 1, -timeout, one single-quoted -run and
 # ./ packages, in a run: | block holding nothing else, and set neither Go's

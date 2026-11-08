@@ -49,19 +49,19 @@ func OtherStateDir(err error) *FatalError {
 	return NewFatal(fmt.Sprintf(OtherStateDirMessage, other.Other, other.StateDir), err)
 }
 
-// OlderZmxMessage is the fatal of a zmx that speaks zmx 0.8.1's protocol: a
-// saver judged so, or a session any create just made, which the backend
-// refuses with backend.ErrUnsupportedProtocol.
-const OlderZmxMessage = "Portal can't use this zmx: it speaks zmx 0.8.1's protocol, which Portal doesn't support. Install zmx 1.0.1 or later."
+// UnsupportedCreateMessage is the fatal of a session any create just made
+// that speaks a protocol Portal doesn't, which the backend refuses with
+// backend.ErrUnsupportedProtocol. The protocol it speaks is in the cause.
+const UnsupportedCreateMessage = "Portal can't use this zmx: the sessions it makes speak a protocol Portal doesn't. Upgrade Portal, or install the zmx release it supports."
 
-// UnsupportedCreate is err as the older-zmx fatal when it carries a create's
-// refusal of a session made by a zmx Portal can't talk to, and nil otherwise,
+// UnsupportedCreate is err as the fatal of a create's refusal of a session
+// made by a zmx Portal can't talk to when it carries one, and nil otherwise,
 // so every command that creates fails the same way.
 func UnsupportedCreate(err error) *FatalError {
 	if !errors.Is(err, backend.ErrUnsupportedProtocol) {
 		return nil
 	}
-	return NewFatal(OlderZmxMessage, err)
+	return NewFatal(UnsupportedCreateMessage, err)
 }
 
 // Warning is an alias, not a local type: cmd, cmd/bootstrap and tui must share

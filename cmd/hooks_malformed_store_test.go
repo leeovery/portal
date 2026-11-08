@@ -31,11 +31,11 @@ func TestHookMutationsRefuseAMalformedStore(t *testing.T) {
 		assertHooksFileUnchanged(t, hooksFile, before)
 	})
 
-	t.Run("it exits non-zero from hook rm --pane-key and leaves the file byte-identical", func(t *testing.T) {
+	t.Run("it exits non-zero from hook rm --key and leaves the file byte-identical", func(t *testing.T) {
 		hooksFile := stageMalformed(t)
 		before := readFileBytes(t, hooksFile)
 
-		_, err := runHookRm(t, "--pane-key", hookstest.SubjectSeedA)
+		_, err := runHookRm(t, "--key", hookstest.SubjectSeedA)
 
 		assertMalformedRefusalReachesStderr(t, err)
 		assertHooksFileUnchanged(t, hooksFile, before)
