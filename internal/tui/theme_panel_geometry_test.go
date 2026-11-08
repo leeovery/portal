@@ -153,8 +153,7 @@ func TestPanelGeometry_ChromeRowsIsSharedByBothArithmetics(t *testing.T) {
 					message:     tc.message,
 				})
 
-				inner := themePanelInnerWidth(p.width)
-				messageRows := themePanelMessageHeight(p.message, inner, themePanelMessageWraps(p, geometryContentH))
+				messageRows := themePanelMessageHeight(p.message)
 				want := geometryContentH - themePanelChromeRows(
 					themePanelHeaderRows(geometryContentH, p.bandRows, tc.dirUnusable),
 					tc.dirUnusable, messageRows)

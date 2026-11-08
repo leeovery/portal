@@ -152,7 +152,7 @@ func themePanelListSize(p themePanel, height int) (width, rows int) {
 	reserved := themePanelChromeRows(
 		themePanelHeaderRows(height, p.bandRows, p.union.DirUnusable),
 		p.union.DirUnusable,
-		themePanelMessageHeight(p.message, inner, themePanelMessageWraps(p, height)),
+		themePanelMessageHeight(p.message),
 	)
 	return inner, max(height-reserved, themePanelMinBodyRows)
 }

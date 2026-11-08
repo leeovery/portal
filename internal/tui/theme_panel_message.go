@@ -1,11 +1,6 @@
 package tui
 
-import (
-	"strings"
-
-	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/theme"
-)
+import "github.com/leeovery/portal/internal/theme"
 
 // The `⚠` is part of the string so the report survives NO_COLOR.
 const themePanelCommitFailedMessage = flashWarningGlyph + " couldn't save theme"
@@ -44,19 +39,14 @@ func (m *Model) setThemePanelMessage(message themePanelMessage) {
 	m.applyThemePanelListStyles()
 }
 
-// The cap bounds the vertical budget: themePanelBlock cuts overflow from the
-// bottom — off the footer, `esc close` first.
-const themePanelMessageWrapRows = 2
-
-// Width and height degrade differently on purpose: at minimum width the slot
-// wraps; at the height floor it truncates. wrap comes from the caller so budget
-// and block resolve it identically.
-func renderThemePanelMessage(message themePanelMessage, inner int, wrap bool, th theme.Theme, colourless bool) string {
+// Drawn as authored, never wrapped or truncated: the copy is fixed and fits the
+// minimum inner width, below which the panel refuses to open.
+func renderThemePanelMessage(message themePanelMessage, th theme.Theme, colourless bool) string {
 	text, token := themePanelMessageContent(message, th)
 	if text == "" {
 		return ""
 	}
-	return headerStyle(token, th, colourless).Render(themePanelMessageText(text, inner, wrap))
+	return headerStyle(token, th, colourless).Render(text)
 }
 
 // The failed-commit line deliberately takes no bg.attention band — too heavy
@@ -68,25 +58,7 @@ func themePanelMessageContent(message themePanelMessage, th theme.Theme) (text s
 	return "", theme.Token{}
 }
 
-func themePanelMessageText(message string, inner int, wrap bool) string {
-	width := max(inner, 0)
-	if !wrap || width == 0 {
-		return ansi.Truncate(message, width, themeRowEllipsis)
-	}
-	return strings.Join(wrapCapped(message, width, themePanelMessageWrapRows, themeRowEllipsis), "\n")
-}
-
 // Measures the real renderer so budget and render cannot drift.
-func themePanelMessageHeight(message themePanelMessage, inner int, wrap bool) int {
-	return blockHeight(renderThemePanelMessage(message, inner, wrap, theme.Theme{}, true))
-}
-
-// "At or below" truncates because a fixture can hand a sub-floor height. The
-// floor is the one for the header shape being drawn: at the page-aligned
-// threshold the extra header rows leave the slot as tight as the compact floor.
-func themePanelMessageWraps(p themePanel, height int) bool {
-	return height > themePanelFloorFor(
-		themePanelHeaderShapeFor(height, p.bandRows, p.union.DirUnusable).rows,
-		p.union.DirUnusable,
-	)
+func themePanelMessageHeight(message themePanelMessage) int {
+	return blockHeight(renderThemePanelMessage(message, theme.Theme{}, true))
 }

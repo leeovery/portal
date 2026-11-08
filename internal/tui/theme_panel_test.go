@@ -164,7 +164,7 @@ func TestThemePanel_FooterSurvivesAtTheFloor(t *testing.T) {
 					return
 				}
 				slot := lines[len(lines)-len(wantFooter)-1]
-				want := themePanelContentPrefix() + themePanelLines(renderThemePanelMessage(message, inner, false, th, false))[0]
+				want := themePanelContentPrefix() + themePanelLines(renderThemePanelMessage(message, th, false))[0]
 				if got := strings.TrimRight(slot, " "); got != want {
 					t.Errorf("message slot = %q, want %q", got, want)
 				}
@@ -366,18 +366,15 @@ func TestThemePanel_DirRowFitsMinimumWidthUntruncated(t *testing.T) {
 
 func TestThemePanel_MessageSlotUnreservedWhenEmpty(t *testing.T) {
 	th := testDarkTheme(t)
-	inner := themePanelInnerWidth(themePanelPreferredWidth)
 
-	for _, wrap := range []bool{false, true} {
-		if got := renderThemePanelMessage(themePanelMessage{}, inner, wrap, th, false); got != "" {
-			t.Errorf("an empty message rendered %q with wrap=%v, want the empty string", got, wrap)
-		}
-		if got := themePanelMessageHeight(themePanelMessage{}, inner, wrap); got != 0 {
-			t.Errorf("an empty message reserved %d rows with wrap=%v, want 0", got, wrap)
-		}
-		if got := themePanelMessageHeight(messageTestFailed(), inner, wrap); got != themePanelTestMessageRows {
-			t.Errorf("a live message reserved %d rows with wrap=%v, want %d", got, wrap, themePanelTestMessageRows)
-		}
+	if got := renderThemePanelMessage(themePanelMessage{}, th, false); got != "" {
+		t.Errorf("an empty message rendered %q, want the empty string", got)
+	}
+	if got := themePanelMessageHeight(themePanelMessage{}); got != 0 {
+		t.Errorf("an empty message reserved %d rows, want 0", got)
+	}
+	if got := themePanelMessageHeight(messageTestFailed()); got != themePanelTestMessageRows {
+		t.Errorf("a live message reserved %d rows, want %d", got, themePanelTestMessageRows)
 	}
 }
 

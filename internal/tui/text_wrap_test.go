@@ -124,9 +124,6 @@ func TestWrap_LeadingSpaceAndARowWideWord(t *testing.T) {
 		if got, want := wrapCappedAtSpaces(" "+word+" b", 60, 2, "…"), []string{word, "b"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
 		}
-		if got, want := wrapCapped(" "+word, 60, 1, "…"), []string{word}; !reflect.DeepEqual(got, want) {
-			t.Errorf("the rows read\n got: %q\nwant: %q", got, want)
-		}
 	})
 }
 
