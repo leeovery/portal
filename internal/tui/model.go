@@ -853,12 +853,6 @@ func WithInitialThemeCursor(slug string) Option {
 	}
 }
 
-func WithInitialThemeConfirm(on bool) Option {
-	return func(m *Model) {
-		m.themeState.initialConfirm = on
-	}
-}
-
 func WithInitialThemeCommitFailed(on bool) Option {
 	return func(m *Model) {
 		m.themeState.initialCommitFailed = on

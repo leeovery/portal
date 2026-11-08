@@ -103,8 +103,9 @@ func TestPanelGeometry_WidthFloor(t *testing.T) {
 // against whatever the header measures pins nothing.
 const wantPanelHeaderRows = 2
 
-// The message row is counted although the slot is unreserved when empty: both of
-// its contenders are non-suppressible, and a floor without it lands one row short.
+// The message row is counted although the slot is unreserved when empty: the
+// failed-commit line cannot be suppressed, and a floor without it lands one row
+// short.
 func TestPanelGeometry_HeightFloorArithmetic(t *testing.T) {
 	entries := themePanelKeymap()
 	footer := themePanelFooterHeight(entries)
@@ -114,34 +115,20 @@ func TestPanelGeometry_HeightFloorArithmetic(t *testing.T) {
 
 	const listRow, messageRow = 1, 1
 	want := wantPanelHeaderRows + footer + listRow + messageRow
-	if got := themePanelMinHeight(entries, false); got != want {
+	if got := themePanelMinHeight(false); got != want {
 		t.Errorf("themePanelMinHeight = %d, want header(%d) + footer(%d) + %d list row + %d message row = %d",
 			got, wantPanelHeaderRows, footer, listRow, messageRow, want)
 	}
-	if got, wantDir := themePanelMinHeight(entries, true), want+1; got != wantDir {
+	if got, wantDir := themePanelMinHeight(true), want+1; got != wantDir {
 		t.Errorf("themePanelMinHeight with an unusable directory = %d, want %d — the same composition plus the pinned row", got, wantDir)
-	}
-
-	shorter := []keymapEntry{
-		{Key: "y", Action: "confirm", Core: true},
-		{Key: "n", Action: "cancel", Core: true},
-	}
-	shorterFooter := themePanelFooterHeight(shorter)
-	if shorterFooter >= footer {
-		t.Fatalf("fixture: the substituted footer is %d rows, not shorter than the panel scope's %d", shorterFooter, footer)
-	}
-	if got, wantShort := themePanelMinHeight(shorter, false), wantPanelHeaderRows+shorterFooter+listRow+messageRow; got != wantShort {
-		t.Errorf("themePanelMinHeight under a %d-row footer = %d, want %d — the floor reads the MEASURED footer height", shorterFooter, got, wantShort)
 	}
 }
 
 func TestPanelGeometry_ChromeRowsIsSharedByBothArithmetics(t *testing.T) {
-	entries := themePanelKeymap()
-
 	t.Run("the floor is the chrome sum plus its guaranteed list row", func(t *testing.T) {
 		for _, dirUnusable := range []bool{false, true} {
-			want := themePanelChromeRows(themePanelCompactHeaderRows, dirUnusable, themePanelFloorMessageRows, entries) + themePanelMinBodyRows
-			if got := themePanelMinHeight(entries, dirUnusable); got != want {
+			want := themePanelChromeRows(themePanelCompactHeaderRows, dirUnusable, themePanelFloorMessageRows) + themePanelMinBodyRows
+			if got := themePanelMinHeight(dirUnusable); got != want {
 				t.Errorf("themePanelMinHeight(dirUnusable=%v) = %d, want the chrome sum plus its %d list row = %d",
 					dirUnusable, got, themePanelMinBodyRows, want)
 			}
@@ -156,7 +143,7 @@ func TestPanelGeometry_ChromeRowsIsSharedByBothArithmetics(t *testing.T) {
 		}{
 			{name: "an empty slot"},
 			{name: "an unusable directory", dirUnusable: true},
-			{name: "the confirm's shorter footer", message: geometryMessage()},
+			{name: "a raised message", message: themePanelMessage{Kind: themeMessageCommitFailed}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				p := newThemePanelFixture(themePanelFixtureOpts{
@@ -167,11 +154,10 @@ func TestPanelGeometry_ChromeRowsIsSharedByBothArithmetics(t *testing.T) {
 					message:     tc.message,
 				})
 
-				inner := themePanelInnerWidth(p.width)
-				messageRows := themePanelMessageHeight(p.message, inner, themePanelMessageWraps(p, geometryContentH))
+				messageRows := themePanelMessageHeight(p.message)
 				want := geometryContentH - themePanelChromeRows(
 					themePanelHeaderRows(geometryContentH, p.bandRows, tc.dirUnusable),
-					tc.dirUnusable, messageRows, themePanelFooterScope(p.message))
+					tc.dirUnusable, messageRows)
 				if want <= themePanelMinBodyRows {
 					t.Fatalf("fixture: a %d-row content region leaves a %d-row body, at or below the %d-row floor — the remainder is clamped, so the assertion proves nothing",
 						geometryContentH, want, themePanelMinBodyRows)
@@ -187,9 +173,8 @@ func TestPanelGeometry_ChromeRowsIsSharedByBothArithmetics(t *testing.T) {
 }
 
 func TestPanelGeometry_DirRowRaisesTheFloor(t *testing.T) {
-	entries := themePanelKeymap()
-	usable := themePanelMinHeight(entries, false)
-	unusable := themePanelMinHeight(entries, true)
+	usable := themePanelMinHeight(false)
+	unusable := themePanelMinHeight(true)
 
 	if got := unusable - usable; got != 1 {
 		t.Errorf("an unusable themes directory raises the floor by %d row(s), want exactly 1", got)
@@ -203,8 +188,7 @@ func TestPanelGeometry_DirRowRaisesTheFloor(t *testing.T) {
 }
 
 func TestPanelGeometry_FloorReportsWidthFirst(t *testing.T) {
-	entries := themePanelKeymap()
-	tallEnough := themePanelMinHeight(entries, false)
+	tallEnough := themePanelMinHeight(false)
 
 	for _, tc := range []struct {
 		name        string
@@ -449,7 +433,7 @@ func TestPanelGeometry_ResizeDegradesInPlace(t *testing.T) {
 	})
 
 	t.Run("a taller terminal re-derives the panel's page", func(t *testing.T) {
-		shortH := themePanelMinHeight(themePanelKeymap(), false)
+		shortH := themePanelMinHeight(false)
 		m := newGeometryPanelModel(t, geometryWideW, shortH)
 		short := m.themePanel.list.Paginator.PerPage
 		requirePanelListMatchesTheRenderCopy(t, m)
@@ -566,7 +550,7 @@ func geometryBelowWidthFloor() (contentW, contentH int) {
 }
 
 func geometryBelowHeightFloor() (contentW, contentH int) {
-	return geometryWideW, themePanelMinHeight(themePanelKeymap(), false) - 1
+	return geometryWideW, themePanelMinHeight(false) - 1
 }
 
 func requireForcedClose(t *testing.T, m Model, wantFlash string) {
@@ -686,99 +670,15 @@ func TestPanelGeometry_ForcedCloseWritesNothing(t *testing.T) {
 	}
 }
 
-// The slug survives truncation at the minimum panel width while the composed
-// copy still overflows it, so the degradation this suite sees is the slot's own.
-func geometryMessage() themePanelMessage {
-	return themePanelMessage{Kind: themeMessageConfirm, Slug: "nord"}
-}
-
-// Deliberately the production composer: the rule under test is the SLOT's, not
-// the copy's.
-func geometryMessageText() string {
-	return themePanelConfirmText(geometryMessage().Slug, themePanelInnerWidth(themePanelMinWidth))
-}
-
-func TestPanelGeometry_MessageTruncatesAtFloorHeight(t *testing.T) {
-	th := testDarkTheme(t)
-	rows := themePanelTestRows(6)
-	inner := themePanelInnerWidth(themePanelMinWidth)
-	footer := themePanelFooterHeight(themePanelFooterScope(geometryMessage()))
-	floor := themePanelMinHeight(themePanelKeymap(), false)
-	wantBody := themePanelMinBodyRows + themePanelFooterHeight(themePanelKeymap()) - footer
-
-	if lipgloss.Width(geometryMessageText()) <= inner {
-		t.Fatalf("fixture: the %d-cell message fits the %d-cell inner width, so neither degradation is exercised", lipgloss.Width(geometryMessageText()), inner)
-	}
-
-	p := newThemePanelFixture(themePanelFixtureOpts{
-		th:      th,
-		width:   themePanelMinWidth,
-		rows:    rows,
-		message: geometryMessage(),
-	})
-
-	t.Run("at the minimum height it truncates to one line", func(t *testing.T) {
-		if got := themePanelMessageHeight(geometryMessage(), inner, false); got != 1 {
-			t.Fatalf("the truncated slot reserves %d rows, want 1", got)
-		}
-		if _, body := themePanelListSize(p, floor); body != wantBody {
-			t.Errorf("at the floor the list body is %d rows, want %d", body, wantBody)
-		}
-
-		lines := themePanelLines(renderThemePanel(p, floor, th, false))
-		if len(lines) != floor {
-			t.Fatalf("the panel rendered %d rows at its floor of %d", len(lines), floor)
-		}
-		if listRow := lines[wantPanelHeaderRows]; !strings.Contains(listRow, rows[0].Label()) {
-			t.Errorf("row %d is not the single list row (%q): %q", wantPanelHeaderRows, rows[0].Label(), listRow)
-		}
-		slot := strings.TrimRight(lines[floor-footer-1], " ")
-		if !strings.Contains(slot, themeRowEllipsis) {
-			t.Errorf("the message slot = %q, want it truncated with %q at the minimum height", slot, themeRowEllipsis)
-		}
-		if strings.Contains(slot, "y / n") {
-			t.Errorf("the message slot = %q, want the tail dropped rather than wrapped onto a second row", slot)
-		}
-	})
-
-	t.Run("one row above the floor it may wrap to two", func(t *testing.T) {
-		height := floor + 1
-		if got := themePanelMessageHeight(geometryMessage(), inner, true); got != themePanelMessageWrapRows {
-			t.Fatalf("the wrapped slot reserves %d rows, want %d", got, themePanelMessageWrapRows)
-		}
-		if _, body := themePanelListSize(p, height); body != wantBody {
-			t.Errorf("one row above the floor the list body is %d rows, want %d — the second message row comes out of the slot's own budget", body, wantBody)
-		}
-
-		lines := themePanelLines(renderThemePanel(p, height, th, false))
-		if len(lines) != height {
-			t.Fatalf("the panel rendered %d rows at height %d", len(lines), height)
-		}
-		slot := lines[height-footer-themePanelMessageWrapRows : height-footer]
-		joined := strings.Join(slot, " ")
-		if strings.Contains(joined, themeRowEllipsis) {
-			t.Errorf("the wrapped slot %q is truncated; above the floor it wraps", slot)
-		}
-		// Reassembled from the two rows rather than matched as a substring: the wrap
-		// point may fall anywhere, including mid-phrase.
-		if got, want := chromeWords(themePanelSlotText(slot)), chromeWords(geometryMessageText()); got != want {
-			t.Errorf("the wrapped slot reads %q, want the whole message %q", got, want)
-		}
-		if listRow := lines[wantPanelHeaderRows]; !strings.Contains(listRow, rows[0].Label()) {
-			t.Errorf("row %d is not the single list row (%q): %q", wantPanelHeaderRows, rows[0].Label(), listRow)
-		}
-	})
-}
-
 func TestPanelGeometry_RendersAtTheFloor(t *testing.T) {
 	th := testDarkTheme(t)
 	rows := themePanelTestRows(12)
 	inner := themePanelInnerWidth(themePanelMinWidth)
 
 	for _, dirUnusable := range []bool{false, true} {
-		for _, message := range []themePanelMessage{{}, geometryMessage()} {
-			floor := themePanelMinHeight(themePanelKeymap(), dirUnusable)
-			wantFooter := themePanelLines(renderThemePanelFooter(themePanelFooterScope(message), inner, th, false))
+		for _, message := range []themePanelMessage{{}, {Kind: themeMessageCommitFailed}} {
+			floor := themePanelMinHeight(dirUnusable)
+			wantFooter := themePanelLines(renderThemePanelFooter(themePanelKeymap(), inner, th, false))
 			name := fmt.Sprintf("dir=%v/msg=%v/h=%d", dirUnusable, message.Kind != themeMessageNone, floor)
 			t.Run(name, func(t *testing.T) {
 				p := newThemePanelFixture(themePanelFixtureOpts{
@@ -822,7 +722,7 @@ func TestPanelGeometry_RendersAtTheFloor(t *testing.T) {
 					return
 				}
 				slot := strings.TrimRight(lines[len(lines)-len(wantFooter)-1], " ")
-				if !strings.HasPrefix(slot, themePanelContentPrefix()+"clear constant") {
+				if slot != themePanelContentPrefix()+themePanelCommitFailedMessage {
 					t.Errorf("the row above the footer is not the message slot: %q", slot)
 				}
 			})
@@ -836,9 +736,9 @@ func TestPanelGeometry_RendersAcrossTheCompactBand(t *testing.T) {
 	inner := themePanelInnerWidth(themePanelMinWidth)
 
 	for _, dirUnusable := range []bool{false, true} {
-		for _, message := range []themePanelMessage{{}, geometryMessage(), {Kind: themeMessageCommitFailed}} {
-			floor := themePanelMinHeight(themePanelKeymap(), dirUnusable)
-			wantFooter := themePanelLines(renderThemePanelFooter(themePanelFooterScope(message), inner, th, false))
+		for _, message := range []themePanelMessage{{}, {Kind: themeMessageCommitFailed}} {
+			floor := themePanelMinHeight(dirUnusable)
+			wantFooter := themePanelLines(renderThemePanelFooter(themePanelKeymap(), inner, th, false))
 			for height := floor; height < panelPageAlignedAffordance(dirUnusable); height++ {
 				name := fmt.Sprintf("dir=%v/msg=%v/h=%d", dirUnusable, message.Kind, height)
 				t.Run(name, func(t *testing.T) {
@@ -924,38 +824,6 @@ func TestPanelGeometry_HeaderShapeFollowsTheHeight(t *testing.T) {
 		}
 	})
 
-	t.Run("at the affordance the slot still truncates", func(t *testing.T) {
-		narrow := newThemePanelFixture(themePanelFixtureOpts{
-			th:      th,
-			width:   themePanelMinWidth,
-			rows:    rows,
-			message: geometryMessage(),
-		})
-		footer := themePanelFooterHeight(themePanelFooterScope(geometryMessage()))
-		if lipgloss.Width(geometryMessageText()) <= themePanelInnerWidth(themePanelMinWidth) {
-			t.Fatalf("fixture: the %d-cell confirm fits the %d-cell inner width, so neither degradation is exercised",
-				lipgloss.Width(geometryMessageText()), themePanelInnerWidth(themePanelMinWidth))
-		}
-
-		lines := themePanelLines(renderThemePanel(narrow, affordance, th, false))
-		if len(lines) != affordance {
-			t.Fatalf("the panel rendered %d rows at the affordance of %d", len(lines), affordance)
-		}
-		slot := strings.TrimRight(lines[affordance-footer-1], " ")
-		if !strings.Contains(slot, themeRowEllipsis) {
-			t.Errorf("the message slot = %q, want it truncated with %q at the affordance", slot, themeRowEllipsis)
-		}
-		if above := lines[affordance-footer-2]; strings.Contains(above, "y / n") {
-			t.Errorf("the row above the slot = %q, want the slot on ONE row — the wrapped tail costs the body a row", above)
-		}
-
-		below := themePanelLines(renderThemePanel(narrow, affordance-1, th, false))
-		wrapped := below[affordance-1-footer-themePanelMessageWrapRows : affordance-1-footer]
-		if got, want := chromeWords(themePanelSlotText(wrapped)), chromeWords(geometryMessageText()); got != want {
-			t.Errorf("one row below the affordance the slot reads %q, want the whole message %q wrapped over two rows", got, want)
-		}
-	})
-
 	t.Run("one row below the affordance the blank rows go", func(t *testing.T) {
 		height := affordance - 1
 		lines := themePanelLines(renderThemePanel(p, height, th, false))
@@ -986,12 +854,4 @@ func (d themePanelDim) String() string {
 	default:
 		return fmt.Sprintf("dimNone(%d)", int(d))
 	}
-}
-
-func themePanelSlotText(slot []string) string {
-	text := make([]string, 0, len(slot))
-	for _, row := range slot {
-		text = append(text, strings.TrimSpace(strings.TrimPrefix(row, panelFrameSide)))
-	}
-	return strings.Join(text, " ")
 }

@@ -19,8 +19,8 @@ func renderThemePanel(p themePanel, height int, th theme.Theme, colourless bool)
 	rows := themePanelHeaderBlock(header, p.width, th, colourless)
 	rows = appendBlock(rows, themePanelDirRow(p.union.DirUnusable, th, colourless))
 	rows = appendBlock(rows, clampBlockHeight(p.list.View(), bodyRows))
-	rows = appendBlock(rows, renderThemePanelMessage(p.message, inner, themePanelMessageWraps(p, height), th, colourless))
-	rows = appendBlock(rows, renderThemePanelFooter(themePanelFooterScope(p.message), inner, th, colourless))
+	rows = appendBlock(rows, renderThemePanelMessage(p.message, th, colourless))
+	rows = appendBlock(rows, renderThemePanelFooter(themePanelKeymap(), inner, th, colourless))
 
 	return themePanelBlock(rows, header.borderFrom(), height, p.width, th, colourless)
 }

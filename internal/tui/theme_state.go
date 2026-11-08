@@ -75,8 +75,6 @@ type themeState struct {
 	// `capturetool --theme` inert on the frames a drop-in author most wants to check.
 	initialCursor string
 
-	initialConfirm bool
-
 	// Both halves of the report are seeded because their lifetimes differ.
 	initialCommitFailed bool
 }

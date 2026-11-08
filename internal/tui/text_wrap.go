@@ -8,18 +8,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The rows past the cap are re-joined onto the last kept one and truncated
-// there, so the ellipsis marks the cut rather than the rows leaving without one.
-func wrapCapped(text string, width, maxRows int, ellipsis string) []string {
-	return capRows(wrappedRows(text, width), width, maxRows, ellipsis)
-}
-
 // For text whose hyphens belong to its words, such as a command's flags, where
 // a row ending "--" cut from the word after it misreads the text.
 func wrapCappedAtSpaces(text string, width, maxRows int, ellipsis string) []string {
 	return capRows(spaceWrappedRows(text, width), width, maxRows, ellipsis)
 }
 
+// The rows past the cap are re-joined onto the last kept one and truncated
+// there, so the ellipsis marks the cut rather than the rows leaving without one.
 func capRows(rows []wrappedRow, width, maxRows int, ellipsis string) []string {
 	if len(rows) <= maxRows {
 		return rowTexts(rows)

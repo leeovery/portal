@@ -89,7 +89,7 @@ func TestThemePanel_BlockGeometry(t *testing.T) {
 
 	for _, width := range []int{themePanelMinWidth, themePanelPreferredWidth} {
 		for _, dirUnusable := range []bool{false, true} {
-			for _, message := range []themePanelMessage{{}, messageTestConfirm()} {
+			for _, message := range []themePanelMessage{{}, messageTestFailed()} {
 				floor := themePanelCompactHeaderRows + themePanelTestBodyRows + footerRows
 				if dirUnusable {
 					floor++
@@ -133,8 +133,8 @@ func TestThemePanel_FooterSurvivesAtTheFloor(t *testing.T) {
 	inner := themePanelInnerWidth(themePanelPreferredWidth)
 
 	for _, dirUnusable := range []bool{false, true} {
-		for _, message := range []themePanelMessage{{}, messageTestConfirm()} {
-			wantFooter := themePanelLines(renderThemePanelFooter(themePanelFooterScope(message), inner, th, false))
+		for _, message := range []themePanelMessage{{}, messageTestFailed()} {
+			wantFooter := themePanelLines(renderThemePanelFooter(themePanelKeymap(), inner, th, false))
 			floor := themePanelCompactHeaderRows + themePanelTestBodyRows + len(wantFooter)
 			if dirUnusable {
 				floor++
@@ -164,7 +164,7 @@ func TestThemePanel_FooterSurvivesAtTheFloor(t *testing.T) {
 					return
 				}
 				slot := lines[len(lines)-len(wantFooter)-1]
-				want := themePanelContentPrefix() + themePanelLines(renderThemePanelMessage(message, inner, false, th, false))[0]
+				want := themePanelContentPrefix() + themePanelLines(renderThemePanelMessage(message, th, false))[0]
 				if got := strings.TrimRight(slot, " "); got != want {
 					t.Errorf("message slot = %q, want %q", got, want)
 				}
@@ -322,7 +322,7 @@ func TestThemePanel_RowsRenderBeneathDirRow(t *testing.T) {
 	p.list.SetDelegate(themeRowDelegate{Theme: th, Width: themePanelInnerWidth(themePanelPreferredWidth)})
 	p.list.Items()[1] = themeRowItem{Row: persisted, Badge: theme.BadgeDark}
 
-	height := themePanelMinHeight(themePanelKeymap(), p.union.DirUnusable) + 10
+	height := themePanelMinHeight(p.union.DirUnusable) + 10
 	lines := themePanelLines(renderThemePanel(p, height, th, false))
 	below := strings.Join(lines[themePanelHeaderRows(height, p.bandRows, p.union.DirUnusable)+1:], "\n")
 
@@ -366,23 +366,18 @@ func TestThemePanel_DirRowFitsMinimumWidthUntruncated(t *testing.T) {
 
 func TestThemePanel_MessageSlotUnreservedWhenEmpty(t *testing.T) {
 	th := testDarkTheme(t)
-	inner := themePanelInnerWidth(themePanelPreferredWidth)
 
-	for _, wrap := range []bool{false, true} {
-		if got := renderThemePanelMessage(themePanelMessage{}, inner, wrap, th, false); got != "" {
-			t.Errorf("an empty message rendered %q with wrap=%v, want the empty string", got, wrap)
-		}
-		if got := themePanelMessageHeight(themePanelMessage{}, inner, wrap); got != 0 {
-			t.Errorf("an empty message reserved %d rows with wrap=%v, want 0", got, wrap)
-		}
-		if got := themePanelMessageHeight(messageTestConfirm(), inner, wrap); got != themePanelTestMessageRows {
-			t.Errorf("a live message reserved %d rows with wrap=%v, want %d", got, wrap, themePanelTestMessageRows)
-		}
+	if got := renderThemePanelMessage(themePanelMessage{}, th, false); got != "" {
+		t.Errorf("an empty message rendered %q, want the empty string", got)
+	}
+	if got := themePanelMessageHeight(themePanelMessage{}); got != 0 {
+		t.Errorf("an empty message reserved %d rows, want 0", got)
+	}
+	if got := themePanelMessageHeight(messageTestFailed()); got != themePanelTestMessageRows {
+		t.Errorf("a live message reserved %d rows, want %d", got, themePanelTestMessageRows)
 	}
 }
 
-// The failed-commit line, not the confirm: the confirm also substitutes a
-// shorter footer and would net the list a row rather than cost it one.
 func TestThemePanel_MessageSlotRecomputesListHeight(t *testing.T) {
 	th := testDarkTheme(t)
 	const height = 14
@@ -455,7 +450,7 @@ func TestThemePanel_EveryChromeSurfaceIsATokenLookup(t *testing.T) {
 
 	// Derived so the list draws no paginator: this fixture skips the production
 	// restyle, and library-default dots would read as a surface surviving the swap.
-	pageAligned := themePanelFloorFor(themePanelPageAlignedHeaderShape(0).rows, themePanelKeymap(), true)
+	pageAligned := themePanelFloorFor(themePanelPageAlignedHeaderShape(0).rows, true)
 	height := pageAligned - themePanelMinBodyRows + len(rows) + 2
 
 	render := func(th theme.Theme) string {
@@ -464,7 +459,7 @@ func TestThemePanel_EveryChromeSurfaceIsATokenLookup(t *testing.T) {
 			width:       themePanelPreferredWidth,
 			rows:        rows,
 			dirUnusable: true,
-			message:     messageTestConfirm(),
+			message:     messageTestFailed(),
 		})
 		return renderThemePanel(p, height, th, false)
 	}
@@ -774,7 +769,7 @@ func TestThemePanel_Colourless(t *testing.T) {
 		width:       themePanelPreferredWidth,
 		rows:        themePanelTestRows(5),
 		dirUnusable: true,
-		message:     messageTestConfirm(),
+		message:     messageTestFailed(),
 	})
 	const height = 14
 	shape := themePanelHeaderShapeFor(height, p.bandRows, p.union.DirUnusable)

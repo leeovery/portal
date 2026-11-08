@@ -72,8 +72,6 @@ type themePanel struct {
 
 	message themePanelMessage
 
-	pending themeSlotConfirm
-
 	// Outer width, border column included.
 	width int
 
@@ -157,15 +155,9 @@ func (m *Model) armThemePanel(enumeration theme.Enumeration, union theme.Union) 
 	m.seedThemePanelMessage()
 }
 
-// Runs after the cursor seed: the confirm records the slug under the cursor,
-// and raising a message re-sizes the list.
+// Runs after the cursor seed, since raising a message re-sizes the list.
 func (m *Model) seedThemePanelMessage() {
-	switch {
-	case m.themeState.initialConfirm:
-		if slug, ok := committableThemeSlug(m.themePanel.list); ok {
-			m.raiseSlotConfirm(slug, theme.MemberLight)
-		}
-	case m.themeState.initialCommitFailed:
+	if m.themeState.initialCommitFailed {
 		m.reportCommitFailure()
 	}
 }
@@ -323,8 +315,6 @@ func (m Model) updateThemePanel(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case keyIsCtrlC(msg):
 		return m, tea.Quit
-	case m.themePanel.confirming():
-		return m.updateSlotConfirm(msg)
 	case keyIsCode(msg, tea.KeyEscape):
 		cmd := (&m).closeThemePanel()
 		return m, cmd

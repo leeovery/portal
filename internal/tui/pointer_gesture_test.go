@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/theme"
 )
 
 // A trackpad's momentum steps arrive about this far apart.
@@ -318,22 +317,6 @@ func TestWheelGestureBegunOverThePreviewsHelpNeverScrollsThePreview(t *testing.T
 	}
 	m = swipe(t, m, clock, 10)
 	requirePreviewOffset(t, m, tail, "momentum begun over the help")
-}
-
-func TestWheelGestureBegunOverTheThemeConfirmNeverMovesThePanel(t *testing.T) {
-	m, _ := newSlotConfirmModel(t)
-	clock := stageWheelClock(&m)
-	m = raiseSlotConfirmForTest(t, m, slotLightPress, theme.MemberLight)
-	m = swipe(t, m, clock, 5)
-	m, _ = pressConfirmKey(t, m, confirmNo)
-	if !m.themePanel.open || m.themePanel.confirming() {
-		t.Fatal("fixture: n did not resolve the confirm with the panel left open")
-	}
-	before := arrowPanelIndex(m)
-	m = swipe(t, m, clock, 10)
-	if got := arrowPanelIndex(m); got != before {
-		t.Fatalf("momentum begun over the confirm moved the panel cursor from %d to %d", before, got)
-	}
 }
 
 func TestWheelGestureBegunUnderTheBurstLockNeverMovesTheList(t *testing.T) {

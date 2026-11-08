@@ -90,7 +90,7 @@ func themePanelProbes(dispatch themePanelDispatch) map[string]dispatchProbe {
 		"esc": {press: keyEsc, honour: func(t *testing.T) bool {
 			m, _ := themePanelGuardModel(t)
 			after := dispatchPanelKey(t, dispatch, m, keyEsc)
-			return !after.themePanel.open && !after.themePanel.confirming() && themePanelStateDropped(after)
+			return !after.themePanel.open && themePanelStateDropped(after)
 		}},
 	}
 }
@@ -101,8 +101,7 @@ func themePanelSlotHonoured(t *testing.T, dispatch themePanelDispatch, press tea
 	m, persister := themePanelGuardModel(t)
 	slug := themePanelCursorRow(t, m).Slug
 	after := dispatchPanelKey(t, dispatch, m, press)
-	return slices.Equal(persister.slotCommits, []slotCommit{{slug: slug, member: member}}) &&
-		after.themePanel.open && !after.themePanel.confirming()
+	return slices.Equal(persister.slotCommits, []slotCommit{{slug: slug, member: member}}) && after.themePanel.open
 }
 
 func themePanelStateDropped(m Model) bool {
@@ -112,49 +111,8 @@ func themePanelStateDropped(m Model) bool {
 		m.themePanel.width == 0
 }
 
-func themeConfirmProbes(dispatch themePanelDispatch) map[string]dispatchProbe {
-	return map[string]dispatchProbe{
-		"y": {press: confirmYes, honour: func(t *testing.T) bool {
-			return themeConfirmYesHonoured(t, dispatch, confirmYes)
-		}},
-		"n": {press: confirmNo, honour: func(t *testing.T) bool {
-			return themeConfirmNoHonoured(t, dispatch, confirmNo)
-		}},
-	}
-}
-
-func themeConfirmYesHonoured(t *testing.T, dispatch themePanelDispatch, press tea.KeyPressMsg) bool {
-	t.Helper()
-
-	m, persister := themeConfirmGuardModel(t)
-	after := dispatchPanelKey(t, dispatch, m, press)
-	return slices.Equal(persister.slotCommits, []slotCommit{themeConfirmPending}) &&
-		!after.themePanel.confirming() && after.themePanel.open
-}
-
-func themeConfirmNoHonoured(t *testing.T, dispatch themePanelDispatch, press tea.KeyPressMsg) bool {
-	t.Helper()
-
-	m, persister := themeConfirmGuardModel(t)
-	after := dispatchPanelKey(t, dispatch, m, press)
-	return len(persister.slugs) == 0 && !after.themePanel.confirming() && after.themePanel.open
-}
-
-var themeConfirmPending = slotCommit{slug: slotConfirmTarget(), member: theme.MemberLight}
-
-func themeConfirmGuardModel(t *testing.T) (Model, *fakeThemePersister) {
-	t.Helper()
-
-	m, persister := newSlotConfirmModel(t)
-	return raiseSlotConfirmForTest(t, m, slotLightPress, themeConfirmPending.member), persister
-}
-
 func TestThemePanelDescriptorDispatchParity(t *testing.T) {
 	assertDescriptorDispatchParity(t, "theme panel", themePanelKeymap(), themePanelProbes(livePanelDispatch))
-}
-
-func TestThemeConfirmDescriptorDispatchParity(t *testing.T) {
-	assertDescriptorDispatchParity(t, "theme confirm", themePanelConfirmKeymap(), themeConfirmProbes(livePanelDispatch))
 }
 
 func themePanelArmRemoved(presses ...tea.KeyPressMsg) themePanelDispatch {
@@ -218,88 +176,36 @@ func requireDriftNaming(t *testing.T, drift []string, key string) {
 func TestThemePanelParity_ProbesAssertEffects(t *testing.T) {
 	swallow := themePanelDispatch(func(m Model, _ tea.KeyPressMsg) (tea.Model, tea.Cmd) { return m, nil })
 
-	for _, scope := range []struct {
-		name   string
-		probes map[string]dispatchProbe
-	}{
-		{name: "theme panel", probes: themePanelProbes(swallow)},
-		{name: "theme confirm", probes: themeConfirmProbes(swallow)},
-	} {
-		for _, key := range slices.Sorted(maps.Keys(scope.probes)) {
-			t.Run(scope.name+" "+key, func(t *testing.T) {
-				if scope.probes[key].honour(t) {
-					t.Errorf("the %s probe for %q passes against a dispatch that swallows every key and changes nothing; it asserts CONSUMPTION rather than the bound effect, so a deleted dispatch arm would still satisfy it", scope.name, key)
-				}
-			})
-		}
-	}
-}
-
-func TestThemePanelDispatch_EscMeansInnermostFirst(t *testing.T) {
-	t.Run("with no confirm live it closes the panel", func(t *testing.T) {
-		m, persister := themePanelGuardModel(t)
-		if m.themePanel.confirming() {
-			t.Fatal("fixture: the panel seed is already asking a question, so `Esc` would take the cancel")
-		}
-
-		after := dispatchPanelKey(t, livePanelDispatch, m, keyEsc)
-
-		if after.themePanel.open {
-			t.Error("`Esc` with no confirm live left the panel open; it is the ONLY way out")
-		}
-		if !themePanelStateDropped(after) {
-			t.Errorf("the close retained panel state %+v, want the whole struct dropped so the next open re-reads", after.themePanel)
-		}
-		if len(persister.slugs) != 0 {
-			t.Errorf("the close wrote %v; every write is an explicit commit key", persister.slugs)
-		}
-	})
-
-	t.Run("with the confirm live it cancels and leaves the panel open", func(t *testing.T) {
-		m, persister := themeConfirmGuardModel(t)
-
-		after := dispatchPanelKey(t, livePanelDispatch, m, keyEsc)
-
-		if !after.themePanel.open {
-			t.Fatal("`Esc` closed the panel while the confirm was live; the innermost thing resolves first")
-		}
-		if after.themePanel.confirming() {
-			t.Error("`Esc` left the confirm standing; it is one of the three inputs that resolve it")
-		}
-		if themePanelStateDropped(after) {
-			t.Errorf("the cancel dropped the panel state %+v, want everything the CLOSE would have discarded left in place", after.themePanel)
-		}
-		if len(persister.slugs) != 0 {
-			t.Errorf("the cancel wrote %v; nothing is written until `y`", persister.slugs)
-		}
-	})
-}
-
-func TestThemeConfirmDispatch_UppercaseReachesTheSameArm(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		press    tea.KeyPressMsg
-		honoured func(*testing.T, themePanelDispatch, tea.KeyPressMsg) bool
-	}{
-		{name: "shift+y", press: confirmYesShift, honoured: themeConfirmYesHonoured},
-		{name: "Y", press: confirmYesUpper, honoured: themeConfirmYesHonoured},
-		{name: "shift+n", press: confirmNoShift, honoured: themeConfirmNoHonoured},
-		{name: "N", press: confirmNoUpper, honoured: themeConfirmNoHonoured},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if !tc.honoured(t, livePanelDispatch, tc.press) {
-				t.Errorf("%q does not reach the arm its lowercase form does; the descriptor carries ONE glyph for both cases", tc.name)
+	probes := themePanelProbes(swallow)
+	for _, key := range slices.Sorted(maps.Keys(probes)) {
+		t.Run(key, func(t *testing.T) {
+			if probes[key].honour(t) {
+				t.Errorf("the theme panel probe for %q passes against a dispatch that swallows every key and changes nothing; it asserts CONSUMPTION rather than the bound effect, so a deleted dispatch arm would still satisfy it", key)
 			}
 		})
 	}
 }
 
+func TestThemePanelDispatch_EscClosesThePanel(t *testing.T) {
+	m, persister := themePanelGuardModel(t)
+
+	after := dispatchPanelKey(t, livePanelDispatch, m, keyEsc)
+
+	if after.themePanel.open {
+		t.Error("`Esc` left the panel open; it is the ONLY way out")
+	}
+	if !themePanelStateDropped(after) {
+		t.Errorf("the close retained panel state %+v, want the whole struct dropped so the next open re-reads", after.themePanel)
+	}
+	if len(persister.slugs) != 0 {
+		t.Errorf("the close wrote %v; every write is an explicit commit key", persister.slugs)
+	}
+}
+
 func TestThemePanelKeymap_NoRightAlignedEntry(t *testing.T) {
-	for _, scope := range themeKeymapScopes() {
-		for _, e := range scope.entries {
-			if e.RightAligned {
-				t.Errorf("the %s scope's %q entry is RightAligned; the vertical footer has no right anchor, and the flag would exempt the key from the dispatch guard", scope.name, e.Key)
-			}
+	for _, e := range themePanelKeymap() {
+		if e.RightAligned {
+			t.Errorf("the theme panel's %q entry is RightAligned; the vertical footer has no right anchor, and the flag would exempt the key from the dispatch guard", e.Key)
 		}
 	}
 
@@ -327,16 +233,14 @@ func countRightAligned(entries []keymapEntry) int {
 }
 
 func TestThemePanelKeymap_NoHelpEntry(t *testing.T) {
-	t.Run("neither scope advertises or probes ?", func(t *testing.T) {
-		for _, scope := range themeKeymapScopes() {
-			for _, e := range scope.entries {
-				if e.Key == "?" || e.HelpKey == "?" {
-					t.Errorf("the %s scope advertises a `?` entry; `?` does nothing inside the panel", scope.name)
-				}
+	t.Run("the panel neither advertises nor probes ?", func(t *testing.T) {
+		for _, e := range themePanelKeymap() {
+			if e.Key == "?" || e.HelpKey == "?" {
+				t.Error("the theme panel advertises a `?` entry; `?` does nothing inside the panel")
 			}
-			if _, probed := scope.probes["?"]; probed {
-				t.Errorf("the %s scope carries a `?` probe; the key is swallowed, so there is no bound effect to assert", scope.name)
-			}
+		}
+		if _, probed := themePanelProbes(livePanelDispatch)["?"]; probed {
+			t.Error("the theme panel carries a `?` probe; the key is swallowed, so there is no bound effect to assert")
 		}
 	})
 
@@ -357,38 +261,21 @@ func TestThemePanelKeymap_NoHelpEntry(t *testing.T) {
 		}
 	})
 
-	t.Run("neither scope advertises the global quit", func(t *testing.T) {
+	t.Run("the panel does not advertise the global quit", func(t *testing.T) {
 		m, _ := themePanelGuardModel(t)
-		if _, cmd := livePanelDispatch(m, confirmCtrlC); !isQuitCmd(cmd) {
-			t.Fatal("control: `Ctrl-C` no longer quits inside the panel, so the descriptors' silence about it says nothing")
+		if _, cmd := livePanelDispatch(m, keyCtrlC); !isQuitCmd(cmd) {
+			t.Fatal("control: `Ctrl-C` no longer quits inside the panel, so the descriptor's silence about it says nothing")
 		}
 
-		for _, scope := range themeKeymapScopes() {
-			for _, e := range scope.entries {
-				if slices.Contains(ctrlCGlyphs, e.Key) {
-					t.Errorf("the %s scope advertises %q; `Ctrl-C` is the global quit that stays live everywhere, not a scope binding", scope.name, e.Key)
-				}
+		for _, e := range themePanelKeymap() {
+			if slices.Contains(ctrlCGlyphs, e.Key) {
+				t.Errorf("the theme panel advertises %q; `Ctrl-C` is the global quit that stays live everywhere, not a panel binding", e.Key)
 			}
 		}
 	})
 }
 
 var ctrlCGlyphs = []string{"^c", "^C", "ctrl+c", "ctrl-c", "Ctrl-C"}
-
-func themeKeymapScopes() []struct {
-	name    string
-	entries []keymapEntry
-	probes  map[string]dispatchProbe
-} {
-	return []struct {
-		name    string
-		entries []keymapEntry
-		probes  map[string]dispatchProbe
-	}{
-		{name: "theme panel", entries: themePanelKeymap(), probes: themePanelProbes(livePanelDispatch)},
-		{name: "theme confirm", entries: themePanelConfirmKeymap(), probes: themeConfirmProbes(livePanelDispatch)},
-	}
-}
 
 func TestKeymapGuard_PageDescriptorsUnchanged(t *testing.T) {
 	for _, tc := range []struct {

@@ -44,7 +44,6 @@ func keyColumnRowEntries() []keymapEntry {
 		projectsKeymap(),
 		previewKeymap(),
 		themePanelKeymap(),
-		themePanelConfirmKeymap(),
 	}
 	all := make([]keymapEntry, 0)
 	for _, scope := range scopes {

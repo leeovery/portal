@@ -46,7 +46,6 @@ var (
 	themePanelDarkSlotKey   = tea.KeyPressMsg{Code: 'd', Text: "d"}
 	themePanelCursorUpKey   = tea.KeyPressMsg{Code: tea.KeyUp}
 	themePanelCursorDownKey = tea.KeyPressMsg{Code: tea.KeyDown}
-	themePanelConfirmKey    = tea.KeyPressMsg{Code: 'y', Text: "y"}
 
 	// Restated because internal/tui keeps these strings unexported.
 	roundTripBadgeCopy = map[theme.Badge]string{
@@ -265,11 +264,7 @@ func TestThemePanelCommit_DarkKeyOverAConstantRoundTripsThePairToPrefs(t *testin
 	assertPaintedCanvas(t, m, canvasColour(roundTripStandingCanvas))
 	m = arrowToPreviewedCanvas(t, m, roundTripChosenCanvas)
 
-	// `d` alone only raises the question: a keypress that wrote here would make
-	// the confirm decorative.
 	m = update(t, m, themePanelDarkSlotKey)
-	assertPrefsOnDisk(t, path, prefsOnDisk{Theme: roundTripStandingSlug})
-	m = update(t, m, themePanelConfirmKey)
 
 	assertPrefsOnDisk(t, path, prefsOnDisk{ThemeDark: roundTripChosenSlug})
 	assertBadgesMatchPersistedKeys(t, m)
@@ -299,7 +294,6 @@ func TestThemePanelCommit_ConsecutiveCommitsStayBoundToPrefs(t *testing.T) {
 	assertBadgesMatchPersistedKeys(t, m)
 
 	m = update(t, m, themePanelDarkSlotKey)
-	m = update(t, m, themePanelConfirmKey)
 
 	assertPrefsOnDisk(t, path, prefsOnDisk{ThemeDark: roundTripChosenSlug})
 	assertBadgesMatchPersistedKeys(t, m)

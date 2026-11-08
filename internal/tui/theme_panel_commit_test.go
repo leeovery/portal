@@ -415,7 +415,7 @@ func TestPanelEnter_UnselectableRowWritesNothing(t *testing.T) {
 	})
 }
 
-func TestPanelEnter_NoConfirmOverAPair(t *testing.T) {
+func TestPanelEnter_RaisesNoMessageAndSchedulesNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		build func(*testing.T, []theme.Row) (Model, *fakeThemePersister)
@@ -437,20 +437,15 @@ func TestPanelEnter_NoConfirmOverAPair(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := arrowValidRows(t, 4)
 			m, persister := tc.build(t, rows)
-			footer := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
 
 			m, cmd := pressCommitKey(t, m)
 
 			requireCommitted(t, persister, tc.want(rows))
 			if got := m.themePanel.message; got.Kind != themeMessageNone {
-				t.Errorf("`Enter` raised the message %+v; the reverse direction needs no confirm", got)
+				t.Errorf("`Enter` raised the message %+v, want the slot empty", got)
 			}
 			if cmd != nil {
 				t.Errorf("`Enter` scheduled %T; the write lands on this keypress rather than awaiting an answer", cmd)
-			}
-			after := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
-			if after != footer {
-				t.Errorf("`Enter` swapped the panel footer\nbefore: %q\nafter:  %q", escSeq(footer), escSeq(after))
 			}
 		})
 	}

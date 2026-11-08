@@ -108,7 +108,7 @@ func TestThemeFlash_OriginDiscriminator(t *testing.T) {
 
 func TestThemeFlash_AllSixUseSetThemeFlash(t *testing.T) {
 	t.Run("every reachable theme copy carries the theme origin", func(t *testing.T) {
-		floorH := themePanelMinHeight(themePanelKeymap(), false)
+		floorH := themePanelMinHeight(false)
 
 		for _, tc := range []struct {
 			name  string
