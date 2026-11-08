@@ -78,7 +78,7 @@ A restored session whose resume hook resolves **lazy** comes back with its scrol
 ### How it draws
 
 - **It repaints when you arrive.** Opening a waiting session, or switching to it, redraws its panel, so a panel drawn days ago at restore shows the theme, and the light or dark half of a pair, that is in force now. A key you press as it repaints still counts, so `Enter` the moment the session opens resumes it.
-- **Over a slow link it may wait a moment.** Under a light/dark pair the panel asks your terminal its background each time it draws, and over a slow link, such as SSH from a phone, the answer can arrive after you have already pressed `Enter`. Portal then waits for it, at most a second after the panel was drawn, before the command (or, after a discard, the shell) starts, so the answer never lands there as stray text; a key typed in that moment is dropped.
+- **Over a slow link it may wait a moment.** Under a light/dark pair the panel asks your terminal its background each time it draws while a terminal holds the session, and over a slow link, such as SSH from a phone, the answer can arrive after you have already pressed `Enter`. Portal then waits for it, at most a second after the panel was drawn, before the command (or, after a discard, the shell) starts, so the answer never lands there as stray text; a key typed in that moment is dropped.
 - **A small terminal** too small for the card still shows the title, command and key hints, stacked plainly; the keys act at every size.
 
 Waiting sessions show as a pending dot on their row in the [picker](picker.md#session-rows), and `xctl doctor` counts them. [Themes](theming.md) covers how the panel picks its theme.

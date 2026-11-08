@@ -96,10 +96,11 @@ var openCmd = &cobra.Command{
 With no arguments, open launches the TUI picker so you can choose a destination.
 
 A bare target is resolved through the precedence chain — exact session name → kept
-saved session → path → alias → zoxide query, first match wins. An exact session
-name attaches that existing session; the name of a saved session that isn't
-running, which the next restore would bring back, brings it back and attaches it;
-a path, alias, or zoxide match mints a new session there.
+saved session → glob → path → alias → zoxide query, first match wins. An exact
+session name attaches that existing session; the name of a saved session that
+isn't running, which the next restore would bring back, brings it back and
+attaches it; a glob attaches the live sessions it matches, several each in a
+window of its own; a path, alias, or zoxide match mints a new session there.
 
 Domain pins skip the precedence chain and force a single domain:
   -s, --session   attach the named session or session glob (never mints); an
