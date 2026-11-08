@@ -1144,6 +1144,7 @@ func TestRunsHelper(t *testing.T) {
 		{"a portal at another path, replaying a transcript", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--file", "/tmp/work.vt"}},
 		{"a portal at another path, given a flag shorter than the transcript's", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "-t", "/tmp/work.vt"}},
 		{"a portal at another path, given flags longer than the transcript's", []string{"/usr/local/bin/portal", "state", "hydrate", "--session", "work", "--transcript-at", "/tmp/work.vt", "--quiet"}},
+		{"a portal given a flag this helper no longer takes, before the transcript", []string{"/opt/homebrew/bin/portal", "state", "hydrate", "--session", "work", "--lazy", "--file", "/tmp/work.vt"}},
 		{"a portal at a path the shell would read specially", []string{"/Users/lee/My Apps/it's/portal", "state", "hydrate", "--session", "work"}},
 	} {
 		t.Run("it counts the helper run by "+tc.name, func(t *testing.T) {

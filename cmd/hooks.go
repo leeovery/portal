@@ -165,7 +165,7 @@ func hooksFilePath() (string, error) {
 
 var hooksRmCmd = &cobra.Command{
 	Use:   "rm",
-	Short: "Remove a resume hook for the current session",
+	Short: "Remove a resume hook: the current session's, or the one --key names",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		hookKey, err := cmd.Flags().GetString("key")
