@@ -50,7 +50,7 @@ A daemon in a hidden `_portal-saver` session reads zmx's sessions every 5 second
 Whenever you run a command that needs your sessions, Portal checks that its save daemon is running and brings it back if it is not. In the same step it re-creates the saved sessions that are not live: after a reboot every one, and after a logout or crash that ended your sessions along with the saver, those too.
 
 - Each comes back under its own name, in its last working directory, with its scrollback (including ANSI colour) replayed.
-- Each carrying a [resume hook](resume.md) comes back holding the resume panel, which runs the command when you answer it, or, for a registration pinned `eager`, fires the command outright.
+- Each carrying a [resume hook](resume.md) comes back holding the resume panel, which runs the command when you answer it, or, when the hook's mode resolves `eager`, fires the command outright; see [Lazy or eager](resume.md#lazy-or-eager).
 - While that runs, the picker shows its loading page.
 
 ## What comes back, and what doesn't

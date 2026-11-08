@@ -4,7 +4,7 @@ This page covers where Portal keeps its files and what each holds, `prefs.json`,
 
 - [Where Portal keeps its files](#where-portal-keeps-its-files)
 - [The files](#the-files)
-- [Keys in a session](#keys-in-a-session)
+- [Rebinding the attach keys](#rebinding-the-attach-keys)
 - [Theme](#theme)
 - [Logging](#logging)
 - [Privacy](#privacy)
@@ -54,7 +54,7 @@ UI preferences:
 | `session_list_mode` | the last-used session-list [grouping mode](picker.md#grouping-and-tags) |
 | `theme`, or `theme_light` / `theme_dark` | a pinned theme, or the light/dark pair; see [Theme](#theme) |
 | `resume_mode` | `eager` or `lazy`: the install-wide default a resume hook that names no mode of its own inherits; see [Lazy or eager](resume.md#lazy-or-eager) |
-| `keys` | the [keys in a session](#keys-in-a-session) |
+| `keys` | the attach keys; see [Rebinding the attach keys](#rebinding-the-attach-keys) |
 
 ### `terminals.json`
 
@@ -83,7 +83,7 @@ Saved sessions and scrollback for automatic restoration on reboot. It holds:
 
 See [Privacy](#privacy) for what the saved state can hold.
 
-## Keys in a session
+## Rebinding the attach keys
 
 Set `keys` in `prefs.json` to rebind the keys Portal watches while you're attached ([Keys in a session](sessions.md#keys-in-a-session) has the defaults). Each action takes one key or a list, an empty list turns it off, and an action you leave out keeps its default:
 
@@ -120,7 +120,7 @@ Every colour Portal draws comes from the active theme, painted onto its own canv
 
 ## Logging
 
-Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log. [Troubleshooting](troubleshooting.md#the-logs) says how to read it.
+Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log. [Troubleshooting](troubleshooting.md#the-logs) says how to read it.
 
 - **Rotation:** a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
 - **Retention:** rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl doctor --fix` forces a sweep on demand.

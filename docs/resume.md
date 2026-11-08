@@ -18,7 +18,7 @@ xctl hook list                                   # every hook
 xctl hook rm --on-resume                         # remove the current session's hook
 ```
 
-Under the shipped default a restored session comes back holding the [resume panel](#the-resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it. A registration pinned `eager` runs its command as the session is restored, with no panel.
+Under the shipped default a restored session comes back holding the [resume panel](#the-resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it. A hook whose mode resolves [eager](#lazy-or-eager) runs its command as the session is restored, with no panel.
 
 ## When hooks fire
 
@@ -31,7 +31,7 @@ A hook resolves to one of two modes:
 - **lazy**, the shipped default: the session comes back holding the resume panel, and the command runs when you answer it.
 - **eager**: the command runs as the session is restored, with no panel.
 
-The mode comes from the registration, if it names one (`xctl hook set --resume-mode eager|lazy`); otherwise from `resume_mode` in [`prefs.json`](configuration.md#prefsjson); otherwise **lazy**. To have every command fire as its session is restored, set `"resume_mode": "eager"` in `prefs.json` (there is no UI for this setting yet), or pin a single registration with `--resume-mode`. `xctl doctor` reports the install's resume mode.
+The mode comes from the registration, if it names one (`xctl hook set --resume-mode eager|lazy`); otherwise from `resume_mode` in [`prefs.json`](configuration.md#prefsjson); otherwise **lazy**. Setting `"resume_mode": "eager"` in `prefs.json` (there is no UI for this setting yet) makes every hook that names no mode of its own fire as its session is restored; a registration pinned `lazy` still shows the panel. To change one hook alone, pin its registration with `--resume-mode`. `xctl doctor` reports the install's resume mode.
 
 ## Hooks and sessions
 

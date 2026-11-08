@@ -19,9 +19,20 @@ This page covers getting into a session: how `x` resolves what you type, the sea
 **exact session name → kept saved session → path → alias → zoxide query.**
 
 - **An exact session name** attaches that existing session.
-- **A kept saved session**, the name of a saved session that isn't running and that the next restore would bring back, is brought back with its scrollback and resume hook, then attached. `-s` reaches it too, and so does a name with glob characters in it, read as that name rather than a glob; a glob never matches one. `xctl doctor` lists such sessions. If it can't be brought back, one line says why and the session stays saved for the next restore. While another Portal is starting, it waits for it as a start does, and a wait that runs out fails with the same error a start gives.
+- **A kept saved session**, the name of a saved session that isn't running and that the next restore would bring back, is brought back and attached. See [Kept sessions](#kept-sessions).
 - **A path, alias or zoxide match** mints a brand-new session there. New sessions resolve to the git repository root when there is one.
 - **Nothing:** a target that resolves to nothing is a hard failure. There is no fallback to the picker on a miss; the error points you at `-f`.
+
+### Kept sessions
+
+A kept session is brought back under its own name, with its scrollback and resume hook, then attached. `xctl doctor` lists such sessions.
+
+- `-s` reaches it too, and so does a name with glob characters in it, read as that name rather than a glob. A glob never matches one.
+- If it can't be brought back, one line says why and the session stays saved for the next restore.
+
+While another Portal is starting, bringing a kept session back waits for it as a start does, and a wait that runs out fails with the same error a start gives.
+
+### Minting, and pinning a domain
 
 Directory targets always create. There is no find-or-create, so `x api` mints even while an `api-*` session runs; reach the existing one with the name, a glob, or `-s`.
 
@@ -70,7 +81,7 @@ The last step of the chain asks [zoxide](https://github.com/ajeetdsouza/zoxide) 
 
 ## Several sessions at once
 
-Two or more targets, or one glob expanding to several sessions, open a portal to each: this terminal becomes the first and the rest open in their own host-terminal windows, **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), and a command rides only the minted sessions. The extra windows need a supported terminal: Ghostty natively, others through [`terminals.json`](custom-terminals.md). The picker's [multi-select](picker.md#multi-select-and-new-windows) does the same from the list.
+Two or more targets, or one glob expanding to several sessions, open a portal to each: this terminal becomes the first and the rest open in their own host-terminal windows, **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), and a command rides only the minted sessions. The extra windows need a supported terminal; see [Which terminals](picker.md#which-terminals). The picker's [multi-select](picker.md#multi-select-and-new-windows) does the same from the list.
 
 ## Inside a session
 
@@ -96,7 +107,7 @@ On that prompt `y` kills the session and stays in the picker, `d` keeps it and s
 
 zmx's own `Ctrl+\` detaches too, and always to the shell. Portal detaches zmx through that key, so under Portal it can't be turned off: `ZMX_NO_DETACH_KEY` isn't honoured.
 
-To bind other keys, or turn one off, set `keys` in `prefs.json`; see [Keys in a session](configuration.md#keys-in-a-session) in Configuration.
+To bind other keys, or turn one off, see [Rebinding the attach keys](configuration.md#rebinding-the-attach-keys).
 
 ### macOS
 

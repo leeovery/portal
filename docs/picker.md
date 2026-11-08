@@ -1,10 +1,13 @@
 # The picker
 
-This page covers the TUI that `x` opens: its keys, the session rows, grouping and tags, the scrollback preview, and multi-select with its new windows.
+This page covers the TUI that `x` opens: its keys, filtering, killing a session, the session rows, the Projects page, grouping and tags, the scrollback preview, and multi-select with its new windows.
 
 - [Keys](#keys)
 - [Mouse and touch](#mouse-and-touch)
+- [Filtering](#filtering)
+- [Killing a session](#killing-a-session)
 - [Session rows](#session-rows)
+- [Projects](#projects)
 - [Grouping and tags](#grouping-and-tags)
 - [Scrollback preview](#scrollback-preview)
 - [Multi-select and new windows](#multi-select-and-new-windows)
@@ -35,13 +38,19 @@ The lists move with the **arrows only**, with no vim or page-jump aliases; the [
 | `?` | Show the full keymap for the current page |
 | `q` / `Esc` | Quit (`Esc` clears an active filter first) |
 
-A kill from the picker is final, as [`xctl kill`](commands.md#xctl-kill) is.
-
 ## Mouse and touch
 
 The picker reads the mouse, so a wheel, a trackpad, or a swipe on a touch terminal moves the highlight through the sessions, projects and theme lists and scrolls the preview. A scroll stays with what it began on: momentum still running as you close the preview or a panel doesn't carry into the list behind it.
 
 Tapping a session or project row opens it, as `Enter` would; in multi-select a tap marks the row instead, as `m` would. Selecting text while the picker is open takes your terminal's mouse-override modifier, such as `Shift`-drag in Ghostty.
+
+## Filtering
+
+`/` opens the filter on the sessions list or the Projects page. It is fuzzy: the letters you type match scattered anywhere in a row, and the list narrows as you type. `Esc` clears an active filter before it quits. In a grouped view the list flattens while the filter is active; see [Grouping and tags](#grouping-and-tags). [`x /term`](sessions.md#searching-your-sessions) is the stricter search from the command line.
+
+## Killing a session
+
+`k` on the sessions list asks to confirm before it kills the highlighted session: `y` kills it, and `Esc` keeps it. A kill is final, as [`xctl kill`](commands.md#xctl-kill) is: see [What comes back, and what doesn't](how-it-works.md#what-comes-back-and-what-doesnt). `Alt+Q` inside a session asks too, on a prompt with keys of its own; see [Keys in a session](sessions.md#keys-in-a-session).
 
 ## Session rows
 
@@ -51,6 +60,22 @@ A session row ends in up to two status dots, packed to the right:
 - a warm-coloured **pending** dot, when the session is waiting on its [resume panel](resume.md#the-resume-panel).
 
 Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on the sessions list carries the legend.
+
+## Projects
+
+`x` switches between the sessions list and the Projects page, which lists the directories Portal remembers, most recently used first. Projects are remembered as you create sessions, and a project whose directory is gone is dropped as the page loads; see [`projects.json`](configuration.md#projectsjson).
+
+| Key | Action |
+|---|---|
+| `Enter` | New session from the highlighted project |
+| `e` | Edit the project: its name, aliases and tags; see [Managing tags](#managing-tags) |
+| `d` | Delete the project, after a confirmation |
+| `/` | Filter projects |
+| `n` | New session in the current directory |
+| `x` | Switch to Sessions |
+| `t` | Theme picker |
+| `Esc` | Back, or quit |
+| `q` | Quit |
 
 ## Grouping and tags
 
@@ -72,14 +97,12 @@ Tags belong to directories (projects), not to individual sessions. Every session
 
 ### Managing tags
 
-Open the projects picker (run `x`, then press `x` to switch from sessions to projects), highlight a project, and press `e` to edit it. The edit modal has **Name**, **Aliases**, and **Tags** fields.
+On the [Projects page](#projects), highlight a project and press `e` to edit it. The edit modal has **Name**, **Aliases**, and **Tags** fields.
 
 - `Tab` (or `↑`/`↓`) moves between fields, and `←`/`→` moves between chips and the trailing `+ add` slot.
 - To add a tag, land on `+ add`, press `Enter` (or `+`), type the tag, and press `Enter` to save.
 - Press `x` on a chip to remove it.
 - Every edit saves immediately, with no separate confirm step, and `Esc` never discards saved work: it backs out the current edit or closes the modal.
-
-Projects are remembered as you create sessions; see [Configuration](configuration.md#projectsjson).
 
 ## Scrollback preview
 
@@ -103,7 +126,7 @@ Each stays only until the session gives a read: the preview keeps reading, so a 
 
 Press **`m`** on the sessions list to enter multi-select mode, which marks the highlighted session as your first selection. Press `m` again on any row to mark or unmark it. You can also sit in the mode with nothing selected: toggle the auto-marked row off, or enter while the cursor is on a group header.
 
-Press **`Enter`** to open every marked session at once, each attached in its own host-terminal window. The result is **N windows for N sessions**: the picker reuses its own window for one of them and spawns the rest as new host windows, so there is never a leftover empty picker window. `Esc` cancels and clears the selection.
+Press **`Enter`** to open every marked session at once, each attached in its own host-terminal window. The picker reuses its own window for one of them, so there is never a leftover empty picker window. `Esc` cancels and clears the selection.
 
 | Key | Action |
 |---|---|
@@ -114,7 +137,7 @@ Press **`Enter`** to open every marked session at once, each attached in its own
 | `Enter` | Open every marked session (one marked → a plain attach in place) |
 | `Esc` | Cancel and clear the selection |
 
-Marks are sticky across filtering, paging, regrouping, and the `Space`-preview round-trip; a session killed elsewhere while you were in the mode drops out of the selection. If a burst only partly succeeds, Portal leaves the windows that did open in place and keeps the failed sessions marked, so pressing `Enter` again retries only those. [`x` with several targets](sessions.md#several-sessions-at-once) does the same from the command line.
+Marks are sticky across filtering, paging, regrouping, and the `Space`-preview round-trip; a session killed elsewhere while you were in the mode drops out of the selection. If a burst only partly succeeds, Portal leaves the windows that did open in place and keeps the failed sessions marked, so pressing `Enter` again retries only those. Opening several at once works as [several targets of `x`](sessions.md#several-sessions-at-once) do.
 
 ### Which terminals
 
@@ -127,4 +150,4 @@ On any of these, pressing **`m`** does **not** open multi-select. Portal shows a
 
 ## Themes
 
-Press `t` for the theme picker, or name a theme in [`prefs.json`](configuration.md#prefsjson). Six themes ship, and by default Portal picks a light or dark one by asking your terminal what colour its background is. `NO_COLOR` gives a colourless render, with `t` unavailable. See [Themes](theming.md) and [Theme](configuration.md#theme) in Configuration.
+Press `t` for the theme picker. [Theme](configuration.md#theme) covers the built-ins, light and dark, pinning one and `NO_COLOR`; [Themes](theming.md) covers writing your own.

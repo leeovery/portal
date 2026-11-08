@@ -14,10 +14,10 @@ The examples use the default `x` / `xctl` function names that [`portal init`](#p
 | [Paths](#paths) | [`xctl alias`](#xctl-alias) | Sets, removes and lists path aliases. |
 | [Resume hooks](#resume-hooks) | [`xctl hook`](#xctl-hook) | Registers, removes and lists resume hooks. |
 | [Health](#health) | [`xctl doctor`](#xctl-doctor) | Reports Portal's health, and makes the low-stakes repairs. |
+| | [`xctl version`](#xctl-version) | Prints Portal's version. |
 | [Themes](#themes) | [`xctl theme export`](#xctl-theme-export) | Prints a theme's file. |
 | [Setting up and taking down](#setting-up-and-taking-down) | [`portal init`](#portal-init) | Prints the shell integration. |
 | | [`portal uninstall`](#portal-uninstall) | Stops Portal's save daemon, leaving your sessions and config. |
-| | [`xctl version`](#xctl-version) | Prints Portal's version. |
 
 ## Opening
 
@@ -54,7 +54,7 @@ x work api ~/Code/new                # open three surfaces at once (see below)
 | `/<term>` *(positional, not a flag)* | — | open the picker pre-filtered by the term, or attach outright when exactly one live session matches |
 | `-e, --exec <cmd>` / `-- <cmd>` | — | command to run in a **freshly minted** session (never an attach target) |
 
-**Multi-window bursts.** Two or more targets, or one glob expanding to several sessions, open a portal to each: this terminal becomes the first surface and the remaining **N−1** open in host-terminal windows, **N windows for N targets**. Pins and bare targets mix freely (`x -s api -p ~/Code/new blog`), the command rides only the minted surfaces, and a supported terminal is required for the extra windows (Ghostty natively, others through [`terminals.json`](custom-terminals.md)). This is the command-line form of the picker's [multi-select mode](picker.md#multi-select-and-new-windows).
+**Multi-window bursts.** Two or more targets, or one glob expanding to several sessions, open each in its own window, this terminal among them; see [Several sessions at once](sessions.md#several-sessions-at-once).
 
 **Tab completion.** Tab after the session-opening function asks Portal for `open`'s completions: `x <TAB>` offers your live session names, and `x /po<TAB>` completes the term after the slash against the sessions a search can reach (every live session but the one you are attached to, since a search never lands you back where you already are), leaving the slash in place. A shell has this only once it has evaluated the current output of `portal init`: start a new shell, or run the `eval` in your profile again. The `/term` form itself is `portal open`'s own parsing, and doesn't depend on the shell integration. A path argument after the function does not fall through to filename completion. Switching that fallback off needs a shell that supports it: bash 4+ with `bash-completion`, zsh, or fish. macOS's stock `/bin/bash` 3.2 can't, so filenames still complete there.
 
@@ -150,7 +150,7 @@ The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent ali
 
 ### `xctl doctor`
 
-A read-only health report across Portal's resurrection machinery: zmx present and every session answering, `_portal-saver` up, its save daemon alive, the state directory sane, `sessions.json` valid, no stale entries, sessions waiting to resume, the [key config](configuration.md#keys-in-a-session), and the detected host terminal. It starts nothing and signals nothing (a saver that isn't running is reported, not started).
+A read-only health report across Portal's resurrection machinery, from zmx and the saver to the state directory, hooks and projects. It starts nothing and signals nothing. [Troubleshooting](troubleshooting.md#doctor) explains each line it prints.
 
 ```bash
 xctl doctor              # health report
@@ -159,9 +159,17 @@ xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 
 | Flag | Description |
 |---|---|
-| `--fix` | Prune stale hooks, prune stale projects and sweep old logs, then run the diagnosis again |
+| `--fix` | Make the low-stakes repairs, then run the diagnosis again; see [`doctor --fix`](troubleshooting.md#doctor---fix) |
 
-It exits `0` only when every check passes, non-zero otherwise, so it serves as a scriptable health gate. Informational lines, such as the host terminal and the key config, never affect the exit code. With `--fix`, the exit code reflects the state after the repairs. [Troubleshooting](troubleshooting.md#doctor) explains each line, and what `--fix` does and refuses.
+It exits `0` only when every check passes, non-zero otherwise, so it serves as a scriptable health gate. Lines that only inform, and theme advisories, never affect the exit code. With `--fix`, the exit code reflects the state after the repairs, and a `--fix` that refuses every repair exits non-zero.
+
+### `xctl version`
+
+Prints the Portal version.
+
+```bash
+xctl version
+```
 
 ## Themes
 
@@ -206,11 +214,3 @@ Two paths, depending on whether you want to keep your saved state:
 
 - **Remove the binary:** `brew uninstall portal` or `rm $(which portal)`. `brew uninstall portal` leaves zmx installed, as Homebrew leaves a dependency. Either way your sessions keep running in zmx, and a save daemon already running keeps running until its `_portal-saver` session ends. Your saved state is preserved, and reinstalling picks up where it left off.
 - **Explicit teardown:** run `portal uninstall`, which stops the save daemon once it has saved. It touches **none of your files**: saved sessions and all config are left in place, and running `x` again brings the daemon back. To remove Portal completely, run `portal uninstall`, then uninstall the binary and delete `~/.config/portal/` (which holds both state and config) yourself.
-
-### `xctl version`
-
-Prints the Portal version.
-
-```bash
-xctl version
-```

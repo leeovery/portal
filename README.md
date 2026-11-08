@@ -37,7 +37,7 @@ Portal folds that into two shell functions and a picker:
 - **A keyboard-driven picker.** It paints its own canvas, with a `?` keymap on every page. Six themes ship, matched to your terminal's background unless you pin one; drop-in `.theme` files restyle every screen, and `NO_COLOR` is honoured.
 - **Grouping and tags.** One key flips the list between flat, by project and by tag. Tags live on directories, so every session opened there inherits them.
 - **Scrollback preview.** `Space` peeks at any session's screen and scrollback, kept live while it's open, without attaching.
-- **Multi-window open.** `x work api db`, or sessions marked with `m` in the picker, open each in its own terminal window. Ghostty works out of the box; other terminals through a `terminals.json` recipe.
+- **Multi-window open.** `x work api db`, or sessions marked with `m` in the picker, open each in its own terminal window, so a post-reboot window layout is back in one command. Ghostty works out of the box; other terminals through a `terminals.json` recipe.
 - **One terminal at a time.** Opening a session takes it from any other terminal showing it, so it is drawn for yours from the first frame.
 
 ## Screenshots
@@ -52,8 +52,8 @@ The full tour: grouping, fuzzy filter, scrollback preview, projects. Stills belo
 |:---:|:---:|
 | <a href="docs/picker.md#grouping-and-tags"><img src="art/sessions-by-tag.webp" alt="Sessions grouped by tag" width="430"></a><br>**Grouped by tag** | <a href="docs/picker.md#scrollback-preview"><img src="art/preview.webp" alt="Scrollback preview" width="430"></a><br>**Peek-mode scrollback preview** |
 | <a href="docs/how-it-works.md#bootstrap-and-restoration"><img src="art/loading.webp" alt="Honest loading screen" width="430"></a><br>**Concurrent cold-boot loading** | <a href="docs/picker.md#keys"><img src="art/help-modal.webp" alt="Keybindings help modal" width="430"></a><br>**Per-page `?` keymap** |
-| <a href="docs/picker.md#managing-tags"><img src="art/projects.webp" alt="Projects page" width="430"></a><br>**Projects** | <a href="docs/picker.md#managing-tags"><img src="art/edit-project.webp" alt="Edit project modal" width="430"></a><br>**Edit project: name, aliases, tags** |
-| <a href="docs/picker.md#keys"><img src="art/filtering.webp" alt="Live filter" width="430"></a><br>**Live fuzzy filter** | <a href="docs/picker.md#keys"><img src="art/kill-confirm.webp" alt="Kill confirmation modal" width="430"></a><br>**Destructive confirm** |
+| <a href="docs/picker.md#projects"><img src="art/projects.webp" alt="Projects page" width="430"></a><br>**Projects** | <a href="docs/picker.md#projects"><img src="art/edit-project.webp" alt="Edit project modal" width="430"></a><br>**Edit project: name, aliases, tags** |
+| <a href="docs/picker.md#filtering"><img src="art/filtering.webp" alt="Live filter" width="430"></a><br>**Live fuzzy filter** | <a href="docs/picker.md#killing-a-session"><img src="art/kill-confirm.webp" alt="Kill confirmation modal" width="430"></a><br>**Destructive confirm** |
 | <a href="docs/resume.md#the-resume-panel"><img src="art/resume-panel.webp" alt="Resume panel on a restored session" width="430"></a><br>**Resume panel after a reboot** | <a href="docs/theming.md"><img src="art/theme-panel.webp" alt="Theme picker over the sessions" width="430"></a><br>**Theme picker** |
 
 <div align="center">
@@ -64,7 +64,7 @@ The six built-in themes: Tokyo Night, Tokyo Night Day, Nord, Nord Wave, GitLab D
 
 ## Install
 
-You need macOS and **[zmx](https://github.com/neurosnap/zmx)** 1.0.1 or later. Portal talks to zmx through its socket protocol 1; 1.0.0 was the first release to speak it, but its macOS downloads don't resize a session. Building from source needs **Go** 1.26+.
+You need macOS and **[zmx](https://github.com/neurosnap/zmx)** 1.0.1 or later. Portal talks to zmx through its socket protocol 1; 1.0.0 was the first release to speak it, but its macOS downloads don't resize a session. What Portal refuses is in [zmx](docs/how-it-works.md#zmx). Building from source needs **Go** 1.26+.
 
 ```bash
 brew install leeovery/tools/portal
@@ -122,20 +122,7 @@ eval "$(portal init zsh --cmd p)"   # creates p() and pctl()
 
 ## How it works
 
-```
-  OPEN    x                       ──▶  the picker
-          x /term                 ──▶  search: one match attaches, more open the picker
-          x <session | glob>      ──▶  attach, or switch inside a session
-          x <path | alias | zox>  ──▶  new session at the git root
-
-  SAVE    _portal-saver ──▶ save daemon ──▶ state/sessions.json + scrollback/*.bin
-                            every 5 seconds, whatever changed
-
-  REBOOT  first x ──▶ start the saver ──▶ rebuild sessions ─┬─▶ cwd · scrollback
-                                                            └─▶ resume hooks wait on a panel
-```
-
-Portal runs `zmx attach` itself and stays running while you're attached, watching for its own keys. A daemon in a hidden `_portal-saver` session saves what changed in your sessions, and after a reboot the first command that needs them brings the saver back and rebuilds every saved session. See [How it works](docs/how-it-works.md) for the whole of it.
+Portal runs `zmx attach` itself and stays running while you're attached, watching for its own keys. A daemon in a hidden `_portal-saver` session saves what changed in your sessions, and after a reboot the first command that needs them brings the saver back and rebuilds every saved session that isn't already live. See [How it works](docs/how-it-works.md) for the whole of it.
 
 ## Commands
 
