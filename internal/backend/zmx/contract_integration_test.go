@@ -128,8 +128,15 @@ func (s *zmxSubject) Program(t *testing.T, pid int) string {
 	return ""
 }
 
+// SpeakOtherProtocol is never asked: the subject lacks OtherProtocols.
+func (s *zmxSubject) SpeakOtherProtocol(t *testing.T) {
+	t.Fatal("SpeakOtherProtocol asked of a subject whose zmx speaks Portal's protocol")
+}
+
 func (s *zmxSubject) Lacks(b backendtest.Behaviour) string {
 	switch b {
+	case backendtest.OtherProtocols:
+		return "the pinned zmx speaks Portal's protocol, and no zmx a test can run speaks another; TestCreateRefusesASessionOfAnotherProtocol shows the driver's refusal"
 	case backendtest.HangingUpSessions:
 		return "zmx answers every well-formed request it reads, so no real daemon hangs up without answering"
 	case backendtest.HistorylessSessions:

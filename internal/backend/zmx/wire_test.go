@@ -51,14 +51,14 @@ func TestHeader(t *testing.T) {
 	})
 
 	t.Run("it refuses a header of another protocol version, reporting it", func(t *testing.T) {
-		// zmx v0.8.1's packed header puts the low byte of the length where
-		// main keeps the version: 552 is 0x228.
-		old := []byte{6, 0x28, 2, 0, 0, 0, 0, 0}
+		// A packed header of a tag and a u32 length puts the length's low
+		// byte where this protocol keeps the version: 552 is 0x228.
+		packed := []byte{6, 0x28, 2, 0, 0, 0, 0, 0}
 
-		h, err := decodeHeader(old)
+		h, err := decodeHeader(packed)
 
 		if !errors.Is(err, errProtocolVersion) || h.version != 0x28 {
-			t.Errorf("decodeHeader(v0.8.1 Info) = %+v, %v; want version 0x28 refused", h, err)
+			t.Errorf("decodeHeader(a packed Info header) = %+v, %v; want version 0x28 refused", h, err)
 		}
 	})
 

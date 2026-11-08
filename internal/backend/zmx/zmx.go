@@ -354,10 +354,10 @@ func SessionMarks(name string, reach []string) ([]string, error) {
 
 // ProtocolVersion is the socket protocol version that the daemon of the live
 // session name speaks, read from the header of its answer to Info alone. Any
-// version but ProtocolVersion is unsupported. A zmx 0.8.1 daemon gives no
-// answer, so ErrTimeout: it reads the request as a frame still awaiting
-// payload, and the output it broadcasts meanwhile is no answer. A socket that
-// refuses connections is ErrRefusing.
+// version but ProtocolVersion is unsupported. A daemon of a framing with no
+// version byte may give no answer, so ErrTimeout: it can read the request as
+// a frame still awaiting payload, and the output it broadcasts meanwhile is
+// no answer. A socket that refuses connections is ErrRefusing.
 func (b *Backend) ProtocolVersion(ctx context.Context, name string) (int, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()

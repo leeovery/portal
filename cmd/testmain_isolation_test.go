@@ -11,6 +11,7 @@ package cmd
 // poison sits under /dev/null, so no read of it can pass for an empty listing.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -147,6 +148,10 @@ func TestMain(m *testing.M) {
 	// no portal: a test reaching the real bootstrap panics here.
 	bootstrapExe = func() (string, error) {
 		panic("cmd tests: bootstrapExe reached without withBootstrapDeps")
+	}
+	// It runs the zmx on PATH, the developer's own.
+	doctorZmx = func(context.Context) (string, error) {
+		panic("cmd tests: doctor's zmx check reached without DoctorDeps.Zmx")
 	}
 
 	// Detection reads the terminal's identity from the environment, scrubbed

@@ -232,106 +232,6 @@ func varying(frame []byte) []byte {
 	return f
 }
 
-// zmx 0.8.1's daemons frame their messages as the release before the
-// protocol Portal speaks: Portal recognises one and ends one, and never
-// drives one.
-func TestOlderZmxDaemon(t *testing.T) {
-	older := zmxtest.OlderBinary(t)
-	// start has zmx 0.8.1 start the session older, in b's directory.
-	start := func(t *testing.T, b *zmx.Backend) {
-		t.Helper()
-		attach := exec.Command(older, "attach", "older", "sleep", "1000")
-		attach.Env = append(b.ReachEnv(), "HOME="+t.TempDir(), "PATH=/usr/bin:/bin")
-		attach.Dir = t.TempDir()
-		if out, err := attach.CombinedOutput(); err != nil {
-			t.Fatalf("zmx 0.8.1 attach: %v\n%s", err, out)
-		}
-	}
-	gone := func(t *testing.T, b *zmx.Backend) {
-		t.Helper()
-		if _, err := os.Lstat(filepath.Join(b.Dir(), "older")); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("stat the socket after the end = %v; want it gone", err)
-		}
-	}
-
-	t.Run("it is recognised, and ended by the proved SIGTERM", func(t *testing.T) {
-		b := zmxtest.New(t)
-		start(t, b)
-		ctx := t.Context()
-
-		if isOlder, err := b.OlderZmx(ctx, "older"); !isOlder || err != nil {
-			t.Errorf("OlderZmx = %v, %v; want true, nil", isOlder, err)
-		}
-		if _, err := b.ProtocolVersion(ctx, "older"); !errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("ProtocolVersion = %v, want ErrTimeout: a 0.8.1 daemon answers Portal's protocol nothing", err)
-		}
-
-		if sent := endDaemon(t, b, "older"); len(sent) != 1 || !strings.HasSuffix(sent[0], " "+syscall.SIGTERM.String()) {
-			t.Errorf("signals = %v, want one SIGTERM", sent)
-		}
-		gone(t, b)
-	})
-
-	t.Run("it is ended by its own zmx's kill, as KillByCLI runs it bound to that zmx", func(t *testing.T) {
-		b := zmxtest.New(t)
-		start(t, b)
-		home := t.TempDir()
-		byOlder, err := zmx.New(zmx.Config{Binary: older, Dir: b.Dir(), Environ: func() []string {
-			return []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
-		}})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := byOlder.KillByCLI(t.Context(), "older"); err != nil {
-			t.Errorf("KillByCLI = %v, want nil", err)
-		}
-		gone(t, b)
-	})
-
-	// decision 75: inside a session, path_helper puts Homebrew's zmx 0.8.1
-	// first on PATH, and a create through it makes a session Portal can't
-	// talk to.
-	t.Run("a session it makes is ended by its own zmx's kill, and Create refuses it", func(t *testing.T) {
-		b := zmxtest.New(t)
-		byOlder := boundFirstOnPath(t, older, b.Dir())
-
-		s, err := byOlder.Create(t.Context(), "older", t.TempDir(), []string{"sleep", "1000"})
-
-		if !errors.Is(err, backend.ErrUnsupportedProtocol) || s != (backend.Session{}) {
-			t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", s, err)
-		}
-		if !strings.Contains(err.Error(), "zmx kill ended the session") {
-			t.Errorf("Create = %v, want it to say zmx kill ended the session", err)
-		}
-		gone(t, b)
-	})
-}
-
-// boundFirstOnPath binds a Backend to dir through the zmx found first on PATH
-// with zmx's directory first, as Portal binds the zmx on PATH. PATH holds it
-// for the rest of the test only.
-func boundFirstOnPath(t *testing.T, zmxPath, dir string) *zmx.Backend {
-	t.Helper()
-	bin := t.TempDir()
-	if err := os.Symlink(zmxPath, filepath.Join(bin, "zmx")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	binary, err := exec.LookPath("zmx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	home := t.TempDir()
-	b, err := zmx.New(zmx.Config{Binary: binary, Dir: dir, Environ: func() []string {
-		return []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin"}
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 func TestInfoFixture(t *testing.T) {
 	t.Run("it is the pinned build's own answer to Info", func(t *testing.T) {
 		b := zmxtest.New(t)
@@ -835,18 +735,6 @@ func TestBackendAgainstZmx(t *testing.T) {
 			return err == nil && string(got) == "hup\n"
 		}) {
 			t.Error("the session's program never caught a SIGHUP")
-		}
-	})
-
-	t.Run("a daemon of its own protocol discards zmx 0.8.1's framing, answering nothing", func(t *testing.T) {
-		b := zmxtest.New(t)
-		mustCreate(t, b, "current", t.TempDir(), "sleep", "1000")
-
-		if older, err := b.OlderZmx(t.Context(), "current"); older || !errors.Is(err, backend.ErrTimeout) {
-			t.Errorf("OlderZmx = %v, %v; want false, ErrTimeout", older, err)
-		}
-		if got := session(t, b, "current"); !got.Answered {
-			t.Errorf("session after the probe = %+v, want it answering still", got)
 		}
 	})
 

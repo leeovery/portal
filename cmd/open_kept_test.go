@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -657,9 +656,9 @@ func TestBringBack_UnderTheLock(t *testing.T) {
 		w.assertKeptAsSaved(t)
 	})
 
-	t.Run("a refusal of a session an older zmx made is the older-zmx fatal", func(t *testing.T) {
+	t.Run("a refusal of a session that speaks another protocol is the unsupported-create fatal", func(t *testing.T) {
 		w := newKeptWorld(t)
-		w.fake.Fail(backendtest.OpCreate, fmt.Errorf("create session %q: %w; zmx kill ended the session", "work", backend.ErrUnsupportedProtocol))
+		w.fake.SpeakOtherProtocol()
 		var stderr bytes.Buffer
 		withFuncSeam[io.Writer](t, &fatalErrorStderr, &stderr)
 
@@ -668,10 +667,10 @@ func TestBringBack_UnderTheLock(t *testing.T) {
 		err := Execute()
 
 		fatal, ok := errors.AsType[*bootstrap.FatalError](err)
-		if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
-			t.Fatalf("Execute = %v, want the older-zmx fatal carrying the refusal", err)
+		if !ok || fatal.UserMessage != bootstrap.UnsupportedCreateMessage || !errors.Is(err, backend.ErrUnsupportedProtocol) {
+			t.Fatalf("Execute = %v, want the unsupported-create fatal carrying the refusal", err)
 		}
-		if got, want := stderr.String(), bootstrap.OlderZmxMessage+"\n"; got != want {
+		if got, want := stderr.String(), bootstrap.UnsupportedCreateMessage+"\n"; got != want {
 			t.Errorf("stderr = %q, want %q", got, want)
 		}
 		w.rec.assertNone(t)

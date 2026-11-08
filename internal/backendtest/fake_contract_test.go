@@ -45,6 +45,8 @@ func (s fakeSubject) Lead(_ *testing.T, session, variable, value string) {
 	s.f.SetLeaderEnv(session, backend.ClientEnv{{Name: variable, Value: value}})
 }
 
+func (s fakeSubject) SpeakOtherProtocol(*testing.T) { s.f.SpeakOtherProtocol() }
+
 // RunConnected is never asked: the Fake runs no zmx.
 func (s fakeSubject) RunConnected(t *testing.T, session string) {
 	t.Fatalf("RunConnected(%s) asked of a Fake, which runs no zmx", session)

@@ -43,7 +43,7 @@ Portal folds that into two shell functions and a picker:
 
 ### Requirements
 
-- **[zmx](https://github.com/neurosnap/zmx)** 1.0.1 or later, which speaks zmx's socket protocol 1, the way Portal talks to zmx. (1.0.0 was the first release to speak it, but its macOS downloads don't resize a session.) Portal refuses zmx 0.8.1, and lists a session started by it as not answering.
+- **[zmx](https://github.com/neurosnap/zmx)** 1.0.1 or later, which speaks zmx's socket protocol 1, the way Portal talks to zmx. (1.0.0 was the first release to speak it, but its macOS downloads don't resize a session.) Portal refuses a zmx older than 1.0.0 before it makes anything, and lists a session whose daemon speaks another protocol as not answering.
 - **macOS**, and **Go** 1.26+ to build from source.
 
 **Homebrew**

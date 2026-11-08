@@ -35,9 +35,16 @@ func pathWithoutZmx(t *testing.T) {
 // returns its path.
 func pathWithFakeZmx(t *testing.T) string {
 	t.Helper()
+	return pathWithZmx(t, "exit 1")
+}
+
+// pathWithZmx leaves PATH holding only a zmx that runs script under /bin/sh,
+// and returns its path.
+func pathWithZmx(t *testing.T, script string) string {
+	t.Helper()
 	dir := t.TempDir()
 	binary := filepath.Join(dir, zmxProgram)
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
 		t.Fatalf("write fake zmx: %v", err)
 	}
 	t.Setenv("PATH", dir)

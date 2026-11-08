@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,8 +66,10 @@ type DoctorDeps struct {
 	ThemesDir string
 	// ZmxDir is the zmx dir the dir check judges and, unless a test injects
 	// its own, the one the sessions are listed and probed in.
-	ZmxDir       string
-	LookPath     func(file string) (string, error)
+	ZmxDir string
+	// Zmx finds the zmx on PATH and checks it as the bootstrap's first step
+	// does: its path, or why Portal can't use it, worded for the user.
+	Zmx          func(ctx context.Context) (string, error)
 	ListSessions func(ctx context.Context) ([]backend.Session, error)
 	// ProtocolVersion reads the protocol a session's daemon speaks. It is the
 	// zmx driver's own, on no backend interface.
@@ -108,8 +109,8 @@ func resolveDoctorDeps() *DoctorDeps {
 	if deps.ZmxDir == "" {
 		deps.ZmxDir = zmx.DirFor(os.Environ())
 	}
-	if deps.LookPath == nil {
-		deps.LookPath = exec.LookPath
+	if deps.Zmx == nil {
+		deps.Zmx = doctorZmx
 	}
 	if deps.Version == "" {
 		deps.Version = Version()
@@ -437,7 +438,7 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	saverRead := readSaverPresence(ctx, deps.Saver)
 
 	results := []checkResult{
-		checkZmxBinary(deps.LookPath),
+		checkZmxBinary(ctx, deps.Zmx),
 		checkZmxDir(deps.ZmxDir),
 		checkSessionsAnswer(ctx, listed, deps.ProtocolVersion),
 		checkSaver(saverRead, idle),
@@ -462,13 +463,30 @@ func runDoctorDiagnosis(ctx context.Context, deps *DoctorDeps) ([]checkResult, e
 	return results, nil
 }
 
-func checkZmxBinary(lookPath func(string) (string, error)) checkResult {
+// checkZmxBinary shows the zmx find finds, or why Portal can't use it.
+func checkZmxBinary(ctx context.Context, find func(context.Context) (string, error)) checkResult {
 	const name = "zmx"
-	path, err := lookPath(zmxProgram)
+	path, err := find(ctx)
 	if err != nil {
-		return checkResult{name: name, status: checkFail, detail: errZmxMissing.Error()}
+		return checkResult{name: name, status: checkFail, detail: err.Error()}
 	}
 	return checkResult{name: name, status: checkPass, detail: path}
+}
+
+// doctorZmx is the zmx line's check of the zmx on PATH. cmd's TestMain makes
+// it panic: a test that reaches it would run the developer's zmx.
+var doctorZmx = findZmxReadOnly
+
+// findZmxReadOnly is the bootstrap's own check of the zmx on PATH, bound to
+// a scratch directory it removes after: zmx version makes the directory it
+// is bound to, which doctor's read-only path never makes.
+func findZmxReadOnly(ctx context.Context) (string, error) {
+	scratch, err := os.MkdirTemp("", "portal-doctor-zmx-")
+	if err != nil {
+		return "", fmt.Errorf("make a scratch directory to run zmx in: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	return productionZmxCheck(scratch).Find(ctx)
 }
 
 // zmx makes its directory with its first session, so one not made yet holds

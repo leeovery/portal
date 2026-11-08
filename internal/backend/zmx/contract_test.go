@@ -92,9 +92,15 @@ func (s *daemonSubject) Program(t *testing.T, pid int) string {
 	return ""
 }
 
+// SpeakOtherProtocol is never asked: the subject lacks OtherProtocols.
+// TestCreateRefusesASessionOfAnotherProtocol shows the driver's.
+func (s *daemonSubject) SpeakOtherProtocol(t *testing.T) {
+	t.Fatal("SpeakOtherProtocol asked of a subject with no zmx to create a session with")
+}
+
 func (s *daemonSubject) Lacks(b backendtest.Behaviour) string {
 	switch b {
-	case backendtest.Creating:
+	case backendtest.Creating, backendtest.OtherProtocols:
 		return "the daemon run has no zmx to create a session with"
 	case backendtest.RunClients:
 		return "the daemon run has no zmx to run a command with"

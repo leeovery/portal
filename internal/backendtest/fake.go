@@ -72,6 +72,9 @@ type Fake struct {
 	failures map[Op]error
 	calls    []Call
 	lastPID  int
+	// unsupported has every Create make a session speaking a protocol
+	// Portal doesn't.
+	unsupported bool
 }
 
 var _ backend.Backend = (*Fake)(nil)
@@ -118,6 +121,16 @@ func (f *Fake) StopAnswering(name string) {
 	}
 	s.Answered = false
 	f.sessions[name] = s
+}
+
+// SpeakOtherProtocol makes every later Create make its session speaking a
+// protocol Portal doesn't, as a zmx of another protocol first on PATH does:
+// Create ends that session and refuses it with ErrUnsupportedProtocol,
+// holding nothing.
+func (f *Fake) SpeakOtherProtocol() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unsupported = true
 }
 
 // Remove drops a session as if it ended outside Portal.
@@ -262,6 +275,9 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string, e
 	}
 	if held, ok := f.heldUnder(name); ok {
 		return backend.Session{}, &backend.SessionExistsError{Name: name, Held: held}
+	}
+	if f.unsupported {
+		return backend.Session{}, fmt.Errorf("create session %q: it speaks a protocol Portal doesn't: %w; it was ended", name, backend.ErrUnsupportedProtocol)
 	}
 	f.lastPID++
 	s := backend.Session{

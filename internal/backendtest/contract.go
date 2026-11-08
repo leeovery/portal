@@ -40,6 +40,10 @@ type Subject interface {
 	// backend, "" for no such process. Contract asks it only of a subject
 	// that can show Creating, for the pid of a session Create made.
 	Program(t *testing.T, pid int) string
+	// SpeakOtherProtocol makes every later Create bring its session up
+	// speaking a protocol the backend doesn't. Contract asks it only of a
+	// subject that can show OtherProtocols.
+	SpeakOtherProtocol(t *testing.T)
 	// Lacks says why the backend cannot show a behaviour, "" when it can, so
 	// Contract skips that case by name instead of leaving it out.
 	Lacks(b Behaviour) string
@@ -89,6 +93,9 @@ const (
 	HistorylessSessions
 	// RunClients is a zmx run connected to a session.
 	RunClients
+	// OtherProtocols is a Create that brings its session up speaking a
+	// protocol the backend doesn't.
+	OtherProtocols
 )
 
 // perSession is each call but Exists that acts on one held session, Kill last
@@ -365,6 +372,27 @@ func nameContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 }
 
 func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("it refuses a session that comes up speaking another protocol, ending it and holding nothing", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(OtherProtocols); why != "" {
+			t.Skip(why)
+		}
+		s.SpeakOtherProtocol(t)
+		b, ctx := s.Backend(), t.Context()
+
+		made, err := b.Create(ctx, "made", t.TempDir(), []string{"sleep", "1000"})
+
+		if !errors.Is(err, backend.ErrUnsupportedProtocol) || made != (backend.Session{}) {
+			t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", made, err)
+		}
+		if exists, err := b.Exists(ctx, "made"); err != nil || exists {
+			t.Errorf("Exists after the refusal = %v, %v; want false: the session it made was ended", exists, err)
+		}
+		if got := names(t, b); len(got) != 0 {
+			t.Errorf("List after the refusal = %v, want none", got)
+		}
+	})
+
 	t.Run("it makes a session that answers, running the command in the directory", func(t *testing.T) {
 		s := newSubject(t)
 		if why := s.Lacks(Creating); why != "" {

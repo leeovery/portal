@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -17,14 +18,13 @@ import (
 	"github.com/leeovery/portal/internal/saver"
 )
 
-// olderSaverDriver is the zmx driver bound to a directory whose _portal-saver
-// answers as a zmx 0.8.1 daemon does: nothing in Portal's protocol, and 0.8.1's
-// Info in its framing.
-type olderSaverDriver struct{ *zmx.Backend }
+// otherSaverDriver is the zmx driver bound to a directory whose _portal-saver
+// answers in protocol 2.
+type otherSaverDriver struct{ *zmx.Backend }
 
-func (olderSaverDriver) ProtocolVersion(context.Context, string) (int, error) { return 0, errNoAnswer }
-
-func (olderSaverDriver) OlderZmx(context.Context, string) (bool, error) { return true, nil }
+func (otherSaverDriver) ProtocolVersion(context.Context, string) (int, error) {
+	return zmx.ProtocolVersion + 1, nil
+}
 
 // foundSaver is a saver found running, read through the wiring's saverDaemon,
 // that nothing may make another of.
@@ -34,6 +34,8 @@ type foundSaver struct {
 }
 
 func (foundSaver) Present(context.Context) (bool, error) { return true, nil }
+
+func (foundSaver) CheckStateDir(context.Context) error { return nil }
 
 func (s foundSaver) EnsureSaver(context.Context, func(context.Context) error) error {
 	s.t.Error("a saver was ensured past one found that couldn't be ended")
@@ -55,10 +57,10 @@ func (quietSteps) MarkOwed(context.Context) error           { return nil }
 func (quietSteps) Restore(context.Context) restore.Result   { return restore.Result{} }
 
 // Off darwin the process table can't be read, so no saver found can be ended
-// by the proved signal: a zmx 0.8.1 saver found running is the fatal naming
-// the way out, never the judgement's own, which sends the user to a zmx that
-// would leave it running.
-func TestBootstrap_AnOlderSaverFoundOnLinuxIsTheFatalNamingTheWayOut(t *testing.T) {
+// by the proved signal: a saver of another protocol found running is the
+// fatal naming the way out, never the judgement's own, which sends the user
+// to a zmx that would leave it running.
+func TestBootstrap_ASaverFoundOfAnotherProtocolOnLinuxIsTheFatalNamingTheWayOut(t *testing.T) {
 	dir := t.TempDir()
 	l, err := net.Listen("unix", filepath.Join(dir, saver.SessionName))
 	if err != nil {
@@ -76,7 +78,7 @@ func TestBootstrap_AnOlderSaverFoundOnLinuxIsTheFatalNamingTheWayOut(t *testing.
 	steps := quietSteps{}
 	o := &bootstrap.Orchestrator{
 		Zmx: steps, ZmxDir: steps, Latch: steps, Restoring: steps, OrphanSweeper: steps, FlagSweeper: steps, Restore: steps,
-		Saver:    foundSaver{saverDaemon: saverDaemon{driver: func() (saverZmx, error) { return olderSaverDriver{driver}, nil }}, t: t},
+		Saver:    foundSaver{saverDaemon: saverDaemon{driver: func() (saverZmx, error) { return otherSaverDriver{driver}, nil }}, t: t},
 		Protocol: zmx.ProtocolVersion,
 	}
 
@@ -86,7 +88,7 @@ func TestBootstrap_AnOlderSaverFoundOnLinuxIsTheFatalNamingTheWayOut(t *testing.
 	if !ok || fatal.UserMessage != bootstrap.SaverLeftMessage {
 		t.Fatalf("Run = %v, want the fatal %q", err, bootstrap.SaverLeftMessage)
 	}
-	if !errors.Is(err, bootstrap.ErrOlderZmx) || !errors.Is(err, proctable.ErrUnsupported) {
-		t.Errorf("cause = %v, want the older zmx found, and the table it couldn't read to end it", fatal.Cause)
+	if !strings.Contains(fatal.Cause.Error(), "speaks zmx protocol 2, not 1") || !errors.Is(err, proctable.ErrUnsupported) {
+		t.Errorf("cause = %v, want the protocol the saver found speaks, and the table it couldn't read to end it", fatal.Cause)
 	}
 }

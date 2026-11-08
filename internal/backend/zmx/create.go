@@ -30,9 +30,9 @@ func created(name string) string { return `session "` + name + `" created` + "\n
 // whatever its exit code: when the command exits before the client connects,
 // zmx reports the session made and then fails. A session made that gives no
 // Info within the read-back is judged once that is over, each step within
-// its own ceiling and past the create's (refuseOlder), so a judgement late in
-// the create's ceiling is never cut short. env reaches the session through
-// zmx's environment, which its daemon keeps and its program inherits.
+// its own ceiling and past the create's (refuseUnsupported), so a judgement
+// late in the create's ceiling is never cut short. env reaches the session
+// through zmx's environment, which its daemon keeps and its program inherits.
 func (b *Backend) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	if err := b.ValidateName(name); err != nil {
 		return backend.Session{}, err
@@ -48,7 +48,7 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 		if s.Answered {
 			return s, nil
 		}
-		if err := b.refuseOlder(ctx, name); err != nil {
+		if err := b.refuseUnsupported(ctx, name); err != nil {
 			return backend.Session{}, err
 		}
 		return s, nil
@@ -63,24 +63,26 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 	return backend.Session{}, notCreated(name, runErr, holder)
 }
 
-// refuseOlder refuses the session name, just made, when it answers zmx 0.8.1's
-// framing: the zmx that made it speaks a protocol Portal can't, so every
-// session it made would be one Portal can't talk to. A session that answers
-// neither framing, or has already ended, is made all the same.
+// refuseUnsupported refuses the session name, just made, when its daemon
+// answers ProtocolVersion in another version: the zmx that made it speaks a
+// protocol Portal doesn't, so every session it made would be one Portal
+// can't talk to. A session that answers in Portal's version, answers
+// nothing, or has already ended, is made all the same.
 //
 // The refused session is ended by that zmx's own kill, which speaks its
 // daemon's protocol, and nothing else: a signal's proof of which daemon this
 // Create made can be fooled into reaching a session Portal didn't make, so
 // one the kill can't end is left, and the refusal says so. Each step runs
 // past a cancelled ctx, within its own ceiling: a caller giving up between
-// the created line and the judgement would otherwise keep a session of
-// 0.8.1's as made.
-func (b *Backend) refuseOlder(ctx context.Context, name string) error {
+// the created line and the judgement would otherwise keep a session Portal
+// can't talk to as made.
+func (b *Backend) refuseUnsupported(ctx context.Context, name string) error {
 	ctx = context.WithoutCancel(ctx)
-	if older, _ := b.OlderZmx(ctx, name); !older {
+	speaks, err := b.ProtocolVersion(ctx, name)
+	if err != nil || speaks == ProtocolVersion {
 		return nil
 	}
-	refused := fmt.Errorf("create session %q: its daemon speaks zmx 0.8.1's framing: %w", name, backend.ErrUnsupportedProtocol)
+	refused := fmt.Errorf("create session %q: its daemon speaks zmx protocol %d, not %d: %w", name, speaks, ProtocolVersion, backend.ErrUnsupportedProtocol)
 	if err := b.KillByCLI(ctx, name); err != nil {
 		return fmt.Errorf("%w; the session is left running: %w", refused, err)
 	}
@@ -89,8 +91,9 @@ func (b *Backend) refuseOlder(ctx context.Context, name string) error {
 
 // made reads back the session zmx has just made, asking again while its
 // fresh daemon comes up, for at most a probe ceiling within the create one.
-// A session that has already ended, or does not answer by then, is made all
-// the same, and is returned with only its name.
+// A session that has already ended, answers in another protocol version or
+// does not answer by then is made all the same, and is returned with only
+// its name: another version's answer is that daemon's for good.
 func (b *Backend) made(ctx context.Context, name string) backend.Session {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
@@ -100,7 +103,7 @@ func (b *Backend) made(ctx context.Context, name string) backend.Session {
 		if err == nil {
 			return sessionOf(name, i, hostname)
 		}
-		if gone(err) {
+		if gone(err) || errors.Is(err, errProtocolVersion) {
 			return backend.Session{Name: name}
 		}
 		select {

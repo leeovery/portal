@@ -18,7 +18,7 @@ type failingCreator struct{ err error }
 func (c failingCreator) CreateFromDir(string, []string) (string, error) { return "", c.err }
 
 // The picker cmd builds maps a mint's refusal through createFatal, so the
-// refusal is the older-zmx fatal, never a flash and a zero exit.
+// refusal is the unsupported-create fatal, never a flash and a zero exit.
 func TestBuildTUIModelMapsAMintRefusalToTheFatal(t *testing.T) {
 	cfg := defaultTestTUIConfig()
 	cfg.sessionCreator = failingCreator{err: fmt.Errorf("create session %q: %w", "alpha-x", backend.ErrUnsupportedProtocol)}
@@ -40,7 +40,7 @@ func TestBuildTUIModelMapsAMintRefusalToTheFatal(t *testing.T) {
 	}
 
 	fatal, ok := errors.AsType[*bootstrap.FatalError](model.(tui.Model).FatalError())
-	if !ok || fatal.UserMessage != bootstrap.OlderZmxMessage {
-		t.Errorf("FatalError = %v, want the older-zmx fatal", model.(tui.Model).FatalError())
+	if !ok || fatal.UserMessage != bootstrap.UnsupportedCreateMessage {
+		t.Errorf("FatalError = %v, want the unsupported-create fatal", model.(tui.Model).FatalError())
 	}
 }

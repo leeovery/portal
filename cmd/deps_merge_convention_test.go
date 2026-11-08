@@ -50,8 +50,8 @@ func TestResolveDoctorDepsMergeConvention(t *testing.T) {
 		if deps.ZmxDir == "" {
 			t.Error("ZmxDir is empty; an unset seam must fall through to its production default")
 		}
-		if deps.LookPath == nil {
-			t.Error("LookPath = nil; an unset seam must fall through to its production default")
+		if deps.Zmx == nil {
+			t.Error("Zmx = nil; an unset seam must fall through to its production default")
 		}
 		if deps.ProtocolVersion == nil {
 			t.Error("ProtocolVersion = nil; an unset seam must fall through to its production default")
@@ -191,13 +191,13 @@ func doctorSeamCases() []seamCase {
 			},
 		},
 		{
-			field: "LookPath",
+			field: "Zmx",
 			inject: func(t *testing.T) {
-				withDoctorDeps(t, DoctorDeps{LookPath: func(string) (string, error) { return "/sentinel/zmx", nil }})
+				withDoctorDeps(t, DoctorDeps{Zmx: func(context.Context) (string, error) { return "/sentinel/zmx", nil }})
 			},
 			assert: func(t *testing.T) {
-				if got, err := resolveDoctorDeps().LookPath("zmx"); err != nil || got != "/sentinel/zmx" {
-					t.Errorf("LookPath() = (%q, %v); want the injected seam's /sentinel/zmx", got, err)
+				if got, err := resolveDoctorDeps().Zmx(t.Context()); err != nil || got != "/sentinel/zmx" {
+					t.Errorf("Zmx() = (%q, %v); want the injected seam's /sentinel/zmx", got, err)
 				}
 			},
 		},

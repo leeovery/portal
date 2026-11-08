@@ -154,7 +154,7 @@ func TestList(t *testing.T) {
 			{"a long record", frame(6, 1, append(append([]byte{}, record...), 0))},
 			{"a frame cut short", infoFrame(t)[:300]},
 			{"a header of another version", frame(6, 2, record)},
-			{"zmx v0.8.1's header", append([]byte{6, 0x28, 2, 0, 0, 0, 0, 0}, record...)},
+			{"a packed header of a tag and a length", append([]byte{6, 0x28, 2, 0, 0, 0, 0, 0}, record...)},
 			{"a record of another version", frame(6, 1, wrongVersion)},
 			{"a refusal of the request", frame(255, 1, nil)},
 		} {

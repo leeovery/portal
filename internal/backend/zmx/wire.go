@@ -12,8 +12,9 @@ import (
 )
 
 // ProtocolVersion is the version of zmx's socket protocol the driver speaks,
-// frozen on zmx main on 16 Oct 2026. Support is judged by it, never by zmx's
-// version string.
+// frozen on zmx main on 16 Oct 2026. Support is judged by it. zmx's version
+// line refuses only a release older than FirstRelease, up front (Runs): one
+// that passes proves nothing of the protocol its daemons speak.
 const ProtocolVersion = 1
 
 // tag is a message's type, zmx's ipc.Tag. The values are frozen.

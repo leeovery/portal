@@ -17,14 +17,14 @@ type userMessage string
 
 func (m userMessage) Error() string { return string(m) }
 
-// errOlderFatal stands in for the fatal cmd maps a refused create to.
-var errOlderFatal error = userMessage("Portal can't use this zmx: it speaks zmx 0.8.1's protocol")
+// errUnsupportedFatal stands in for the fatal cmd maps a refused create to.
+var errUnsupportedFatal error = userMessage("Portal can't use this zmx: the sessions it makes speak a protocol Portal doesn't")
 
-// olderFatal is the CreateFatal seam as cmd wires it: a create the backend
+// unsupportedFatal is the CreateFatal seam as cmd wires it: a create the backend
 // refused as unsupported is the fatal, and nothing else is.
-func olderFatal(err error) error {
+func unsupportedFatal(err error) error {
 	if errors.Is(err, backend.ErrUnsupportedProtocol) {
-		return errOlderFatal
+		return errUnsupportedFatal
 	}
 	return nil
 }
@@ -38,7 +38,7 @@ func warmProjectsModel(t *testing.T, createErr error) tea.Model {
 	deps := tui.Deps{
 		Lister:      &mockSessionLister{sessions: []tui.Session{}},
 		Creator:     &mockSessionCreator{err: createErr},
-		CreateFatal: olderFatal,
+		CreateFatal: unsupportedFatal,
 		CWD:         "/tmp/cwd",
 	}
 	var model tea.Model = tui.Build(deps)
@@ -72,7 +72,7 @@ func TestMintFailure(t *testing.T) {
 		model, _ := mint(t, warmProjectsModel(t, errRefusedCreate))
 
 		got := model.(tui.Model)
-		if got.ActivePage() != tui.PageLoading || !errors.Is(got.FatalError(), errOlderFatal) {
+		if got.ActivePage() != tui.PageLoading || !errors.Is(got.FatalError(), errUnsupportedFatal) {
 			t.Fatalf("page %d, FatalError %v; want the error frame carrying the fatal", got.ActivePage(), got.FatalError())
 		}
 		assertFatalAlone(t, model)
@@ -88,7 +88,7 @@ func TestMintFailure(t *testing.T) {
 		deps := tui.Deps{
 			Lister:           &mockSessionLister{sessions: []tui.Session{}},
 			Creator:          &mockSessionCreator{err: errRefusedCreate},
-			CreateFatal:      olderFatal,
+			CreateFatal:      unsupportedFatal,
 			CWD:              "/tmp/cwd",
 			ProgressReceiver: tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} }),
 		}
@@ -108,7 +108,7 @@ func TestMintFailure(t *testing.T) {
 		model, _ = mint(t, model)
 
 		view := visible(model)
-		for _, want := range []string{errOlderFatal.Error(), "✓   " + tui.LabelCheckingZmx, "✓   " + tui.LabelStartingTheSaver, "✓   " + tui.LabelRestoringSessions} {
+		for _, want := range []string{errUnsupportedFatal.Error(), "✓   " + tui.LabelCheckingZmx, "✓   " + tui.LabelStartingTheSaver, "✓   " + tui.LabelRestoringSessions} {
 			if !strings.Contains(view, want) {
 				t.Errorf("frame lacks %q:\n%s", want, view)
 			}
@@ -121,7 +121,7 @@ func TestMintFailure(t *testing.T) {
 		deps := tui.Deps{
 			Lister:           &mockSessionLister{sessions: []tui.Session{}},
 			Creator:          &mockSessionCreator{err: errRefusedCreate},
-			CreateFatal:      olderFatal,
+			CreateFatal:      unsupportedFatal,
 			CWD:              "/tmp/cwd",
 			ProgressReceiver: tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Waiting: true} }),
 		}
@@ -178,7 +178,7 @@ func TestMintFailure(t *testing.T) {
 		model, cmd := model.Update(tui.BootstrapCompleteMsg{})
 		model, cmd = model.Update(runCmd(cmd))
 
-		if got := model.(tui.Model).FatalError(); !errors.Is(got, errOlderFatal) {
+		if got := model.(tui.Model).FatalError(); !errors.Is(got, errUnsupportedFatal) {
 			t.Errorf("FatalError = %v, want the fatal", got)
 		}
 		if _, ok := runCmd(cmd).(tea.QuitMsg); !ok {
@@ -204,12 +204,12 @@ func TestMintFailure(t *testing.T) {
 }
 
 // stagedFatalModel is the cold command-pending picker, its mints answered by
-// creator and mapped by olderFatal.
+// creator and mapped by unsupportedFatal.
 func stagedFatalModel(t *testing.T, creator *mockSessionCreator) tea.Model {
 	t.Helper()
 	deps := commandPendingDeps(tea.Cmd(func() tea.Msg { return tui.BootstrapProgressMsg{Index: 1} }))
 	deps.Creator = creator
-	deps.CreateFatal = olderFatal
+	deps.CreateFatal = unsupportedFatal
 	deps.CWD = "/tmp/cwd"
 	var model tea.Model = tui.Build(deps)
 	model, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -231,7 +231,7 @@ func assertFatalAlone(t *testing.T, model tea.Model) {
 		t.Fatalf("frame rows = %q, want the wordmark, the fatal and the quit hint", rows)
 	}
 	wordmark, footer := rows[:len(rows)-2], rows[len(rows)-2:]
-	if footer[0] != errOlderFatal.Error() || !strings.HasPrefix(footer[1], "q quit") {
+	if footer[0] != errUnsupportedFatal.Error() || !strings.HasPrefix(footer[1], "q quit") {
 		t.Errorf("frame ends %q, want the fatal, then the quit hint", footer)
 	}
 	if len(wordmark) != 5 {

@@ -22,7 +22,15 @@ func TestLockWaitOutlastsAHoldersRun(t *testing.T) {
 // and ends one Portal can't use with zmx kill and then, when that fails, the
 // proved signal.
 func TestJudgeRunCoversTheEndOfASaverMade(t *testing.T) {
-	if judge := 2*ReadCeiling + 2*KillCeiling + RunGrace; JudgeRun < judge {
-		t.Errorf("JudgeRun = %s, want at least two reads, a zmx kill with its run's grace and a signalled end's wait, %s", JudgeRun, judge)
+	if judge := ReadCeiling + 2*KillCeiling + RunGrace; JudgeRun < judge {
+		t.Errorf("JudgeRun = %s, want at least a read, a zmx kill with its run's grace and a signalled end's wait, %s", JudgeRun, judge)
+	}
+}
+
+// The saver's create, refusing a session of another protocol, reads its
+// protocol and ends it with zmx kill in the judge's place.
+func TestJudgeRunCoversTheRefusalOfASaverCreated(t *testing.T) {
+	if refusal := ReadCeiling + KillCeiling + RunGrace; JudgeRun < refusal {
+		t.Errorf("JudgeRun = %s, want at least a read and a zmx kill with its run's grace, %s", JudgeRun, refusal)
 	}
 }

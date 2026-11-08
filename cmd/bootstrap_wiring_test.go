@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -21,8 +22,6 @@ import (
 type zmxFake struct {
 	version    int
 	versionErr error
-	older      bool
-	olderErr   error
 	killErr    error
 	endErr     error
 
@@ -30,8 +29,8 @@ type zmxFake struct {
 	// given, as the driver does the daemon it proves.
 	signals bool
 
-	olderAsks, kills, ends int
-	names                  []string
+	kills, ends int
+	names       []string
 	// dirs is what each EndDaemon was asked to prove the daemon by, beside
 	// the session's own marks.
 	dirs [][]string
@@ -46,12 +45,6 @@ func (f *zmxFake) KillByCLI(_ context.Context, name string) error {
 func (f *zmxFake) ProtocolVersion(_ context.Context, name string) (int, error) {
 	f.names = append(f.names, name)
 	return f.version, f.versionErr
-}
-
-func (f *zmxFake) OlderZmx(_ context.Context, name string) (bool, error) {
-	f.names = append(f.names, name)
-	f.olderAsks++
-	return f.older, f.olderErr
 }
 
 func (f *zmxFake) EndDaemon(_ context.Context, name string, signal func(pid int, sig syscall.Signal) error, dirs ...string) error {
@@ -83,23 +76,15 @@ func TestSaverDaemon_Protocol(t *testing.T) {
 		name string
 		fake zmxFake
 		// want is the version, wantErr what the error must wrap, nil for none.
-		want      int
-		wantErr   error
-		notErr    error
-		olderAsks int
+		want    int
+		wantErr error
 	}{
-		{name: "a daemon of Portal's protocol answers it, unasked in the older framing", fake: zmxFake{version: zmx.ProtocolVersion}, want: zmx.ProtocolVersion},
+		{name: "a daemon of Portal's protocol answers it", fake: zmxFake{version: zmx.ProtocolVersion}, want: zmx.ProtocolVersion},
 		{name: "a daemon of another version names it", fake: zmxFake{version: 2}, want: 2},
-		{name: "a failure other than no answer is its own, unasked in the older framing", fake: zmxFake{versionErr: errBoom}, wantErr: errBoom, notErr: bootstrap.ErrOlderZmx},
-		{name: "a saver session gone is ErrSaverGone", fake: zmxFake{versionErr: backend.ErrNoSuchSession, older: true}, wantErr: bootstrap.ErrSaverGone},
-		{
-			name:    "a socket that refuses is no answer to judge by, unasked in the older framing",
-			fake:    zmxFake{versionErr: fmt.Errorf("%w: %w", zmx.ErrRefusing, backend.ErrTimeout), older: true},
-			wantErr: zmx.ErrRefusing, notErr: bootstrap.ErrOlderZmx,
-		},
-		{name: "no answer, then 0.8.1's answer, is ErrOlderZmx", fake: zmxFake{versionErr: errNoAnswer, older: true}, wantErr: bootstrap.ErrOlderZmx, olderAsks: 1},
-		{name: "no answer in either framing is the timeout", fake: zmxFake{versionErr: errNoAnswer}, wantErr: backend.ErrTimeout, notErr: bootstrap.ErrOlderZmx, olderAsks: 1},
-		{name: "no answer, then a failed ask in 0.8.1's framing, is the timeout", fake: zmxFake{versionErr: errNoAnswer, olderErr: errBoom}, wantErr: backend.ErrTimeout, notErr: bootstrap.ErrOlderZmx, olderAsks: 1},
+		{name: "a failure is its own", fake: zmxFake{versionErr: errBoom}, wantErr: errBoom},
+		{name: "a saver session gone is ErrSaverGone", fake: zmxFake{versionErr: backend.ErrNoSuchSession}, wantErr: bootstrap.ErrSaverGone},
+		{name: "a socket that refuses is no answer to judge by", fake: zmxFake{versionErr: fmt.Errorf("%w: %w", zmx.ErrRefusing, backend.ErrTimeout)}, wantErr: zmx.ErrRefusing},
+		{name: "no answer is the timeout", fake: zmxFake{versionErr: errNoAnswer}, wantErr: backend.ErrTimeout},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := tc.fake
@@ -108,12 +93,6 @@ func TestSaverDaemon_Protocol(t *testing.T) {
 
 			if got != tc.want || !errors.Is(err, tc.wantErr) || tc.wantErr == nil && err != nil {
 				t.Errorf("Protocol = %d, %v; want %d, %v", got, err, tc.want, tc.wantErr)
-			}
-			if tc.notErr != nil && errors.Is(err, tc.notErr) {
-				t.Errorf("Protocol = %v, want it not %v", err, tc.notErr)
-			}
-			if fake.olderAsks != tc.olderAsks {
-				t.Errorf("asked in 0.8.1's framing %d times, want %d", fake.olderAsks, tc.olderAsks)
 			}
 			for _, name := range fake.names {
 				if name != saver.SessionName {
@@ -259,10 +238,9 @@ func TestSaverDaemon_Unusable(t *testing.T) {
 		fake zmxFake
 		want bool
 	}{
-		"a daemon of zmx 0.8.1":           {zmxFake{versionErr: errNoAnswer, older: true}, true},
 		"a daemon of another protocol":    {zmxFake{version: zmx.ProtocolVersion + 1}, true},
 		"a daemon of Portal's protocol":   {zmxFake{version: zmx.ProtocolVersion}, false},
-		"a daemon that answers neither":   {zmxFake{versionErr: errNoAnswer}, false},
+		"a daemon that answers nothing":   {zmxFake{versionErr: errNoAnswer}, false},
 		"a saver session gone":            {zmxFake{versionErr: backend.ErrNoSuchSession}, false},
 		"a daemon that can't be read yet": {zmxFake{versionErr: errBoom}, false},
 	} {
@@ -273,6 +251,63 @@ func TestSaverDaemon_Unusable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The bootstrap's first step, and doctor's zmx line, refuse a zmx older than
+// the first release that speaks Portal's protocol before anything is made,
+// and let the protocol judge every other.
+func TestZmxCheck(t *testing.T) {
+	t.Run("it finds the zmx on PATH that runs and is a release Portal can use", func(t *testing.T) {
+		binary := pathWithZmx(t, `printf 'zmx\t\t1.0.1\n'`)
+		check := productionZmxCheck(t.TempDir())
+
+		if got, err := check.Find(t.Context()); err != nil || got != binary {
+			t.Errorf("Find = %q, %v; want %q", got, err, binary)
+		}
+		if err := check.CheckZmx(t.Context()); err != nil {
+			t.Errorf("CheckZmx = %v, want nil", err)
+		}
+	})
+
+	t.Run("a release older than the first that speaks Portal's protocol is refused, naming it, where it is, and the release it needs", func(t *testing.T) {
+		binary := pathWithZmx(t, `printf 'zmx\t\t0.9.2\n'`)
+
+		err := productionZmxCheck(t.TempDir()).CheckZmx(t.Context())
+
+		want := "Portal can't use zmx 0.9.2 at " + binary + ": it needs zmx 1.0.0 or later, the first release that speaks the protocol Portal uses. Upgrade zmx."
+		if err == nil || err.Error() != want {
+			t.Errorf("CheckZmx = %v, want %q", err, want)
+		}
+		if older, ok := errors.AsType[*zmx.OlderReleaseError](err); !ok || older.Release != "0.9.2" {
+			t.Errorf("CheckZmx = %v, want it to carry the driver's refusal of 0.9.2", err)
+		}
+	})
+
+	t.Run("a version line it can't read passes, the protocol judging that zmx", func(t *testing.T) {
+		binary := pathWithZmx(t, `printf 'zmx\t\tdev\n'`)
+
+		if got, err := productionZmxCheck(t.TempDir()).Find(t.Context()); err != nil || got != binary {
+			t.Errorf("Find = %q, %v; want %q", got, err, binary)
+		}
+	})
+
+	t.Run("no zmx on PATH is the zmx-missing line", func(t *testing.T) {
+		pathWithoutZmx(t)
+
+		if err := productionZmxCheck(t.TempDir()).CheckZmx(t.Context()); !errors.Is(err, errZmxMissing) {
+			t.Errorf("CheckZmx = %v, want %v", err, errZmxMissing)
+		}
+	})
+
+	t.Run("a zmx that doesn't run says so, with what it printed", func(t *testing.T) {
+		binary := pathWithZmx(t, "echo 'error: NotDir' >&2; exit 1")
+
+		err := productionZmxCheck(t.TempDir()).CheckZmx(t.Context())
+
+		if err == nil || !strings.HasPrefix(err.Error(), "zmx at "+binary+" doesn't run: ") || !strings.Contains(err.Error(), "error: NotDir") {
+			t.Errorf("CheckZmx = %v, want it to say the zmx at %s doesn't run, with its output", err, binary)
+		}
+	})
 }
 
 func TestLatchFile(t *testing.T) {

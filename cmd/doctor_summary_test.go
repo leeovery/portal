@@ -33,7 +33,7 @@ func TestDoctorSummary_AllChecksPassed(t *testing.T) {
 
 func TestDoctorSummary_PartialForm(t *testing.T) {
 	deps := healthyDoctorDeps(t)
-	deps.LookPath = zmxMissing
+	deps.Zmx = zmxMissing
 
 	outBuf, _, err := runDoctorWith(t, deps)
 	if err != ErrDoctorUnhealthy {
