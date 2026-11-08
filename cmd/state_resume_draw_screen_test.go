@@ -91,6 +91,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 				resumeChainPayload: drawScreenPayload(screen),
 				Stdout:             rec,
 				Logger:             drawTestLogger(t),
+				Now:                testClockAtEpoch,
 				CatchSIGTERM:       func() {},
 				DisableEcho: func() error {
 					calls = append(calls, "echo-off")
@@ -100,7 +101,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 					calls = append(calls, "size")
 					return 100, 30, nil
 				},
-				ResolveTheme: func(bool, func() error) (tui.PaneAppearance, error) {
+				ResolveTheme: func(bool, int, func() error) (tui.PaneAppearance, error) {
 					calls = append(calls, "theme")
 					return tui.PaneAppearance{Theme: th}, nil
 				},

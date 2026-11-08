@@ -38,10 +38,15 @@ type resumeDrawProbe struct {
 	execsAtEchoOff    int
 
 	// typed is what the appearance query read of the input that wasn't its
-	// reply, which a drop discards, as the real query's does; unanswered, a
-	// query it gave up on.
+	// reply, which a drop discards, as the real query's does; settled, the
+	// questions owed before it that its replies answered; unanswered, a query
+	// it gave up on.
 	typed      []byte
+	settled    int
 	unanswered bool
+
+	// owed is how many questions owed a reply each query was told of.
+	owed []int
 }
 
 func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPayload, size func() (int, int, error)) resumeDrawConfig {
@@ -52,17 +57,19 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 		Stdout:             &p.stdout,
 		Logger:             drawTestLogger(t),
 		Size:               size,
+		Now:                testClockAtEpoch,
 		CatchSIGTERM:       func() {},
 		DisableEcho: func() error {
 			p.echoOffCalls++
 			p.execsAtEchoOff = p.execCalls
 			return p.echoOffErr
 		},
-		ResolveTheme: func(colourless bool, dropInput func() error) (tui.PaneAppearance, error) {
+		ResolveTheme: func(colourless bool, owed int, dropInput func() error) (tui.PaneAppearance, error) {
 			p.colourless = append(p.colourless, colourless)
+			p.owed = append(p.owed, owed)
 			p.paintedAtResolve = p.stdout.Len()
 			p.echoOffsAtResolve = p.echoOffCalls
-			found := tui.PaneAppearance{Theme: th, Typed: p.typed, Unanswered: p.unanswered}
+			found := tui.PaneAppearance{Theme: th, Typed: p.typed, Settled: p.settled, Unanswered: p.unanswered}
 			if dropInput == nil {
 				return found, nil
 			}

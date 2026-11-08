@@ -10,7 +10,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/shellquote"
@@ -29,7 +31,7 @@ const (
 	resumeFlagDropInput     = "drop-input"
 	resumeFlagInputArriving = "input-arriving"
 	resumeFlagTyped         = "typed"
-	resumeFlagReplyOwed     = "reply-owed"
+	resumeFlagRepliesOwed   = "replies-owed"
 )
 
 // The screens one draw of the waiting session can put up. The panel is the
@@ -77,11 +79,113 @@ type resumeChainPayload struct {
 	// carried in the waiter's argv.
 	Typed string
 
-	// ReplyOwed marks a background question a draw gave up on with no reply
-	// read, as a terminal over a slow link answers late. It rides each hand-off
-	// until a waiter takes a reply out of its input, so the reply, whenever it
-	// lands, never answers the panel nor reaches what the session is handed to.
-	ReplyOwed bool
+	// RepliesOwed is the background questions draws gave up on with no reply
+	// read, as a terminal over a slow link answers late. It rides each hand-off,
+	// so a reply, whenever it lands within its question's window, never
+	// answers the panel nor reaches what the session is handed to.
+	RepliesOwed replyDebt
+}
+
+// resumeReplyWindow is how long a background question is owed its reply. Only
+// a terminal attached when it was asked answers it, within its round trip, and
+// a phone over SSH answers well within this, so a question older than it is
+// owed nothing: the first draw after a boot asks one with no terminal attached,
+// which nothing will ever answer.
+const resumeReplyWindow = time.Second
+
+// replyDebtKept bounds a debt to its newest questions. More go unanswered
+// within one window only while the terminal answers none, as a drag's redraws
+// can, and the newest is the one the wait before a hand-off lasts for.
+const replyDebtKept = 4
+
+// replyDebt is the background questions a session's draws asked and have read
+// no reply to, each by when it was asked, in unix milliseconds, oldest first.
+// A terminal answers in the order it is asked, so each reply settles the
+// oldest. An array, not a slice, so a payload compares whole.
+type replyDebt struct {
+	asked [replyDebtKept]int64
+	n     int
+}
+
+// replyDebtFrom is the debt of the questions asked, oldest first, keeping the
+// newest replyDebtKept.
+func replyDebtFrom(asked []int64) replyDebt {
+	var d replyDebt
+	d.n = copy(d.asked[:], asked[max(0, len(asked)-replyDebtKept):])
+	return d
+}
+
+// replyDebtFromFlag reads the replies-owed flag's comma-separated times. A
+// value Portal didn't write is read as one question asked now, owed a window
+// at most, so a reply it may stand for never reaches what the session is
+// handed to.
+func replyDebtFromFlag(value string, now time.Time) replyDebt {
+	if value == "" {
+		return replyDebt{}
+	}
+	fields := strings.Split(value, ",")
+	asked := make([]int64, len(fields))
+	for i, field := range fields {
+		ms, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return replyDebt{}.owe(now)
+		}
+		asked[i] = ms
+	}
+	return replyDebtFrom(asked)
+}
+
+func (d replyDebt) owing() bool {
+	return d.n > 0
+}
+
+func (d replyDebt) count() int {
+	return d.n
+}
+
+// owe adds a question asked at at, letting the oldest go past the bound.
+func (d replyDebt) owe(at time.Time) replyDebt {
+	if d.n == replyDebtKept {
+		d = d.settle(1)
+	}
+	d.asked[d.n] = at.UnixMilli()
+	d.n++
+	return d
+}
+
+// settle drops the k oldest questions, each answered by a reply read.
+func (d replyDebt) settle(k int) replyDebt {
+	return replyDebtFrom(d.asked[min(max(k, 0), d.n):d.n])
+}
+
+// live drops the questions asked a window or more before now, which are owed
+// nothing.
+func (d replyDebt) live(now time.Time) replyDebt {
+	for i, asked := range d.asked[:d.n] {
+		if now.Sub(time.UnixMilli(asked)) < resumeReplyWindow {
+			return d.settle(i)
+		}
+	}
+	return replyDebt{}
+}
+
+// lastDue is when the newest question's window closes, and never later than
+// a window from now, so a clock set back since it was asked can't stretch the
+// wait for its reply.
+func (d replyDebt) lastDue(now time.Time) time.Time {
+	newest := time.UnixMilli(d.asked[d.n-1])
+	if newest.After(now) {
+		newest = now
+	}
+	return newest.Add(resumeReplyWindow)
+}
+
+func (d replyDebt) flagValue() string {
+	asked := make([]string, d.n)
+	for i, a := range d.asked[:d.n] {
+		asked[i] = strconv.FormatInt(a, 10)
+	}
+	return strings.Join(asked, ",")
 }
 
 func (p resumeChainPayload) logAttrs(attrs ...any) []any {
@@ -145,8 +249,8 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	if p.InputArriving {
 		argv = append(argv, flagArg(resumeFlagInputArriving))
 	}
-	if p.ReplyOwed {
-		argv = append(argv, flagArg(resumeFlagReplyOwed))
+	if p.RepliesOwed.owing() {
+		argv = append(argv, flagArg(resumeFlagRepliesOwed), p.RepliesOwed.flagValue())
 	}
 	// Only the waiter takes a key: a draw handed one would refuse its argv,
 	// and the session would lose its panel to the chain's recovery.

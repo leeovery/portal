@@ -54,10 +54,15 @@ type PaneAppearance struct {
 	// the input, so it is nil when one was supplied.
 	Typed []byte
 
-	// Unanswered reports a question written and given up on with no reply
-	// read: the terminal may still answer, after the probe has stopped
-	// reading, into whatever reads the pane's input next. A drop doesn't
-	// change it, since the reply can arrive after the drop as well.
+	// Settled is how many of the questions owed a reply before this one the
+	// replies the probe read answered, oldest first: a terminal answers in the
+	// order it was asked, so their replies come ahead of this question's.
+	Settled int
+
+	// Unanswered reports a question written and given up on with its own
+	// reply unread: the terminal may still answer, after the probe has
+	// stopped reading, into whatever reads the pane's input next. A drop
+	// doesn't change it, since the reply can arrive after the drop as well.
 	Unanswered bool
 }
 
@@ -67,16 +72,19 @@ type PaneAppearance struct {
 // picker's own detect timeout and resolves dark for every way the question can
 // go unanswered.
 //
+// owed is how many questions earlier draws asked are still owed their replies,
+// which the terminal sends ahead of this one's.
+//
 // dropInput runs once the appearance question has resolved and never before it:
 // the terminal's own answer can arrive after the probe's deadline, and a drop
 // taken first cannot clear it. A nil dropInput is a no-op. The palette is
 // returned whether or not the drop succeeded, alongside the drop's own error.
-func ResolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error) (PaneAppearance, error) {
-	return resolvePaneTheme(n, colourless, dropInput, newPaneAppearanceProbe())
+func ResolvePaneTheme(n theme.Nomination, colourless bool, owed int, dropInput func() error) (PaneAppearance, error) {
+	return resolvePaneTheme(n, colourless, owed, dropInput, newPaneAppearanceProbe())
 }
 
-func resolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error, p paneAppearanceProbe) (PaneAppearance, error) {
-	found := selectPaneTheme(n, colourless, p)
+func resolvePaneTheme(n theme.Nomination, colourless bool, owed int, dropInput func() error, p paneAppearanceProbe) (PaneAppearance, error) {
+	found := selectPaneTheme(n, colourless, owed, p)
 	if dropInput == nil {
 		return found, nil
 	}
@@ -84,21 +92,24 @@ func resolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() erro
 	return found, dropInput()
 }
 
-func selectPaneTheme(n theme.Nomination, colourless bool, p paneAppearanceProbe) PaneAppearance {
+func selectPaneTheme(n theme.Nomination, colourless bool, owed int, p paneAppearanceProbe) PaneAppearance {
 	if n.IsConstant() {
 		return PaneAppearance{Theme: n.Constant()}
 	}
 	if n.IsZero() || colourless {
 		return PaneAppearance{Theme: n.Select(theme.MemberDark)}
 	}
-	member, found := p.detect()
+	member, found := p.detect(owed)
 	found.Theme = n.Select(member)
 	return found
 }
 
-// detect asks the terminal its background. The palette is left to the caller;
-// what it read beside the answer, and whether one came, is in the appearance.
-func (p paneAppearanceProbe) detect() (theme.Member, PaneAppearance) {
+// detect asks the terminal its background, owed questions still owed their
+// replies ahead of it. The member is its own reply's or, unanswered, the latest
+// earlier one's it read, which a terminal attached a moment ago sent; what it
+// read beside the replies, and which questions they answered, is in the
+// appearance.
+func (p paneAppearanceProbe) detect(owed int) (theme.Member, PaneAppearance) {
 	if !p.isTerminal() {
 		return theme.MemberDark, PaneAppearance{}
 	}
@@ -117,28 +128,40 @@ func (p paneAppearanceProbe) detect() (theme.Member, PaneAppearance) {
 	if _, err := io.WriteString(p.out, ansi.RequestBackgroundColor); err != nil {
 		return theme.MemberDark, PaneAppearance{}
 	}
-	payload, typed, ok := readBackgroundReply(reader)
-	if !ok {
-		return theme.MemberDark, PaneAppearance{Typed: typed, Unanswered: true}
+	replies, typed := p.readBackgroundReplies(reader, owed+1)
+	found := PaneAppearance{Typed: typed, Settled: min(len(replies), owed), Unanswered: len(replies) <= owed}
+	if len(replies) == 0 {
+		return theme.MemberDark, found
 	}
-	return terminalReplyFrom(tea.BackgroundColorMsg{Color: ansi.XParseColor(payload)}).member, PaneAppearance{Typed: typed}
+	payload := replies[min(owed, len(replies)-1)]
+	return terminalReplyFrom(tea.BackgroundColorMsg{Color: ansi.XParseColor(payload)}).member, found
 }
 
-// readBackgroundReply reads until a whole reply has arrived with no other cut
-// off behind it, as a second terminal on the same pane answering sends, or the
-// read gives up. ok reports a reply read, payload being the first one's.
-func readBackgroundReply(r io.Reader) (payload string, typed []byte, ok bool) {
+// readBackgroundReplies reads until want replies have arrived whole with no
+// other cut off behind them, as a second terminal on the same pane answering
+// sends, or the read gives up. A reply whose head has arrived as it gives up is
+// read on for bgreply.TailWait more, once, so its rest is never left on the
+// pane's input for the next reader to take as keys.
+func (p paneAppearanceProbe) readBackgroundReplies(r io.Reader, want int) (replies []string, typed []byte) {
 	buf := make([]byte, paneReplyCap)
 	filled := 0
+	finishing := false
 	for {
 		n, err := r.Read(buf[filled:])
 		filled += n
-		rest, payloads, cut := bgreply.Split(buf[:filled])
-		if (len(payloads) > 0 && !cut) || err != nil || filled == len(buf) {
-			if len(payloads) == 0 {
-				return "", rest, false
-			}
-			return payloads[0], rest, true
+		rest, payloads, head := bgreply.Split(buf[:filled])
+		if (len(payloads) >= want && head == nil) || filled == len(buf) {
+			return payloads, rest
+		}
+		if err == nil {
+			continue
+		}
+		if finishing || head == nil || !errors.Is(err, os.ErrDeadlineExceeded) {
+			return payloads, rest
+		}
+		finishing = true
+		if r, err = p.armRead(bgreply.TailWait); err != nil {
+			return payloads, rest
 		}
 	}
 }

@@ -162,7 +162,7 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 	cfg.Size = p.size
 	cfg.DisableEcho = func() error { return nil }
 	cfg.DropInputQueue = func() error { return nil }
-	cfg.ResolveTheme = func(bool, func() error) (tui.PaneAppearance, error) {
+	cfg.ResolveTheme = func(bool, int, func() error) (tui.PaneAppearance, error) {
 		p.recordSelf(termEventDraw)
 		p.holdDraw()
 		return tui.PaneAppearance{Theme: th}, nil

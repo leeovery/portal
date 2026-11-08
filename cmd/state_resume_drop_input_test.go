@@ -65,9 +65,10 @@ func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropD
 		Stdout:             sequencedWriter{d: d},
 		Logger:             logger,
 		Size:               fixedSize(100, 30),
+		Now:                testClockAtEpoch,
 		CatchSIGTERM:       func() {},
 		DisableEcho:        func() error { return nil },
-		ResolveTheme: func(_ bool, dropInput func() error) (tui.PaneAppearance, error) {
+		ResolveTheme: func(_ bool, _ int, dropInput func() error) (tui.PaneAppearance, error) {
 			d.calls = append(d.calls, "appearance-query")
 			d.handed = append(d.handed, dropInput != nil)
 			if dropInput == nil {
@@ -388,7 +389,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, err := sessionDrawTheme(true, func() error {
+		_, err := sessionDrawTheme(true, 0, func() error {
 			calls++
 			return refused
 		})
@@ -401,7 +402,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, err := sessionDrawTheme(true, nil); err != nil {
+		if _, err := sessionDrawTheme(true, 0, nil); err != nil {
 			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})

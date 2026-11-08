@@ -36,13 +36,10 @@ const resumeResizeSettle = 150 * time.Millisecond
 // together than this.
 const resumeInputQuiet = 50 * time.Millisecond
 
-// resumeLateReplyWait bounds how long a session whose draw's background
-// question went unanswered waits, before it is handed to its hook or a shell,
-// for the reply: a terminal over a slow link answers after the draw's 50 ms,
-// and the reply would otherwise land in what the session runs next, echoed. It
-// is spent in quiet windows, so it is the silence waited through, not counting
-// the reply's own bytes.
-const resumeLateReplyWait = 300 * time.Millisecond
+// resumeReplyTailHolds is how many quiet windows an arrival ending in a reply's
+// head stays open for the rest of it, so a reply split across them is never
+// judged as keys.
+const resumeReplyTailHolds = int(bgreply.TailWait / resumeInputQuiet)
 
 type resumeWaitConfig struct {
 	resumeChainPayload
@@ -71,6 +68,9 @@ type resumeWaitConfig struct {
 	// reading nothing.
 	AwaitInput func(window time.Duration) (bool, error)
 
+	// Now is the wall clock the questions owed a reply were asked by.
+	Now func() time.Time
+
 	// ClearPending lowers the session's resume-pending flag; LookupResume
 	// reads the registration at the moment the key is pressed rather than
 	// carrying what the panel was drawn from, since the store can have changed
@@ -98,6 +98,10 @@ type resumeWaitConfig struct {
 	// Set by runResumeWait from MakeRaw, so an answer hands the session on in
 	// a cooked tty. An answer reached without a wait restores nothing.
 	restoreTerminal func()
+
+	// replyHead is a reply cut off at the end of the arrival last judged, its
+	// rest still to come, for the wait before a hand-off to finish.
+	replyHead []byte
 }
 
 func (cfg resumeWaitConfig) restore() {
@@ -190,6 +194,10 @@ type resumeArrival struct {
 	// carried marks input already arriving when the waiter started, whose
 	// earlier bytes this waiter never read.
 	carried bool
+
+	// held counts the quiet windows it has been kept open past for a reply's
+	// rest.
+	held int
 }
 
 func (a *resumeArrival) add(b byte) {
@@ -204,17 +212,32 @@ func (a *resumeArrival) open() bool {
 	return a.carried || len(a.kept) > 0
 }
 
+// hold keeps the arrival open through a quiet window while it ends in a reply
+// whose rest is still to come, for as long as resumeReplyTailHolds allows.
+func (a *resumeArrival) hold() bool {
+	if a.held == resumeReplyTailHolds {
+		return false
+	}
+	if _, _, head := bgreply.Split(a.kept); head == nil {
+		return false
+	}
+	a.held++
+	return true
+}
+
 // resumeJudged is an arrival closed: the byte left once every reply is taken
-// out of it, whether that byte arrived alone, and whether a reply was among it.
+// out of it, whether that byte arrived alone, how many replies were among it,
+// and a reply cut off at its end.
 type resumeJudged struct {
 	key     byte
 	alone   bool
-	replied bool
+	replies int
+	head    []byte
 }
 
 func (a *resumeArrival) end() resumeJudged {
-	rest, payloads, _ := bgreply.Split(a.kept)
-	judged := resumeJudged{replied: len(payloads) > 0}
+	rest, payloads, head := bgreply.Split(a.kept)
+	judged := resumeJudged{replies: len(payloads), head: head}
 	if len(rest) == 1 && !a.carried && !a.overflow {
 		judged.key, judged.alone = rest[0], true
 	}
@@ -222,12 +245,13 @@ func (a *resumeArrival) end() resumeJudged {
 	return judged
 }
 
-// judge closes the arrival, and a reply among it is the one owed.
+// judge closes the arrival. Each reply among it settles the oldest question
+// owed, and a reply cut off at its end is kept for the wait before a hand-off
+// to finish.
 func (cfg *resumeWaitConfig) judge(arrival *resumeArrival) resumeJudged {
 	judged := arrival.end()
-	if judged.replied {
-		cfg.ReplyOwed = false
-	}
+	cfg.RepliesOwed = cfg.RepliesOwed.live(cfg.Now()).settle(judged.replies)
+	cfg.replyHead = judged.head
 	return judged
 }
 
@@ -262,6 +286,9 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 		case read := <-reader.results:
 			outstanding = false
 			if read.quiet {
+				if arrival.hold() {
+					continue
+				}
 				judged := cfg.judge(&arrival)
 				if ended, err := keys.answer(cfg, judged); ended {
 					return err
@@ -370,7 +397,7 @@ func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error
 // resumeAnswerEnter hands the session back to its own transcript and starts
 // what the store holds now over it, once its flag is lowered.
 func resumeAnswerEnter(cfg resumeWaitConfig) error {
-	cfg.awaitLateReply()
+	cfg.awaitOwedReplies()
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
@@ -424,7 +451,7 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 		return resumeReport(cfg, resumeScreenDiscard, resumeDiscardRefusal(err))
 	}
 
-	cfg.awaitLateReply()
+	cfg.awaitOwedReplies()
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
@@ -436,36 +463,86 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 	return nil
 }
 
-// awaitLateReply reads off the session's input, while its draw's background
-// question is owed a reply, the reply as it comes within resumeLateReplyWait,
-// so the hook or the shell the session is handed to never reads it, and hands
-// on at once when it has come. An answer is taken with no read outstanding, so
-// nothing else reads the input meanwhile. It reads only while what has come
-// can still be a reply: the first byte that can't, typed in the wait, ends it
-// and is lost, the one cost, which the hook's own start-up would mostly outlast.
-func (cfg resumeWaitConfig) awaitLateReply() {
-	if !cfg.ReplyOwed {
+// awaitOwedReplies holds a hand-off to the hook or a shell while a question
+// is owed its reply within its window, reading the replies off the session's
+// input as they come, each settling the oldest question owed, so neither ever
+// reads one. It ends once nothing is owed or the newest question's window has
+// closed, and with nothing owed the hand-off is immediate. An answer is taken
+// with no read outstanding, so nothing else reads the input meanwhile. A key
+// typed in the wait is lost whole, the one cost: once a byte no reply accounts
+// for is read, the wait reads on to the quiet that ends what was typed, so no
+// escape sequence's tail reaches what the session is handed to.
+func (cfg *resumeWaitConfig) awaitOwedReplies() {
+	now := cfg.Now()
+	cfg.RepliesOwed = cfg.RepliesOwed.live(now)
+	if !cfg.RepliesOwed.owing() {
 		return
 	}
-	var got []byte
+	due := cfg.RepliesOwed.lastDue(now)
+	read := replyRead{got: cfg.replyHead}
+	cfg.replyHead = nil
 	buf := make([]byte, 1)
-	for quiet := time.Duration(0); quiet < resumeLateReplyWait && len(got) < resumeArrivalKept; {
-		arrived, err := cfg.AwaitInput(resumeInputQuiet)
+	for read.n < resumeArrivalKept {
+		window, ok := read.listen(cfg.RepliesOwed, due.Sub(now))
+		if !ok {
+			return
+		}
+		arrived, err := cfg.AwaitInput(window)
 		if err != nil {
 			return
 		}
+		now = cfg.Now()
 		if !arrived {
-			quiet += resumeInputQuiet
+			read.quiet()
 			continue
 		}
 		if n, err := cfg.In.Read(buf); n == 0 || err != nil {
 			return
 		}
-		got = append(got, buf[0])
-		if whole, partial := bgreply.ReadsAsOne(got); whole || !partial {
-			return
-		}
+		cfg.RepliesOwed = cfg.RepliesOwed.settle(read.take(buf[0]))
 	}
+}
+
+// replyRead is what the wait before a hand-off has read since the session was
+// last quiet.
+type replyRead struct {
+	got []byte
+	// settled counts the whole replies in got already settled.
+	settled int
+	// typed marks a byte in got that no reply accounts for.
+	typed bool
+	// n counts every byte the wait has read.
+	n int
+}
+
+// listen is how long the wait listens next, ok false once it is over: a key
+// typed is read on to the quiet that ends it, and otherwise the wait lasts
+// while a question is owed and left of the time due.
+func (r replyRead) listen(owed replyDebt, left time.Duration) (window time.Duration, ok bool) {
+	if r.typed {
+		return resumeInputQuiet, true
+	}
+	if !owed.owing() || left <= 0 {
+		return 0, false
+	}
+	return min(resumeInputQuiet, left), true
+}
+
+// take adds a byte read, answering how many replies it finished.
+func (r *replyRead) take(b byte) (finished int) {
+	r.n++
+	r.got = append(r.got, b)
+	_, payloads, _ := bgreply.Split(r.got)
+	finished, r.settled = len(payloads)-r.settled, len(payloads)
+	r.typed = r.typed || bgreply.Typed(r.got)
+	return finished
+}
+
+// quiet ends what had arrived: keys typed in it are dropped with the replies
+// read, and only a reply still arriving is kept for its rest.
+func (r *replyRead) quiet() {
+	_, _, head := bgreply.Split(r.got)
+	r.got, r.settled, r.typed = head, 0, false
 }
 
 // resumeUnfreeze hands the session back to its own transcript and then lowers
@@ -580,7 +657,7 @@ var stateResumeWaitCmd = &cobra.Command{
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
 		typedHex, _ := cmd.Flags().GetString(resumeFlagTyped)
 		typed, unnamed := typedFromFlag(typedHex)
-		replyOwed, _ := cmd.Flags().GetBool(resumeFlagReplyOwed)
+		repliesOwed, _ := cmd.Flags().GetString(resumeFlagRepliesOwed)
 
 		return resumeWaitRunFunc(resumeWaitConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -593,7 +670,7 @@ var stateResumeWaitCmd = &cobra.Command{
 
 				InputArriving: inputArriving || unnamed,
 				Typed:         typed,
-				ReplyOwed:     replyOwed,
+				RepliesOwed:   replyDebtFromFlag(repliesOwed, time.Now()),
 			},
 			Stdout:              os.Stdout,
 			In:                  os.Stdin,
@@ -605,6 +682,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			Settle:              time.After,
 			Size:                sessionSizeFromStdin,
 			AwaitInput:          awaitStdinInput,
+			Now:                 time.Now,
 			ClearPending:        func() error { return clearResumePending(session) },
 			LookupResume:        lookupResumeRegistration,
 			DiscardRegistration: discardResumeRegistration,
@@ -625,7 +703,7 @@ func init() {
 	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the session is showing: discard for the confirmation, else the panel")
 	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
 	stateResumeWaitCmd.Flags().String(resumeFlagTyped, "", "The key, in hex, the draw read while it asked the terminal its background")
-	stateResumeWaitCmd.Flags().Bool(resumeFlagReplyOwed, false, "A draw's background question is still owed its reply")
+	stateResumeWaitCmd.Flags().String(resumeFlagRepliesOwed, "", "When each background question still owed its reply was asked, in unix milliseconds, oldest first, comma-separated")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagSession)
 

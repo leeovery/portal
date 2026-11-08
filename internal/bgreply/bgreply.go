@@ -5,10 +5,18 @@
 // rendering path.
 package bgreply
 
-import "bytes"
+import (
+	"bytes"
+	"time"
+)
 
 // Introducer opens every reply: OSC, then 11 and its separator.
 const Introducer = "\x1b]11;"
+
+// TailWait bounds how long the rest of a reply is waited for once its head has
+// arrived. A terminal writes its reply whole, so only the link between them
+// splits one, and the rest follows within far less than this.
+const TailWait = 100 * time.Millisecond
 
 const (
 	bel = 0x07
@@ -20,29 +28,47 @@ const (
 // payload between each one's introducer and its terminator (BEL, ESC \ or the
 // C1 ST) in order, and the rest, which was typed. Every reply is taken out, as
 // every terminal showing the pane answers. A reply cut off at the end, still
-// arriving, is taken out too, cut reporting it, as is the start of an
+// arriving, is taken out too and handed back as head, as is the start of an
 // introducer there, though an escape alone at the end is the Escape key. A
 // reply broken by an escape that ends nothing is taken out up to that escape,
 // which stays in the rest.
-func Split(in []byte) (rest []byte, payloads []string, cut bool) {
+func Split(in []byte) (rest []byte, payloads []string, head []byte) {
 	rest = []byte{}
 	for len(in) > 0 {
 		before, after, found := bytes.Cut(in, []byte(Introducer))
 		if !found {
 			kept := withoutIntroducerStart(in)
-			return append(rest, kept...), payloads, len(kept) < len(in)
+			return append(rest, kept...), payloads, cutHead(in[len(kept):])
 		}
 		rest = append(rest, before...)
 		payload, tail, ended := replyPayload(after)
 		if !ended {
-			return rest, payloads, true
+			return rest, payloads, cutHead(in[len(before):])
 		}
 		if payload != nil {
 			payloads = append(payloads, *payload)
 		}
 		in = tail
 	}
-	return rest, payloads, false
+	return rest, payloads, nil
+}
+
+// Typed reports whether in, read so far, holds a byte no reply accounts for:
+// one in no whole reply and in none cut off at its end, an escape alone there
+// aside, since it may open the next.
+func Typed(in []byte) bool {
+	rest, _, head := Split(in)
+	opens := len(head) == 0 && len(rest) == 1 && rest[0] == esc && in[len(in)-1] == esc
+	return len(rest) > 0 && !opens
+}
+
+// cutHead is nil for no head, and a copy otherwise, so a head kept to be
+// finished never shares the input's memory.
+func cutHead(head []byte) []byte {
+	if len(head) == 0 {
+		return nil
+	}
+	return bytes.Clone(head)
 }
 
 // replyPayload reads a reply past its introducer: its payload, nil for one an
@@ -75,17 +101,4 @@ func withoutIntroducerStart(in []byte) []byte {
 		}
 	}
 	return in
-}
-
-// ReadsAsOne reports whether in is one whole reply and nothing else, or could
-// still become one as more of it arrives.
-func ReadsAsOne(in []byte) (whole, partial bool) {
-	rest, payloads, cut := Split(in)
-	switch {
-	case len(payloads) == 1 && len(rest) == 0 && !cut:
-		return true, false
-	case len(payloads) == 0 && len(rest) == 0 && cut:
-		return false, true
-	}
-	return false, len(in) == 1 && in[0] == esc
 }

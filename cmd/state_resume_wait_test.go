@@ -102,6 +102,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		Settle:             time.After,
 		// Input handed in whole is already queued behind whatever is read.
 		AwaitInput: func(time.Duration) (bool, error) { return true, nil },
+		Now:        testClockAtEpoch,
 		Size:       fixedSize(payload.Width, payload.Height),
 		MakeRaw: func() (func(), error) {
 			p.rawCalls++

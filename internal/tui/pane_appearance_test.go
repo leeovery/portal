@@ -6,9 +6,11 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/bgreply"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
@@ -49,7 +51,8 @@ type fakePaneReader struct {
 	reads   int
 
 	scripted bool
-	script   [][]byte
+	// A nil chunk is a deadline passing between the chunks either side of it.
+	script [][]byte
 }
 
 func (r *fakePaneReader) Read(p []byte) (int, error) {
@@ -58,25 +61,51 @@ func (r *fakePaneReader) Read(p []byte) (int, error) {
 		return 0, r.readErr
 	}
 	if r.scripted {
-		if len(r.script) == 0 {
-			return 0, os.ErrDeadlineExceeded
-		}
-		n := copy(p, r.script[0])
-		if r.script[0] = r.script[0][n:]; len(r.script[0]) == 0 {
-			r.script = r.script[1:]
-		}
-		return n, nil
+		return r.readScript(p)
 	}
 	return r.f.Read(p)
 }
+
+func (r *fakePaneReader) readScript(p []byte) (int, error) {
+	if len(r.script) == 0 {
+		return 0, os.ErrDeadlineExceeded
+	}
+	if r.script[0] == nil {
+		r.script = r.script[1:]
+		return 0, os.ErrDeadlineExceeded
+	}
+	n := copy(p, r.script[0])
+	if r.script[0] = r.script[0][n:]; len(r.script[0]) == 0 {
+		r.script = r.script[1:]
+	}
+	return n, nil
+}
+
+// deadlinePasses, among the chunks readsInChunks takes, is the read's deadline
+// passing there.
+const deadlinePasses = ""
 
 // readsInChunks has every read of the probe take the next chunk alone, as a
 // terminal's input does when its bytes arrive apart.
 func (h *probeHarness) readsInChunks(chunks ...string) {
 	h.reader.scripted = true
 	for _, c := range chunks {
-		h.reader.script = append(h.reader.script, []byte(c))
+		chunk := []byte(c)
+		if c == deadlinePasses {
+			chunk = nil
+		}
+		h.reader.script = append(h.reader.script, chunk)
 	}
+}
+
+// unread is what the scripted input still holds for whatever reads the pane
+// next.
+func (h *probeHarness) unread() string {
+	var left []byte
+	for _, c := range h.reader.script {
+		left = append(left, c...)
+	}
+	return string(left)
 }
 
 // recordingWriter puts the query write into the same sequence as the read's
@@ -136,6 +165,11 @@ func (h *probeHarness) dropInput(err error) func() error {
 	}
 }
 
+// probeArmsRefusedPast is how many reads the harness arms before it refuses,
+// so a probe that reads on without end fails on the bounds it armed rather
+// than hanging.
+const probeArmsRefusedPast = 8
+
 // armRead records the bound as the read is armed, before anything is read
 // under it, so the bound asserted on is the one the read was given.
 func (h *probeHarness) armRead(bound time.Duration) (io.Reader, error) {
@@ -143,6 +177,9 @@ func (h *probeHarness) armRead(bound time.Duration) (io.Reader, error) {
 	h.record(eventArmRead)
 	if h.armErr != nil {
 		return nil, h.armErr
+	}
+	if len(h.bounds) > probeArmsRefusedPast {
+		return nil, errSeam
 	}
 	if err := h.reader.f.SetReadDeadline(time.Now().Add(bound)); err != nil {
 		return nil, err
@@ -222,7 +259,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		constant := themetest.DefaultLight(t)
 
-		found, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
+		found, err := resolvePaneTheme(theme.ConstantNomination(constant), false, 0, nil, h.probe())
 		got := found.Theme
 
 		if got != constant {
@@ -236,7 +273,7 @@ func TestResolvePaneTheme(t *testing.T) {
 	t.Run("it returns the zero theme for a zero nomination", func(t *testing.T) {
 		h := newProbeHarness(t)
 
-		found, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
+		found, err := resolvePaneTheme(theme.Nomination{}, false, 0, nil, h.probe())
 		got := found.Theme
 
 		if got != (theme.Theme{}) {
@@ -264,7 +301,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, lightReply)
 
-				found, err := resolvePaneTheme(tc.n, true, nil, h.probe())
+				found, err := resolvePaneTheme(tc.n, true, 0, nil, h.probe())
 				got := found.Theme
 
 				if got != tc.want {
@@ -295,7 +332,7 @@ func TestResolvePaneTheme(t *testing.T) {
 					h.reply(t, tc.reply)
 				}
 
-				found, err := resolvePaneTheme(pair, false, nil, h.probe())
+				found, err := resolvePaneTheme(pair, false, 0, nil, h.probe())
 				got := found.Theme
 
 				if got != tc.want {
@@ -323,7 +360,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				tc.arrange(h)
 
-				_, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
+				_, _ = resolvePaneTheme(pair, false, 0, h.dropInput(nil), h.probe())
 
 				if !slices.Equal(h.events, tc.want) {
 					t.Errorf("ran %v with %s, want %v — the query waits on a ready read, and a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
@@ -350,7 +387,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, darkReply)
 
-				_, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
+				_, _ = resolvePaneTheme(tc.n, tc.colourless, 0, h.dropInput(nil), h.probe())
 
 				if h.drops != 1 {
 					t.Errorf("ran the drop %d times for a %s resolution, want exactly 1 — every pane draw owes one drop", h.drops, tc.name)
@@ -382,9 +419,9 @@ func TestResolvePaneTheme(t *testing.T) {
 				bare.reply(t, lightReply)
 				dropping.reply(t, lightReply)
 
-				found, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
+				found, err := resolvePaneTheme(tc.n, tc.colourless, 0, nil, bare.probe())
 				got := found.Theme
-				wanted, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
+				wanted, _ := resolvePaneTheme(tc.n, tc.colourless, 0, dropping.dropInput(nil), dropping.probe())
 				want := wanted.Theme
 
 				if got != want {
@@ -400,7 +437,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, lightReply)
 
-		found, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		found, err := resolvePaneTheme(pair, false, 0, h.dropInput(errSeam), h.probe())
 		got := found.Theme
 
 		if got != light {
@@ -429,7 +466,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, "\r"+darkReply)
 
-				found, _ := resolvePaneTheme(tc.n, tc.colourless, nil, h.probe())
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, nil, h.probe())
 
 				if string(found.Typed) != tc.typed {
 					t.Errorf("handed back %q as typed, want %q", found.Typed, tc.typed)
@@ -461,10 +498,37 @@ func TestResolvePaneTheme(t *testing.T) {
 					drop = h.dropInput(nil)
 				}
 
-				found, _ := resolvePaneTheme(tc.n, tc.colourless, drop, h.probe())
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, drop, h.probe())
 
 				if found.Unanswered != tc.unanswered {
 					t.Errorf("Unanswered = %v, want %v", found.Unanswered, tc.unanswered)
+				}
+			})
+		}
+	})
+
+	t.Run("it hands the probe the questions owed, and settles none where it asks none", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+			settled    int
+			unanswered bool
+		}{
+			{"adaptive pair", pair, false, 1, true},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, 0, false},
+			{"colourless", pair, true, 0, false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.reply(t, darkReply)
+
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, 1, nil, h.probe())
+
+				if found.Settled != tc.settled || found.Unanswered != tc.unanswered {
+					t.Errorf("Settled = %d, Unanswered = %v with one question owed; want %d, %v", found.Settled, found.Unanswered, tc.settled, tc.unanswered)
 				}
 			})
 		}
@@ -476,7 +540,7 @@ func TestResolvePaneTheme(t *testing.T) {
 			h := newProbeHarness(t)
 			h.reply(t, "\r"+darkReply)
 
-			found, _ := resolvePaneTheme(pair, false, h.dropInput(dropErr), h.probe())
+			found, _ := resolvePaneTheme(pair, false, 0, h.dropInput(dropErr), h.probe())
 
 			if found.Typed != nil {
 				t.Errorf("handed back %q as typed beside a drop failing with %v, want nothing: the drop discards it with the rest", found.Typed, dropErr)
@@ -489,7 +553,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, darkReply)
 
-		_, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		_, err := resolvePaneTheme(pair, false, 0, h.dropInput(errSeam), h.probe())
 
 		if err != errSeam {
 			t.Errorf("returned %v, want the drop's own error %v unchanged — nothing here wraps it, retries it or swallows it", err, errSeam)
@@ -502,7 +566,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, darkReply)
 
-		h.probe().detect()
+		h.probe().detect(0)
 
 		h.assertWroteQuery(t)
 	})
@@ -511,7 +575,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, lightReply)
 
-		if got, _ := h.probe().detect(); got != theme.MemberLight {
+		if got, _ := h.probe().detect(0); got != theme.MemberLight {
 			t.Errorf("classified a light reply as %v, want %v", got, theme.MemberLight)
 		}
 	})
@@ -523,7 +587,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, reply)
 
-				if got, _ := h.probe().detect(); got != theme.MemberDark {
+				if got, _ := h.probe().detect(0); got != theme.MemberDark {
 					t.Errorf("classified a dark reply as %v, want %v", got, theme.MemberDark)
 				}
 			})
@@ -534,7 +598,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 
 		start := time.Now()
-		got, _ := h.probe().detect()
+		got, _ := h.probe().detect(0)
 		elapsed := time.Since(start)
 
 		if got != theme.MemberDark {
@@ -550,7 +614,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.timeout = testProbeTimeout * 10
 		h.reply(t, darkReply)
-		h.probe().detect()
+		h.probe().detect(0)
 
 		var rec harnesstest.Recorder
 		rec.Run(func() { assertArmedWithin(&rec, h.bounds, testProbeTimeout) })
@@ -571,7 +635,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, reply)
 
-				if got, _ := h.probe().detect(); got != theme.MemberDark {
+				if got, _ := h.probe().detect(0); got != theme.MemberDark {
 					t.Errorf("classified %q as %v, want %v", reply, got, theme.MemberDark)
 				}
 				h.assertWroteQuery(t)
@@ -583,7 +647,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reader.readErr = errSeam
 
-		if got, _ := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(0); got != theme.MemberDark {
 			t.Errorf("resolved %v after a read failure, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteQuery(t)
@@ -594,7 +658,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.terminal = false
 		h.reply(t, lightReply)
 
-		if got, _ := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(0); got != theme.MemberDark {
 			t.Errorf("resolved %v off a terminal, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
@@ -606,7 +670,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.rawErr = errSeam
 		h.reply(t, lightReply)
 
-		if got, _ := h.probe().detect(); got != theme.MemberDark {
+		if got, _ := h.probe().detect(0); got != theme.MemberDark {
 			t.Errorf("resolved %v with raw mode refused, want %v", got, theme.MemberDark)
 		}
 		h.assertWroteNothing(t)
@@ -621,7 +685,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		// Off the test goroutine, so a probe that hangs fails this subtest rather
 		// than hanging the package.
 		answers := make(chan theme.Member, 1)
-		go func() { member, _ := h.probe().detect(); answers <- member }()
+		go func() { member, _ := h.probe().detect(0); answers <- member }()
 
 		select {
 		case got := <-answers:
@@ -646,7 +710,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			close(late)
 		}()
 
-		got, _ := h.probe().detect()
+		got, _ := h.probe().detect(0)
 		<-late
 
 		if got != theme.MemberDark {
@@ -686,7 +750,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, tc.input)
 
-				got, found := h.probe().detect()
+				got, found := h.probe().detect(0)
 
 				if got != tc.want {
 					t.Errorf("resolved %v for %q, want %v", got, tc.input, tc.want)
@@ -715,7 +779,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				h.readsInChunks(tc.chunks...)
 
-				got, found := h.probe().detect()
+				got, found := h.probe().detect(0)
 
 				if got != tc.want {
 					t.Errorf("resolved %v for reads %q, want %v", got, tc.chunks, tc.want)
@@ -746,10 +810,103 @@ func TestPaneAppearanceProbe(t *testing.T) {
 					h.reply(t, tc.input)
 				}
 
-				_, found := h.probe().detect()
+				_, found := h.probe().detect(0)
 
 				if found.Unanswered != tc.unanswered {
 					t.Errorf("Unanswered = %v for %q, want %v", found.Unanswered, tc.input, tc.unanswered)
+				}
+			})
+		}
+	})
+
+	// A terminal answers in the order it was asked, so the replies to questions
+	// still owed from earlier draws come ahead of this one's.
+	t.Run("it settles the questions owed before its own with the replies that come first", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			owed       int
+			replies    []string
+			want       theme.Member
+			settled    int
+			unanswered bool
+		}{
+			{"nothing owed before, and its own reply", 0, []string{darkReply}, theme.MemberDark, 0, false},
+			{"nothing owed before, its own reply, and a second terminal's", 0, []string{lightReply, darkReply}, theme.MemberLight, 0, false},
+			{"one owed before, and that one's reply alone", 1, []string{lightReply}, theme.MemberLight, 1, true},
+			{"one owed before, that one's reply, then its own", 1, []string{darkReply, lightReply}, theme.MemberLight, 1, false},
+			{"one owed before, both replies, and a second terminal's", 1, []string{darkReply, lightReply, darkReply}, theme.MemberLight, 1, false},
+			{"two owed before, and one reply", 2, []string{lightReply}, theme.MemberLight, 1, true},
+			{"one owed before, and no reply", 1, nil, theme.MemberDark, 0, true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.readsInChunks(tc.replies...)
+
+				got, found := h.probe().detect(tc.owed)
+
+				if got != tc.want {
+					t.Errorf("resolved %v, want %v", got, tc.want)
+				}
+				if found.Settled != tc.settled || found.Unanswered != tc.unanswered {
+					t.Errorf("Settled = %d, Unanswered = %v; want %d, %v", found.Settled, found.Unanswered, tc.settled, tc.unanswered)
+				}
+				if len(found.Typed) != 0 {
+					t.Errorf("handed back %q as typed, want no reply among it", found.Typed)
+				}
+			})
+		}
+	})
+
+	t.Run("it reads on past its deadline, once, to finish a reply whose head has arrived", func(t *testing.T) {
+		const head, tail = "\x1b]11;rgb:e1e1/e2", "e2/e7e7\a"
+		cases := []struct {
+			name       string
+			chunks     []string
+			want       theme.Member
+			typed      string
+			unanswered bool
+			unread     string
+		}{
+			{"a reply split across the deadline", []string{head, deadlinePasses, tail}, theme.MemberLight, "", false, ""},
+			{"Enter, then a reply split across the deadline", []string{"\r" + head, deadlinePasses, tail}, theme.MemberLight, "\r", false, ""},
+			{"an introducer split across the deadline", []string{"\x1b]1", deadlinePasses, "1;rgb:e1e1/e2e2/e7e7\a"}, theme.MemberLight, "", false, ""},
+			{"a reply's head and nothing more", []string{head}, theme.MemberDark, "", true, ""},
+			{"a reply's rest past a second deadline", []string{head, deadlinePasses, "e2/e7", deadlinePasses, "e7\a"}, theme.MemberDark, "", true, "e7\a"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.readsInChunks(tc.chunks...)
+
+				got, found := h.probe().detect(0)
+
+				if got != tc.want || string(found.Typed) != tc.typed || found.Unanswered != tc.unanswered {
+					t.Errorf("resolved %v, typed %q, Unanswered %v for reads %q; want %v, %q, %v", got, found.Typed, found.Unanswered, tc.chunks, tc.want, tc.typed, tc.unanswered)
+				}
+				if left := h.unread(); left != tc.unread {
+					t.Errorf("left %q on the input for the next reader, want %q", left, tc.unread)
+				}
+				if want := []time.Duration{h.timeout, bgreply.TailWait}; !slices.Equal(h.bounds, want) {
+					t.Errorf("armed reads bounded %v, want %v: the question's, then once more for the reply's rest", h.bounds, want)
+				}
+			})
+		}
+	})
+
+	t.Run("it reads on past its deadline for nothing but a reply's head", func(t *testing.T) {
+		for _, key := range []string{"\x1b", "q", "\r" + darkReply} {
+			t.Run(strconv.Quote(key), func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.readsInChunks(key, deadlinePasses, "[A")
+
+				h.probe().detect(0)
+
+				if want := []time.Duration{h.timeout}; !slices.Equal(h.bounds, want) {
+					t.Errorf("armed reads bounded %v, want only the question's %v", h.bounds, want)
+				}
+				if left := h.unread(); left != "[A" {
+					t.Errorf("left %q on the input for the next reader, want %q", left, "[A")
 				}
 			})
 		}
@@ -773,7 +930,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				h := newProbeHarness(t)
 				tc.arrange(h)
 
-				h.probe().detect()
+				h.probe().detect(0)
 
 				if h.restores != 1 {
 					t.Errorf("restored the terminal mode %d times after %s, want 1 — raw mode left on breaks the pane's keyboard", h.restores, tc.name)

@@ -169,6 +169,18 @@ func (w *waitingWorld) attachedDuringItsRedraw(t *testing.T) *zmxtest.Client {
 	return c
 }
 
+// waiterOwed reports whether a waiter that started in the log's first upTo
+// bytes was handed a background question still owed its reply.
+func (w *waitingWorld) waiterOwed(upTo int) bool {
+	raw, _ := os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+	for line := range strings.Lines(string(raw[:min(upTo, len(raw))])) {
+		if strings.Contains(line, "process: start") && strings.Contains(line, "resume-wait") && strings.Contains(line, "--replies-owed") {
+			return true
+		}
+	}
+	return false
+}
+
 // logField is the value of a key=value field of a log line.
 func logField(line, key string) string {
 	_, rest, _ := strings.Cut(line, " "+key+"=")
@@ -322,4 +334,47 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			t.Error("the session ended; Enter hands it its shell")
 		}
 	})
+
+	// A parked session's first draw runs as restore makes it, with no terminal
+	// attached, so its question is never answered: zmx answers none itself and
+	// replays none to a client that attaches later. Attached once that
+	// question's window has closed, a terminal answers the redraw's question at
+	// once, so nothing is owed: Enter hands on at once, and keys typed just
+	// after it reach the shell rather than a wait for a reply.
+	t.Run("Enter on a panel whose boot draw went unanswered hands on at once, keys typed after it reaching the shell", func(t *testing.T) {
+		const typedNext = "zqv"
+		w := newWaitingWorld(t, binary)
+		w.awaitPanel(t)
+		mark := w.awaitStarted(t, 0, "resume-wait")
+		if !w.waiterOwed(mark) {
+			t.Fatal("the first draw, with no terminal attached, owed no reply; nothing here is the boot")
+		}
+		time.Sleep(cmd.ResumeReplyWindow)
+
+		c := zmxtest.Attach(t, w.b, waitingSession)
+		w.awaitClients(t, waitingSession, 1)
+		drawn := w.awaitStarted(t, mark, "resume-draw")
+		c.Type(t, "\x1b]11;rgb:0b0b/0c0c/1414\a")
+		w.awaitStarted(t, drawn, "resume-wait")
+
+		entered := time.Now()
+		c.Type(t, "\r")
+		time.Sleep(typedAfterEnter)
+		c.Type(t, typedNext)
+
+		if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, w.hookRan) {
+			t.Fatal("the resume command never ran")
+		}
+		if ran, err := os.Stat(filepath.Join(w.work, hookMark)); err == nil {
+			t.Logf("Enter typed to the resume command's mark made: %v", ran.ModTime().Sub(entered))
+		}
+		w.awaitScreen(t, "the keys typed after Enter at its shell", func(screen string) bool {
+			return strings.Contains(screen, typedNext)
+		})
+	})
 }
+
+// typedAfterEnter is how long after Enter a key is typed: past Enter's own
+// quiet window, so it is judged alone, and well inside the wait a reply still
+// owed would hold the hand-off for.
+const typedAfterEnter = 250 * time.Millisecond

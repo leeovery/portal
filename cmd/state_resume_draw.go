@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/prefs"
@@ -24,17 +25,22 @@ type resumeDrawConfig struct {
 	Size       func() (int, int, error)
 	ExecSelf   func(prog string, args []string)
 
+	// Now is the wall clock a question is asked by: it rides the hand-off to
+	// another process, which no monotonic reading survives.
+	Now func() time.Time
+
 	CatchSIGTERM func()
 
 	// DisableEcho runs ahead of the appearance query and the input drop, so the
 	// modes each puts back on its way out have echo off.
 	DisableEcho func() error
 
-	// ResolveTheme runs dropInput, when handed one, after the appearance query
-	// and before it returns, answering the drop's error beside the palette,
-	// what the query read of the input that wasn't a terminal's reply, and
-	// whether a reply came.
-	ResolveTheme   func(colourless bool, dropInput func() error) (tui.PaneAppearance, error)
+	// ResolveTheme asks the terminal its background, with owed questions still
+	// owed their replies ahead of it, and runs dropInput, when handed one,
+	// after the question and before it returns, answering the drop's error
+	// beside the palette, what it read of the input that wasn't a terminal's
+	// reply, and which questions the replies it read answered.
+	ResolveTheme   func(colourless bool, owed int, dropInput func() error) (tui.PaneAppearance, error)
 	DropInputQueue func() error
 }
 
@@ -60,16 +66,19 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	if cfg.DropInput {
 		dropInput = cfg.DropInputQueue
 	}
-	found, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
+	asked := cfg.Now()
+	owed := cfg.RepliesOwed.live(asked)
+	found, dropErr := cfg.ResolveTheme(cfg.Colourless, owed.count(), dropInput)
 
 	shown := cfg.resumeChainPayload
 	shown.DropInput = false
 	// A key typed while the query was out was read with it; the waiter judges
 	// it as if typed after the draw.
 	shown.carryTyped(found.Typed)
-	// A reply still owed from an earlier draw is owed still: what this draw
-	// read may have been that one.
-	shown.ReplyOwed = shown.ReplyOwed || found.Unanswered
+	shown.RepliesOwed = owed.settle(found.Settled)
+	if found.Unanswered {
+		shown.RepliesOwed = shown.RepliesOwed.owe(asked)
+	}
 	// Input the drop could not discard may still answer the confirmation, so it
 	// is never put up over that input, and the waiter is told the input is its
 	// own to swallow.
@@ -106,9 +115,9 @@ func renderResumeScreen(s tui.ResumeScreen, screen string) string {
 // non-migrating prefs route: the migrating one performs the one-shot appearance
 // translation and writes, and a boot's worth of sessions taking it at once is
 // a write storm over one file for a value none of them is setting.
-func sessionDrawTheme(colourless bool, dropInput func() error) (tui.PaneAppearance, error) {
+func sessionDrawTheme(colourless bool, owed int, dropInput func() error) (tui.PaneAppearance, error) {
 	nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
-	return tui.ResolvePaneTheme(nomination, colourless, dropInput)
+	return tui.ResolvePaneTheme(nomination, colourless, owed, dropInput)
 }
 
 // Every failure along the route degrades to the shipped pair rather than
@@ -168,7 +177,7 @@ var stateResumeDrawCmd = &cobra.Command{
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
-		replyOwed, _ := cmd.Flags().GetBool(resumeFlagReplyOwed)
+		repliesOwed, _ := cmd.Flags().GetString(resumeFlagRepliesOwed)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -178,11 +187,12 @@ var stateResumeDrawCmd = &cobra.Command{
 				Screen:        screen,
 				DropInput:     dropInput,
 				InputArriving: inputArriving,
-				ReplyOwed:     replyOwed,
+				RepliesOwed:   replyDebtFromFlag(repliesOwed, time.Now()),
 			},
 			Stdout:         os.Stdout,
 			Logger:         hydrateLogger,
 			Colourless:     noColorEnabled(),
+			Now:            time.Now,
 			Size:           sessionSizeFromStdin,
 			DisableEcho:    clearStdinEcho,
 			ResolveTheme:   sessionDrawTheme,
@@ -205,7 +215,7 @@ func init() {
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the session before drawing")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
-	stateResumeDrawCmd.Flags().Bool(resumeFlagReplyOwed, false, "A draw's background question is still owed its reply")
+	stateResumeDrawCmd.Flags().String(resumeFlagRepliesOwed, "", "When each background question still owed its reply was asked, in unix milliseconds, oldest first, comma-separated")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagSession)
 

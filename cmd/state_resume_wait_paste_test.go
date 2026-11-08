@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/bgreply"
 	"github.com/leeovery/portal/internal/harnesstest"
 )
 
@@ -19,7 +20,8 @@ const resumeArrivalTestBudget = 2 * time.Second
 // arrivalHarness delivers input to a wait in arrivals — bytes landing together,
 // then the pane falling quiet — and holds every listen and window the wait
 // takes until the test answers it, so which bytes arrived together is decided
-// by the test and never by the clock.
+// by the test and never by the clock. The wait's wall clock moves on only by
+// the windows it listened through in quiet.
 type arrivalHarness struct {
 	t       *testing.T
 	probe   *resumeWaitProbe
@@ -31,10 +33,16 @@ type arrivalHarness struct {
 	settles chan chan time.Time
 	done    chan error
 	ended   chan struct{}
+	clock   *testClock
 
 	// The wait's listen past the latest byte, or past input it was told was
 	// still arriving when it started, answered by whether another byte arrived.
 	live chan bool
+
+	// The bytes of the arrival the wait has yet to judge, and the quiet
+	// windows it has held that arrival open for a reply's rest.
+	pending []byte
+	heldFor int
 }
 
 func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
@@ -51,19 +59,26 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 		settles: make(chan chan time.Time, 8),
 		done:    make(chan error, 1),
 		ended:   make(chan struct{}),
+		clock:   newTestClock(),
+		pending: []byte(payload.Typed),
 	}
 	t.Cleanup(func() { _ = pipeWriter.Close() })
 
 	cfg := newResumeWaitConfig(t, h.probe, payload, h.reader)
 	cfg.Winch = h.winch
 	cfg.Size = h.sizes.size
+	cfg.Now = h.clock.now
 	cfg.AwaitInput = func(d time.Duration) (bool, error) {
 		if d != resumeInputQuiet {
 			t.Errorf("listen window = %v, want %v", d, resumeInputQuiet)
 		}
 		reply := make(chan bool)
 		h.listens <- reply
-		return <-reply, nil
+		arrived := <-reply
+		if !arrived {
+			h.clock.advance(d)
+		}
+		return arrived, nil
 	}
 	cfg.Settle = func(d time.Duration) <-chan time.Time {
 		if d != resumeResizeSettle {
@@ -102,6 +117,7 @@ func (h *arrivalHarness) awaitListen(what string) chan bool {
 // byte of it and is listening for one more.
 func (h *arrivalHarness) arrive(keys string) {
 	h.t.Helper()
+	h.pending = append(h.pending, keys...)
 	go func() { _, _ = h.writer.Write([]byte(keys)) }()
 	for range len(keys) {
 		if h.live != nil {
@@ -121,10 +137,18 @@ func (h *arrivalHarness) answerListen(arrived bool) {
 	}
 }
 
-// quiet lets the pane fall silent after the latest arrival, and returns once
-// the wait has judged it: gone back to reading, or ended on an answer.
+// quiet lets the pane fall silent after the latest arrival, through every
+// quiet window the wait holds an arrival ending in a reply's head open for,
+// and returns once the wait has judged it: gone back to reading, or ended on
+// an answer.
 func (h *arrivalHarness) quiet() {
 	h.t.Helper()
+	if _, _, head := bgreply.Split(h.pending); head != nil {
+		for h.heldFor < resumeReplyTailHolds {
+			h.held()
+		}
+	}
+	h.pending, h.heldFor = nil, 0
 	reads := h.reader.reads.Load()
 	h.answerListen(false)
 	judged := harnesstest.PollUntil(h.t, resumeArrivalTestBudget, time.Millisecond, func() bool {
