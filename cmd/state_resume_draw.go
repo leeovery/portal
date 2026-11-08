@@ -131,10 +131,12 @@ func sessionDrawTheme(session string) func(colourless bool, owed int, dropInput 
 
 var resolvePaneThemeFunc = tui.ResolvePaneTheme
 
-// resumeAttachedBound bounds a draw's asks of its session's zmx daemon, so one
-// slow to answer delays the panel by this at most. The process table's read
-// between them takes no context: it takes about a millisecond, and fails
-// within a tenth of a second on a zmx it can't read.
+// resumeAttachedBound bounds a draw's asks of its session's zmx daemon, the
+// leader's environment and the session's Info, so one slow to answer delays
+// the panel by this at most. The process table's read between them takes no
+// context, so this bound doesn't cover it: it takes about a millisecond, and
+// at worst about a tenth of a second more for each zmx it finds mid-exec,
+// which it reads again until it can, or gives up on and fails.
 const resumeAttachedBound = 250 * time.Millisecond
 
 // sessionAttached reports whether a terminal shows session to answer a
