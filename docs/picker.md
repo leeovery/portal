@@ -13,7 +13,7 @@ This page covers the TUI that `x` opens: its keys, filtering, killing a session,
 - [Multi-select and new windows](#multi-select-and-new-windows)
 - [Themes](#themes)
 
-The TUI has three views: the session list, the project picker, and the scrollback preview. It paints its own canvas in the colours of the active theme.
+The TUI has three views: the session list, the Projects page, and the scrollback preview. It paints its own canvas in the colours of the active theme.
 
 ## Keys
 
@@ -67,15 +67,18 @@ Under `NO_COLOR` they render as `A` and `P` in the same cells. The `?` help on t
 
 | Key | Action |
 |---|---|
+| `↑` / `↓` | Move up / down |
+| `Ctrl+↑` / `Ctrl+↓` | Page up / down |
 | `Enter` | New session from the highlighted project |
-| `e` | Edit the project: its name, aliases and tags; see [Managing tags](#managing-tags) |
-| `d` | Delete the project, after a confirmation |
-| `/` | Filter projects |
-| `n` | New session in the current directory |
 | `x` | Switch to Sessions |
+| `e` | Edit the project: its name, aliases and tags; see [Managing tags](#managing-tags) |
+| `/` | Filter projects |
 | `t` | Theme picker |
-| `Esc` | Back, or quit |
+| `d` | Delete the project, after a confirmation |
+| `n` | New session in the current directory |
 | `q` | Quit |
+| `Esc` | Clear an applied filter; with none, quit |
+| `?` | Show the full keymap for this page |
 
 ## Grouping and tags
 
@@ -137,7 +140,7 @@ Press **`Enter`** to open every marked session at once, each attached in its own
 | `Enter` | Open every marked session (one marked → a plain attach in place) |
 | `Esc` | Cancel and clear the selection |
 
-Marks are sticky across filtering, paging, regrouping, and the `Space`-preview round-trip; a session killed elsewhere while you were in the mode drops out of the selection. If a burst only partly succeeds, Portal leaves the windows that did open in place and keeps the failed sessions marked, so pressing `Enter` again retries only those. Opening several at once works as [several targets of `x`](sessions.md#several-sessions-at-once) do.
+Marks are sticky across filtering, paging, regrouping, and the `Space`-preview round-trip; a session killed elsewhere while you were in the mode drops out of the selection. If a burst only partly succeeds, Portal leaves the windows that did open in place and keeps the failed sessions marked, so pressing `Enter` again retries only those. The command line's [several targets](sessions.md#several-sessions-at-once) work the same way.
 
 ### Which terminals
 

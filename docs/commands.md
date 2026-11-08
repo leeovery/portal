@@ -38,7 +38,7 @@ x ~/Code/app -- npm start            # alternative command syntax
 x work api ~/Code/new                # open three surfaces at once (see below)
 ```
 
-**Resolution.** A bare target runs the precedence chain, first match wins: **exact session name → kept saved session → path → alias → zoxide query.** A session name attaches; a kept saved session is brought back and attached; a path, alias or zoxide match mints a new session there, at the git root when there is one. A target that resolves to nothing fails, pointing you at `-f`. [Opening a session](sessions.md#opening-a-session) has each step in full.
+**Resolution.** A bare target runs the precedence chain, first match wins: **exact session name → kept saved session → glob → path → alias → zoxide query.** A session name attaches; a kept saved session is brought back and attached; a glob attaches the live sessions it matches, one window each; a path, alias or zoxide match mints a new session there, at the git root when there is one. A target that resolves to nothing fails, pointing you at `-f`. [Opening a session](sessions.md#opening-a-session) has each step in full.
 
 **Session search.** A positional beginning with `/` and containing no further `/`, such as `x /port`, searches your live sessions rather than resolving a target: one match attaches, several or none open the picker filtered by the term, and `x /` opens the picker with the filter ready to type. A single-segment absolute directory typed without a trailing slash, such as `x /tmp`, searches too; mint there with `x -p /tmp`. A search composes with nothing else on its line. See [Searching your sessions](sessions.md#searching-your-sessions).
 
@@ -161,7 +161,7 @@ xctl doctor --fix        # apply low-stakes repairs, then re-diagnose
 |---|---|
 | `--fix` | Make the low-stakes repairs, then run the diagnosis again; see [`doctor --fix`](troubleshooting.md#doctor---fix) |
 
-It exits `0` only when every check passes, non-zero otherwise, so it serves as a scriptable health gate. Lines that only inform, and theme advisories, never affect the exit code. With `--fix`, the exit code reflects the state after the repairs, and a `--fix` that refuses every repair exits non-zero.
+It exits `0` unless a check fails, non-zero when one does, so it serves as a scriptable health gate. Lines that can't be judged, lines that only inform, and theme advisories never affect the exit code. With `--fix`, the exit code reflects the state after the repairs, and a `--fix` that refuses every repair exits non-zero.
 
 ### `xctl version`
 

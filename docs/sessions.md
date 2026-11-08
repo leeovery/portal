@@ -16,10 +16,11 @@ This page covers getting into a session: how `x` resolves what you type, the sea
 
 `x` with no arguments opens the [picker](picker.md). Given a target, it runs the precedence chain, and the first match wins:
 
-**exact session name → kept saved session → path → alias → zoxide query.**
+**exact session name → kept saved session → glob → path → alias → zoxide query.**
 
 - **An exact session name** attaches that existing session.
 - **A kept saved session**, the name of a saved session that isn't running and that the next restore would bring back, is brought back and attached. See [Kept sessions](#kept-sessions).
+- **A glob**, a target holding `*`, `?` or `[` (quote it from the shell, as in `x 'api-*'`), matches the names of your live sessions, shell-style; Portal's own sessions are never among them. One match attaches it; several open [one window each](#several-sessions-at-once); none is a miss. A glob never goes on to the path, alias or zoxide steps, and never matches a kept session: a kept session whose name holds glob characters is that session.
 - **A path, alias or zoxide match** mints a brand-new session there. New sessions resolve to the git repository root when there is one.
 - **Nothing:** a target that resolves to nothing is a hard failure. There is no fallback to the picker on a miss; the error points you at `-f`.
 

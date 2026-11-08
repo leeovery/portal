@@ -143,7 +143,7 @@ needs to reconnect on its own:
   in a terminal of its own rather than switching the session its opener runs in.
 
 You never need to set environment variables, source a profile, or plumb `PATH` in a
-recipe — just open a window that runs the command Portal gives you.
+recipe: open a window that runs the command Portal gives you.
 
 ## Tolerant decoding & troubleshooting
 

@@ -21,13 +21,14 @@ This page shows where to look when Portal doesn't do what you expect: what each 
 
 `xctl doctor` is a read-only health report across Portal's resurrection machinery. It starts nothing and signals nothing: a saver that isn't running is reported, not started.
 
-It prints one line per check, marked `✓` when it passes, `✗` when it fails, `·` when it can't be judged, and with no mark when it only informs. Theme advisories (`⚠`) follow, then a last line counting the checks that passed and any advisories.
+It prints one line per check, marked `✓` when it passes, `✗` when it fails, `·` when it can't be judged, and with no mark when it only informs. A line that can't be judged never fails the report. Theme advisories (`⚠`) follow, then a last line counting the checks that passed and any advisories.
 
 - [zmx](#zmx)
 - [The saver and its daemon](#the-saver-and-its-daemon)
 - [State](#state)
 - [Stale hooks](#stale-hooks)
 - [Stale projects](#stale-projects)
+- [Key config](#key-config)
 - [Lines that inform](#lines-that-inform)
 - [Theme advisories](#theme-advisories)
 
@@ -60,29 +61,31 @@ A state directory doctor can't resolve fails all three lines (`unresolvable`), s
 
 **`stale hooks`** counts the hooks the daemon's hourly sweep would remove, and removes none. A hook is stale when its key names neither a session zmx lists nor one saved in `sessions.json` (see [Hooks and sessions](resume.md#hooks-and-sessions)). It passes with `no hooks` or `no stale hooks`, and fails with the count of stale entries, or when `hooks.json` can't be read or doesn't parse.
 
-While the stale hooks can't be counted, the line reads not evaluable, never failing, and says why:
+While the stale hooks can't be counted, the line reads not evaluable, never failing, and says why, as one of these:
 
-- `restore in progress`
+- `restore in progress (not evaluable)`
 - `could not read the restoring flag`
 - `could not resolve the state directory`
 - `could not list sessions`
 - `could not read sessions.json` (unreadable, corrupt, or written by an older or newer Portal)
-- `no sessions listed or saved`
-- `hooks.json is locked`, when another writer held it too long
-- `half or more of hooks.json's keys name no session listed or saved`
+- `no sessions listed or saved (not evaluable)`
+- `half or more of hooks.json's keys name no session listed or saved (not evaluable)`
 
 ### Stale projects
 
 **`stale projects`** counts the remembered projects whose directory no longer exists. A directory that can't be read is not counted stale. It fails with the count, which `--fix` prunes, and reads not evaluable when `projects.json` can't be read.
+
+### Key config
+
+**`key config`** reads the bindings of the [attach keys](configuration.md#rebinding-the-attach-keys) as an attach reads them. It passes, marked `✓`, when every binding holds. When one falls back to its default it only informs, naming each that does and why, and so it does when `prefs.json` isn't valid JSON or a JSON object, so every key keeps its default. It reads not evaluable when `prefs.json` can't be read. It never fails.
 
 ### Lines that inform
 
 These state rather than judge, and none of them fails:
 
 - **`pending resumes`:** how many live sessions are waiting on their [resume panel](resume.md#the-resume-panel).
-- **`kept sessions`,** shown only when there are any: the saved sessions that aren't running, which `x <name>` brings back. With no save daemon running, that is every saved session that isn't running, since the next start brings them all back. It is left out when the `state's zmx dir` line fails, and when the sessions or `sessions.json` can't be read.
-- **`key config`:** the bindings of the [attach keys](configuration.md#rebinding-the-attach-keys). It passes when every binding holds, and otherwise names each that falls back to its default, and why, or says `prefs.json` isn't valid JSON or a JSON object, so every key keeps its default. It reads not evaluable when `prefs.json` can't be read.
-- **`host terminal`:** the detected terminal's name and whether Portal supports it, or `unsupported` with why: a remote session, or a terminal Portal can't tell. On an unsupported terminal the picker's banner names its bundle id, the key to copy into [`terminals.json`](custom-terminals.md).
+- **`kept sessions`,** shown only when there are any: the saved sessions that aren't running, which `x <name>` brings back. With no save daemon running, that is every saved session that isn't running, since the next start brings them all back. It is left out when the `state's zmx dir` line fails, when the sessions or `sessions.json` can't be read, and when doctor can't bind the zmx dir.
+- **`host terminal`:** the detected terminal's name and whether Portal supports it, or `unsupported` with why: a remote session, or a terminal Portal can't tell. On an unsupported terminal the picker's banner names its bundle id, the key to copy into [`terminals.json`](custom-terminals.md). It is left out when doctor can't bind the zmx dir.
 - **`resume mode`:** the install's resume mode, `eager` or `lazy`; the shipped default `lazy` whenever `prefs.json` sets none.
 
 ### Theme advisories
@@ -91,7 +94,7 @@ After the checks, a `⚠` line names each theme file Portal can't use and why, a
 
 ## `doctor --fix`
 
-`--fix` performs the reversible-by-reconstruction repairs, then runs the diagnosis again:
+`--fix` prints the report, performs the reversible-by-reconstruction repairs, then runs the diagnosis again and prints a second report:
 
 - prune stale hooks;
 - prune stale projects, naming each: `Pruned stale project: <name> (<path>)`;
@@ -107,16 +110,19 @@ Pruned 2 stale hooks:
   blog-drafts
 ```
 
-When it can't, it removes nothing and prints `Skipped stale hook prune:` with one of the [stale hooks](#stale-hooks) reasons, or with:
+When it can't, it removes nothing and prints `Skipped stale hook prune:` with one of the [stale hooks](#stale-hooks) reasons, without the ` (not evaluable)`, or with:
 
+- `hooks.json is locked`, when another writer held it too long;
 - `could not read hooks.json`;
 - `hooks.json holds malformed JSON`;
 - `the sweep could not complete`.
 
-It repairs nothing at all, and says so, in two cases:
+It repairs nothing at all in two cases. It prints the line below and stops, with no second report:
 
-- when the `state's zmx dir` line fails: `Skipped every repair: state's zmx dir failed`;
+- when the state directory's `zmx-dir` record names another zmx directory, or can't be read: `Skipped every repair: state's zmx dir failed`;
 - beside another state directory's `_portal-saver`: `Skipped every repair: _portal-saver saves the state in <other>, not this one`.
+
+A state directory that can't be resolved also fails the `state's zmx dir` line, but refuses nothing: the repairs run, and each that needs the state directory skips, the hook prune saying `could not resolve the state directory`.
 
 ## The logs
 

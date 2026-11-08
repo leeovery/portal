@@ -2,7 +2,7 @@
 
 The user's guide, a page for each subject:
 
-- [The picker](picker.md): its keys, grouping and tags, the scrollback preview, and multi-select
+- [The picker](picker.md): its keys, filtering, the Projects page, grouping and tags, the scrollback preview, and multi-select
 - [Sessions](sessions.md): opening a session, the search form, aliases and zoxide, keys in a session, and one terminal at a time
 - [Resume hooks](resume.md): bringing commands back after a reboot, and the resume panel
 - [How it works](how-it-works.md): zmx and its directory, the saver, and restoration after a reboot

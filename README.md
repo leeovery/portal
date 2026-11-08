@@ -138,16 +138,16 @@ The examples use the default `x` / `xctl` names; with `--cmd p`, use `p` and `pc
 | [`xctl alias`](docs/commands.md#xctl-alias) | Sets, removes and lists path aliases |
 | [`xctl hook`](docs/commands.md#xctl-hook) | Registers, removes and lists resume hooks |
 | [`xctl doctor`](docs/commands.md#xctl-doctor) | Reports Portal's health; `--fix` makes the low-stakes repairs |
+| [`xctl version`](docs/commands.md#xctl-version) | Prints Portal's version |
 | [`xctl theme export`](docs/commands.md#xctl-theme-export) | Prints a theme's file, to start your own from |
 | [`portal init`](docs/commands.md#portal-init) | Prints the shell integration |
 | [`portal uninstall`](docs/commands.md#portal-uninstall) | Stops Portal's save daemon, leaving your sessions and config |
-| [`xctl version`](docs/commands.md#xctl-version) | Prints Portal's version |
 
 Every command and flag is in [Commands](docs/commands.md).
 
 ## Documentation
 
-- [The picker](docs/picker.md): its keys, grouping and tags, the scrollback preview, and multi-select
+- [The picker](docs/picker.md): its keys, filtering, the Projects page, grouping and tags, the scrollback preview, and multi-select
 - [Sessions](docs/sessions.md): opening a session, the search form, aliases and zoxide, keys in a session, and one terminal at a time
 - [Resume hooks](docs/resume.md): bringing commands back after a reboot, and the resume panel
 - [How it works](docs/how-it-works.md): zmx and its directory, the saver, and restoration after a reboot
