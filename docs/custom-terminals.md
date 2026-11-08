@@ -2,7 +2,7 @@
 
 Portal opens a fresh host-terminal window per target when you open more than one
 session at once — the multi-target `x` burst (`x work api db`) and the picker's
-[multi-select mode](../README.md#multi-select-mode). It drives **Ghostty** out of
+[multi-select mode](picker.md#multi-select-and-new-windows). It drives **Ghostty** out of
 the box. For any other terminal you teach Portal how to open a window with a
 `terminals.json` recipe.
 
@@ -143,7 +143,7 @@ needs to reconnect on its own:
   in a terminal of its own rather than switching the session its opener runs in.
 
 You never need to set environment variables, source a profile, or plumb `PATH` in a
-recipe — just open a window that runs the command Portal gives you.
+recipe: open a window that runs the command Portal gives you.
 
 ## Tolerant decoding & troubleshooting
 
@@ -165,7 +165,7 @@ executable. A skipped entry falls through to the native adapter — never to a
 less-specific config key.
 
 Every rejection is a `spawn:` breadcrumb in the log (see
-[Logging](../README.md#logging)) naming the entry and the reason:
+[Logging](configuration.md#logging)) naming the entry and the reason:
 
 ```sh
 grep "spawn:" ~/.config/portal/state/portal.log

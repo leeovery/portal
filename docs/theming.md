@@ -175,7 +175,7 @@ nothing else. There is no `#RGB` shorthand, no ANSI colour number (`212`), and n
 colour name (`blue`). Anything else is `bad colour`, and the message names each
 key alongside the value you wrote. A key with nothing after the `=` is a `bad
 colour` too, not a syntax error — the line is a well-formed pair whose value
-simply is not a colour.
+is not a colour.
 
 Portal validates the value itself rather than trusting the terminal colour
 library, whose accepted range is far wider and stranger — there `212` is a valid
@@ -243,7 +243,7 @@ built-in is exactly what Portal falls back to when a theme fails to load, so a
 broken file could otherwise break the thing meant to catch it.
 
 A wrong-cased extension gets one deliberate difference: `nord.THEME` is still
-**listed**, and then rejected for its extension. A file that simply vanished
+**listed**, and then rejected for its extension. A file that vanished silently
 would leave you with nothing to go on — and you are most likely to type it that
 way on macOS, where the filesystem does not distinguish the two names, so nothing
 else would tell you either.
