@@ -385,7 +385,6 @@ func newDaemonDeps(dir string, b backend.Backend, ticks <-chan time.Time, signal
 
 // The daemon runs in the _portal-saver session, which the bootstrap creates.
 // It refuses an index this version must not touch before it holds anything.
-// before it holds anything.
 var stateDaemonCmd = &cobra.Command{
 	Use:    "daemon",
 	Short:  "Run the Portal save daemon (internal)",

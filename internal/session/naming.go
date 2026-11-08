@@ -13,7 +13,8 @@ import (
 type IDGenerator = nanoid.Generator
 
 // FallbackProject is the project part of a name whose project sanitises to
-// nothing, so a generated name is never the nanoid alone.
+// nothing, so every generated name keeps the {project}-{nanoid} form rather
+// than opening with the "-" zmx reads as a flag.
 const FallbackProject = "session"
 
 // leadingDropped are the characters a generated name may not open with: zmx

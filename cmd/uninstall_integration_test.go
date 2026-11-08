@@ -31,7 +31,7 @@ func TestUninstallAgainstZmx(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A pre-token key, which no sweep reaps.
-	hookstest.SeedHooksJSON(t, d.Env, map[string]string{"work:0.0": "make dev"})
+	hookstest.SeedHooksJSON(t, d.Env, map[string]string{"work": "make dev"})
 	configDir, err := xdg.PortalDir(xdg.EnvSlice(d.Env))
 	if err != nil {
 		t.Fatal(err)

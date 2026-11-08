@@ -179,7 +179,6 @@ func elsewhere(idx *sessionindex.Index) {
 	idx.Hydrated("a", at, 0)
 }
 `
-
 	const methodNamedAsAllowed = `package fixture
 
 import "github.com/leeovery/portal/internal/sessionindex"
@@ -277,7 +276,6 @@ func elsewhere(s store, r remover) {
 			pkg:  modulePath + "/internal/restore", src: hydrates,
 			want: []string{"fixture.go:6: Hydrated in claimCreation", "fixture.go:10: Hydrated in elsewhere"},
 		},
-
 		{
 			name: "it reports a Remove promoted through an embedded index",
 			pkg:  modulePath + "/cmd", src: embeds,

@@ -76,7 +76,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("returns hooks from valid JSON file", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Seed: `{"my-session:0.0":{"on-resume":"claude --resume abc123"},"my-session:0.1":{"on-resume":"claude --resume def456"}}`,
+			Seed: `{"my-session":{"on-resume":"claude --resume abc123"},"my-session-2":{"on-resume":"claude --resume def456"}}`,
 		})
 
 		h, err := store.Load(hooks.ViaInternal)
@@ -88,11 +88,11 @@ func TestLoad(t *testing.T) {
 			t.Fatalf("got %d keys, want 2", len(h))
 		}
 
-		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
+		if h["my-session"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session on-resume = %q, want %q", h["my-session"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if h["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
+		if h["my-session-2"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session-2 on-resume = %q, want %q", h["my-session-2"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 }
@@ -145,7 +145,7 @@ func TestPersistence(t *testing.T) {
 		filePath := hookstest.HooksPath(t, nested)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -163,10 +163,10 @@ func TestPersistence(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session-2", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -178,11 +178,11 @@ func TestPersistence(t *testing.T) {
 		if len(loaded) != 2 {
 			t.Fatalf("got %d keys, want 2", len(loaded))
 		}
-		if loaded["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", loaded["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
+		if loaded["my-session"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session on-resume = %q, want %q", loaded["my-session"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if loaded["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", loaded["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
+		if loaded["my-session-2"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session-2 on-resume = %q, want %q", loaded["my-session-2"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 
@@ -191,7 +191,7 @@ func TestPersistence(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -222,7 +222,7 @@ func TestSet(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -234,8 +234,8 @@ func TestSet(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
+		if h["my-session"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session on-resume = %q, want %q", h["my-session"]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -244,10 +244,10 @@ func TestSet(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("my-session:0.0", "on-start", hooks.Registration{Command: "echo hello"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-start", hooks.Registration{Command: "echo hello"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -259,14 +259,14 @@ func TestSet(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if len(h["my-session:0.0"]) != 2 {
-			t.Fatalf("got %d events for my-session:0.0, want 2", len(h["my-session:0.0"]))
+		if len(h["my-session"]) != 2 {
+			t.Fatalf("got %d events for my-session, want 2", len(h["my-session"]))
 		}
-		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
+		if h["my-session"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session on-resume = %q, want %q", h["my-session"]["on-resume"].Command, "claude --resume abc123")
 		}
-		if h["my-session:0.0"]["on-start"].Command != "echo hello" {
-			t.Errorf("my-session:0.0 on-start = %q, want %q", h["my-session:0.0"]["on-start"].Command, "echo hello")
+		if h["my-session"]["on-start"].Command != "echo hello" {
+			t.Errorf("my-session on-start = %q, want %q", h["my-session"]["on-start"].Command, "echo hello")
 		}
 	})
 
@@ -276,7 +276,7 @@ func TestSet(t *testing.T) {
 
 		sink := logtest.Install(t)
 
-		err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
+		err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
 		if !errors.Is(err, hooks.ErrMalformed) {
 			t.Errorf("err = %v, want errors.Is ErrMalformed — a map loaded from nothing and written back is every other entry gone", err)
 		}
@@ -350,10 +350,10 @@ func TestSet(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume xyz789"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume xyz789"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -365,11 +365,11 @@ func TestSet(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if len(h["my-session:0.0"]) != 1 {
-			t.Fatalf("got %d events for my-session:0.0, want 1", len(h["my-session:0.0"]))
+		if len(h["my-session"]) != 1 {
+			t.Fatalf("got %d events for my-session, want 1", len(h["my-session"]))
 		}
-		if h["my-session:0.0"]["on-resume"].Command != "claude --resume xyz789" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume xyz789")
+		if h["my-session"]["on-resume"].Command != "claude --resume xyz789" {
+			t.Errorf("my-session on-resume = %q, want %q", h["my-session"]["on-resume"].Command, "claude --resume xyz789")
 		}
 	})
 }
@@ -380,14 +380,14 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session-2", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -403,11 +403,11 @@ func TestRemove(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if _, ok := h["my-session:0.0"]; ok {
-			t.Error("key my-session:0.0 should have been removed")
+		if _, ok := h["my-session"]; ok {
+			t.Error("key my-session should have been removed")
 		}
-		if h["my-session:0.1"]["on-resume"].Command != "claude --resume def456" {
-			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"].Command, "claude --resume def456")
+		if h["my-session-2"]["on-resume"].Command != "claude --resume def456" {
+			t.Errorf("my-session-2 on-resume = %q, want %q", h["my-session-2"]["on-resume"].Command, "claude --resume def456")
 		}
 	})
 
@@ -416,11 +416,11 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -436,8 +436,8 @@ func TestRemove(t *testing.T) {
 		if len(h) != 0 {
 			t.Fatalf("got %d keys, want 0 (outer key should be cleaned up)", len(h))
 		}
-		if _, ok := h["my-session:0.0"]; ok {
-			t.Error("key my-session:0.0 should have been removed from outer map")
+		if _, ok := h["my-session"]; ok {
+			t.Error("key my-session should have been removed from outer map")
 		}
 	})
 
@@ -446,14 +446,14 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.0", "on-start", hooks.Registration{Command: "echo hello"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-start", hooks.Registration{Command: "echo hello"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -466,9 +466,9 @@ func TestRemove(t *testing.T) {
 			t.Fatalf("failed to load: %v", err)
 		}
 
-		events, ok := h["my-session:0.0"]
+		events, ok := h["my-session"]
 		if !ok {
-			t.Fatalf("outer key my-session:0.0 should be retained, got %+v", h)
+			t.Fatalf("outer key my-session should be retained, got %+v", h)
 		}
 		if _, ok := events["on-resume"]; ok {
 			t.Error("on-resume should have been removed")
@@ -483,13 +483,13 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		before := readFileBytes(t, filePath)
 		beforeMod := modTime(t, filePath)
 
-		removed, err := store.Remove("nonexistent:9.9", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("nonexistent", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -516,13 +516,13 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		before := readFileBytes(t, filePath)
 		beforeMod := modTime(t, filePath)
 
-		removed, err := store.Remove("my-session:0.0", "on-start", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-start", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -542,8 +542,8 @@ func TestRemove(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["my-session:0.0"]["on-resume"].Command != "claude --resume abc123" {
-			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"].Command, "claude --resume abc123")
+		if h["my-session"]["on-resume"].Command != "claude --resume abc123" {
+			t.Errorf("my-session on-resume = %q, want %q", h["my-session"]["on-resume"].Command, "claude --resume abc123")
 		}
 	})
 
@@ -552,7 +552,7 @@ func TestRemove(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -569,7 +569,7 @@ func TestRemove(t *testing.T) {
 		store, filePath := hookstest.StageStore(t, hookstest.Staging{Seed: "not json"})
 		before := hookstest.HooksFileBytes(t, filePath)
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if !errors.Is(err, hooks.ErrMalformed) {
 			t.Errorf("err = %v, want errors.Is ErrMalformed — an answer about a file that did not parse is a fiction", err)
 		}
@@ -596,9 +596,9 @@ func TestRemove(t *testing.T) {
 	})
 
 	t.Run("it reports no removal when the save fails", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"my-session:0.0":{"on-resume":"claude --resume abc123"}}`, WritesDenied: true})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"my-session":{"on-resume":"claude --resume abc123"}}`, WritesDenied: true})
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err == nil {
 			t.Fatal("expected error from Remove on read-only dir, got nil")
 		}
@@ -628,7 +628,7 @@ func TestList(t *testing.T) {
 
 	t.Run("returns hooks sorted by key then event", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Seed: `{"my-session:0.1":{"on-resume":"cmd1"},"my-session:0.0":{"on-start":"cmd0s","on-resume":"cmd0r"}}`,
+			Seed: `{"my-session-2":{"on-resume":"cmd1"},"my-session":{"on-start":"cmd0s","on-resume":"cmd0r"}}`,
 		})
 
 		list, err := store.List(hooks.ViaCLI)
@@ -640,7 +640,7 @@ func TestList(t *testing.T) {
 			t.Fatalf("got %d hooks, want 3", len(list))
 		}
 
-		wantKeys := []string{"my-session:0.0", "my-session:0.0", "my-session:0.1"}
+		wantKeys := []string{"my-session", "my-session", "my-session-2"}
 		wantEvents := []string{"on-resume", "on-start", "on-resume"}
 		wantCmds := []string{"cmd0r", "cmd0s", "cmd1"}
 
@@ -659,8 +659,8 @@ func TestList(t *testing.T) {
 
 	t.Run("it carries each entry's mode through List in key then event order", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Seed: `{"my-session:0.1":{"on-resume":{"command":"cmd1","resume":"lazy"}},` +
-				`"my-session:0.0":{"on-start":{"command":"cmd0s","resume":"eager"},"on-resume":"cmd0r"}}`,
+			Seed: `{"my-session-2":{"on-resume":{"command":"cmd1","resume":"lazy"}},` +
+				`"my-session":{"on-start":{"command":"cmd0s","resume":"eager"},"on-resume":"cmd0r"}}`,
 		})
 
 		list, err := store.List(hooks.ViaCLI)
@@ -669,9 +669,9 @@ func TestList(t *testing.T) {
 		}
 
 		want := []hooks.Hook{
-			{Key: "my-session:0.0", Event: "on-resume", Command: "cmd0r"},
-			{Key: "my-session:0.0", Event: "on-start", Command: "cmd0s", Resume: resumemode.Eager},
-			{Key: "my-session:0.1", Event: "on-resume", Command: "cmd1", Resume: resumemode.Lazy},
+			{Key: "my-session", Event: "on-resume", Command: "cmd0r"},
+			{Key: "my-session", Event: "on-start", Command: "cmd0s", Resume: resumemode.Eager},
+			{Key: "my-session-2", Event: "on-resume", Command: "cmd1", Resume: resumemode.Lazy},
 		}
 		if !reflect.DeepEqual(list, want) {
 			t.Errorf("List() = %+v, want %+v", list, want)
@@ -685,14 +685,14 @@ func TestCleanStale(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		if err := store.Set(hookstest.ReapableSeedA, "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
+		removed, err := store.CleanStale(listing("my-session"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -711,8 +711,8 @@ func TestCleanStale(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if _, ok := h["my-session:0.0"]; !ok {
-			t.Error("key my-session:0.0 should have been kept")
+		if _, ok := h["my-session"]; !ok {
+			t.Error("key my-session should have been kept")
 		}
 		if _, ok := h[hookstest.ReapableSeedA]; ok {
 			t.Errorf("key %s should have been removed", hookstest.ReapableSeedA)
@@ -723,7 +723,7 @@ func TestCleanStale(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		removed, err := store.CleanStale(listing("my-session:0.0", "my-session:0.1"), noIndex)
+		removed, err := store.CleanStale(listing("my-session", "my-session-2"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -738,14 +738,14 @@ func TestCleanStale(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session-2", "on-resume", hooks.Registration{Command: "claude --resume def456"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(listing("my-session:0.0", "my-session:0.1"), noIndex)
+		removed, err := store.CleanStale(listing("my-session", "my-session-2"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -790,7 +790,7 @@ func TestCleanStale(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -799,7 +799,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to stat file: %v", err)
 		}
 
-		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
+		removed, err := store.CleanStale(listing("my-session"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -819,10 +819,10 @@ func TestCleanStale(t *testing.T) {
 
 	t.Run("cleans stale entries seeded straight into the file", func(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{
-			Seed: fmt.Sprintf(`{%q:{"on-resume":"claude --resume old1"},%q:{"on-resume":"claude --resume old2"},"my-session:0.0":{"on-resume":"claude --resume new1"}}`, hookstest.ReapableSeedA, hookstest.ReapableSeedB),
+			Seed: fmt.Sprintf(`{%q:{"on-resume":"claude --resume old1"},%q:{"on-resume":"claude --resume old2"},"my-session":{"on-resume":"claude --resume new1"}}`, hookstest.ReapableSeedA, hookstest.ReapableSeedB),
 		})
 
-		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
+		removed, err := store.CleanStale(listing("my-session"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -846,8 +846,8 @@ func TestCleanStale(t *testing.T) {
 		if len(h) != 1 {
 			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if _, ok := h["my-session:0.0"]; !ok {
-			t.Error("key my-session:0.0 should have been kept")
+		if _, ok := h["my-session"]; !ok {
+			t.Error("key my-session should have been kept")
 		}
 		if _, ok := h[hookstest.ReapableSeedA]; ok {
 			t.Errorf("key %s should have been removed", hookstest.ReapableSeedA)
@@ -862,7 +862,7 @@ func TestCleanStale(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		if err := store.Set(hookstest.ReapableSeedB, "on-resume", hooks.Registration{Command: "cmd-other0"}, hooks.ViaCLI); err != nil {
@@ -871,11 +871,11 @@ func TestCleanStale(t *testing.T) {
 		if err := store.Set(hookstest.ReapableSeedA, "on-resume", hooks.Registration{Command: "cmd1"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("other-session:0.1", "on-resume", hooks.Registration{Command: "cmd-other1"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("other-session-2", "on-resume", hooks.Registration{Command: "cmd-other1"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale(listing("my-session:0.0", "other-session:0.1"), noIndex)
+		removed, err := store.CleanStale(listing("my-session", "other-session-2"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -899,11 +899,11 @@ func TestCleanStale(t *testing.T) {
 		if len(h) != 2 {
 			t.Fatalf("got %d keys, want 2", len(h))
 		}
-		if _, ok := h["my-session:0.0"]; !ok {
-			t.Error("key my-session:0.0 should have been kept")
+		if _, ok := h["my-session"]; !ok {
+			t.Error("key my-session should have been kept")
 		}
-		if _, ok := h["other-session:0.1"]; !ok {
-			t.Error("key other-session:0.1 should have been kept")
+		if _, ok := h["other-session-2"]; !ok {
+			t.Error("key other-session-2 should have been kept")
 		}
 	})
 }
@@ -1033,7 +1033,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		if err := store.Set(hookstest.ReapableSeedA, "on-resume", hooks.Registration{Command: "cmd1"}, hooks.ViaCLI); err != nil {
@@ -1044,7 +1044,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
+		removed, err := store.CleanStale(listing("my-session"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1091,7 +1091,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1111,7 +1111,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1131,7 +1131,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1147,7 +1147,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1164,7 +1164,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		})
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1180,7 +1180,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		store, seeded := hookstest.StageStore(t, hookstest.Staging{Seed: body, WritesDenied: true})
 		sink := logtest.Install(t)
 
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err == nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err == nil {
 			t.Fatal("expected error from CleanStale on read-only dir, got nil")
 		}
 
@@ -1206,7 +1206,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 		if err := store.Set(hookstest.ReapableSeedA, "on-resume", hooks.Registration{Command: "cmd1"}, hooks.ViaCLI); err != nil {
@@ -1214,7 +1214,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		if _, err := store.CleanStale(listing("my-session:0.0"), noIndex); err != nil {
+		if _, err := store.CleanStale(listing("my-session"), noIndex); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1266,7 +1266,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "cmd0"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -1276,7 +1276,7 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		removed, err := store.CleanStale(listing("my-session:0.0"), noIndex)
+		removed, err := store.CleanStale(listing("my-session"), noIndex)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1304,7 +1304,7 @@ func TestSetLogging(t *testing.T) {
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 		sink := logtest.Install(t)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -1316,8 +1316,8 @@ func TestSetLogging(t *testing.T) {
 			Op:        "set",
 			Via:       "cli",
 		})
-		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
-			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		if got := rec.AttrString(t, "hook_key"); got != "my-session" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session")
 		}
 		if got := rec.AttrString(t, "value"); got != "claude --resume abc123" {
 			t.Errorf("value = %q, want %q", got, "claude --resume abc123")
@@ -1328,12 +1328,12 @@ func TestSetLogging(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
 
 		sink := logtest.Install(t)
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume xyz789"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume xyz789"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -1345,8 +1345,8 @@ func TestSetLogging(t *testing.T) {
 			Op:        "modify",
 			Via:       "cli",
 		})
-		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
-			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		if got := rec.AttrString(t, "hook_key"); got != "my-session" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session")
 		}
 		if got := rec.AttrString(t, "value"); got != "claude --resume xyz789" {
 			t.Errorf("value = %q, want %q", got, "claude --resume xyz789")
@@ -1358,7 +1358,7 @@ func TestSetLogging(t *testing.T) {
 		filePath := hookstest.HooksPath(t, dir)
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
 
@@ -1368,7 +1368,7 @@ func TestSetLogging(t *testing.T) {
 		}
 
 		sink := logtest.Install(t)
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on noop set: %v", err)
 		}
 
@@ -1380,8 +1380,8 @@ func TestSetLogging(t *testing.T) {
 			Op:        "set-noop",
 			Via:       "cli",
 		})
-		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
-			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		if got := rec.AttrString(t, "hook_key"); got != "my-session" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session")
 		}
 		if rec.HasAttr("value") {
 			t.Errorf("set-noop record should not carry a value attr: %+v", rec.Attrs)
@@ -1400,7 +1400,7 @@ func TestSetLogging(t *testing.T) {
 		store, _ := hookstest.StageStore(t, hookstest.Staging{WritesDenied: true})
 		sink := logtest.Install(t)
 
-		err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
+		err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI)
 		if err == nil {
 			t.Fatal("expected error from Set on read-only dir, got nil")
 		}
@@ -1420,8 +1420,8 @@ func TestSetLogging(t *testing.T) {
 		if got := rec.AttrString(t, "value"); got != "claude --resume abc123" {
 			t.Errorf("value = %q, want %q", got, "claude --resume abc123")
 		}
-		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
-			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		if got := rec.AttrString(t, "hook_key"); got != "my-session" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session")
 		}
 	})
 }
@@ -1435,7 +1435,7 @@ func TestSetEmitsOpAsJSONField(t *testing.T) {
 
 	dir := t.TempDir()
 	store := hooks.NewStore(hookstest.HooksPath(t, dir))
-	if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+	if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1456,12 +1456,12 @@ func TestRemoveLogging(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(hookstest.HooksPath(t, dir))
 
-		if err := store.Set("my-session:0.0", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
+		if err := store.Set("my-session", "on-resume", hooks.Registration{Command: "claude --resume abc123"}, hooks.ViaCLI); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
 		sink := logtest.Install(t)
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
@@ -1477,8 +1477,8 @@ func TestRemoveLogging(t *testing.T) {
 			Op:        "rm",
 			Via:       "cli",
 		})
-		if got := rec.AttrString(t, "hook_key"); got != "my-session:0.0" {
-			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		if got := rec.AttrString(t, "hook_key"); got != "my-session" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session")
 		}
 		if rec.HasAttr("value") {
 			t.Errorf("rm record should not carry a value attr: %+v", rec.Attrs)
@@ -1494,20 +1494,20 @@ func TestRemoveLogging(t *testing.T) {
 		}{
 			{
 				name: "absent key",
-				seed: map[string]map[string]string{"my-session:0.0": {"on-resume": "claude --resume abc123"}},
-				key:  "nonexistent:9.9",
+				seed: map[string]map[string]string{"my-session": {"on-resume": "claude --resume abc123"}},
+				key:  "nonexistent",
 				ev:   "on-resume",
 			},
 			{
 				name: "absent event",
-				seed: map[string]map[string]string{"my-session:0.0": {"on-resume": "claude --resume abc123"}},
-				key:  "my-session:0.0",
+				seed: map[string]map[string]string{"my-session": {"on-resume": "claude --resume abc123"}},
+				key:  "my-session",
 				ev:   "on-start",
 			},
 			{
 				name: "absent file",
 				seed: nil,
-				key:  "my-session:0.0",
+				key:  "my-session",
 				ev:   "on-resume",
 			},
 		}
@@ -1541,10 +1541,10 @@ func TestRemoveLogging(t *testing.T) {
 	})
 
 	t.Run("emits WARN with error_class=write-failed-temp-create when AtomicWrite fails on Remove", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"my-session:0.0":{"on-resume":"claude --resume abc123"}}`, WritesDenied: true})
+		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: `{"my-session":{"on-resume":"claude --resume abc123"}}`, WritesDenied: true})
 		sink := logtest.Install(t)
 
-		removed, err := store.Remove("my-session:0.0", "on-resume", hooks.ViaCLI)
+		removed, err := store.Remove("my-session", "on-resume", hooks.ViaCLI)
 		if err == nil {
 			t.Fatal("expected error from Remove on read-only dir, got nil")
 		}

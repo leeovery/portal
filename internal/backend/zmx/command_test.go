@@ -1,6 +1,7 @@
 package zmx_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -45,4 +46,32 @@ func TestDisplayCommand(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCommandBegins(t *testing.T) {
+	fill := strings.Repeat("a", 240)
+	for _, tc := range []struct {
+		name   string
+		shown  string
+		start  []string
+		begins bool
+	}{
+		{"the start alone", "sh -c 'echo a b'", []string{"sh", "-c", "echo a b"}, true},
+		{"the start, then an argument", "sh -c 'echo a b' x", []string{"sh", "-c", "echo a b"}, true},
+		{"the start, then the mark", fill + " bb...", []string{fill, "bb"}, true},
+		{"a start cut within, shown as it alone is", fill + " bb...", []string{fill, "bb", strings.Repeat("c", 20)}, true},
+		{"a start cut within, the report going on past it", fill + " bb... x", []string{fill, "bb", strings.Repeat("c", 20)}, false},
+		{"the start, then the mark, past 256 bytes", strings.Repeat("a", 254) + "...", []string{strings.Repeat("a", 254)}, false},
+		{"the start, then more than the mark", fill + " bb....", []string{fill, "bb"}, false},
+		{"a start whose last argument begins the next shown", "sh -c 'echo a b' xy", []string{"sh", "-c", "echo a b", "x"}, false},
+		{"a start whose last argument begins the one cut", fill + " bb...", []string{fill, "b"}, false},
+		{"a start shown unquoted where the report quotes it", "sh -c 'echo a b'", []string{"sh", "-c", "echo"}, false},
+		{"another start", "vim notes.md", []string{"vi"}, false},
+	} {
+		t.Run(fmt.Sprintf("%s: %v", tc.name, tc.begins), func(t *testing.T) {
+			if got := zmx.CommandBegins(tc.shown, tc.start); got != tc.begins {
+				t.Errorf("CommandBegins(%q, %q) = %v, want %v", tc.shown, tc.start, got, tc.begins)
+			}
+		})
+	}
 }

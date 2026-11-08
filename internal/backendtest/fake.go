@@ -247,7 +247,7 @@ func (f *Fake) Exists(ctx context.Context, name string) (bool, error) {
 
 // Create reports the session as zmx does: its Dir with symlinks resolved, as
 // the session's own working directory reads, and its Command rendered by
-// DisplayCommand.
+// zmx.DisplayCommand.
 func (f *Fake) Create(ctx context.Context, name, dir string, command []string, env ...string) (backend.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -270,7 +270,7 @@ func (f *Fake) Create(ctx context.Context, name, dir string, command []string, e
 		Dir:      resolved(dir),
 		PID:      f.lastPID,
 		Created:  f.now().Truncate(time.Second),
-		Command:  f.DisplayCommand(command),
+		Command:  zmx.DisplayCommand(command),
 	}
 	f.sessions[name] = s
 	return s, nil
@@ -394,8 +394,10 @@ func (f *Fake) ValidateName(name string) error {
 	return f.validate(name)
 }
 
-// DisplayCommand renders command as the driver does.
-func (f *Fake) DisplayCommand(command []string) string { return zmx.DisplayCommand(command) }
+// CommandBegins judges shown as the driver does.
+func (f *Fake) CommandBegins(shown string, start []string) bool {
+	return zmx.CommandBegins(shown, start)
+}
 
 // forget drops all the Fake keeps for a session that has ended. The caller
 // holds mu.

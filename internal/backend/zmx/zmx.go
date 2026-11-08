@@ -113,9 +113,11 @@ func New(cfg Config) (*Backend, error) {
 // Dir is the zmx directory the Backend is bound to.
 func (b *Backend) Dir() string { return b.dir }
 
-// DisplayCommand is command as zmx reports it, as the package's
-// DisplayCommand renders it.
-func (b *Backend) DisplayCommand(command []string) string { return DisplayCommand(command) }
+// CommandBegins reports whether shown is how zmx reports a command that
+// begins with start, as the package's CommandBegins judges it.
+func (b *Backend) CommandBegins(shown string, start []string) bool {
+	return CommandBegins(shown, start)
+}
 
 // ReachEnv is the environment another process needs to reach the sessions b
 // does: b's directory. Every zmx Portal runs has ZMX_SESSION_PREFIX removed,

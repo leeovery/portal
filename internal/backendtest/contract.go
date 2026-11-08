@@ -391,7 +391,7 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 	})
 
-	t.Run("it reports the command it made a session running as DisplayCommand renders it", func(t *testing.T) {
+	t.Run("it reports the command it made a session running, each argument the shell would split quoted", func(t *testing.T) {
 		s := newSubject(t)
 		if why := s.Lacks(Creating); why != "" {
 			t.Skip(why)
@@ -404,9 +404,9 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			t.Fatalf("Create = %v", err)
 		}
 
-		want := b.DisplayCommand(command)
-		if want != "/bin/sh -c 'exec sleep 1000'" {
-			t.Errorf("DisplayCommand = %q, want each argument the shell would split quoted", want)
+		const want = "/bin/sh -c 'exec sleep 1000'"
+		if !b.CommandBegins(want, command) {
+			t.Errorf("CommandBegins(%q, %q) = false, want the command it made judged its own", want, command)
 		}
 		looked, err := b.Session(ctx, "made")
 		if err != nil {
@@ -414,6 +414,42 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 		}
 		if got := listed(t, b, "made").Command; made.Command != want || got != want || looked.Command != want {
 			t.Errorf("Create reported %q, List %q and Session %q, want each %q", made.Command, got, looked.Command, want)
+		}
+	})
+
+	// The command runs past zmx's 256 bytes, so its report is cut after
+	// "-x", within the arguments sh takes as its own and ignores.
+	t.Run("it judges a cut report begun by each start it shows, and by no other", func(t *testing.T) {
+		s := newSubject(t)
+		if why := s.Lacks(Creating); why != "" {
+			t.Skip(why)
+		}
+		b := s.Backend()
+		script := []string{"/bin/sh", "-c", "exec sleep 1000"}
+		command := slices.Concat(script, []string{"-x", strings.Repeat("p", 250)})
+		if _, err := b.Create(t.Context(), "made", t.TempDir(), command); err != nil {
+			t.Fatalf("Create = %v", err)
+		}
+		shown := listed(t, b, "made").Command
+
+		for _, tc := range []struct {
+			name   string
+			start  []string
+			begins bool
+		}{
+			{"the whole command", command, true},
+			{"its program alone", script[:1], true},
+			{"its script, the next argument shown after it", script, true},
+			{"its script and the last argument shown, the cut after them", command[:4], true},
+			{"the command and an argument more, cut where the command is", slices.Concat(command, []string{"q"}), true},
+			{"a script it doesn't run, its own a prefix of it", []string{"/bin/sh", "-c", "exec sleep 100"}, false},
+			{"a start ending in part of an argument shown", slices.Concat(script, []string{"-"}), false},
+			{"a start whose argument after the last shown isn't the one cut", slices.Concat(command[:4], []string{"q"}), false},
+			{"another program", []string{"/bin/bash"}, false},
+		} {
+			if got := b.CommandBegins(shown, tc.start); got != tc.begins {
+				t.Errorf("CommandBegins(%q, %s) = %v, want %v", shown, tc.name, got, tc.begins)
+			}
 		}
 	})
 

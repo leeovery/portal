@@ -56,17 +56,6 @@ func holding(rules []runeRule) []nameRule {
 	return named
 }
 
-// RefusesRune reports whether Create refuses every name holding r, by the
-// rules on single characters that CheckName applies.
-func RefusesRune(r rune) bool {
-	for _, rule := range slices.Concat(pathRunes, createRunes) {
-		if rule.refuses(r) {
-			return true
-		}
-	}
-	return false
-}
-
 // pathRules refuse the names no entry in the directory can carry, as zmx
 // refuses them.
 var pathRules = slices.Concat([]nameRule{

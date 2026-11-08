@@ -41,11 +41,11 @@ func (idx *Index) Lookup(name string) (Entry, bool) {
 	return idx.sessions[i], true
 }
 
-// LabelFor is the label an entry of the session named name records for label:
+// labelFor is the label an entry of the session named name records for label:
 // label trimmed of surrounding whitespace, and empty, the default, when that
 // leaves it empty or the name itself. A label still holding an unprintable
 // character once trimmed is refused with ErrLabelUnprintable.
-func LabelFor(name, label string) (string, error) {
+func labelFor(name, label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if !printable(label) {
 		return "", ErrLabelUnprintable
@@ -56,12 +56,12 @@ func LabelFor(name, label string) (string, error) {
 	return label, nil
 }
 
-// SetLabel sets the session's label as LabelFor gives it, an empty one
+// SetLabel sets the session's label as labelFor gives it, an empty one
 // clearing it back to the default. A session with no entry gets a bare one
 // only when it is given a label; clearing one with no entry changes nothing. A
-// label LabelFor refuses changes nothing.
+// label labelFor refuses changes nothing.
 func (idx *Index) SetLabel(name, label string) error {
-	label, err := LabelFor(name, label)
+	label, err := labelFor(name, label)
 	if err != nil {
 		return err
 	}
@@ -88,13 +88,13 @@ func (idx *Index) SetLabel(name, label string) error {
 }
 
 func printable(label string) bool {
-	return utf8.ValidString(label) && !strings.ContainsFunc(label, Unprintable)
+	return utf8.ValidString(label) && !strings.ContainsFunc(label, unprintable)
 }
 
-// Unprintable reports whether r is a character a label may not hold: a
+// unprintable reports whether r is a character a label may not hold: a
 // control, formatting or line or paragraph separator character. The
 // zero-width joiner is format-class but builds joined emoji, so it passes.
-func Unprintable(r rune) bool {
+func unprintable(r rune) bool {
 	return r != '\u200d' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp))
 }
 

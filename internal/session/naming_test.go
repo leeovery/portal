@@ -50,7 +50,6 @@ func TestSessionName(t *testing.T) {
 			if err != nil || got != session.FallbackProject+"-abc123" {
 				t.Errorf("SessionName(%q) = %q, %v; want %s-abc123", project, got, err, session.FallbackProject)
 			}
-
 		}
 	})
 

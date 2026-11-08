@@ -168,12 +168,10 @@ var hooksRmCmd = &cobra.Command{
 	Short: "Remove a resume hook for the current session",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paneKey, err := cmd.Flags().GetString("pane-key")
+		hookKey, err := cmd.Flags().GetString("key")
 		if err != nil {
 			return err
 		}
-
-		hookKey := paneKey
 		if hookKey == "" {
 			if hookKey, err = currentSession(); err != nil {
 				return err
@@ -206,7 +204,7 @@ func init() {
 
 	hooksRmCmd.Flags().Bool("on-resume", false, "Remove the on-resume hook")
 	_ = hooksRmCmd.MarkFlagRequired("on-resume")
-	hooksRmCmd.Flags().String("pane-key", "", "Hook key of the entry to remove, taken verbatim (defaults to the current session's name)")
+	hooksRmCmd.Flags().String("key", "", "Hook key of the entry to remove, taken verbatim (defaults to the current session's name)")
 
 	hookCmd.AddCommand(hooksListCmd)
 	hookCmd.AddCommand(hooksSetCmd)

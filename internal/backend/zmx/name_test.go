@@ -73,30 +73,6 @@ func TestValidateName(t *testing.T) {
 	})
 }
 
-func TestRefusesRune(t *testing.T) {
-	t.Run("it refuses each character a name may never hold, and no other", func(t *testing.T) {
-		for _, r := range []rune{'/', 0, '\t', '\n', '\x1b', '\x7f', '\u0085'} {
-			if !zmx.RefusesRune(r) {
-				t.Errorf("RefusesRune(%q) = false, want true", r)
-			}
-		}
-		for _, r := range []rune{'a', ' ', '-', '*', '.', ':', '=', '$', '·', 'é', '\u202e'} {
-			if zmx.RefusesRune(r) {
-				t.Errorf("RefusesRune(%q) = true, want false", r)
-			}
-		}
-	})
-
-	t.Run("it refuses a character exactly when CheckName refuses a plain name holding it", func(t *testing.T) {
-		for r := range rune(0x100) {
-			refused := zmx.CheckName("a"+string(r)+"a") != nil
-			if refused != zmx.RefusesRune(r) {
-				t.Errorf("CheckName of a name holding %q refuses: %v; RefusesRune: %v", r, refused, zmx.RefusesRune(r))
-			}
-		}
-	})
-}
-
 func TestCheckName(t *testing.T) {
 	t.Run("it applies every rule but the length", func(t *testing.T) {
 		b := mustNew(t, zmx.Config{Dir: "/tmp/zx-unit"})

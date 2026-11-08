@@ -179,25 +179,6 @@ func TestOwe(t *testing.T) {
 	}
 }
 
-func TestLabelFor(t *testing.T) {
-	for label, want := range map[string]string{
-		"  my work \n": "my work",
-		"":             "",
-		"   ":          "",
-		"a":            "",
-		" a ":          "",
-		"café — 日本":    "café — 日本",
-	} {
-		got, err := sessionindex.LabelFor("a", label)
-		if err != nil || got != want {
-			t.Errorf("LabelFor(a, %q) = %q, %v; want %q", label, got, err, want)
-		}
-	}
-	if _, err := sessionindex.LabelFor("a", "two\nlines inside"); !errors.Is(err, sessionindex.ErrLabelUnprintable) {
-		t.Errorf("LabelFor of an unprintable label = %v, want ErrLabelUnprintable", err)
-	}
-}
-
 func labelOf(idx sessionindex.Index, name string) string {
 	e, _ := idx.Lookup(name)
 	return e.Label

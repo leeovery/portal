@@ -246,7 +246,7 @@ xctl alias list                      # list all aliases
 
 ### `xctl hook`
 
-Register per-session commands to bring back after a reboot. Under the shipped default a restored session comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the session is restored, with no panel. `hook set` must be run from inside a session; `hook rm` defaults to the current session's name but accepts `--pane-key` to remove the entry under any hook key, taken verbatim (including sessions that no longer exist). `hook rm` exits non-zero when it removes nothing — a missing entry or a session with no hook of its own — so a scripted caller can tell a real removal from a no-op.
+Register per-session commands to bring back after a reboot. Under the shipped default a restored session comes back holding the [resume panel](#resume-panel), showing the registered command with `⏎ resume`, `d discard` and `esc back`, and the command runs when you answer it; a registration pinned `eager` runs its command as the session is restored, with no panel. `hook set` must be run from inside a session; `hook rm` defaults to the current session's name but accepts `--key` to remove the entry under any hook key, taken verbatim (including sessions that no longer exist). `hook rm` exits non-zero when it removes nothing — a missing entry or a session with no hook of its own — so a scripted caller can tell a real removal from a no-op.
 
 The verb is **`hook`** (singular); **`hooks`** is kept as a permanent silent alias, so existing `xctl hooks …` scripts keep working unchanged.
 
@@ -260,7 +260,7 @@ A label takes any printable text. Only a label holding a control or formatting c
 xctl hook set --on-resume "npm start"            # register a resume hook
 xctl hook set --on-resume "npm start" --resume-mode lazy   # register it pinned to a resume mode
 xctl hook rm --on-resume                         # remove the current session's hook
-xctl hook rm --on-resume --pane-key 'api-Rf4TmZ' # remove the entry under any hook key, verbatim (works outside a session)
+xctl hook rm --on-resume --key 'api-Rf4TmZ' # remove the entry under any hook key, verbatim (works outside a session)
 xctl hook list                                   # list hooks: key, event, command, the session's label (4th column, empty if no live session carries the key), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
 ```
 

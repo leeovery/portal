@@ -345,7 +345,7 @@ func TestEveryDemoTapeNamesAScenarioOrFixtureThatExists(t *testing.T) {
 
 // Each tape runs capturetool and nothing else: before its program draws, it
 // types the one line that starts it, hidden, so no shell is recorded, and no
-// portal, zmx, tmux or container is run.
+// portal, zmx or container is run.
 func TestEveryDemoTapeRunsOnlyTheCaptureTool(t *testing.T) {
 	for _, name := range demoTapeNames(t) {
 		tp := readTape(t, name)

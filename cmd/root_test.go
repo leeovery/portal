@@ -81,7 +81,7 @@ func resetRootCmd() {
 		_ = f.Value.Set("false")
 		f.Changed = false
 	}
-	if f := hooksRmCmd.Flags().Lookup("pane-key"); f != nil {
+	if f := hooksRmCmd.Flags().Lookup("key"); f != nil {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
