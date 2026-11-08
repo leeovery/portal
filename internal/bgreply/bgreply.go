@@ -53,13 +53,47 @@ func Split(in []byte) (rest []byte, payloads []string, head []byte) {
 	return rest, payloads, nil
 }
 
-// Typed reports whether in, read so far, holds a byte no reply accounts for:
-// one in no whole reply and in none cut off at its end, an escape alone there
-// aside, since it may open the next.
-func Typed(in []byte) bool {
-	rest, _, head := Split(in)
-	opens := len(head) == 0 && len(rest) == 1 && rest[0] == esc && in[len(in)-1] == esc
-	return len(rest) > 0 && !opens
+// headKept bounds a reply's head kept for its rest. A reply is some 30 bytes,
+// so a longer head is no reply's: a terminal answering something else entirely
+// without ever terminating it.
+const headKept = 256
+
+// Stream is a pane's input read a piece at a time, by a reader that discards
+// it, so a reply split across two pieces is still taken out whole.
+type Stream struct {
+	unfinished []byte
+}
+
+// Take reads in, the next piece of the input. It answers how many replies in
+// finished whole and whether in held a byte no reply accounts for, and keeps
+// the end where a reply may still be arriving, cut off or an escape alone that
+// may open one, to read with the piece that follows. A head too long for a
+// reply's is typed.
+func (s *Stream) Take(in []byte) (replies int, typed bool) {
+	joined := append(s.unfinished, in...)
+	rest, payloads, head := Split(joined)
+	if head == nil && len(rest) > 0 && rest[len(rest)-1] == esc && joined[len(joined)-1] == esc {
+		rest, head = rest[:len(rest)-1], []byte{esc}
+	}
+	if len(head) > headKept {
+		rest, head = append(rest, head...), nil
+	}
+	s.unfinished = head
+	return len(payloads), len(rest) > 0
+}
+
+// Unfinished reports whether the input read ends where a reply may still be
+// arriving.
+func (s *Stream) Unfinished() bool {
+	return s.unfinished != nil
+}
+
+// Quiet is the input falling quiet: an escape alone at its end was the Escape
+// key, and opens nothing, while a reply cut off is kept for its rest.
+func (s *Stream) Quiet() {
+	if len(s.unfinished) == 1 && s.unfinished[0] == esc {
+		s.unfinished = nil
+	}
 }
 
 // cutHead is nil for no head, and a copy otherwise, so a head kept to be

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/leeovery/portal/internal/bgreply"
 )
 
 // A terminal over a slow link, a phone over SSH among them, answers the draw's
@@ -90,7 +92,7 @@ func (h *arrivalHarness) inTheWait(input string) {
 func (h *arrivalHarness) arriving(n int) {
 	h.t.Helper()
 	for range n {
-		h.awaitListen("a listen for the input arriving") <- true
+		h.awaitListen("a listen for the input arriving").reply <- true
 	}
 }
 
@@ -98,7 +100,7 @@ func (h *arrivalHarness) arriving(n int) {
 func (h *arrivalHarness) silentFor(n int) {
 	h.t.Helper()
 	for range n {
-		h.awaitListen("a listen for the reply owed") <- false
+		h.awaitListen("a listen for the reply owed").reply <- false
 	}
 }
 
@@ -165,8 +167,7 @@ func TestResumeLateReply_InAnArrival(t *testing.T) {
 
 					switch key {
 					case "\x1b":
-						_ = h.writer.Close()
-						if err := h.wait(); !errors.Is(err, io.EOF) {
+						if err := h.endInput(); !errors.Is(err, io.EOF) {
 							t.Fatalf("runResumeWait() error = %v, want the EOF that ended a wait still going", err)
 						}
 						if h.probe.backCalls != 1 {
@@ -204,7 +205,7 @@ func TestResumeLateReply_InAnArrival(t *testing.T) {
 		}
 	})
 
-	t.Run("a reply settles the oldest question still in its window", func(t *testing.T) {
+	t.Run("a reply settles a question still in its window, never one past it", func(t *testing.T) {
 		payload := drawnPayload()
 		payload.RepliesOwed = askedAgo(resumeReplyWindow-2*resumeInputQuiet, 0)
 		h := startArrivals(t, payload)
@@ -215,6 +216,24 @@ func TestResumeLateReply_InAnArrival(t *testing.T) {
 		h.arrive(lateDarkReply)
 		h.quiet()
 		h.answerWith("\r")
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
+	})
+
+	// A question no terminal saw is never answered, so a reply is the newest
+	// question's: settled oldest first, that question would wait out a window
+	// of its own after its reply had come.
+	t.Run("a reply settles the newest question owed, leaving an older one to its own window", func(t *testing.T) {
+		payload := drawnPayload()
+		payload.RepliesOwed = askedAgo(resumeReplyWindow-3*resumeInputQuiet, 0)
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.arrive(lateDarkReply)
+		h.quiet()
+		h.answerWith("\r")
+		h.silentFor(1)
 
 		h.answered()
 		assertHookHandOff(t, h.probe, payload.Command)
@@ -425,19 +444,80 @@ func TestResumeLateReply_BeforeTheHandOff(t *testing.T) {
 		assertHookHandOff(t, h.probe, payload.Command)
 	})
 
-	t.Run("the wait reads no more than an arrival keeps", func(t *testing.T) {
+	t.Run("a paste longer than an arrival keeps, typed in the wait, is lost whole", func(t *testing.T) {
 		payload := owing(drawnPayload())
 		h := startArrivals(t, payload)
 		h.probe.lookup = foundHook(payload.Command)
 		paste := strings.Repeat("x", resumeArrivalKept+10)
 
 		h.answerWith("\r")
-		go func() { _, _ = h.writer.Write([]byte(paste)) }()
-		h.arriving(resumeArrivalKept)
+		h.inTheWait(paste)
+		h.silentFor(1)
+		h.inTheWait(lateDarkReply)
 
 		h.answered()
 		assertHookHandOff(t, h.probe, payload.Command)
-		h.assertRead("\r" + paste[:resumeArrivalKept])
+		h.assertRead("\r" + paste + lateDarkReply)
+	})
+
+	t.Run("a reply's head, the pane falling quiet, then its rest, all in the wait, settle the question owed", func(t *testing.T) {
+		payload := owing(drawnPayload())
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.answerWith("\r")
+		h.inTheWait(lateReplyHead)
+		h.silentFor(1)
+		h.inTheWait(lateReplyTail)
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
+		h.assertRead("\r" + lateReplyHead + lateReplyTail)
+	})
+
+	t.Run("two replies back to back in the wait settle two questions, and it waits on for the third", func(t *testing.T) {
+		payload := drawnPayload()
+		payload.RepliesOwed = askedAgo(2*resumeInputQuiet, resumeInputQuiet, 0)
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.answerWith("\r")
+		h.inTheWait(lateDarkReply + lateC1Reply)
+		h.silentFor(1)
+		h.inTheWait(lateSTReply)
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
+		h.assertRead("\r" + lateDarkReply + lateC1Reply + lateSTReply)
+	})
+
+	t.Run("a reply cut off at the end of Enter's arrival is finished with nothing owed", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.arrive("\r" + lateReplyHead)
+		h.holdSpent()
+		h.answerListen(false)
+		h.inTheWait(lateReplyTail)
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
+		h.assertRead("\r" + lateReplyHead + lateReplyTail)
+	})
+
+	t.Run("a reply cut off with nothing owed is waited on for a reply's rest, and no longer", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.arrive("\r" + lateReplyHead)
+		h.holdSpent()
+		h.answerListen(false)
+		h.silentFor(int(bgreply.TailWait / resumeInputQuiet))
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
 	})
 
 	t.Run("nothing owed, Enter hands on at once", func(t *testing.T) {
@@ -524,29 +604,98 @@ func TestResumeLateReply_TheWaitsLength(t *testing.T) {
 	}
 }
 
+// Auto-repeat, or a paste arriving a byte at a time: input that never falls
+// quiet.
+func TestResumeLateReply_TheWaitsBound(t *testing.T) {
+	t.Run("keys typed without a pause hold the wait a window from its start at most", func(t *testing.T) {
+		const repeat = 30 * time.Millisecond
+		clock := newTestClock()
+		cfg := newResumeWaitConfig(t, new(resumeWaitProbe), drawnPayload(), keystrokes(t, strings.Repeat("x", 1000)))
+		cfg.RepliesOwed = askedAgo(0)
+		cfg.Now = clock.now
+		cfg.AwaitInput = func(time.Duration) (bool, error) {
+			clock.advance(repeat)
+			return true, nil
+		}
+
+		cfg.awaitOwedReplies()
+
+		if waited := clock.now().Sub(resumeTestEpoch); waited > resumeReplyWindow+repeat {
+			t.Errorf("the wait lasted %v with a key arriving every %v, want no more than its window, %v", waited, repeat, resumeReplyWindow)
+		}
+	})
+
+	t.Run("a reply cut off as the wait's window closes holds it no longer", func(t *testing.T) {
+		clock := newTestClock()
+		input := keystrokes(t, lateReplyHead)
+		cfg := newResumeWaitConfig(t, new(resumeWaitProbe), drawnPayload(), input)
+		cfg.RepliesOwed = askedAgo(0)
+		cfg.Now = clock.now
+		headAt := resumeTestEpoch.Add(resumeReplyWindow - resumeInputQuiet)
+		cfg.AwaitInput = func(d time.Duration) (bool, error) {
+			if !clock.now().Before(headAt) && input.reads < len(lateReplyHead) {
+				return true, nil
+			}
+			clock.advance(d)
+			return false, nil
+		}
+
+		cfg.awaitOwedReplies()
+
+		if waited := clock.now().Sub(resumeTestEpoch); waited != resumeReplyWindow {
+			t.Errorf("the wait lasted %v with a reply's head arriving %v before its window closed, want its window, %v", waited, resumeInputQuiet, resumeReplyWindow)
+		}
+	})
+}
+
+func TestResumeLateReply_TheDebt(t *testing.T) {
+	const before = 100 * time.Millisecond
+
+	t.Run("a reply settles the newest question owed", func(t *testing.T) {
+		if got, want := askedAgo(3*before, 2*before, before).settle(1), askedAgo(3*before, 2*before); got != want {
+			t.Errorf("one reply leaves %v owed, want %v", got, want)
+		}
+	})
+
+	t.Run("a question the clock says is yet to be asked is owed a window from now, and no longer", func(t *testing.T) {
+		owed := askedAgo(-5 * time.Second).live(resumeTestEpoch)
+
+		if due := resumeTestEpoch.Add(resumeReplyWindow); !owed.owing() || !owed.lastDue().Equal(due) {
+			t.Fatalf("owes %v, want one question due at %v", owed, due)
+		}
+		if later := owed.live(resumeTestEpoch.Add(resumeReplyWindow)); later.owing() {
+			t.Errorf("a window on, owes %v, want nothing", later)
+		}
+	})
+}
+
 func TestResumeLateReply_TheDraw(t *testing.T) {
 	const before = 100 * time.Millisecond
 	cases := []struct {
-		name       string
-		owed       replyDebt
-		settled    int
-		unanswered bool
-		handed     int
-		want       replyDebt
+		name    string
+		owed    replyDebt
+		asked   bool
+		replies int
+		handed  int
+		want    replyDebt
 	}{
-		{"nothing owed, its question answered", replyDebt{}, 0, false, 0, replyDebt{}},
-		{"nothing owed, its question unanswered", replyDebt{}, 0, true, 0, askedAgo(0)},
-		{"one owed, that one's reply and its own read", askedAgo(before), 1, false, 1, replyDebt{}},
-		{"one owed, only that one's reply read", askedAgo(before), 1, true, 1, askedAgo(0)},
-		{"one owed, no reply read", askedAgo(before), 0, true, 1, askedAgo(before, 0)},
-		{"one owed past its window, as after a boot, its own answered", askedAgo(resumeReplyWindow), 0, false, 0, replyDebt{}},
-		{"as many owed as are kept, its own unanswered", askedAgo(4*before, 3*before, 2*before, before), 0, true, 4, askedAgo(3*before, 2*before, before, 0)},
+		{"nothing owed, its question answered", replyDebt{}, true, 1, 0, replyDebt{}},
+		{"nothing owed, its question unanswered", replyDebt{}, true, 0, 0, askedAgo(0)},
+		{"nothing owed, no question asked, as with no terminal to answer", replyDebt{}, false, 0, 0, replyDebt{}},
+		{"one owed, that one's reply and its own read", askedAgo(before), true, 2, 1, replyDebt{}},
+		{"one owed, one reply read, which settles its own question", askedAgo(before), true, 1, 1, askedAgo(before)},
+		{"one owed, no reply read", askedAgo(before), true, 0, 1, askedAgo(before, 0)},
+		{"one owed, no question asked, and its reply read", askedAgo(before), false, 1, 1, replyDebt{}},
+		{"one owed, no question asked, and no reply read", askedAgo(before), false, 0, 1, askedAgo(before)},
+		{"one owed past its window, as after a boot, its own answered", askedAgo(resumeReplyWindow), true, 1, 0, replyDebt{}},
+		{"as many owed as are kept, its own unanswered", askedAgo(4*before, 3*before, 2*before, before), true, 0, 4, askedAgo(3*before, 2*before, before, 0)},
+		{"as many owed as are kept, one reply read", askedAgo(4*before, 3*before, 2*before, before), true, 1, 4, askedAgo(3*before, 2*before, before)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := samplePayload()
 			payload.RepliesOwed = tc.owed
-			probe := &resumeDrawProbe{settled: tc.settled, unanswered: tc.unanswered}
+			probe := &resumeDrawProbe{asked: tc.asked, replies: tc.replies}
 
 			if err := runResumeDraw(newResumeDrawConfig(t, probe, payload, fixedSize(100, 30))); err != nil {
 				t.Fatalf("runResumeDraw() error = %v", err)
@@ -560,6 +709,33 @@ func TestResumeLateReply_TheDraw(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("the replies the drop read settle questions as the query's do", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			replies int
+			want    replyDebt
+		}{
+			{"one", 1, askedAgo(before)},
+			{"two", 2, replyDebt{}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				payload := openingPayload()
+				payload.RepliesOwed = askedAgo(before)
+				probe := &resumeDrawProbe{asked: true}
+				cfg := newResumeDrawConfig(t, probe, payload, fixedSize(100, 30))
+				cfg.DropInputQueue = func() (int, error) { return tc.replies, nil }
+
+				if err := runResumeDraw(cfg); err != nil {
+					t.Fatalf("runResumeDraw() error = %v", err)
+				}
+
+				if got := waiterOf(t, probe.execArgs).RepliesOwed; got != tc.want {
+					t.Errorf("waiter owes %v, want %v", got, tc.want)
+				}
+			})
+		}
+	})
 
 	t.Run("the replies owed round-trip through a redraw's argv", func(t *testing.T) {
 		payload := samplePayload()
@@ -583,6 +759,19 @@ func TestResumeLateReply_TheDraw(t *testing.T) {
 
 		if got, want := waiterOf(t, argv).RepliesOwed, replyDebtFrom([]int64{2, 3, 4, 5}); got != want {
 			t.Errorf("waiter owes %v, want %v", got, want)
+		}
+	})
+
+	t.Run("an argv owing a question the clock says is yet to be asked is read as one asked now", func(t *testing.T) {
+		argv := resumeChainArgv("portal", resumeWaitSubcommand, samplePayload())
+		argv = append(argv, flagArg(resumeFlagRepliesOwed), "99999999999999")
+
+		before := time.Now().UnixMilli()
+		got := waiterOf(t, argv).RepliesOwed
+		after := time.Now().UnixMilli()
+
+		if got.count() != 1 || got.asked[0] < before || got.asked[0] > after {
+			t.Errorf("waiter owes %v, want one question asked between %d and %d", got, before, after)
 		}
 	})
 

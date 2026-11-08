@@ -161,8 +161,8 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 	th := themetest.DefaultDark(p.t)
 	cfg.Size = p.size
 	cfg.DisableEcho = func() error { return nil }
-	cfg.DropInputQueue = func() error { return nil }
-	cfg.ResolveTheme = func(bool, int, func() error) (tui.PaneAppearance, error) {
+	cfg.DropInputQueue = func() (int, error) { return 0, nil }
+	cfg.ResolveTheme = func(bool, int, func() (int, error)) (tui.PaneAppearance, error) {
 		p.recordSelf(termEventDraw)
 		p.holdDraw()
 		return tui.PaneAppearance{Theme: th}, nil
@@ -212,7 +212,7 @@ func (p termPaneProcess) holdDraw() {
 func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	cfg.IsTerminal = func() bool { return true }
 	cfg.MakeRaw = func() (func(), error) { return func() {}, nil }
-	cfg.In = &announcingReader{inner: cfg.In, announce: func() { p.recordSelf(termEventWait) }}
+	cfg.AwaitInput = announcingListen(cfg.AwaitInput, func() { p.recordSelf(termEventWait) })
 	cfg.Size = p.size
 	cfg.LookupResume = func(string) (hooks.OnResume, error) {
 		return hooks.OnResume{Command: os.Getenv(termPaneHookEnv), Found: true}, nil
@@ -227,17 +227,14 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	return cfg
 }
 
-// announcingReader reports the waiter's first read, the point it is holding the
-// pane on its panel.
-type announcingReader struct {
-	inner    io.Reader
-	announce func()
-	once     sync.Once
-}
-
-func (r *announcingReader) Read(b []byte) (int, error) {
-	r.once.Do(r.announce)
-	return r.inner.Read(b)
+// announcingListen reports the waiter's first listen, the point it is holding
+// the pane on its panel.
+func announcingListen(await func(time.Duration) (bool, error), announce func()) func(time.Duration) (bool, error) {
+	var once sync.Once
+	return func(window time.Duration) (bool, error) {
+		once.Do(announce)
+		return await(window)
+	}
 }
 
 // termPane is a waiting session: the parked chain, started as restore leaves

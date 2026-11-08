@@ -128,8 +128,7 @@ func escapeToPicker(t *testing.T, payload resumeChainPayload, route backRoute) *
 	h := startArrivals(t, payload)
 	h.probe.backRoute = route
 	h.typed("\x1b")
-	_ = h.writer.Close()
-	if err := h.wait(); !errors.Is(err, io.EOF) {
+	if err := h.endInput(); !errors.Is(err, io.EOF) {
 		t.Fatalf("runResumeWait() error = %v, want the EOF that ended a wait still going", err)
 	}
 	if h.probe.backCalls != 1 {
@@ -395,8 +394,8 @@ func TestRunResumeWait_Screens(t *testing.T) {
 
 				h.arrive(chord.keys)
 				h.quiet()
-				h.sizes.deliver(h.winch)
-				h.awaitSettle() <- time.Now()
+				h.resizeSettled()
+				h.quiet()
 
 				h.answered()
 				assertHandOff(t, h.probe, payload)

@@ -2,6 +2,8 @@ package bgreply
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -61,33 +63,109 @@ func TestSplit(t *testing.T) {
 	})
 }
 
-func TestTyped(t *testing.T) {
-	cases := []struct {
-		name  string
-		in    string
-		typed bool
-	}{
-		{"nothing", "", false},
-		{"a whole reply", darkReply, false},
-		{"two replies", darkReply + c1Light, false},
-		{"a reply still arriving", truncated, false},
-		{"an introducer's start", "\x1b]1", false},
-		{"a reply at its closing escape", "\x1b]11;rgb:0b\x1b", false},
-		{"an escape, which may open a reply", "\x1b", false},
-		{"a reply, then an escape", darkReply + "\x1b", false},
-		{"a key", "\r", true},
-		{"an arrow", "\x1b[A", true},
-		{"a reply and a key", darkReply + "\r", true},
-		{"an escape before a reply", "\x1b" + darkReply, true},
-		{"an escape before a reply still arriving", "\x1b" + truncated, true},
-		{"a key before a reply still arriving", "x" + truncated, true},
-		{"a reply's rest with no head", "rgb:0b0b/0c0c/1414\a", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := Typed([]byte(tc.in)); got != tc.typed {
-				t.Errorf("Typed(%q) = %v, want %v", tc.in, got, tc.typed)
-			}
-		})
-	}
+func TestStream(t *testing.T) {
+	t.Run("one piece", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			in         string
+			replies    int
+			typed      bool
+			unfinished bool
+		}{
+			{"nothing", "", 0, false, false},
+			{"a whole reply", darkReply, 1, false, false},
+			{"two replies", darkReply + c1Light, 2, false, false},
+			{"a reply still arriving", truncated, 0, false, true},
+			{"an introducer's start", "\x1b]1", 0, false, true},
+			{"a reply at its closing escape", "\x1b]11;rgb:0b\x1b", 0, false, true},
+			{"an escape, which may open a reply", "\x1b", 0, false, true},
+			{"a reply, then an escape", darkReply + "\x1b", 1, false, true},
+			{"a key", "\r", 0, true, false},
+			{"an arrow", "\x1b[A", 0, true, false},
+			{"a reply and a key", darkReply + "\r", 1, true, false},
+			{"an escape before a reply", "\x1b" + darkReply, 1, true, false},
+			{"an escape before a reply still arriving", "\x1b" + truncated, 0, true, true},
+			{"a key before a reply still arriving", "x" + truncated, 0, true, true},
+			{"a key, then an escape", "x\x1b", 0, true, true},
+			{"a reply's rest with no head", "rgb:0b0b/0c0c/1414\a", 0, true, false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				var s Stream
+				replies, typed := s.Take([]byte(tc.in))
+
+				if replies != tc.replies || typed != tc.typed || s.Unfinished() != tc.unfinished {
+					t.Errorf("Take(%q) = %d, %v, unfinished %v; want %d, %v, unfinished %v",
+						tc.in, replies, typed, s.Unfinished(), tc.replies, tc.typed, tc.unfinished)
+				}
+			})
+		}
+	})
+
+	t.Run("a reply split across pieces is finished by the piece that ends it, and is typed by neither", func(t *testing.T) {
+		for _, cut := range []int{1, 2, 4, 5, 12, len(stDark) - 1} {
+			t.Run(strconv.Itoa(cut), func(t *testing.T) {
+				var s Stream
+				headReplies, headTyped := s.Take([]byte(stDark[:cut]))
+				tailReplies, tailTyped := s.Take([]byte(stDark[cut:]))
+
+				if headReplies != 0 || headTyped || tailReplies != 1 || tailTyped || s.Unfinished() {
+					t.Errorf("Take(%q), Take(%q) = (%d, %v), (%d, %v), unfinished %v; want (0, false), (1, false), unfinished false",
+						stDark[:cut], stDark[cut:], headReplies, headTyped, tailReplies, tailTyped, s.Unfinished())
+				}
+			})
+		}
+	})
+
+	t.Run("an escape that opens no reply is typed with the piece after it", func(t *testing.T) {
+		var s Stream
+		s.Take([]byte("\x1b"))
+
+		if replies, typed := s.Take([]byte("[A")); replies != 0 || !typed || s.Unfinished() {
+			t.Errorf("Take(%q) after an escape = %d, %v, unfinished %v; want 0, true, unfinished false", "[A", replies, typed, s.Unfinished())
+		}
+	})
+
+	t.Run("an escape alone as the input falls quiet was the Escape key, and opens no reply", func(t *testing.T) {
+		var s Stream
+		s.Take([]byte("\x1b"))
+		s.Quiet()
+
+		if s.Unfinished() {
+			t.Fatal("an escape the input fell quiet after is still unfinished")
+		}
+		if replies, typed := s.Take([]byte("]11;" + darkColour + "\a")); replies != 0 || !typed {
+			t.Errorf("Take(a reply's rest) after the quiet = %d, %v; want 0, true", replies, typed)
+		}
+	})
+
+	t.Run("a reply cut off as the input falls quiet is kept for its rest", func(t *testing.T) {
+		var s Stream
+		s.Take([]byte(truncated))
+		s.Quiet()
+
+		if replies, typed := s.Take([]byte("14\a")); replies != 1 || typed {
+			t.Errorf("Take(the reply's rest) after the quiet = %d, %v; want 1, false", replies, typed)
+		}
+	})
+
+	t.Run("a head longer than any reply's is typed, and kept no longer", func(t *testing.T) {
+		var s Stream
+		s.Take([]byte(Introducer))
+
+		replies, typed := s.Take([]byte(strings.Repeat("0", headKept)))
+
+		if replies != 0 || !typed || s.Unfinished() {
+			t.Errorf("a head of %d bytes = %d, %v, unfinished %v; want 0, true, unfinished false", len(Introducer)+headKept, replies, typed, s.Unfinished())
+		}
+	})
+
+	t.Run("a head as long as a reply's is kept", func(t *testing.T) {
+		var s Stream
+		s.Take([]byte(Introducer + strings.Repeat("0", headKept-len(Introducer))))
+
+		if replies, typed := s.Take([]byte("\a")); replies != 1 || typed {
+			t.Errorf("a reply of %d bytes = %d, %v; want 1, false", headKept+1, replies, typed)
+		}
+	})
 }

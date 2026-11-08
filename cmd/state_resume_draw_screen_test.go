@@ -101,7 +101,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 					calls = append(calls, "size")
 					return 100, 30, nil
 				},
-				ResolveTheme: func(bool, int, func() error) (tui.PaneAppearance, error) {
+				ResolveTheme: func(bool, int, func() (int, error)) (tui.PaneAppearance, error) {
 					calls = append(calls, "theme")
 					return tui.PaneAppearance{Theme: th}, nil
 				},

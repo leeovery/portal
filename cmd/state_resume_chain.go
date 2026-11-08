@@ -80,17 +80,16 @@ type resumeChainPayload struct {
 	Typed string
 
 	// RepliesOwed is the background questions draws gave up on with no reply
-	// read, as a terminal over a slow link answers late. It rides each hand-off,
-	// so a reply, whenever it lands within its question's window, never
-	// answers the panel nor reaches what the session is handed to.
+	// read, as a terminal over a slow link answers late. It rides each
+	// hand-off, so the hand-off to a hook or a shell reads the replies off
+	// while one is owed.
 	RepliesOwed replyDebt
 }
 
 // resumeReplyWindow is how long a background question is owed its reply. Only
 // a terminal attached when it was asked answers it, within its round trip, and
 // a phone over SSH answers well within this, so a question older than it is
-// owed nothing: the first draw after a boot asks one with no terminal attached,
-// which nothing will ever answer.
+// owed nothing.
 const resumeReplyWindow = time.Second
 
 // replyDebtKept bounds a debt to its newest questions. More go unanswered
@@ -100,8 +99,13 @@ const replyDebtKept = 4
 
 // replyDebt is the background questions a session's draws asked and have read
 // no reply to, each by when it was asked, in unix milliseconds, oldest first.
-// A terminal answers in the order it is asked, so each reply settles the
-// oldest. An array, not a slice, so a payload compares whole.
+// A reply read settles the newest question owed: a terminal answers in the
+// order it is asked, but only a terminal that saw a question answers it, so
+// one asked as a terminal came or went may never be answered, and settled
+// oldest first, it would take the next real reply and leave the question that
+// reply answered owed in its place. Settled newest first, a question never
+// answered is owed only until its own window closes. An array, not a slice, so
+// a payload compares whole.
 type replyDebt struct {
 	asked [replyDebtKept]int64
 	n     int
@@ -115,10 +119,10 @@ func replyDebtFrom(asked []int64) replyDebt {
 	return d
 }
 
-// replyDebtFromFlag reads the replies-owed flag's comma-separated times. A
-// value Portal didn't write is read as one question asked now, owed a window
-// at most, so a reply it may stand for never reaches what the session is
-// handed to.
+// replyDebtFromFlag reads the replies-owed flag's comma-separated times, a
+// time later than now read as now, as live reads one. A value Portal didn't
+// write is read as one question asked now, so a reply it may stand for is
+// still waited for, a window at most.
 func replyDebtFromFlag(value string, now time.Time) replyDebt {
 	if value == "" {
 		return replyDebt{}
@@ -130,7 +134,7 @@ func replyDebtFromFlag(value string, now time.Time) replyDebt {
 		if err != nil {
 			return replyDebt{}.owe(now)
 		}
-		asked[i] = ms
+		asked[i] = min(ms, now.UnixMilli())
 	}
 	return replyDebtFrom(asked)
 }
@@ -146,38 +150,37 @@ func (d replyDebt) count() int {
 // owe adds a question asked at at, letting the oldest go past the bound.
 func (d replyDebt) owe(at time.Time) replyDebt {
 	if d.n == replyDebtKept {
-		d = d.settle(1)
+		d = replyDebtFrom(d.asked[1:d.n])
 	}
 	d.asked[d.n] = at.UnixMilli()
 	d.n++
 	return d
 }
 
-// settle drops the k oldest questions, each answered by a reply read.
+// settle drops the k newest questions, one for each reply read.
 func (d replyDebt) settle(k int) replyDebt {
-	return replyDebtFrom(d.asked[min(max(k, 0), d.n):d.n])
+	return replyDebtFrom(d.asked[:d.n-min(max(k, 0), d.n)])
 }
 
 // live drops the questions asked a window or more before now, which are owed
-// nothing.
+// nothing, and reads a question the clock says is yet to be asked as asked
+// now, so a clock set back, or a time Portal didn't write, keeps none owed
+// for longer than a window.
 func (d replyDebt) live(now time.Time) replyDebt {
-	for i, asked := range d.asked[:d.n] {
+	var kept replyDebt
+	for _, asked := range d.asked[:d.n] {
+		asked = min(asked, now.UnixMilli())
 		if now.Sub(time.UnixMilli(asked)) < resumeReplyWindow {
-			return d.settle(i)
+			kept.asked[kept.n] = asked
+			kept.n++
 		}
 	}
-	return replyDebt{}
+	return kept
 }
 
-// lastDue is when the newest question's window closes, and never later than
-// a window from now, so a clock set back since it was asked can't stretch the
-// wait for its reply.
-func (d replyDebt) lastDue(now time.Time) time.Time {
-	newest := time.UnixMilli(d.asked[d.n-1])
-	if newest.After(now) {
-		newest = now
-	}
-	return newest.Add(resumeReplyWindow)
+// lastDue is when the newest question's window closes.
+func (d replyDebt) lastDue() time.Time {
+	return time.UnixMilli(d.asked[d.n-1]).Add(resumeReplyWindow)
 }
 
 func (d replyDebt) flagValue() string {

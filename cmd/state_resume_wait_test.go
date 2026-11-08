@@ -404,39 +404,33 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		// what shows the report survived the idle wait.
 		cases := []struct {
 			name    string
-			deliver func(writer *io.PipeWriter, resize func()) error
+			deliver func(input *typeAhead, resize func())
 			want    func(resumeChainPayload) resumeChainPayload
 			// One per byte read: a key waits for the pane to fall quiet.
 			wantQuiets int64
 		}{
 			{
-				name: "answered by d",
-				deliver: func(writer *io.PipeWriter, _ func()) error {
-					_, err := writer.Write([]byte("d"))
-					return err
-				},
+				name:       "answered by d",
+				deliver:    func(input *typeAhead, _ func()) { input.typeKeys("d") },
 				want:       opened,
 				wantQuiets: 1,
 			},
 			{
-				name: "redrawn by a settled resize",
-				deliver: func(_ *io.PipeWriter, resize func()) error {
-					resize()
-					return nil
-				},
-				want: func(p resumeChainPayload) resumeChainPayload { return p },
+				name:    "redrawn by a settled resize",
+				deliver: func(_ *typeAhead, resize func()) { resize() },
+				want:    func(p resumeChainPayload) resumeChainPayload { return p },
 			},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				reader, writer := io.Pipe()
-				t.Cleanup(func() { _ = writer.Close() })
+				input := newTypeAhead("")
+				t.Cleanup(input.end)
 
 				var probe resumeWaitProbe
 				payload := samplePayload()
 				payload.Report = "could not clear the pending marker"
 				payload.Width, payload.Height = 80, 24
-				cfg := newResumeWaitConfig(t, &probe, payload, reader)
+				cfg := newResumeWaitConfig(t, &probe, payload, input)
 
 				winch := make(chan os.Signal, 1)
 				var quietListens, settleWindows atomic.Int64
@@ -449,9 +443,11 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					fired <- time.Now()
 					return fired
 				}
-				cfg.AwaitInput = func(time.Duration) (bool, error) {
-					quietListens.Add(1)
-					return false, nil
+				cfg.AwaitInput = func(d time.Duration) (bool, error) {
+					if d != resumeIdleListen {
+						quietListens.Add(1)
+					}
+					return input.await(d)
 				}
 
 				done := make(chan error, 1)
@@ -463,12 +459,10 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 				case <-time.After(150 * time.Millisecond):
 				}
 				if got := settleWindows.Load() + quietListens.Load(); got != 0 {
-					t.Fatalf("the wait armed %d windows or listens while left alone, want 0", got)
+					t.Fatalf("the wait armed %d windows or listens past a byte while left alone, want 0", got)
 				}
 
-				if err := tc.deliver(writer, func() { resize.deliver(winch) }); err != nil {
-					t.Fatalf("delivering the answer: %v", err)
-				}
+				tc.deliver(input, func() { resize.deliver(winch) })
 				select {
 				case err := <-done:
 					if err != nil {

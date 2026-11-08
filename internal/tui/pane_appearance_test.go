@@ -132,6 +132,11 @@ type probeHarness struct {
 	restores int
 	drops    int
 	events   []string
+
+	// attached is what the probe is told of whether a terminal shows the
+	// pane, and asks counts how often it asked.
+	attached bool
+	asks     int
 }
 
 func newProbeHarness(t *testing.T) *probeHarness {
@@ -150,6 +155,7 @@ func newProbeHarness(t *testing.T) *probeHarness {
 		replies:  write,
 		timeout:  testProbeTimeout,
 		terminal: true,
+		attached: true,
 	}
 }
 
@@ -157,11 +163,16 @@ func (h *probeHarness) record(event string) {
 	h.events = append(h.events, event)
 }
 
-func (h *probeHarness) dropInput(err error) func() error {
-	return func() error {
+func (h *probeHarness) dropInput(err error) func() (int, error) {
+	return h.dropReading(0, err)
+}
+
+// dropReading is a drop that reads replies off with what it discards.
+func (h *probeHarness) dropReading(replies int, err error) func() (int, error) {
+	return func() (int, error) {
 		h.drops++
 		h.record(eventDrop)
-		return err
+		return replies, err
 	}
 }
 
@@ -199,6 +210,10 @@ func (h *probeHarness) probe() paneAppearanceProbe {
 			return func() { h.restores++ }, nil
 		},
 		timeout: h.timeout,
+		attached: func() bool {
+			h.asks++
+			return h.attached
+		},
 	}
 }
 
@@ -475,60 +490,88 @@ func TestResolvePaneTheme(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports an unanswered question only where it asked one, a drop changing nothing", func(t *testing.T) {
+	t.Run("it reports a question asked only where it asked one", func(t *testing.T) {
 		pair, _, _ := adaptivePair(t)
 		cases := []struct {
 			name       string
 			n          theme.Nomination
 			colourless bool
-			drop       bool
-			unanswered bool
+			attached   bool
+			asked      bool
 		}{
-			{"adaptive pair", pair, false, false, true},
-			{"adaptive pair, dropping its input", pair, false, true, true},
-			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, false, false},
-			{"zero", theme.Nomination{}, false, false, false},
-			{"colourless", pair, true, false, false},
+			{"adaptive pair", pair, false, true, true},
+			{"adaptive pair no terminal shows", pair, false, false, false},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, true, false},
+			{"zero", theme.Nomination{}, false, true, false},
+			{"colourless", pair, true, true, false},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				h := newProbeHarness(t)
-				var drop func() error
-				if tc.drop {
-					drop = h.dropInput(nil)
-				}
+				h.attached = tc.attached
 
-				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, drop, h.probe())
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, h.dropInput(nil), h.probe())
 
-				if found.Unanswered != tc.unanswered {
-					t.Errorf("Unanswered = %v, want %v", found.Unanswered, tc.unanswered)
+				if found.Asked != tc.asked {
+					t.Errorf("Asked = %v, want %v", found.Asked, tc.asked)
 				}
 			})
 		}
 	})
 
-	t.Run("it hands the probe the questions owed, and settles none where it asks none", func(t *testing.T) {
+	t.Run("it asks whether a terminal shows the pane only where it would ask it its background", func(t *testing.T) {
 		pair, _, _ := adaptivePair(t)
 		cases := []struct {
 			name       string
 			n          theme.Nomination
 			colourless bool
-			settled    int
-			unanswered bool
+			terminal   bool
+			asks       int
 		}{
-			{"adaptive pair", pair, false, 1, true},
-			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, 0, false},
-			{"colourless", pair, true, 0, false},
+			{"adaptive pair", pair, false, true, 1},
+			{"adaptive pair off a terminal", pair, false, false, 0},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, true, 0},
+			{"zero", theme.Nomination{}, false, true, 0},
+			{"colourless", pair, true, true, 0},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.terminal = tc.terminal
+				h.reply(t, darkReply)
+
+				_, _ = resolvePaneTheme(tc.n, tc.colourless, 0, nil, h.probe())
+
+				if h.asks != tc.asks {
+					t.Errorf("asked whether a terminal shows the pane %d times, want %d", h.asks, tc.asks)
+				}
+			})
+		}
+	})
+
+	t.Run("it counts the replies the drop read with its own, where it asked and where it didn't", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+			dropErr    error
+			replies    int
+		}{
+			{"adaptive pair", pair, false, nil, 3},
+			{"adaptive pair, its drop failing", pair, false, errSeam, 3},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, nil, 2},
+			{"colourless", pair, true, nil, 2},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, darkReply)
 
-				found, _ := resolvePaneTheme(tc.n, tc.colourless, 1, nil, h.probe())
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, h.dropReading(2, tc.dropErr), h.probe())
 
-				if found.Settled != tc.settled || found.Unanswered != tc.unanswered {
-					t.Errorf("Settled = %d, Unanswered = %v with one question owed; want %d, %v", found.Settled, found.Unanswered, tc.settled, tc.unanswered)
+				if found.Replies != tc.replies {
+					t.Errorf("Replies = %d, want %d", found.Replies, tc.replies)
 				}
 			})
 		}
@@ -665,6 +708,28 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.assertReadNothing(t)
 	})
 
+	// A question no terminal sees is never answered: a reply read later, a
+	// terminal's that attached since, answers a question of its own.
+	t.Run("it resolves dark, asks nothing and reads nothing where no terminal shows the pane", func(t *testing.T) {
+		h := newProbeHarness(t)
+		h.attached = false
+		h.reply(t, lightReply)
+
+		got, found := h.probe().detect(1)
+
+		if got != theme.MemberDark {
+			t.Errorf("resolved %v with no terminal showing the pane, want %v", got, theme.MemberDark)
+		}
+		if found.Asked || found.Replies != 0 {
+			t.Errorf("Asked = %v, Replies = %d; want no question asked and no reply read", found.Asked, found.Replies)
+		}
+		h.assertWroteNothing(t)
+		h.assertReadNothing(t)
+		if h.restores != 0 {
+			t.Errorf("entered raw mode %d times with no question to ask, want 0", h.restores)
+		}
+	})
+
 	t.Run("it resolves dark and writes nothing when raw mode cannot be entered", func(t *testing.T) {
 		h := newProbeHarness(t)
 		h.rawErr = errSeam
@@ -791,17 +856,17 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		}
 	})
 
-	t.Run("it reports a question no reply answered", func(t *testing.T) {
+	t.Run("it reports the question asked and the whole replies it read", func(t *testing.T) {
 		cases := []struct {
-			name       string
-			input      string
-			unanswered bool
+			name    string
+			input   string
+			replies int
 		}{
-			{"a reply", darkReply, false},
-			{"Enter, then a reply", "\r" + lightReply, false},
-			{"no reply", "", true},
-			{"Enter and no reply", "\r", true},
-			{"a truncated reply", truncatedReply, true},
+			{"a reply", darkReply, 1},
+			{"Enter, then a reply", "\r" + lightReply, 1},
+			{"no reply", "", 0},
+			{"Enter and no reply", "\r", 0},
+			{"a truncated reply", truncatedReply, 0},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -812,31 +877,32 @@ func TestPaneAppearanceProbe(t *testing.T) {
 
 				_, found := h.probe().detect(0)
 
-				if found.Unanswered != tc.unanswered {
-					t.Errorf("Unanswered = %v for %q, want %v", found.Unanswered, tc.input, tc.unanswered)
+				if !found.Asked || found.Replies != tc.replies {
+					t.Errorf("Asked = %v, Replies = %d for %q; want true, %d", found.Asked, found.Replies, tc.input, tc.replies)
 				}
 			})
 		}
 	})
 
 	// A terminal answers in the order it was asked, so the replies to questions
-	// still owed from earlier draws come ahead of this one's.
-	t.Run("it settles the questions owed before its own with the replies that come first", func(t *testing.T) {
+	// still owed from earlier draws come ahead of this one's, and the latest
+	// read is the terminal's background as it is now.
+	t.Run("it reads until a reply has come for every question owed, its own included, and paints the latest", func(t *testing.T) {
 		cases := []struct {
-			name       string
-			owed       int
-			replies    []string
-			want       theme.Member
-			settled    int
-			unanswered bool
+			name    string
+			owed    int
+			replies []string
+			want    theme.Member
+			read    int
+			unread  string
 		}{
-			{"nothing owed before, and its own reply", 0, []string{darkReply}, theme.MemberDark, 0, false},
-			{"nothing owed before, its own reply, and a second terminal's", 0, []string{lightReply, darkReply}, theme.MemberLight, 0, false},
-			{"one owed before, and that one's reply alone", 1, []string{lightReply}, theme.MemberLight, 1, true},
-			{"one owed before, that one's reply, then its own", 1, []string{darkReply, lightReply}, theme.MemberLight, 1, false},
-			{"one owed before, both replies, and a second terminal's", 1, []string{darkReply, lightReply, darkReply}, theme.MemberLight, 1, false},
-			{"two owed before, and one reply", 2, []string{lightReply}, theme.MemberLight, 1, true},
-			{"one owed before, and no reply", 1, nil, theme.MemberDark, 0, true},
+			{"nothing owed before, and its own reply", 0, []string{darkReply}, theme.MemberDark, 1, ""},
+			{"nothing owed before, and a second terminal's reply behind its own", 0, []string{lightReply, darkReply}, theme.MemberLight, 1, darkReply},
+			{"one owed before, and one reply", 1, []string{lightReply}, theme.MemberLight, 1, ""},
+			{"one owed before, and two replies", 1, []string{darkReply, lightReply}, theme.MemberLight, 2, ""},
+			{"one owed before, two replies and a second terminal's", 1, []string{darkReply, lightReply, darkReply}, theme.MemberLight, 2, darkReply},
+			{"two owed before, and one reply", 2, []string{lightReply}, theme.MemberLight, 1, ""},
+			{"one owed before, and no reply", 1, nil, theme.MemberDark, 0, ""},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -848,8 +914,11 @@ func TestPaneAppearanceProbe(t *testing.T) {
 				if got != tc.want {
 					t.Errorf("resolved %v, want %v", got, tc.want)
 				}
-				if found.Settled != tc.settled || found.Unanswered != tc.unanswered {
-					t.Errorf("Settled = %d, Unanswered = %v; want %d, %v", found.Settled, found.Unanswered, tc.settled, tc.unanswered)
+				if found.Replies != tc.read {
+					t.Errorf("Replies = %d, want %d", found.Replies, tc.read)
+				}
+				if left := h.unread(); left != tc.unread {
+					t.Errorf("left %q on the input for the next reader, want %q", left, tc.unread)
 				}
 				if len(found.Typed) != 0 {
 					t.Errorf("handed back %q as typed, want no reply among it", found.Typed)
@@ -861,18 +930,18 @@ func TestPaneAppearanceProbe(t *testing.T) {
 	t.Run("it reads on past its deadline, once, to finish a reply whose head has arrived", func(t *testing.T) {
 		const head, tail = "\x1b]11;rgb:e1e1/e2", "e2/e7e7\a"
 		cases := []struct {
-			name       string
-			chunks     []string
-			want       theme.Member
-			typed      string
-			unanswered bool
-			unread     string
+			name    string
+			chunks  []string
+			want    theme.Member
+			typed   string
+			replies int
+			unread  string
 		}{
-			{"a reply split across the deadline", []string{head, deadlinePasses, tail}, theme.MemberLight, "", false, ""},
-			{"Enter, then a reply split across the deadline", []string{"\r" + head, deadlinePasses, tail}, theme.MemberLight, "\r", false, ""},
-			{"an introducer split across the deadline", []string{"\x1b]1", deadlinePasses, "1;rgb:e1e1/e2e2/e7e7\a"}, theme.MemberLight, "", false, ""},
-			{"a reply's head and nothing more", []string{head}, theme.MemberDark, "", true, ""},
-			{"a reply's rest past a second deadline", []string{head, deadlinePasses, "e2/e7", deadlinePasses, "e7\a"}, theme.MemberDark, "", true, "e7\a"},
+			{"a reply split across the deadline", []string{head, deadlinePasses, tail}, theme.MemberLight, "", 1, ""},
+			{"Enter, then a reply split across the deadline", []string{"\r" + head, deadlinePasses, tail}, theme.MemberLight, "\r", 1, ""},
+			{"an introducer split across the deadline", []string{"\x1b]1", deadlinePasses, "1;rgb:e1e1/e2e2/e7e7\a"}, theme.MemberLight, "", 1, ""},
+			{"a reply's head and nothing more", []string{head}, theme.MemberDark, "", 0, ""},
+			{"a reply's rest past a second deadline", []string{head, deadlinePasses, "e2/e7", deadlinePasses, "e7\a"}, theme.MemberDark, "", 0, "e7\a"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -881,8 +950,8 @@ func TestPaneAppearanceProbe(t *testing.T) {
 
 				got, found := h.probe().detect(0)
 
-				if got != tc.want || string(found.Typed) != tc.typed || found.Unanswered != tc.unanswered {
-					t.Errorf("resolved %v, typed %q, Unanswered %v for reads %q; want %v, %q, %v", got, found.Typed, found.Unanswered, tc.chunks, tc.want, tc.typed, tc.unanswered)
+				if got != tc.want || string(found.Typed) != tc.typed || found.Replies != tc.replies {
+					t.Errorf("resolved %v, typed %q, Replies %d for reads %q; want %v, %q, %d", got, found.Typed, found.Replies, tc.chunks, tc.want, tc.typed, tc.replies)
 				}
 				if left := h.unread(); left != tc.unread {
 					t.Errorf("left %q on the input for the next reader, want %q", left, tc.unread)
@@ -941,7 +1010,7 @@ func TestPaneAppearanceProbe(t *testing.T) {
 }
 
 func TestProductionPaneAppearanceProbe(t *testing.T) {
-	p := newPaneAppearanceProbe()
+	p := newPaneAppearanceProbe(func() bool { return true })
 
 	t.Run("it races the picker's own detect timeout", func(t *testing.T) {
 		if p.timeout != appearanceDetectTimeout {
@@ -950,9 +1019,9 @@ func TestProductionPaneAppearanceProbe(t *testing.T) {
 	})
 
 	t.Run("it wires every seam", func(t *testing.T) {
-		if p.out == nil || p.armRead == nil || p.isTerminal == nil || p.makeRaw == nil {
-			t.Errorf("production probe has an unwired seam: out=%v armRead=%v isTerminal=%v makeRaw=%v",
-				p.out != nil, p.armRead != nil, p.isTerminal != nil, p.makeRaw != nil)
+		if p.out == nil || p.armRead == nil || p.isTerminal == nil || p.makeRaw == nil || p.attached == nil {
+			t.Errorf("production probe has an unwired seam: out=%v armRead=%v isTerminal=%v makeRaw=%v attached=%v",
+				p.out != nil, p.armRead != nil, p.isTerminal != nil, p.makeRaw != nil, p.attached != nil)
 		}
 	})
 }

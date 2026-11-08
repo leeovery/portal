@@ -29,20 +29,26 @@ type arrivalHarness struct {
 	reader  *trackedReader
 	sizes   *paneResize
 	winch   chan os.Signal
-	listens chan chan bool
+	listens chan listen
 	settles chan chan time.Time
 	done    chan error
 	ended   chan struct{}
 	clock   *testClock
 
-	// The wait's listen past the latest byte, or past input it was told was
-	// still arriving when it started, answered by whether another byte arrived.
-	live chan bool
+	// The wait's listen in flight while it waits between arrivals, past the
+	// latest byte or for the next, answered by whether a byte arrived.
+	live *listen
 
 	// The bytes of the arrival the wait has yet to judge, and the quiet
 	// windows it has held that arrival open for a reply's rest.
 	pending []byte
 	heldFor int
+}
+
+// listen is one listen the wait takes, held until the test answers it.
+type listen struct {
+	window time.Duration
+	reply  chan bool
 }
 
 func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
@@ -55,7 +61,7 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 		reader:  &trackedReader{t: t, inner: pipeReader, started: make(chan struct{}, 1)},
 		sizes:   &paneResize{drawn: payload, to: resizedSize},
 		winch:   make(chan os.Signal, 1),
-		listens: make(chan chan bool),
+		listens: make(chan listen),
 		settles: make(chan chan time.Time, 8),
 		done:    make(chan error, 1),
 		ended:   make(chan struct{}),
@@ -69,12 +75,12 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 	cfg.Size = h.sizes.size
 	cfg.Now = h.clock.now
 	cfg.AwaitInput = func(d time.Duration) (bool, error) {
-		if d != resumeInputQuiet {
-			t.Errorf("listen window = %v, want %v", d, resumeInputQuiet)
+		if d != resumeInputQuiet && d != resumeIdleListen {
+			t.Errorf("listen window = %v, want the quiet %v or the idle %v", d, resumeInputQuiet, resumeIdleListen)
 		}
-		reply := make(chan bool)
-		h.listens <- reply
-		arrived := <-reply
+		l := listen{window: d, reply: make(chan bool)}
+		h.listens <- l
+		arrived := <-l.reply
 		if !arrived {
 			h.clock.advance(d)
 		}
@@ -94,17 +100,15 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 		h.done <- runResumeWait(cfg)
 		close(h.ended)
 	}()
-	if payload.InputArriving || payload.Typed != "" {
-		h.live = h.awaitListen("a listen for input still arriving at start-up")
-	}
+	h.live = h.awaitListen("the wait's first listen")
 	return h
 }
 
-func (h *arrivalHarness) awaitListen(what string) chan bool {
+func (h *arrivalHarness) awaitListen(what string) *listen {
 	h.t.Helper()
 	select {
-	case reply := <-h.listens:
-		return reply
+	case l := <-h.listens:
+		return &l
 	case err := <-h.done:
 		h.t.Fatalf("the wait ended while waiting for %s: %v", what, err)
 	case <-time.After(resumeArrivalTestBudget):
@@ -120,17 +124,18 @@ func (h *arrivalHarness) arrive(keys string) {
 	h.pending = append(h.pending, keys...)
 	go func() { _, _ = h.writer.Write([]byte(keys)) }()
 	for range len(keys) {
-		if h.live != nil {
-			h.answerListen(true)
+		if h.live == nil {
+			h.live = h.awaitListen("a listen for a byte of " + strconv.Quote(keys))
 		}
-		h.live = h.awaitListen("listen past a byte of " + strconv.Quote(keys))
+		h.answerListen(true)
+		h.live = h.awaitListen("a listen past a byte of " + strconv.Quote(keys))
 	}
 }
 
 func (h *arrivalHarness) answerListen(arrived bool) {
 	h.t.Helper()
 	select {
-	case h.live <- arrived:
+	case h.live.reply <- arrived:
 		h.live = nil
 	case <-time.After(resumeArrivalTestBudget):
 		h.t.Fatal("the wait stopped listening")
@@ -139,8 +144,8 @@ func (h *arrivalHarness) answerListen(arrived bool) {
 
 // quiet lets the pane fall silent after the latest arrival, through every
 // quiet window the wait holds an arrival ending in a reply's head open for,
-// and returns once the wait has judged it: gone back to reading, or ended on
-// an answer.
+// or through the listen in flight with no arrival open, and returns once the
+// wait has acted on it: taken its next listen, or ended.
 func (h *arrivalHarness) quiet() {
 	h.t.Helper()
 	if _, _, head := bgreply.Split(h.pending); head != nil {
@@ -149,18 +154,13 @@ func (h *arrivalHarness) quiet() {
 		}
 	}
 	h.pending, h.heldFor = nil, 0
-	reads := h.reader.reads.Load()
 	h.answerListen(false)
-	judged := harnesstest.PollUntil(h.t, resumeArrivalTestBudget, time.Millisecond, func() bool {
-		select {
-		case <-h.ended:
-			return true
-		default:
-			return h.reader.reads.Load() > reads
-		}
-	})
-	if !judged {
-		h.t.Fatal("the wait never judged the arrival once the pane fell quiet")
+	select {
+	case l := <-h.listens:
+		h.live = &l
+	case <-h.ended:
+	case <-time.After(resumeArrivalTestBudget):
+		h.t.Fatal("the wait never acted on the pane falling quiet")
 	}
 }
 
@@ -182,12 +182,23 @@ func (h *arrivalHarness) wait() error {
 	return nil
 }
 
+// endInput ends the input under a wait still listening and returns what the
+// wait ended with.
+func (h *arrivalHarness) endInput() error {
+	h.t.Helper()
+	_ = h.writer.Close()
+	if h.live == nil {
+		h.live = h.awaitListen("a listen to find the input ended")
+	}
+	h.answerListen(true)
+	return h.wait()
+}
+
 // stillWaiting ends the input and asserts the wait had answered nothing and
 // touched nothing before it did.
 func (h *arrivalHarness) stillWaiting() {
 	h.t.Helper()
-	_ = h.writer.Close()
-	if err := h.wait(); !errors.Is(err, io.EOF) {
+	if err := h.endInput(); !errors.Is(err, io.EOF) {
 		h.t.Fatalf("runResumeWait() error = %v, want the EOF that ended a wait still going", err)
 	}
 	assertNoHandOff(h.t, h.probe)
@@ -474,13 +485,31 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 
 		h.arrive("echo o")
 		h.quiet()
-		h.sizes.deliver(h.winch)
-		h.awaitSettle() <- time.Now()
+		h.resizeSettled()
+		h.quiet()
 
 		h.answered()
 		want := start
 		want.InputArriving = false
 		assertHandOff(t, h.probe, want)
+	})
+
+	// The redraw an attach's SIGWINCH asks for comes due about as the user
+	// reaches for a key: the listen in flight as it does finds the key, and
+	// the key answers as it would have with no redraw due.
+	t.Run("a key arriving as a redraw comes due answers, the redraw waiting on the listen in flight", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startArrivals(t, payload)
+		if h.live.window != resumeIdleListen {
+			t.Fatalf("the wait's first listen lasts %v, want the idle %v", h.live.window, resumeIdleListen)
+		}
+
+		h.resizeSettled()
+		h.arrive("d")
+		h.quiet()
+
+		h.answered()
+		assertHandOff(t, h.probe, opened(payload))
 	})
 }
 
@@ -590,13 +619,17 @@ func executeChainArgv(t *testing.T, args []string) {
 // typeAhead is input a user is still typing: bytes join it while the wait runs,
 // and a byte nobody has read stays for whichever program reads the pane next.
 type typeAhead struct {
-	mu    sync.Mutex
-	cond  *sync.Cond
-	bytes []byte
+	mu     sync.Mutex
+	cond   *sync.Cond
+	bytes  []byte
+	closed bool
+
+	// listening is signalled, never blocking, as each await begins.
+	listening chan struct{}
 }
 
 func newTypeAhead(typed string) *typeAhead {
-	q := &typeAhead{bytes: []byte(typed)}
+	q := &typeAhead{bytes: []byte(typed), listening: make(chan struct{}, 1)}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
@@ -604,8 +637,11 @@ func newTypeAhead(typed string) *typeAhead {
 func (q *typeAhead) Read(p []byte) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for len(q.bytes) == 0 {
+	for len(q.bytes) == 0 && !q.closed {
 		q.cond.Wait()
+	}
+	if len(q.bytes) == 0 {
+		return 0, io.EOF
 	}
 	n := copy(p, q.bytes)
 	q.bytes = q.bytes[n:]
@@ -619,11 +655,50 @@ func (q *typeAhead) typeKey(b byte) {
 	q.cond.Broadcast()
 }
 
+func (q *typeAhead) typeKeys(keys string) {
+	for _, b := range []byte(keys) {
+		q.typeKey(b)
+	}
+}
+
+// end ends the input, as a session's tty hanging up does.
+func (q *typeAhead) end() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closed = true
+	q.cond.Broadcast()
+}
+
 // arrived answers at once: a key typed alone has nothing behind it yet.
 func (q *typeAhead) arrived(time.Duration) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.bytes) > 0, nil
+}
+
+// await answers as a terminal's select does: at once for a byte unread or the
+// input ended, and otherwise once a key is typed or window has passed.
+func (q *typeAhead) await(window time.Duration) (bool, error) {
+	select {
+	case q.listening <- struct{}{}:
+	default:
+	}
+	passed := time.AfterFunc(window, func() {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		q.cond.Broadcast()
+	})
+	defer passed.Stop()
+	deadline := time.Now().Add(window)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.bytes) == 0 && !q.closed {
+		if !time.Now().Before(deadline) {
+			return false, nil
+		}
+		q.cond.Wait()
+	}
+	return true, nil
 }
 
 func (q *typeAhead) unread() string {

@@ -16,7 +16,7 @@ func TestTTYDrain(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
 
-		if err := resumeInputDrain.drain(int(r.Fd())); err == nil {
+		if _, err := resumeInputDrain.drain(int(r.Fd())); err == nil {
 			t.Error("drain on a pipe returned nil, want an error")
 		}
 	})

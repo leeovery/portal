@@ -31,15 +31,20 @@ type paneAppearanceProbe struct {
 	isTerminal func() bool
 	makeRaw    func() (restore func(), err error)
 	timeout    time.Duration
+
+	// attached reports whether a terminal shows the pane to answer a
+	// question, asked only once one would be written.
+	attached func() bool
 }
 
-func newPaneAppearanceProbe() paneAppearanceProbe {
+func newPaneAppearanceProbe(attached func() bool) paneAppearanceProbe {
 	return paneAppearanceProbe{
 		out:        os.Stdout,
 		armRead:    armStdinRead,
 		isTerminal: func() bool { return term.IsTerminal(os.Stdin.Fd()) },
 		makeRaw:    makeStdinRaw,
 		timeout:    appearanceDetectTimeout,
+		attached:   attached,
 	}
 }
 
@@ -54,42 +59,46 @@ type PaneAppearance struct {
 	// the input, so it is nil when one was supplied.
 	Typed []byte
 
-	// Settled is how many of the questions owed a reply before this one the
-	// replies the probe read answered, oldest first: a terminal answers in the
-	// order it was asked, so their replies come ahead of this question's.
-	Settled int
+	// Asked reports a question written: the terminal answers it, after the
+	// probe has stopped reading if not before, into whatever reads the pane's
+	// input next.
+	Asked bool
 
-	// Unanswered reports a question written and given up on with its own
-	// reply unread: the terminal may still answer, after the probe has
-	// stopped reading, into whatever reads the pane's input next. A drop
-	// doesn't change it, since the reply can arrive after the drop as well.
-	Unanswered bool
+	// Replies is how many whole replies were read off the pane's input, the
+	// probe's and the drop's, each answering this question or one an earlier
+	// draw asked.
+	Replies int
 }
 
 // ResolvePaneTheme answers which palette a pane draw paints in. A constant
 // nomination paints from the first frame and a colourless draw detects nothing,
 // both without writing a byte to the terminal; a pair is raced against the
 // picker's own detect timeout and resolves dark for every way the question can
-// go unanswered.
+// go unanswered. A pane no terminal shows, as attached reports, is asked
+// nothing and painted as for a question unanswered: no terminal would ever
+// answer it.
 //
 // owed is how many questions earlier draws asked are still owed their replies,
 // which the terminal sends ahead of this one's.
 //
 // dropInput runs once the appearance question has resolved and never before it:
 // the terminal's own answer can arrive after the probe's deadline, and a drop
-// taken first cannot clear it. A nil dropInput is a no-op. The palette is
-// returned whether or not the drop succeeded, alongside the drop's own error.
-func ResolvePaneTheme(n theme.Nomination, colourless bool, owed int, dropInput func() error) (PaneAppearance, error) {
-	return resolvePaneTheme(n, colourless, owed, dropInput, newPaneAppearanceProbe())
+// taken first cannot clear it. It answers how many replies it read off with
+// what it discarded. A nil dropInput is a no-op. The palette is returned
+// whether or not the drop succeeded, alongside the drop's own error.
+func ResolvePaneTheme(n theme.Nomination, colourless bool, owed int, attached func() bool, dropInput func() (replies int, err error)) (PaneAppearance, error) {
+	return resolvePaneTheme(n, colourless, owed, dropInput, newPaneAppearanceProbe(attached))
 }
 
-func resolvePaneTheme(n theme.Nomination, colourless bool, owed int, dropInput func() error, p paneAppearanceProbe) (PaneAppearance, error) {
+func resolvePaneTheme(n theme.Nomination, colourless bool, owed int, dropInput func() (int, error), p paneAppearanceProbe) (PaneAppearance, error) {
 	found := selectPaneTheme(n, colourless, owed, p)
 	if dropInput == nil {
 		return found, nil
 	}
 	found.Typed = nil
-	return found, dropInput()
+	replies, err := dropInput()
+	found.Replies += replies
+	return found, err
 }
 
 func selectPaneTheme(n theme.Nomination, colourless bool, owed int, p paneAppearanceProbe) PaneAppearance {
@@ -105,12 +114,13 @@ func selectPaneTheme(n theme.Nomination, colourless bool, owed int, p paneAppear
 }
 
 // detect asks the terminal its background, owed questions still owed their
-// replies ahead of it. The member is its own reply's or, unanswered, the latest
-// earlier one's it read, which a terminal attached a moment ago sent; what it
-// read beside the replies, and which questions they answered, is in the
-// appearance.
+// replies ahead of it, reading until as many replies as questions are owed
+// have arrived or the read gives up. The member is its own reply's or, short
+// of it, the latest one's it read, which a terminal attached a moment ago
+// sent; whether it asked, how many replies it read and what it read beside
+// them is in the appearance.
 func (p paneAppearanceProbe) detect(owed int) (theme.Member, PaneAppearance) {
-	if !p.isTerminal() {
+	if !p.isTerminal() || !p.attached() {
 		return theme.MemberDark, PaneAppearance{}
 	}
 	restore, err := p.makeRaw()
@@ -129,7 +139,7 @@ func (p paneAppearanceProbe) detect(owed int) (theme.Member, PaneAppearance) {
 		return theme.MemberDark, PaneAppearance{}
 	}
 	replies, typed := p.readBackgroundReplies(reader, owed+1)
-	found := PaneAppearance{Typed: typed, Settled: min(len(replies), owed), Unanswered: len(replies) <= owed}
+	found := PaneAppearance{Typed: typed, Asked: true, Replies: len(replies)}
 	if len(replies) == 0 {
 		return theme.MemberDark, found
 	}

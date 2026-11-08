@@ -31,7 +31,7 @@ func TestRunResumeDraw_Echo(t *testing.T) {
 		t.Run(s.name+" turns echo off before the appearance query", func(t *testing.T) {
 			var probe resumeDrawProbe
 			cfg := newResumeDrawConfig(t, &probe, s.payload(), fixedSize(100, 30))
-			cfg.DropInputQueue = func() error { return nil }
+			cfg.DropInputQueue = func() (int, error) { return 0, nil }
 
 			if err := runResumeDraw(cfg); err != nil {
 				t.Fatalf("runResumeDraw() error = %v", err)
@@ -159,8 +159,9 @@ func TestResumeWait_EchoStaysOffAcrossScreens(t *testing.T) {
 
 	t.Run("Escape on the confirmation redraws with echo still off", func(t *testing.T) {
 		var probe resumeWaitProbe
-		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), heldInput(t, "\x1b"))
-		cfg.AwaitInput = quietAtOnce
+		input := newTypeAhead("\x1b")
+		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
+		cfg.AwaitInput = input.await
 
 		if err := runResumeWait(cfg); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -171,7 +172,9 @@ func TestResumeWait_EchoStaysOffAcrossScreens(t *testing.T) {
 
 	t.Run("a resize redraws with echo still off", func(t *testing.T) {
 		var probe resumeWaitProbe
-		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), heldInput(t, ""))
+		input := newTypeAhead("")
+		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
+		cfg.AwaitInput = input.await
 		winch := make(chan os.Signal, 1)
 		winch <- syscall.SIGWINCH
 		cfg.Winch = winch

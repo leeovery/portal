@@ -4,8 +4,10 @@ package cmd
 
 import (
 	"errors"
+	"io"
 	"time"
 
+	"github.com/leeovery/portal/internal/bgreply"
 	"golang.org/x/sys/unix"
 )
 
@@ -15,28 +17,32 @@ var (
 )
 
 // ttyDrain discards a terminal's input until none has arrived for settle,
-// giving up once bound has elapsed with input still arriving.
+// giving up once bound has elapsed with input still arriving. It reads what it
+// discards, so a reply to a background question among it is counted rather
+// than lost unseen, and a reply cut off as the input falls quiet is waited on
+// for its rest, bgreply.TailWait at most, so none is left half read.
 type ttyDrain struct {
 	settle, bound time.Duration
 }
 
 // resumeInputDrain settles for as long as the waiter waits for a session to
-// fall quiet, the gap it judges one arrival by. What refills a flushed queue is
-// the session's zmx daemon writing the rest of an attached client's input into
-// the pty. The figure is kept from the tmux version, whose server refilled the
-// queue within its own event loop; the gap under zmx has not been measured.
+// fall quiet, the gap it judges one arrival by. What keeps the input arriving
+// is the session's zmx daemon writing the rest of an attached client's input
+// into the pty. The figure is kept from the tmux version, whose server wrote
+// it within its own event loop; the gap under zmx has not been measured.
 var resumeInputDrain = ttyDrain{settle: resumeInputQuiet, bound: time.Second}
 
 // drain runs with canonical processing off, because a canonical terminal
 // reports nothing readable for a line whose newline has not yet arrived, and
-// puts back the modes it found before it returns.
-func (d ttyDrain) drain(fd int) (err error) {
+// puts back the modes it found before it returns. It answers how many replies
+// it read, beside any error.
+func (d ttyDrain) drain(fd int) (replies int, err error) {
 	if fd < 0 || fd >= unix.FD_SETSIZE {
-		return errUnselectableTTY
+		return 0, errUnselectableTTY
 	}
 	found, err := unix.IoctlGetTermios(fd, ioctlReadTermios)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	draining := *found
 	draining.Lflag &^= unix.ICANON
@@ -44,7 +50,7 @@ func (d ttyDrain) drain(fd int) (err error) {
 	draining.Cc[unix.VMIN] = 1
 	draining.Cc[unix.VTIME] = 0
 	if err := unix.IoctlSetTermios(fd, ioctlWriteTermios, &draining); err != nil {
-		return err
+		return 0, err
 	}
 	defer func() {
 		if restoreErr := unix.IoctlSetTermios(fd, ioctlWriteTermios, found); err == nil {
@@ -53,19 +59,45 @@ func (d ttyDrain) drain(fd int) (err error) {
 	}()
 
 	deadline := time.Now().Add(d.bound)
+	var read bgreply.Stream
+	buf := make([]byte, 4096)
 	for {
-		if err := flushTTYInput(fd); err != nil {
-			return err
+		window := d.settle
+		if read.Unfinished() {
+			window = max(window, bgreply.TailWait)
 		}
-		arrived, err := awaitTTYInput(fd, d.settle)
+		arrived, err := awaitTTYInput(fd, window)
 		switch {
 		case err != nil:
-			return err
+			return replies, err
 		case !arrived:
-			return nil
-		case time.Now().After(deadline):
-			return errInputKeptArriving
+			return replies, nil
 		}
+		n, err := readTTY(fd, buf)
+		if err != nil {
+			return replies, err
+		}
+		finished, _ := read.Take(buf[:n])
+		replies += finished
+		if time.Now().After(deadline) {
+			return replies, errInputKeptArriving
+		}
+	}
+}
+
+// readTTY reads what fd holds once select has reported it readable.
+func readTTY(fd int, buf []byte) (int, error) {
+	for {
+		n, err := unix.Read(fd, buf)
+		switch {
+		case errors.Is(err, unix.EINTR):
+			continue
+		case err != nil:
+			return 0, err
+		case n == 0:
+			return 0, io.EOF
+		}
+		return n, nil
 	}
 }
 

@@ -41,6 +41,13 @@ const resumeInputQuiet = 50 * time.Millisecond
 // judged as keys.
 const resumeReplyTailHolds = int(bgreply.TailWait / resumeInputQuiet)
 
+// resumeIdleListen is how long the waiter listens for input with no arrival
+// open. Every read the waiter makes is of a byte a listen has found arrived,
+// and every listen ends within its window, so the waiter never execs with a
+// read outstanding to take a byte the next process image should have: a
+// redraw that comes due waits for the listen in flight, this at most.
+const resumeIdleListen = 100 * time.Millisecond
+
 type resumeWaitConfig struct {
 	resumeChainPayload
 
@@ -102,6 +109,35 @@ type resumeWaitConfig struct {
 	// replyHead is a reply cut off at the end of the arrival last judged, its
 	// rest still to come, for the wait before a hand-off to finish.
 	replyHead []byte
+}
+
+// resumeRedraws is the redraw a size change owes the panel: a SIGWINCH arms
+// the settle window and each further one restarts it, and the window's end
+// makes the redraw due.
+type resumeRedraws struct {
+	settled <-chan time.Time
+	// signalled marks a window a SIGWINCH opened. Only the window start-up
+	// opened compares the size before it redraws: a SIGWINCH may be zmx
+	// attaching a client at an unchanged size.
+	signalled bool
+	due       bool
+}
+
+// awaitRead waits for the listen in flight to answer, taking every size
+// change and settle window's end meanwhile.
+func (r *resumeRedraws) awaitRead(cfg resumeWaitConfig, results <-chan resumeRead) resumeRead {
+	for {
+		select {
+		case read := <-results:
+			return read
+		case <-cfg.Winch:
+			r.settled = cfg.Settle(resumeResizeSettle)
+			r.signalled = true
+		case <-r.settled:
+			r.settled = nil
+			r.due = r.due || r.signalled || !resumeSizeUnchanged(cfg)
+		}
+	}
 }
 
 func (cfg resumeWaitConfig) restore() {
@@ -212,6 +248,15 @@ func (a *resumeArrival) open() bool {
 	return a.carried || len(a.kept) > 0
 }
 
+// window is how long the next listen waits: the quiet that ends an arrival
+// while one is open, and the idle listen otherwise.
+func (a *resumeArrival) window() time.Duration {
+	if a.open() {
+		return resumeInputQuiet
+	}
+	return resumeIdleListen
+}
+
 // hold keeps the arrival open through a quiet window while it ends in a reply
 // whose rest is still to come, for as long as resumeReplyTailHolds allows.
 func (a *resumeArrival) hold() bool {
@@ -245,7 +290,7 @@ func (a *resumeArrival) end() resumeJudged {
 	return judged
 }
 
-// judge closes the arrival. Each reply among it settles the oldest question
+// judge closes the arrival. Each reply among it settles the newest question
 // owed, and a reply cut off at its end is kept for the wait before a hand-off
 // to finish.
 func (cfg *resumeWaitConfig) judge(arrival *resumeArrival) resumeJudged {
@@ -257,47 +302,25 @@ func (cfg *resumeWaitConfig) judge(arrival *resumeArrival) resumeJudged {
 
 // The pending redraw dies with the process image a dispatched key execs, so a
 // key answered inside a settle window cancels nothing. A redraw that comes due
-// inside an arrival waits for the arrival to end and be judged: zmx's SIGWINCH
-// on every attach opens the window, so a key typed as the session is opened
-// may still be arriving as it closes, and a redraw then would drop it.
+// waits for the listen in flight to answer, and inside an arrival for the
+// arrival to end and be judged: zmx's SIGWINCH on every attach opens the
+// window, so a key typed as the session is opened may arrive as it closes, and
+// a redraw then would drop it.
 func resumeWaitLoop(cfg resumeWaitConfig) error {
 	keys := resumeKeysFor(cfg.Screen)
 	reader := startResumeReader(cfg.In, cfg.AwaitInput)
 	defer close(reader.requests)
 
-	settled := resumeStartupSettle(cfg)
-	// Only the window start-up opened compares the size before it redraws: a
-	// SIGWINCH may be zmx attaching a client at an unchanged size.
-	signalled := false
-	redrawDue := false
+	redraws := resumeRedraws{settled: resumeStartupSettle(cfg)}
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	for _, b := range []byte(cfg.Typed) {
 		arrival.add(b)
 	}
 	cfg.InputArriving, cfg.Typed = false, ""
-	outstanding := false
 	for {
-		if !outstanding {
-			reader.requests <- resumeReadRequest{listen: arrival.open()}
-			outstanding = true
-		}
-
-		select {
-		case read := <-reader.results:
-			outstanding = false
-			if read.quiet {
-				if arrival.hold() {
-					continue
-				}
-				judged := cfg.judge(&arrival)
-				if ended, err := keys.answer(cfg, judged); ended {
-					return err
-				}
-				if redrawDue {
-					return resumeRedraw(cfg)
-				}
-				continue
-			}
+		reader.requests <- arrival.window()
+		read := redraws.awaitRead(cfg, reader.results)
+		if !read.quiet {
 			if read.n > 0 {
 				arrival.add(read.b)
 			}
@@ -310,20 +333,18 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 				}
 				return fmt.Errorf("resume wait: read: %w", read.err)
 			}
-
-		case <-cfg.Winch:
-			settled = cfg.Settle(resumeResizeSettle)
-			signalled = true
-
-		case <-settled:
-			settled = nil
-			if !signalled && resumeSizeUnchanged(cfg) {
+			continue
+		}
+		if arrival.open() {
+			if arrival.hold() {
 				continue
 			}
-			if arrival.open() {
-				redrawDue = true
-				continue
+			judged := cfg.judge(&arrival)
+			if ended, err := keys.answer(cfg, judged); ended {
+				return err
 			}
+		}
+		if redraws.due {
 			return resumeRedraw(cfg)
 		}
 	}
@@ -359,33 +380,28 @@ type resumeRead struct {
 	quiet bool
 }
 
-// resumeReadRequest asks for the next byte. A listen, made while an arrival is
-// open, waits no longer than the quiet window and reads only a byte that has
-// already arrived; any other request blocks until one does.
-type resumeReadRequest struct {
-	listen bool
-}
-
+// resumeReader listens for the session's input off the waiter's goroutine, so
+// a size change is taken as it comes. Each request is a listen of the window
+// it names.
 type resumeReader struct {
-	requests chan resumeReadRequest
+	requests chan time.Duration
 	results  chan resumeRead
 }
 
-// startResumeReader reads one byte per request and never ahead, and a listen
-// that finds the session quiet reads nothing, so an answer taken on that result
-// runs with no read outstanding and input typed then is inherited by the
-// process image the hand-off execs.
+// startResumeReader answers each listen with the byte that arrived within its
+// window, or with quiet, reading nothing. It reads only a byte a listen has
+// found arrived, one per listen and never ahead, so an answer taken on a
+// result runs with no read outstanding and input typed then is inherited by
+// the process image the hand-off execs.
 func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error)) resumeReader {
-	reader := resumeReader{requests: make(chan resumeReadRequest), results: make(chan resumeRead, 1)}
+	reader := resumeReader{requests: make(chan time.Duration), results: make(chan resumeRead, 1)}
 	go func() {
 		buf := make([]byte, 1)
-		for request := range reader.requests {
-			if request.listen {
-				arrived, err := awaitInput(resumeInputQuiet)
-				if err != nil || !arrived {
-					reader.results <- resumeRead{err: err, quiet: err == nil}
-					continue
-				}
+		for window := range reader.requests {
+			arrived, err := awaitInput(window)
+			if err != nil || !arrived {
+				reader.results <- resumeRead{err: err, quiet: err == nil}
+				continue
 			}
 			n, err := in.Read(buf)
 			reader.results <- resumeRead{b: buf[0], n: n, err: err}
@@ -463,86 +479,80 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 	return nil
 }
 
-// awaitOwedReplies holds a hand-off to the hook or a shell while a question
-// is owed its reply within its window, reading the replies off the session's
-// input as they come, each settling the oldest question owed, so neither ever
-// reads one. It ends once nothing is owed or the newest question's window has
-// closed, and with nothing owed the hand-off is immediate. An answer is taken
-// with no read outstanding, so nothing else reads the input meanwhile. A key
-// typed in the wait is lost whole, the one cost: once a byte no reply accounts
-// for is read, the wait reads on to the quiet that ends what was typed, so no
-// escape sequence's tail reaches what the session is handed to.
+// awaitOwedReplies holds a hand-off to the hook or a shell while a question is
+// owed its reply within its window, or a reply cut off at the end of the
+// answer's arrival has had less than bgreply.TailWait to finish, reading the
+// replies off the session's input as they come, each settling the newest
+// question owed, so neither reads one that lands within the wait. With nothing
+// owed and nothing cut off the hand-off is immediate. An answer is taken with
+// no read outstanding, so nothing else reads the input meanwhile. A key typed
+// in the wait is lost whole, the one cost: once a byte no reply accounts for
+// is read, the wait reads on to the quiet that ends what was typed, so no
+// escape sequence's tail reaches what the session is handed to. However much
+// is typed, the wait lasts a window from its start at most.
 func (cfg *resumeWaitConfig) awaitOwedReplies() {
-	now := cfg.Now()
-	cfg.RepliesOwed = cfg.RepliesOwed.live(now)
-	if !cfg.RepliesOwed.owing() {
-		return
-	}
-	due := cfg.RepliesOwed.lastDue(now)
-	read := replyRead{got: cfg.replyHead}
+	start := cfg.Now()
+	wait := replyWait{last: start, bound: start.Add(resumeReplyWindow)}
+	wait.read.Take(cfg.replyHead)
 	cfg.replyHead = nil
 	buf := make([]byte, 1)
-	for read.n < resumeArrivalKept {
-		window, ok := read.listen(cfg.RepliesOwed, due.Sub(now))
-		if !ok {
+	for {
+		now := cfg.Now()
+		cfg.RepliesOwed = cfg.RepliesOwed.live(now)
+		left := wait.until(cfg.RepliesOwed).Sub(now)
+		if left <= 0 {
 			return
 		}
-		arrived, err := cfg.AwaitInput(window)
+		arrived, err := cfg.AwaitInput(min(resumeInputQuiet, left))
 		if err != nil {
 			return
 		}
-		now = cfg.Now()
 		if !arrived {
-			read.quiet()
+			wait.typed = false
+			wait.read.Quiet()
 			continue
 		}
 		if n, err := cfg.In.Read(buf); n == 0 || err != nil {
 			return
 		}
-		cfg.RepliesOwed = cfg.RepliesOwed.settle(read.take(buf[0]))
+		replies, typed := wait.read.Take(buf)
+		cfg.RepliesOwed = cfg.RepliesOwed.settle(replies)
+		wait.typed = wait.typed || typed
+		wait.last = cfg.Now()
 	}
 }
 
-// replyRead is what the wait before a hand-off has read since the session was
-// last quiet.
-type replyRead struct {
-	got []byte
-	// settled counts the whole replies in got already settled.
-	settled int
-	// typed marks a byte in got that no reply accounts for.
+// replyWait is what the wait before a hand-off has read.
+type replyWait struct {
+	read bgreply.Stream
+	// typed marks a byte read since the session was last quiet that no reply
+	// accounts for.
 	typed bool
-	// n counts every byte the wait has read.
-	n int
+	// last is when the latest byte was read.
+	last time.Time
+	// bound is a window from the wait's start.
+	bound time.Time
 }
 
-// listen is how long the wait listens next, ok false once it is over: a key
-// typed is read on to the quiet that ends it, and otherwise the wait lasts
-// while a question is owed and left of the time due.
-func (r replyRead) listen(owed replyDebt, left time.Duration) (window time.Duration, ok bool) {
-	if r.typed {
-		return resumeInputQuiet, true
+// until is when the wait is over: once keys typed have fallen quiet, the
+// newest question owed is past its window, and a reply cut off has had
+// bgreply.TailWait since its latest byte, and at the bound whatever is still
+// arriving.
+func (w replyWait) until(owed replyDebt) time.Time {
+	if w.typed {
+		return w.bound
 	}
-	if !owed.owing() || left <= 0 {
-		return 0, false
+	var until time.Time
+	if owed.owing() {
+		until = owed.lastDue()
 	}
-	return min(resumeInputQuiet, left), true
-}
-
-// take adds a byte read, answering how many replies it finished.
-func (r *replyRead) take(b byte) (finished int) {
-	r.n++
-	r.got = append(r.got, b)
-	_, payloads, _ := bgreply.Split(r.got)
-	finished, r.settled = len(payloads)-r.settled, len(payloads)
-	r.typed = r.typed || bgreply.Typed(r.got)
-	return finished
-}
-
-// quiet ends what had arrived: keys typed in it are dropped with the replies
-// read, and only a reply still arriving is kept for its rest.
-func (r *replyRead) quiet() {
-	_, _, head := bgreply.Split(r.got)
-	r.got, r.settled, r.typed = head, 0, false
+	if tail := w.last.Add(bgreply.TailWait); w.read.Unfinished() && tail.After(until) {
+		until = tail
+	}
+	if until.After(w.bound) {
+		return w.bound
+	}
+	return until
 }
 
 // resumeUnfreeze hands the session back to its own transcript and then lowers

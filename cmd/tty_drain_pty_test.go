@@ -123,7 +123,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 			t.Fatalf("write the burst into the master: %v", err)
 		}
 
-		if err := resumeInputDrain.drain(fd); err != nil {
+		if _, err := resumeInputDrain.drain(fd); err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
 		if got := queuedOn(t, fd); len(got) != 0 {
@@ -135,7 +135,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		master, fd := chainPTY(t)
 		done := feed(t, master, 10*time.Millisecond, repeated("echo 0123456789 >> burst-ran\n", 20)...)
 
-		if err := resumeInputDrain.drain(fd); err != nil {
+		if _, err := resumeInputDrain.drain(fd); err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
 		if !done.Load() {
@@ -150,7 +150,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		master, fd := chainPTY(t)
 		done := feed(t, master, 20*time.Millisecond, "d", "y", "e", "s", "y", "e", "s", "y", "e", "s", "y", "e", "s")
 
-		if err := resumeInputDrain.drain(fd); err != nil {
+		if _, err := resumeInputDrain.drain(fd); err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
 		if !done.Load() {
@@ -161,15 +161,61 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		}
 	})
 
-	t.Run("it drains a background reply landing after the drain began", func(t *testing.T) {
+	// A terminal over a slow link answers the confirmation's question after
+	// the draw has given up on it, into the drain: discarded unseen, its
+	// question would stay owed and hold the next hand-off for its window.
+	t.Run("it drains a background reply landing after the drain began, and counts it", func(t *testing.T) {
 		master, fd := chainPTY(t)
 		done := feed(t, master, 20*time.Millisecond, "\x1b]11;rgb:0d0d/1111/1717\x07")
 
-		if err := resumeInputDrain.drain(fd); err != nil {
+		replies, err := resumeInputDrain.drain(fd)
+		if err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
 		if !done.Load() {
 			t.Fatal("the drain returned before the reply landed")
+		}
+		if replies != 1 {
+			t.Errorf("drain() counted %d replies, want 1", replies)
+		}
+		if got := queuedOn(t, fd); len(got) != 0 {
+			t.Errorf("the slave still holds %q after the drain, want nothing", got)
+		}
+	})
+
+	t.Run("it counts every reply among the keys it discards", func(t *testing.T) {
+		master, fd := chainPTY(t)
+		if _, err := master.Write([]byte("d\r\x1b]11;rgb:0d0d/1111/1717\x07x\x1b]11;rgb:e1e1/e2e2/e7e7\x1b\\yes")); err != nil {
+			t.Fatalf("write the burst into the master: %v", err)
+		}
+
+		replies, err := resumeInputDrain.drain(fd)
+		if err != nil {
+			t.Fatalf("drain() error = %v", err)
+		}
+		if replies != 2 {
+			t.Errorf("drain() counted %d replies, want 2", replies)
+		}
+		if got := queuedOn(t, fd); len(got) != 0 {
+			t.Errorf("the slave still holds %q after the drain, want nothing", got)
+		}
+	})
+
+	t.Run("it waits on a reply cut off as the input falls quiet for its rest", func(t *testing.T) {
+		master, fd := chainPTY(t)
+		feed(t, master, 10*time.Millisecond, "\x1b]11;rgb:0d0d/11")
+		// Past the drain's settle and inside a reply's rest.
+		done := feed(t, master, 10*time.Millisecond+resumeInputQuiet+resumeInputQuiet/2, "11/1717\x07")
+
+		replies, err := resumeInputDrain.drain(fd)
+		if err != nil {
+			t.Fatalf("drain() error = %v", err)
+		}
+		if !done.Load() {
+			t.Fatal("the drain returned before the reply's rest landed")
+		}
+		if replies != 1 {
+			t.Errorf("drain() counted %d replies, want 1", replies)
 		}
 		if got := queuedOn(t, fd); len(got) != 0 {
 			t.Errorf("the slave still holds %q after the drain, want nothing", got)
@@ -180,7 +226,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		_, fd := chainPTY(t)
 
 		start := time.Now()
-		if err := resumeInputDrain.drain(fd); err != nil {
+		if _, err := resumeInputDrain.drain(fd); err != nil {
 			t.Fatalf("drain() error = %v", err)
 		}
 		if elapsed := time.Since(start); elapsed < resumeInputQuiet || elapsed >= resumeInputDrain.bound {
@@ -193,7 +239,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 		feed(t, master, 10*time.Millisecond, repeated("x\n", 300)...)
 
 		start := time.Now()
-		err := resumeInputDrain.drain(fd)
+		_, err := resumeInputDrain.drain(fd)
 		elapsed := time.Since(start)
 
 		if !errors.Is(err, errInputKeptArriving) {
@@ -226,7 +272,7 @@ func TestTTYDrain_RealPTY(t *testing.T) {
 				before := modesOf(t, fd)
 				tc.arrive(t, master)
 
-				_ = resumeInputDrain.drain(fd)
+				_, _ = resumeInputDrain.drain(fd)
 
 				after := modesOf(t, fd)
 				if after != before {

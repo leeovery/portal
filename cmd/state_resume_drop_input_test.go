@@ -68,17 +68,18 @@ func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropD
 		Now:                testClockAtEpoch,
 		CatchSIGTERM:       func() {},
 		DisableEcho:        func() error { return nil },
-		ResolveTheme: func(_ bool, _ int, dropInput func() error) (tui.PaneAppearance, error) {
+		ResolveTheme: func(_ bool, _ int, dropInput func() (int, error)) (tui.PaneAppearance, error) {
 			d.calls = append(d.calls, "appearance-query")
 			d.handed = append(d.handed, dropInput != nil)
 			if dropInput == nil {
 				return tui.PaneAppearance{Theme: th}, nil
 			}
-			return tui.PaneAppearance{Theme: th}, dropInput()
+			_, err := dropInput()
+			return tui.PaneAppearance{Theme: th}, err
 		},
-		DropInputQueue: func() error {
+		DropInputQueue: func() (int, error) {
 			d.calls = append(d.calls, "drop")
-			return d.dropErr
+			return 0, d.dropErr
 		},
 		ExecSelf: func(_ string, args []string) {
 			d.calls = append(d.calls, "exec")
@@ -389,9 +390,9 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, err := sessionDrawTheme(true, 0, func() error {
+		_, err := sessionDrawTheme(samplePayload().Session)(true, 0, func() (int, error) {
 			calls++
-			return refused
+			return 0, refused
 		})
 		if calls != 1 {
 			t.Errorf("the drop ran %d times, want exactly 1", calls)
@@ -402,7 +403,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, err := sessionDrawTheme(true, 0, nil); err != nil {
+		if _, err := sessionDrawTheme(samplePayload().Session)(true, 0, nil); err != nil {
 			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})
@@ -446,10 +447,12 @@ func TestStateResumeDrawCommand_DropInput(t *testing.T) {
 	})
 }
 
-// A second flush site would eat a keystroke the user meant after the
-// confirmation went up, so the queue is touched from one place in the chain.
-func TestFlushTTYInput_TouchesTheInputQueueInExactlyOnePlace(t *testing.T) {
-	t.Run("it touches the input queue in exactly one place", func(t *testing.T) {
+// A second discard site would eat a keystroke the user meant after the
+// confirmation went up, so input is discarded from one place in the chain. And
+// a flush discards a terminal's reply unseen, leaving its question owed and
+// the next hand-off waiting on it, so the one place reads what it discards.
+func TestResumeInputDrain_DiscardsInputInExactlyOnePlace(t *testing.T) {
+	t.Run("it discards input in exactly one place, and flushes it nowhere", func(t *testing.T) {
 		_, sources := sourceguardtest.RepoSources(t, sourceguardtest.NonTestSources)
 
 		var sites []string
@@ -457,19 +460,27 @@ func TestFlushTTYInput_TouchesTheInputQueueInExactlyOnePlace(t *testing.T) {
 		for _, source := range sources {
 			declared := map[*ast.Ident]bool{}
 			for _, decl := range source.File.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "flushTTYInput" {
-					declared[fn.Name] = true
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					if v, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range v.Names {
+							declared[name] = name.Name == "resumeInputDrain"
+						}
+					}
 				}
 			}
 			ast.Inspect(source.File, func(n ast.Node) bool {
 				switch node := n.(type) {
 				case *ast.Ident:
-					if node.Name == "flushTTYInput" && !declared[node] {
+					if node.Name == "resumeInputDrain" && !declared[node] {
 						sites = append(sites, positionOf(source, node.Pos()))
 					}
 				case *ast.SelectorExpr:
-					if node.Sel.Name == "TIOCFLUSH" || node.Sel.Name == "TCFLSH" {
-						flushIoctls = append(flushIoctls, source.Path)
+					if slices.Contains([]string{"TIOCFLUSH", "TCFLSH", "TCIFLUSH", "TCIOFLUSH"}, node.Sel.Name) {
+						flushIoctls = append(flushIoctls, positionOf(source, node.Pos()))
 					}
 				}
 				return true
@@ -477,15 +488,10 @@ func TestFlushTTYInput_TouchesTheInputQueueInExactlyOnePlace(t *testing.T) {
 		}
 
 		if len(sites) != 1 {
-			t.Errorf("flushTTYInput is referenced at %q, want exactly one site", sites)
+			t.Errorf("resumeInputDrain is referenced at %q, want exactly one site", sites)
 		}
-		for _, path := range flushIoctls {
-			if !strings.HasPrefix(path, "cmd/tty_flush_") {
-				t.Errorf("%s issues a tty input flush outside flushTTYInput", path)
-			}
-		}
-		if len(flushIoctls) != 2 {
-			t.Errorf("found the flush ioctl in %q, want one declaration per platform", flushIoctls)
+		if len(flushIoctls) != 0 {
+			t.Errorf("a tty input flush is issued at %q, want none: the drain reads what it discards", flushIoctls)
 		}
 	})
 }
