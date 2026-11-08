@@ -20,14 +20,9 @@ const (
 	guardPIDCall = "portaltest.RegisterStateDirTeardownGuardWithPIDSource"
 )
 
-// The calls that start a session server whose cleanup ends its sessions: a
-// zmxtest directory's daemons, or a tmuxtest server.
-const (
-	zmxServerCall  = "zmxtest.New"
-	tmuxServerCall = "tmuxtest.New"
-)
-
-var serverCalls = []string{zmxServerCall, tmuxServerCall}
+// zmxServerCall starts a session server whose cleanup ends its sessions: a
+// zmxtest directory's daemons.
+const zmxServerCall = "zmxtest.New"
 
 // fixtureCalls records where one function makes the calls the rule is expressed
 // in. A line of zero means the scope does not make that call at all; a recorded
@@ -257,7 +252,7 @@ func scopesIn(fset *token.FileSet, body *ast.BlockStmt) []fixtureCalls {
 			}
 		case *ast.CallExpr:
 			switch selectorName(node) {
-			case zmxServerCall, tmuxServerCall:
+			case zmxServerCall:
 				record(&calls.ServerLine, node.Pos())
 			case isolateCall:
 				record(&calls.IsolateLine, node.Pos())
@@ -352,7 +347,7 @@ func arrangesByPackage(funcs []scannedFunc) map[string]map[string]fixtureCalls {
 func coverageFailure(scanned int, defects []string) string {
 	if scanned == 0 {
 		return fmt.Sprintf("no function pairs %s with either %s or %s; the guard has stopped looking rather than passed",
-			strings.Join(serverCalls, " or "), stateDirEnv, isolateCall)
+			zmxServerCall, stateDirEnv, isolateCall)
 	}
 	if len(defects) == 0 {
 		return ""
@@ -360,5 +355,5 @@ func coverageFailure(scanned int, defects []string) string {
 	return fmt.Sprintf("%d of %d state-dir fixtures leave their state dir unguarded:\n  %s\n"+
 		"  a server can host writers into that state dir past its own cleanup, so the TempDir\n"+
 		"  RemoveAll races them; isolate the dir and register the guard, both before %s",
-		len(defects), scanned, strings.Join(defects, "\n  "), strings.Join(serverCalls, " or "))
+		len(defects), scanned, strings.Join(defects, "\n  "), zmxServerCall)
 }

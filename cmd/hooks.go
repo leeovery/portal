@@ -54,8 +54,8 @@ var hooksListCmd = &cobra.Command{
 }
 
 // sessionLocations maps each live session's name, the key its hooks are
-// stored under, to what it shows. A key no live session carries, such as a
-// pane token from the tmux version, maps to nothing.
+// stored under, to what it shows. A key no live session carries maps to
+// nothing.
 func sessionLocations(ctx context.Context) map[string]string {
 	b, err := sessionBackend()
 	if err != nil {
@@ -206,7 +206,7 @@ func init() {
 
 	hooksRmCmd.Flags().Bool("on-resume", false, "Remove the on-resume hook")
 	_ = hooksRmCmd.MarkFlagRequired("on-resume")
-	hooksRmCmd.Flags().String("pane-key", "", "Hook key of the entry to remove, taken verbatim — any key, including an old-format one (defaults to the current session's name)")
+	hooksRmCmd.Flags().String("pane-key", "", "Hook key of the entry to remove, taken verbatim (defaults to the current session's name)")
 
 	hookCmd.AddCommand(hooksListCmd)
 	hookCmd.AddCommand(hooksSetCmd)

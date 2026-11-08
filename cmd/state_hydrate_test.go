@@ -319,8 +319,8 @@ func (f writerFunc) Write(p []byte) (int, error) {
 
 // A capture led by modes is one zmx took, and zmx closes every capture with
 // the cursor's placement; one whose close the cut doesn't read is replayed
-// whole, placement and all, so it is recorded. A transcript the tmux backend
-// saved has no lead and no such close.
+// whole, placement and all, so it is recorded. A transcript with no lead is
+// none zmx took, and is replayed whole.
 func TestHydrate_ReplayRecordsACloseItCannotRead(t *testing.T) {
 	const unrecognised = "scrollback closing state not recognised, so replayed whole"
 	const lead, rows = "\x1b[?1004h\x1b[?2004h", "$ claude\r\n\x1b[1mworking on it\x1b[0m\r\n$ "
@@ -341,7 +341,7 @@ func TestHydrate_ReplayRecordsACloseItCannotRead(t *testing.T) {
 			replayed: rows,
 		},
 		{
-			name:     "a transcript with no lead, as the tmux backend saved, is replayed whole and records nothing",
+			name:     "a transcript with no lead is replayed whole and records nothing",
 			body:     "\x1b[1mrow-1\x1b[0m\r\nrow-2\r\n",
 			replayed: "\x1b[1mrow-1\x1b[0m\r\nrow-2\r\n",
 		},

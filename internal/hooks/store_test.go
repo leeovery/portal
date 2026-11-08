@@ -926,19 +926,16 @@ func TestStaleKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("it judges the keys the tmux version wrote, and an empty key, like any other", func(t *testing.T) {
+	t.Run("it judges an empty key like any other", func(t *testing.T) {
 		persisted := hooks.Snapshot{
-			hookstest.TmuxEraSeedA: {"on-resume": {Command: "pane token"}},
-			hookstest.TmuxEraSeedB: {"on-resume": {Command: "coordinates"}},
-			hookstest.TmuxEraSeedC: {"on-resume": {Command: "listed coordinates"}},
-			"":                     {"on-resume": {Command: "empty"}},
+			hookstest.ReapableSeedA: {"on-resume": {Command: "gone"}},
+			hookstest.LiveSeedA:     {"on-resume": {Command: "listed"}},
+			"":                      {"on-resume": {Command: "empty"}},
 		}
 
-		got := hooks.StaleKeys(persisted, []string{hookstest.TmuxEraSeedC}, nil)
+		got := hooks.StaleKeys(persisted, []string{hookstest.LiveSeedA}, nil)
 
-		want := []string{"", hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB}
-		slices.Sort(want)
-		if !slices.Equal(got, want) {
+		if want := []string{"", hookstest.ReapableSeedA}; !slices.Equal(got, want) {
 			t.Errorf("StaleKeys = %v, want %v", got, want)
 		}
 	})

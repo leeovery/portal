@@ -18,7 +18,7 @@ import (
 const SchemaVersion = 2
 
 // ErrLegacyIndex marks a sessions.json written by the tmux version of Portal,
-// which `portal migrate` moves aside.
+// which this version neither reads nor overwrites.
 var ErrLegacyIndex = errors.New("sessions.json is a version 1 index")
 
 // VersionError is a sessions.json whose version is not SchemaVersion. A
@@ -58,9 +58,6 @@ type Index struct {
 	removed map[string]bool
 	// unknown holds the members this version does not model, as a JSON object.
 	unknown string
-	// absent is an index Read found no sessions.json for, which Create makes
-	// Update write.
-	absent bool
 }
 
 // Entries returns a copy of every entry, in the order the index holds them.
@@ -77,11 +74,7 @@ func (idx *Index) Len() int { return len(idx.sessions) }
 // restore its helper hasn't finished, which every restore brings back and no
 // saver drops until the helper of a restore that made it has finished, or a
 // claim has found it live once no restore of it is unfinished; an index
-// written before the mark reads with none owed. ResumeLazy marks an entry
-// portal migrate made, whose restore brings its session up on the resume
-// panel whatever mode its hook registers, since the tmux session it came from
-// may still run the program its hook resumes; it goes with the owed mark,
-// once a restore has finished.
+// written before the mark reads with none owed.
 type Entry struct {
 	Name           string    `json:"name"`
 	Label          string    `json:"label,omitempty"`
@@ -91,7 +84,6 @@ type Entry struct {
 	PID            int       `json:"pid,omitempty"`
 	ScrollbackFile string    `json:"scrollback_file,omitempty"`
 	Owed           bool      `json:"owed,omitempty"`
-	ResumeLazy     bool      `json:"resume_lazy,omitempty"`
 
 	// unknown holds the members this version does not model, as a JSON
 	// object, kept as a string so an Entry stays comparable.

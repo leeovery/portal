@@ -27,8 +27,7 @@ func TestPortalOpenPathAgainstZmx(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Stdin at EOF, so the attach detaches as soon as it connects. TMUX stays
-	// poisoned: opening a session must not reach tmux at all.
+	// Stdin at EOF, so the attach detaches as soon as it connects.
 	cmd := exec.Command(binary, "open", "-p", workDir)
 	cmd.Env = append(env,
 		"ZMX_DIR="+b.Dir(),

@@ -7,7 +7,6 @@ import (
 
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
-	"github.com/leeovery/portal/internal/nanoid"
 	"github.com/leeovery/portal/internal/session"
 )
 
@@ -51,9 +50,7 @@ func TestSessionName(t *testing.T) {
 			if err != nil || got != session.FallbackProject+"-abc123" {
 				t.Errorf("SessionName(%q) = %q, %v; want %s-abc123", project, got, err, session.FallbackProject)
 			}
-			if nanoid.IsTokenShaped(got) {
-				t.Errorf("SessionName(%q) = %q, which is token-shaped", project, got)
-			}
+
 		}
 	})
 

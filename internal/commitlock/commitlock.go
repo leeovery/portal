@@ -1,9 +1,8 @@
 // Package commitlock owns commit.lock, the sidecar every writer of the state
 // directory's sessions.json holds exclusively. sessionindex takes it around
-// every write, the bootstrap reads its Bound to bound a run that commits, and
-// migrate its Path to name what a migration builds. It imports no Portal
-// package but fileutil, so sessionindex, whose imports are held to leaves,
-// can take it.
+// every write, and the bootstrap reads its Bound to bound a run that commits.
+// It imports no Portal package but fileutil, so sessionindex, whose imports
+// are held to leaves, can take it.
 package commitlock
 
 import (

@@ -15,6 +15,5 @@ var TestOnlyPackages = []string{
 	"github.com/leeovery/portal/internal/sourceguardtest",
 	"github.com/leeovery/portal/internal/spawntest",
 	"github.com/leeovery/portal/internal/themetest",
-	"github.com/leeovery/portal/internal/tmuxtest",
 	"github.com/leeovery/portal/internal/zmxtest",
 }

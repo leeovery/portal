@@ -87,8 +87,6 @@ func TestResolveProcessRole_DriftTripwire(t *testing.T) {
 		{"alias", "set", "foo", "."},
 		{"state"},
 		{"state", "wat"},
-		// Retired with the tmux helper's FIFO: no build runs it any more.
-		{"state", "signal-hydrate"},
 		{"totally", "unknown", "verb"},
 	}
 	for _, argv := range fallbackInputs {
@@ -115,7 +113,6 @@ func TestResolveProcessRole_ClosedResultSpace(t *testing.T) {
 		{"state"},
 		{"state", "daemon"},
 		{"state", "hydrate"},
-		{"state", "signal-hydrate"},
 		{"hooks"},
 		{"clean"},
 		{"open", "."},

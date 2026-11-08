@@ -384,9 +384,8 @@ func (s *Store) List(via Via) ([]Hook, error) {
 // StaleKeys applies the staleness rule; every reader of staleness must route
 // through here rather than restate it. A persisted key is stale iff it names
 // neither a session in listed, the user sessions the backend lists (answering
-// or not), nor an entry in indexed, the names sessions.json holds. Every key is judged,
-// whatever its shape: one the tmux version wrote names no zmx session. The
-// stale keys come back sorted.
+// or not), nor an entry in indexed, the names sessions.json holds. Every key
+// is judged, whatever its shape. The stale keys come back sorted.
 //
 // It carries no mass-deletion guard: an empty listing beside an empty index
 // makes every persisted key stale, and deferring on a read that may not be

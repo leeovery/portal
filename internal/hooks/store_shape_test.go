@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/hookstest"
 	"github.com/leeovery/portal/internal/logtest"
 )
@@ -40,29 +39,6 @@ func TestCleanStaleJudgesEveryKey(t *testing.T) {
 		}
 		if !slices.Equal(removed, []string{hookstest.ReapableSeedA}) {
 			t.Errorf("CleanStale removed %v, want [%s]", removed, hookstest.ReapableSeedA)
-		}
-	})
-
-	t.Run("it reaps the keys the tmux version wrote", func(t *testing.T) {
-		store, _ := hookstest.StageStore(t, hookstest.Staging{Seed: fmt.Sprintf(`{%q:{"on-resume":"token"},%q:{"on-resume":"coordinates"},%q:{"on-resume":"live"}}`,
-			hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB, hookstest.LiveSeedA)})
-
-		removed, err := store.CleanStale(listing(hookstest.LiveSeedA), noIndex)
-		if err != nil {
-			t.Fatalf("CleanStale: %v", err)
-		}
-		want := []string{hookstest.TmuxEraSeedA, hookstest.TmuxEraSeedB}
-		slices.Sort(want)
-		if !slices.Equal(removed, want) {
-			t.Fatalf("CleanStale removed %v, want %v", removed, want)
-		}
-
-		h, err := store.Load(hooks.ViaInternal)
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if !slices.Equal(keysOf(h), []string{hookstest.LiveSeedA}) {
-			t.Errorf("file holds %v, want only [%s]", keysOf(h), hookstest.LiveSeedA)
 		}
 	})
 

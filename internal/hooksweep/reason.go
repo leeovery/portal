@@ -25,7 +25,6 @@ const (
 	ReasonIndexUnusable       Reason = "index-unusable"
 	ReasonNoSessions          Reason = "no-sessions"
 	ReasonLockTimeout         Reason = "lock-timeout"
-	ReasonTmuxKeys            Reason = "tmux-keys"
 	ReasonMassReap            Reason = "mass-reap"
 )
 
@@ -45,6 +44,5 @@ var Reasons = []Reason{
 	ReasonIndexUnusable,
 	ReasonNoSessions,
 	ReasonLockTimeout,
-	ReasonTmuxKeys,
 	ReasonMassReap,
 }

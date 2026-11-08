@@ -9,33 +9,24 @@ import (
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/hookstest"
-	"github.com/leeovery/portal/internal/nanoid"
 )
 
-// sessionNameSeeds, in the order the vocabulary declares them, and
-// tmuxEraSeeds name every seed it holds, so the sweeps below cover the whole
-// of it rather than a prefix of it.
-var (
-	sessionNameSeeds = []struct{ name, key string }{
-		{"ReapableSeedA", hookstest.ReapableSeedA},
-		{"ReapableSeedB", hookstest.ReapableSeedB},
-		{"ReapableSeedC", hookstest.ReapableSeedC},
-		{"ReapableSeedD", hookstest.ReapableSeedD},
-		{"LiveSeedA", hookstest.LiveSeedA},
-		{"LiveSeedB", hookstest.LiveSeedB},
-		{"LiveSeedC", hookstest.LiveSeedC},
-		{"SubjectSeedA", hookstest.SubjectSeedA},
-		{"SubjectSeedB", hookstest.SubjectSeedB},
-		{"SubjectSeedC", hookstest.SubjectSeedC},
-		{"SubjectSeedD", hookstest.SubjectSeedD},
-	}
-
-	tmuxEraSeeds = map[string]string{
-		"TmuxEraSeedA": hookstest.TmuxEraSeedA,
-		"TmuxEraSeedB": hookstest.TmuxEraSeedB,
-		"TmuxEraSeedC": hookstest.TmuxEraSeedC,
-	}
-)
+// sessionNameSeeds name every seed the vocabulary holds, in the order it
+// declares them, so the sweeps below cover the whole of it rather than a
+// prefix of it.
+var sessionNameSeeds = []struct{ name, key string }{
+	{"ReapableSeedA", hookstest.ReapableSeedA},
+	{"ReapableSeedB", hookstest.ReapableSeedB},
+	{"ReapableSeedC", hookstest.ReapableSeedC},
+	{"ReapableSeedD", hookstest.ReapableSeedD},
+	{"LiveSeedA", hookstest.LiveSeedA},
+	{"LiveSeedB", hookstest.LiveSeedB},
+	{"LiveSeedC", hookstest.LiveSeedC},
+	{"SubjectSeedA", hookstest.SubjectSeedA},
+	{"SubjectSeedB", hookstest.SubjectSeedB},
+	{"SubjectSeedC", hookstest.SubjectSeedC},
+	{"SubjectSeedD", hookstest.SubjectSeedD},
+}
 
 func TestHookKeySeedVocabulary(t *testing.T) {
 	t.Run("it names a session zmx can hold with every session-name seed", func(t *testing.T) {
@@ -56,27 +47,10 @@ func TestHookKeySeedVocabulary(t *testing.T) {
 		}
 	})
 
-	// The tmux version keyed a hook by pane token, and before that by pane
-	// coordinates; the half holds both, so a fixture asserting what the rule
-	// makes of the tmux version's keys covers each shape it wrote.
-	t.Run("it holds a pane token and coordinate keys in the tmux-era half", func(t *testing.T) {
-		if !nanoid.IsTokenShaped(hookstest.TmuxEraSeedA) {
-			t.Errorf("TmuxEraSeedA = %q, want a pane token", hookstest.TmuxEraSeedA)
-		}
-		for _, key := range []string{hookstest.TmuxEraSeedB, hookstest.TmuxEraSeedC} {
-			if !strings.Contains(key, ":") || !strings.Contains(key, ".") {
-				t.Errorf("tmux-era seed %q, want a <session>:<window>.<pane> key", key)
-			}
-		}
-	})
-
 	t.Run("every named seed is distinct", func(t *testing.T) {
 		seen := map[string]string{}
 		for _, seed := range sessionNameSeeds {
 			assertUnseen(t, seen, seed.name, seed.key)
-		}
-		for name, key := range tmuxEraSeeds {
-			assertUnseen(t, seen, name, key)
 		}
 	})
 }

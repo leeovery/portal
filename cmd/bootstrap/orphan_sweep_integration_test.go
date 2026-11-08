@@ -163,8 +163,8 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 // identified by argv: the one carrying the saver session's environment and
 // the sweep's state directory is an orphaned saver daemon and is killed,
 // while the one without the session's name, as another install's daemon
-// would be, the tmux version's among them, and the one of another state
-// directory, as a saver another Portal's state started would be, survive.
+// would be, and the one of another state directory, as a saver another
+// Portal's state started would be, survive.
 func TestSweepOrphanDaemons_Integration_KillsOnlyTheMarkedDaemon(t *testing.T) {
 	// Built before the isolation scrubs HOME, which go build's caches hang off.
 	binary := portalbintest.Build(t)

@@ -12,9 +12,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if err := os.Setenv("TMUX_TMPDIR", "/dev/null/tmpdir-poison"); err != nil {
-		panic(err)
-	}
 	spawn.PoisonAdaptersForTest()
 	os.Exit(m.Run())
 }

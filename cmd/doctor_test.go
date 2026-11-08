@@ -504,7 +504,7 @@ func TestDoctorSessionsJSONStates(t *testing.T) {
 }
 
 const (
-	legacyIndexDetail = "from the tmux version of Portal; run portal migrate"
+	legacyIndexDetail = `from the tmux version of Portal, which this version can't use; see "Coming from the tmux version" in Portal's README`
 	newerIndexDetail  = "version 3, from a newer Portal; this one reads version 2"
 )
 

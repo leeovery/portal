@@ -23,17 +23,15 @@ const (
 // fn is empty.
 type unruledCaller struct{ pkg, fn string }
 
-// Remove, Restored, Owe, Hydrated and Migrated change an entry with no claim
-// rule consulted: Remove drops one, Restored adopts whatever creation an entry
-// records, Owe keeps one from every drop, Hydrated ends the restore that kept
-// it, and Migrated makes one owed a restore and recording no creation.
-// Anywhere else, the first two would stand for a replace the rule never
-// judged, Owe would bring back a session the saver saw end, Hydrated would let
-// a session whose helper never finished its replay be dropped as a kill, and
-// Migrated would bring back a session no saver ever saw. Remove's callers are
-// kill and the saver's drop of a session that ended. Restored's and Owe's are
-// restore. Hydrated's is the hydrate helper's claim. Migrated's is portal
-// migrate.
+// Remove, Restored, Owe and Hydrated change an entry with no claim rule
+// consulted: Remove drops one, Restored adopts whatever creation an entry
+// records, Owe keeps one from every drop, and Hydrated ends the restore that
+// kept it. Anywhere else, the first two would stand for a replace the rule
+// never judged, Owe would bring back a session the saver saw end, and
+// Hydrated would let a session whose helper never finished its replay be
+// dropped as a kill. Remove's callers are kill and the saver's drop of a
+// session that ended. Restored's and Owe's are restore. Hydrated's is the
+// hydrate helper's claim.
 var unruledCallers = map[string][]unruledCaller{
 	"Remove": {
 		{pkg: modulePath + "/cmd", fn: "forgetSession"},
@@ -42,7 +40,6 @@ var unruledCallers = map[string][]unruledCaller{
 	"Restored": {{pkg: modulePath + "/internal/restore"}},
 	"Owe":      {{pkg: modulePath + "/internal/restore"}},
 	"Hydrated": {{pkg: modulePath + "/cmd", fn: "claimCreation"}},
-	"Migrated": {{pkg: modulePath + "/internal/migrate"}},
 }
 
 // guardLane is a build the guard scans.
@@ -182,14 +179,7 @@ func elsewhere(idx *sessionindex.Index) {
 	idx.Hydrated("a", at, 0)
 }
 `
-	const migrates = `package fixture
 
-import "github.com/leeovery/portal/internal/sessionindex"
-
-func write(idx *sessionindex.Index) error {
-	return idx.Migrated(sessionindex.Entry{Name: "a"})
-}
-`
 	const methodNamedAsAllowed = `package fixture
 
 import "github.com/leeovery/portal/internal/sessionindex"
@@ -287,15 +277,7 @@ func elsewhere(s store, r remover) {
 			pkg:  modulePath + "/internal/restore", src: hydrates,
 			want: []string{"fixture.go:6: Hydrated in claimCreation", "fixture.go:10: Hydrated in elsewhere"},
 		},
-		{
-			name: "it allows Migrated anywhere in internal/migrate",
-			pkg:  modulePath + "/internal/migrate", src: migrates,
-		},
-		{
-			name: "it reports Migrated from a package not named, restore's among them",
-			pkg:  modulePath + "/internal/restore", src: migrates,
-			want: []string{"fixture.go:6: Migrated in write"},
-		},
+
 		{
 			name: "it reports a Remove promoted through an embedded index",
 			pkg:  modulePath + "/cmd", src: embeds,

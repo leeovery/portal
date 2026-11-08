@@ -30,8 +30,8 @@ type cleanupT interface {
 // cannot land a file mid-RemoveAll and fail the test with "directory not empty".
 // The daemon it waits on is the one named by <stateDir>/daemon.pid.
 // Call order is load-bearing: register after the state dir exists and before
-// zmxtest.New (or, in migrate's tests, tmuxtest.New), so LIFO cleanup runs this
-// after the sessions are killed and before the RemoveAll it protects.
+// zmxtest.New, so LIFO cleanup runs this after the sessions are killed and
+// before the RemoveAll it protects.
 func RegisterStateDirTeardownGuard(t *testing.T, stateDir string) {
 	t.Helper()
 	registerTeardownGuard(t, stateDir, func() (int, bool) {

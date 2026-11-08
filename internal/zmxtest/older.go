@@ -27,8 +27,8 @@ var errNoOlder = errors.New("no zmx " + olderVersion)
 // or else Homebrew's zmx when it reports 0.8.1. It skips the test when
 // neither is one, as on the weekly zmx check, which tests zmx's newest builds
 // only. It fails the test when the build OlderBinaryEnv names isn't one,
-// outside the integration lane, when ZMX_DIR or TMUX_TMPDIR is not poisoned,
-// and when the weekly zmx check doesn't run the test.
+// outside the integration lane, when ZMX_DIR is not poisoned, and when the
+// weekly zmx check doesn't run the test.
 func OlderBinary(t *testing.T) string {
 	t.Helper()
 	if !integrationLane {

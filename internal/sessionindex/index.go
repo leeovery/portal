@@ -1,9 +1,7 @@
 package sessionindex
 
 import (
-	"cmp"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -134,56 +132,6 @@ func (idx *Index) Owe(name string) bool {
 	return i >= 0 && idx.owe(i, "")
 }
 
-// Create makes Update write an index read from no sessions.json, holding
-// whatever entries it holds then, none if need be. An index read from a file
-// it leaves as it is. It is portal migrate's: the state dir it builds holds an
-// index even when no session migrates.
-func (idx *Index) Create() {
-	if !idx.absent {
-		return
-	}
-	idx.absent = false
-	idx.changes = append(idx.changes, change{op: "create"})
-}
-
-// ErrNameHeld refuses an entry Migrated would make under a name another entry
-// holds: portal migrate chose the name as no entry's.
-var ErrNameHeld = errors.New("another entry holds the name")
-
-// Migrated records a session portal migrate brings over from the tmux
-// version: e's name, label, dirs and scrollback file, as an entry made afresh,
-// owed a restore and recording no creation, so the next restore makes it and
-// the claim of its helper takes it over, and resuming lazily until that
-// restore finishes. Its label is the one LabelFor gives,
-// and a label LabelFor refuses changes nothing. An entry under the name that
-// is the one Migrated makes already, as migrating again finds it, is left as
-// it is; any other refuses it with ErrNameHeld, changing nothing. It consults
-// no rule, so migrate is its only caller, which a guard holds to.
-func (idx *Index) Migrated(e Entry) error {
-	label, err := LabelFor(e.Name, e.Label)
-	if err != nil {
-		return err
-	}
-	made := Entry{Name: e.Name, Label: label, Dir: e.Dir, Cwd: e.Cwd, ScrollbackFile: e.ScrollbackFile, Owed: true, ResumeLazy: true}
-	if held, ok := idx.Lookup(e.Name); ok {
-		if held == made {
-			return nil
-		}
-		return fmt.Errorf("session %s: %w", e.Name, ErrNameHeld)
-	}
-	if _, added := idx.add(made); !added {
-		return ErrRemoved
-	}
-	idx.changes = append(idx.changes, change{op: "migrated", session: e.Name, value: e.Dir, detail: migratedDetail(made)})
-	return nil
-}
-
-// migratedDetail says what a migrated entry carries over.
-func migratedDetail(e Entry) string {
-	label, scrollback := cmp.Or(e.Label, "none"), cmp.Or(e.ScrollbackFile, "none")
-	return fmt.Sprintf("owed a restore, recording no creation, resuming lazily until it is restored; its label %q and its scrollback %q", label, scrollback)
-}
-
 // owe marks the entry at i owed a restore, recording why when given, and
 // reports whether that changed it.
 func (idx *Index) owe(i int, why string) bool {
@@ -196,14 +144,12 @@ func (idx *Index) owe(i int, why string) bool {
 }
 
 // repay clears the owed mark of the entry at i, recording why, and reports
-// whether it had one. A restore of the entry has finished, so a migrated
-// entry's lazy resume goes with it: later restores take its hook's mode.
+// whether it had one.
 func (idx *Index) repay(i int, why string) bool {
 	if !idx.sessions[i].Owed {
 		return false
 	}
 	idx.sessions[i].Owed = false
-	idx.sessions[i].ResumeLazy = false
 	idx.changes = append(idx.changes, change{op: "clear-owed", session: idx.sessions[i].Name, detail: why})
 	return true
 }

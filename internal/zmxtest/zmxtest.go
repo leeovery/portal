@@ -31,14 +31,6 @@ import (
 // but every read under a file fails with ENOTDIR.
 const PoisonedDir = "/dev/null/zmx-poison"
 
-// PoisonedTmpdir is the TMUX_TMPDIR every package's TestMain sets, and
-// IsolateStateForTest hands every subprocess, so a plain tmux that names no
-// socket (no -S, no -L, no TMUX), run by a test or by a line typed into a test
-// session, fails with ENOTDIR rather than reaching the developer's default
-// server. A test session's shell has no TMUX, since Create drops it, and finds
-// the installed tmux on PATH.
-const PoisonedTmpdir = "/dev/null/tmpdir-poison"
-
 // root is short on purpose: a session's socket is <dir>/<name>, capped at
 // 103 bytes on macOS, and $TMPDIR there is ~50 bytes on its own.
 const root = "/tmp"
@@ -49,8 +41,8 @@ const settle = 5 * time.Second
 // passedEnv names the variables of the test's environment a session sees;
 // LANG and LC_* pass too. Nothing else does: HOME is a temp dir, SHELL is
 // /bin/sh and TERM is sessionTerm, so no session reads the developer's shell
-// config or depends on their terminal. TMUX_TMPDIR is the TestMain's poison.
-var passedEnv = []string{"PATH", "USER", "TMPDIR", "TMUX_TMPDIR"}
+// config or depends on their terminal.
+var passedEnv = []string{"PATH", "USER", "TMPDIR"}
 
 // sessionTerm is the TERM every session gets, one every macOS terminfo
 // carries. The caller's may need a TERMINFO no session sees (Ghostty's
@@ -121,8 +113,8 @@ const BinaryEnv = "PORTAL_TEST_ZMX_BINARY"
 // Binary is the path of the zmx build the tests drive: the one BinaryEnv
 // names, or else the pinned build. It fails the test when that build is
 // missing or cannot run, outside the integration lane, when the weekly zmx
-// check doesn't run the test, and when ZMX_DIR or TMUX_TMPDIR is not
-// poisoned. Every real zmx a test runs comes from here, New's included.
+// check doesn't run the test, and when ZMX_DIR is not poisoned. Every real
+// zmx a test runs comes from here, New's included.
 func Binary(t *testing.T) string {
 	t.Helper()
 	if !integrationLane {
@@ -184,10 +176,8 @@ func runnable(path string) bool {
 }
 
 func checkPoisoned(getenv func(string) string) error {
-	for _, v := range []struct{ name, poison string }{{"ZMX_DIR", PoisonedDir}, {"TMUX_TMPDIR", PoisonedTmpdir}} {
-		if got := getenv(v.name); got != v.poison {
-			return fmt.Errorf("%s is %q, want %q: the package's TestMain must poison it before any test runs zmx", v.name, got, v.poison)
-		}
+	if got := getenv("ZMX_DIR"); got != PoisonedDir {
+		return fmt.Errorf("ZMX_DIR is %q, want %q: the package's TestMain must poison it before any test runs zmx", got, PoisonedDir)
 	}
 	return nil
 }

@@ -19,7 +19,7 @@ func TestX(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	_ = env
 	_ = ts
 }
@@ -32,7 +32,7 @@ import "testing"
 func TestX(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	_ = env
 	_ = ts
 }
@@ -46,7 +46,7 @@ func TestX(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	_ = ts
 }
 `
@@ -57,7 +57,7 @@ import "testing"
 
 func TestX(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	_ = env
 	_ = stateDir
 	_ = ts
@@ -79,7 +79,7 @@ func TestX(t *testing.T) {
 import "testing"
 
 func TestX(t *testing.T) {
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	env, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
@@ -95,7 +95,7 @@ import "testing"
 func TestX(t *testing.T) {
 	env, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	portaltest.RegisterStateDirTeardownGuard(t, stateDir)
 	_ = env
 	_ = ts
@@ -108,7 +108,7 @@ import "testing"
 
 func TestX(t *testing.T) {
 	env, stateDir := newIntegrationStateDir(t)
-	ts := tmuxtest.New(t, "ptl-")
+	ts := zmxtest.New(t)
 	_ = env
 	_ = stateDir
 	_ = ts
@@ -297,7 +297,7 @@ import "testing"
 
 func TestX(t *testing.T) {
 	invoke := func(t *testing.T) {
-		ts := tmuxtest.New(t, "ptl-")
+		ts := zmxtest.New(t)
 		_ = ts
 	}
 	t.Run("case", func(t *testing.T) {
@@ -342,8 +342,8 @@ const fixtureLocalServerHelper = `package x
 
 import "testing"
 
-func startServer(t *testing.T) *tmuxtest.Server {
-	return tmuxtest.New(t, "ptl-")
+func startServer(t *testing.T) *zmx.Backend {
+	return zmxtest.New(t)
 }
 `
 

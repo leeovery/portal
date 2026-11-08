@@ -129,36 +129,6 @@ func TestAtomicWrite_Ordered(t *testing.T) {
 	})
 }
 
-func TestSyncDir(t *testing.T) {
-	t.Run("it syncs a directory a rename was just made in", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.Mkdir(filepath.Join(dir, "old"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Rename(filepath.Join(dir, "old"), filepath.Join(dir, "new")); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := fileutil.SyncDir(dir); err != nil {
-			t.Errorf("SyncDir = %v, want the directory synced", err)
-		}
-	})
-
-	t.Run("it reports a directory it can't open", func(t *testing.T) {
-		if err := fileutil.SyncDir(filepath.Join(t.TempDir(), "missing")); err == nil {
-			t.Error("SyncDir of a missing directory = nil, want an error")
-		}
-	})
-
-	t.Run("it reports the sync's failure", func(t *testing.T) {
-		fileutil.FailDirSyncForTest(t, syscall.EIO)
-
-		if err := fileutil.SyncDir(t.TempDir()); !errors.Is(err, syscall.EIO) {
-			t.Errorf("SyncDir = %v, want EIO", err)
-		}
-	})
-}
-
 // BenchmarkAtomicWrite measures what ordering costs a write of a
 // sessions.json-sized file, against the same write without its syncs.
 func BenchmarkAtomicWrite(b *testing.B) {

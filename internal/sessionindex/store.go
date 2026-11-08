@@ -31,9 +31,7 @@ func Path(dir string) string { return filepath.Join(dir, fileName) }
 func Read(dir string) (Index, error) {
 	data, err := os.ReadFile(Path(dir))
 	if errors.Is(err, os.ErrNotExist) {
-		idx := emptyIndex()
-		idx.absent = true
-		return idx, nil
+		return emptyIndex(), nil
 	}
 	if err != nil {
 		return Index{}, fmt.Errorf("read sessions.json: %w", err)

@@ -1,8 +1,8 @@
 // Package nanoid holds the vocabulary of Portal's generated ids: the charset,
-// the width, the generator that mints them and the predicates that recognise
-// an id and a pane token. It depends on the standard library alone, so the
-// packages that share it — sessions, spawn, the runner registry, the hook
-// sweep and migrate — reach it without an edge to one another.
+// the width, the generator that mints them and the predicate that recognises
+// an id. It depends on the standard library alone, so the packages that share
+// it — sessions, spawn and the runner registry — reach it without an edge to
+// one another.
 package nanoid
 
 import (
@@ -19,7 +19,7 @@ const Alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 
 // width is the byte length of a general-purpose generated id — a session-name
 // suffix or a spawn batch id. Nothing persisted is classified by it, so it is
-// free to move: pane tokens carry their own width.
+// free to move.
 const width = 6
 
 // Generator mints one id per call, erroring only when the system entropy source
@@ -38,20 +38,6 @@ func NewGenerator() Generator {
 		}
 		return string(bytes), nil
 	}
-}
-
-// paneTokenWidth is the byte length of a pane token, the hook key the tmux
-// version minted.
-//
-// It is part of hooks.json's on-disk contract: changing it reclassifies every
-// key already persisted there, which the staleness rule then declines to judge
-// and retains forever. Moving it is a migration event, not a tuning change.
-const paneTokenWidth = 6
-
-// IsTokenShaped reports whether s could be a pane token: an id exactly
-// paneTokenWidth bytes wide.
-func IsTokenShaped(s string) bool {
-	return len(s) == paneTokenWidth && IsIDShaped(s)
 }
 
 // maxIDWidth bounds an id read back from outside Portal: wider than any Portal

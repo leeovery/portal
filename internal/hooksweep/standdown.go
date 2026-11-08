@@ -32,13 +32,12 @@ func (s StandDown) Reason() Reason { return s.reason }
 func (s StandDown) Declined() bool { return s.reason != "" }
 
 // emit logs the stand-down at DEBUG: a deferred prune loses nothing, and the
-// next cycle retries it. One that waits on the tmux version's hooks to be
-// migrated warns, since no cycle clears it by itself, and so does a mass reap
-// held, the mark of hooks.json judged against another state's sessions. A
-// doctor --fix that stood down prints its reason.
+// next cycle retries it. A mass reap held warns, the mark of hooks.json
+// judged against another state's sessions, which no cycle clears by itself.
+// A doctor --fix that stood down prints its reason.
 func (s StandDown) emit() {
 	level := slog.LevelDebug
-	if s.reason == ReasonTmuxKeys || s.reason == ReasonMassReap {
+	if s.reason == ReasonMassReap {
 		level = slog.LevelWarn
 	}
 	logger.Log(context.Background(), level, standDownMsg, standDownAttrs(s.reason, s.attrs...)...)

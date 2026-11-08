@@ -195,13 +195,13 @@ func TestStateHydrateRefusesAnArgvWithoutItsSession(t *testing.T) {
 
 // Referenced by their package-level command vars so a rename or a dropped
 // registration is a compile error rather than a silent miss.
-var stateChildCommands = append([]*cobra.Command{
+var stateChildCommands = []*cobra.Command{
 	stateDaemonCmd,
 	stateHydrateCmd,
 	stateResumeDrawCmd,
 	stateResumeWaitCmd,
 	stateResumeRecoverCmd,
-}, stateUpgradeHookCmds...)
+}
 
 func TestStateParentIsHidden(t *testing.T) {
 	if !stateCmd.Hidden {
@@ -213,9 +213,9 @@ func TestStateParentIsHidden(t *testing.T) {
 }
 
 func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
-	t.Run("it registers exactly eight hidden state children", func(t *testing.T) {
-		if len(stateChildCommands) != 8 {
-			t.Fatalf("stateChildCommands has %d entries, want 8", len(stateChildCommands))
+	t.Run("it registers exactly five hidden state children", func(t *testing.T) {
+		if len(stateChildCommands) != 5 {
+			t.Fatalf("stateChildCommands has %d entries, want 5", len(stateChildCommands))
 		}
 		for _, c := range stateChildCommands {
 			if !c.Hidden {
@@ -238,7 +238,7 @@ func TestStateHiddenSubcommandsAreHidden(t *testing.T) {
 }
 
 func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
-	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover", "notify", "commit-now", "signal-hydrate"}
+	names := []string{"daemon", "hydrate", "resume-draw", "resume-wait", "resume-recover"}
 	for _, name := range names {
 		t.Run(name+" resolves via Find", func(t *testing.T) {
 			resetRootCmd()
@@ -251,16 +251,6 @@ func TestStateChildrenRemainInvocableByArgv(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestStateMigrateRenameIsRetired(t *testing.T) {
-	t.Run("it does not resolve portal state migrate-rename", func(t *testing.T) {
-		resetRootCmd()
-		found, _, err := rootCmd.Find([]string{"state", "migrate-rename"})
-		if err == nil && found.Name() == "migrate-rename" {
-			t.Fatal("portal state migrate-rename still resolves; the subcommand must be retired")
-		}
-	})
 }
 
 func TestStateHiddenSubcommandsAbsentFromShellCompletions(t *testing.T) {
