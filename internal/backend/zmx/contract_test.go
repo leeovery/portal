@@ -42,7 +42,7 @@ func (s *daemonSubject) Backend() backend.Backend {
 func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	switch state {
 	case backendtest.Answering:
-		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }))
+		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }, func() { s.unlead(name) }))
 	case backendtest.Historyless:
 		serve(t, s.dir, name, anyRequest(s.info, nil))
 	case backendtest.Silent:
@@ -71,6 +71,14 @@ func (s *daemonSubject) Lead(_ *testing.T, session, variable, value string) {
 	s.leaders[session] = []byte("-DISPLAY\n" + variable + "=" + value + "\n")
 }
 
+// unlead has the session's daemon answer EnvGet as zmx does once its
+// clients are detached: with no environment.
+func (s *daemonSubject) unlead(session string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.leaders, session)
+}
+
 func (s *daemonSubject) leader(session string) []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,10 +93,18 @@ func (s *daemonSubject) Program(t *testing.T, pid int) string {
 }
 
 func (s *daemonSubject) Lacks(b backendtest.Behaviour) string {
-	if b == backendtest.Creating {
+	switch b {
+	case backendtest.Creating:
 		return "the daemon run has no zmx to create a session with"
+	case backendtest.RunClients:
+		return "the daemon run has no zmx to run a command with"
 	}
 	return lacks(s.t, s.dir, b)
+}
+
+// RunConnected is never asked: the subject lacks RunClients.
+func (s *daemonSubject) RunConnected(t *testing.T, session string) {
+	t.Fatalf("RunConnected(%s) asked of a subject with no zmx", session)
 }
 
 // fixtureListing is how List reports a session answering Info with the

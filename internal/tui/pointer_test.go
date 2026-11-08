@@ -39,7 +39,14 @@ func pointerSessionsModel(t *testing.T, termH int, sessions []Session) Model {
 	m.termWidth = pointerTermW
 	m.termHeight = termH
 	m.resyncPageLayouts()
+	openedASettleAgo(&m)
 	return m
+}
+
+// openedASettleAgo stages a picker that has been open, the wheel quiet, for
+// wheelSettle, so its first wheel step begins a gesture.
+func openedASettleAgo(m *Model) {
+	m.wheel.last = m.wheel.clock().Add(-wheelSettle)
 }
 
 func pointerProjectsModel(t *testing.T, projects []project.Project, creator SessionCreator) Model {
@@ -365,6 +372,7 @@ func TestSwipeMovesTheThemePanelCursorWithTheFinger(t *testing.T) {
 
 	t.Run("down moves the cursor as the arrow does", func(t *testing.T) {
 		m := newArrowPanelModel(t, rows, arrowSlug(1))
+		openedASettleAgo(&m)
 		want := arrowPanelIndex(dispatchPanelArrow(t, m, arrowDown))
 		m, _ = pointerUpdate(t, m, fingerDown)
 		if got := arrowPanelIndex(m); got != want {
@@ -374,6 +382,7 @@ func TestSwipeMovesTheThemePanelCursorWithTheFinger(t *testing.T) {
 
 	t.Run("on the last row it lands where Down does", func(t *testing.T) {
 		m := newArrowPanelModel(t, rows, arrowSlug(len(rows)-1))
+		openedASettleAgo(&m)
 		want := arrowPanelIndex(dispatchPanelArrow(t, m, arrowDown))
 		m, _ = pointerUpdate(t, m, fingerDown)
 		if got := arrowPanelIndex(m); got != want {

@@ -311,6 +311,9 @@ func (f *Fake) Kill(ctx context.Context, name string) error {
 	return nil
 }
 
+// Detach leaves the session with no client, and so none leading it. The
+// processes SetAttachClients gave it stay, as a zmx attach takes a moment to
+// exit once detached.
 func (f *Fake) Detach(ctx context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -320,6 +323,7 @@ func (f *Fake) Detach(ctx context.Context, name string) error {
 	s := f.sessions[name]
 	s.Clients = 0
 	f.sessions[name] = s
+	delete(f.leaders, name)
 	return nil
 }
 

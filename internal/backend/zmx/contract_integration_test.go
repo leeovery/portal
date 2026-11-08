@@ -3,6 +3,8 @@
 package zmx_test
 
 import (
+	"bytes"
+	"context"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/proctable"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
@@ -81,6 +84,32 @@ func (s *zmxSubject) Lead(t *testing.T, session, variable, value string) {
 	}
 	zmxtest.Run(t, s.b.Track(attach, variable, value))
 	awaitLeader(t, s.b, session)
+}
+
+// runTyped is in the command RunConnected's run types into the session.
+const runTyped = "run-typed"
+
+// RunConnected starts a zmx run on the session, whose program, the sleep
+// Hold typed, never reads the command, so the run stays connected waiting on
+// its end. zmx handles a client's messages in order, and a run sends the
+// Resize that makes it the leader of a session no client leads before its
+// command; so once the session's screen shows the command typed, the run
+// leads.
+func (s *zmxSubject) RunConnected(t *testing.T, session string) {
+	t.Helper()
+	zmxtest.Run(t, backend.Command{
+		Argv: []string{zmxtest.Binary(t), "run", session, "true", runTyped},
+		Env:  []string{"ZMX_DIR=" + s.b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"},
+	})
+	// The run reads no stdin, so it ends only as its connection does: a
+	// detach of every client, before zmxtest.Run's cleanup waits for it.
+	t.Cleanup(func() { _ = s.b.Detach(context.Background(), session) })
+	if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+		screen, err := s.b.History(t.Context(), session, 0)
+		return err == nil && bytes.Contains(screen, []byte(runTyped))
+	}) {
+		t.Fatalf("session %s never showed the run's command", session)
+	}
 }
 
 // Program names the file pid exec'd as the kernel keeps it: zmx for the

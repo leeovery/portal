@@ -11,6 +11,7 @@ type modalState int
 const (
 	modalNone modalState = iota
 	modalKillConfirm
+	modalTaken
 	modalRename
 	modalDeleteProject
 	modalEditProject

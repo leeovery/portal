@@ -39,19 +39,27 @@ type handler struct {
 	switches  []string
 	detaches  int
 	confirms  []string
+	takes     []takeCall
 	deadlines []time.Time
 }
 
+// takeCall is a take the handler was asked: the session, and where it went.
+type takeCall struct{ session, by string }
+
 func (h *handler) Switch(ctx context.Context, session string) error {
-	return h.take(ctx, func() { h.switches = append(h.switches, session) })
+	return h.answer(ctx, func() { h.switches = append(h.switches, session) })
 }
 
 func (h *handler) DetachToPicker(ctx context.Context) error {
-	return h.take(ctx, func() { h.detaches++ })
+	return h.answer(ctx, func() { h.detaches++ })
 }
 
 func (h *handler) ConfirmSession(ctx context.Context, session string) error {
-	return h.take(ctx, func() { h.confirms = append(h.confirms, session) })
+	return h.answer(ctx, func() { h.confirms = append(h.confirms, session) })
+}
+
+func (h *handler) Take(ctx context.Context, session, by string) error {
+	return h.answer(ctx, func() { h.takes = append(h.takes, takeCall{session, by}) })
 }
 
 // askedConfirms is each session the handler was asked whether it shows.
@@ -61,6 +69,13 @@ func (h *handler) askedConfirms() []string {
 	return slices.Clone(h.confirms)
 }
 
+// askedTakes is each take the handler was asked.
+func (h *handler) askedTakes() []takeCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.takes)
+}
+
 // askedDeadlines is the deadline of each request the handler took.
 func (h *handler) askedDeadlines() []time.Time {
 	h.mu.Lock()
@@ -68,7 +83,7 @@ func (h *handler) askedDeadlines() []time.Time {
 	return slices.Clone(h.deadlines)
 }
 
-func (h *handler) take(ctx context.Context, record func()) error {
+func (h *handler) answer(ctx context.Context, record func()) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.refuse != nil {

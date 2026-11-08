@@ -59,6 +59,9 @@ type attach struct {
 	keys chan attachkeys.Action
 	// unsure is set once the child's output shows a switch.
 	unsure atomic.Bool
+	// zmxKeyed is set once the input passed on to the child holds zmx's own
+	// detach key, before the child can read it.
+	zmxKeyed atomic.Bool
 	// broken carries the end a copy loop's panic makes.
 	broken         chan ending
 	signals, winch chan os.Signal
@@ -433,8 +436,8 @@ func (a *attach) panicked(r any) ending {
 }
 
 // copyInput passes the terminal's input to the child until a bound key, which
-// it hands on to end the attach. The end of the input is the terminal hanging
-// up.
+// it hands on to end the attach, noting zmx's own detach key as it passes it
+// on. The end of the input is the terminal hanging up.
 func (a *attach) copyInput() {
 	buf := make([]byte, bufSize)
 	for {
@@ -447,6 +450,9 @@ func (a *attach) copyInput() {
 			return
 		}
 		forward, action, found := a.cfg.Scanner.Scan(buf[:n])
+		if attachkeys.HoldsZmxDetach(forward) {
+			a.zmxKeyed.Store(true)
+		}
 		if err := writeAll(a.ptmxFd, forward, a.stopIn.wait); err != nil {
 			return // stopped, or the child's side has closed and its exit ends the attach
 		}

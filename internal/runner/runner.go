@@ -77,8 +77,9 @@ type Config struct {
 	// the attach: zmx may have switched the child to another session, or a
 	// zmx inside the session, one reached over ssh say, may have switched its
 	// own client, writing the same bytes. Unsure, Run asks Confirm each time
-	// the kill key is pressed or a request for the picker or to confirm comes,
-	// and asks for the kill or takes the request only once Confirm confirms.
+	// the kill key is pressed or a request for the picker, to confirm or to
+	// take comes, and asks for the kill or takes the request only once
+	// Confirm confirms.
 	// Nil confirms nothing.
 	Confirm func(ctx context.Context) error
 }
@@ -86,13 +87,17 @@ type Config struct {
 // Request is asked of the attach from outside it. One naming Confirm ends
 // nothing: it asks whether the attach shows that session, sure of it. Any
 // other ends the attach as the detach key does: to the picker, or, when
-// Switch names a session, to that session.
+// Switch names a session, to that session. One naming Take ends it to the
+// picker as taken by another terminal.
 type Request struct {
 	// Switch is the session to attach next, empty to ask for the picker.
 	Switch string
 	// Confirm is the session the asker found this runner's client leading,
 	// which Run confirms the attach shows.
 	Confirm string
+	// Take is the session another terminal is taking, which Run lets go of
+	// only while the attach shows it, and By is where the session went.
+	Take, By string
 	// Deadline is when the asker stops waiting: Run refuses the request from
 	// then on. Zero is none.
 	Deadline time.Time
@@ -117,12 +122,24 @@ type Outcome struct {
 	// was unsure of the session, for the picker to show. The attach ended all
 	// the same.
 	Err error
+	// Taken reports that another terminal took the session, ending the
+	// attach, and By is where the session went, empty when that isn't known.
+	Taken bool
+	By    string
+	// Dropped reports that the child exited by its own hand with status 0
+	// and nothing of this terminal's asked it to: no detach Run sent, and no
+	// zmx detach key in the input Run passed on. zmx's client so exits when
+	// zmx drops it: as the session ends, or as a detach from elsewhere
+	// detaches it. An unsure Run reports none, since the session the child
+	// was dropped from need not be cfg.Session.
+	Dropped bool
 }
 
 // Picker reports whether the picker follows, which only Portal's own action
-// or request asks for; every other end of an attach exits to the shell.
+// or request asks for, or another terminal's take; every other end of an
+// attach exits to the shell.
 func (o Outcome) Picker() bool {
-	return o.Action == attachkeys.Detach || o.Action == attachkeys.Kill
+	return o.Action == attachkeys.Detach || o.Action == attachkeys.Kill || o.Taken
 }
 
 // AsksKill reports whether the kill key ended the attach asking for its
@@ -262,7 +279,7 @@ func (a *attach) await(ctx context.Context) ending {
 				return a.request(ctx, req)
 			}
 		case <-a.exited:
-			return ending{out: Outcome{ExitCode: exitCode(a.child.ProcessState)}, reason: "exit"}
+			return a.exit()
 		case sig := <-a.signals:
 			a.detach()
 			return signalled(sig)
@@ -274,6 +291,13 @@ func (a *attach) await(ctx context.Context) ending {
 			return cancelled(ctx)
 		}
 	}
+}
+
+// exit is the end of an attach whose child exited by itself.
+func (a *attach) exit() ending {
+	code := exitCode(a.child.ProcessState)
+	dropped := code == 0 && !a.zmxKeyed.Load() && !a.unsure.Load()
+	return ending{out: Outcome{ExitCode: code, Dropped: dropped}, reason: "exit"}
 }
 
 // act carries out an action, whatever asked for it, detaching the child.
@@ -304,18 +328,20 @@ func (a *attach) refuseKill(ctx context.Context) error {
 }
 
 // admit is why Run won't take req, nil when it will: its asker has stopped
-// waiting, it asks to confirm a session other than the attach's, or it asks
-// for the picker or to confirm while Run is unsure which session the
-// terminal shows and Confirm, asked by the request's deadline, doesn't
-// confirm it. A switch is taken unsure: its asker found this runner by the
-// backend naming it the leader of the session it attached. The deadline is
-// read again once Confirm returns, as one may overrun it.
+// waiting, it asks to confirm or to take a session other than the attach's,
+// or it asks for the picker, to confirm or to take while Run is unsure which
+// session the terminal shows and Confirm, asked by the request's deadline,
+// doesn't confirm it. A switch is taken unsure: its asker found this runner
+// by the backend naming it the leader of the session it attached. The
+// deadline is read again once Confirm returns, as one may overrun it.
 func (a *attach) admit(ctx context.Context, req Request) error {
 	switch {
 	case past(req):
 		return ErrPastDeadline
 	case req.Confirm != "" && req.Confirm != a.cfg.Session:
 		return fmt.Errorf("the attach shows %s, not %s", a.cfg.Session, req.Confirm)
+	case req.Take != "" && req.Take != a.cfg.Session:
+		return fmt.Errorf("the attach shows %s, not %s", a.cfg.Session, req.Take)
 	case req.Switch != "":
 		return nil
 	}
@@ -358,14 +384,19 @@ func answer(req Request, err error) {
 }
 
 // request carries out a request that ends the attach. A switch detaches the
-// child as the detach key does, naming its session in the outcome; a request
-// for the picker is the detach key's.
+// child as the detach key does, naming its session in the outcome, and a take
+// as taken, saying where the session went; a request for the picker is the
+// detach key's.
 func (a *attach) request(ctx context.Context, req Request) ending {
-	if req.Switch == "" {
-		return a.act(ctx, attachkeys.Detach)
+	switch {
+	case req.Switch != "":
+		a.detach()
+		return ending{out: Outcome{Switch: req.Switch}, reason: "switch"}
+	case req.Take != "":
+		a.detach()
+		return ending{out: Outcome{Taken: true, By: req.By}, reason: "take", detail: req.By}
 	}
-	a.detach()
-	return ending{out: Outcome{Switch: req.Switch}, reason: "switch"}
+	return a.act(ctx, attachkeys.Detach)
 }
 
 // exitCode is the status a shell would report for the child.

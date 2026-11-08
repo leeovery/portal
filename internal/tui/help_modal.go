@@ -94,10 +94,7 @@ func helpModalLegendRows(legend []helpLegendEntry, th theme.Theme, colourless bo
 // At or below the natural width (including the width-0 probe) it renders at
 // natural width rather than dropping the hint or wrapping.
 func helpModalHeader(width int, scrolls bool, th theme.Theme, colourless bool) string {
-	glyph := headerStyle(th.AccentPrimary, th, colourless).Bold(true).Render(helpTitleGlyph)
-	gap := headerCanvasBg(th, colourless).Render(" ")
-	title := headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(helpTitle)
-	left := lipgloss.JoinHorizontal(lipgloss.Top, glyph, gap, title)
+	left := modalTitle(helpTitleGlyph, helpTitle, th, colourless)
 	leftWidth := lipgloss.Width(left)
 
 	dismiss := headerStyle(th.TextMuted, th, colourless).Render(helpModalHint(scrolls))
@@ -110,6 +107,16 @@ func helpModalHeader(width int, scrolls bool, th theme.Theme, colourless bool) s
 	}
 	spacer := headerCanvasBg(th, colourless).Render(strings.Repeat(" ", spacerWidth))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, dismiss)
+}
+
+// modalTitle is a modal's title as the help modal draws its own: glyph in the
+// accent, then title in bold primary text. Under NO_COLOR the glyph and the
+// bold carry it.
+func modalTitle(glyph, title string, th theme.Theme, colourless bool) string {
+	glyphSeg := headerStyle(th.AccentPrimary, th, colourless).Bold(true).Render(glyph)
+	gap := headerCanvasBg(th, colourless).Render(" ")
+	titleSeg := headerStyle(th.TextPrimary, th, colourless).Bold(true).Render(title)
+	return lipgloss.JoinHorizontal(lipgloss.Top, glyphSeg, gap, titleSeg)
 }
 
 func helpModalBody(entries []keymapEntry, th theme.Theme, colourless bool) string {

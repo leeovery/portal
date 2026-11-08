@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"time"
 
 	"github.com/leeovery/portal/internal/runner"
 	"github.com/leeovery/portal/internal/runnerreg"
@@ -19,6 +20,18 @@ type runnerRegistry interface {
 	// session current, to switch to target, returning nil once it has
 	// accepted.
 	Switch(ctx context.Context, token, current, target string) error
+	// Take asks every runner on session but this process's own to let it go
+	// to by, returning how many did.
+	Take(ctx context.Context, session, by string) (int, error)
+	// RecordTake records that session is being taken to by, for the clients
+	// only the backend's detach ends.
+	RecordTake(session, by string) error
+	// TakenBy is where the last take of session recorded no earlier than
+	// since says it went: empty when there is none.
+	TakenBy(session string, since time.Time) string
+	// LockTake takes the lock takes of session hold, waiting up to wait, and
+	// returns its release.
+	LockTake(ctx context.Context, session string, wait time.Duration) (release func(), err error)
 }
 
 // runnerListing is runnerreg.Listing's surface.
@@ -58,6 +71,38 @@ func (stateRunners) Switch(ctx context.Context, token, current, target string) e
 		return err
 	}
 	return r.Switch(ctx, token, current, target)
+}
+
+func (stateRunners) Take(ctx context.Context, session, by string) (int, error) {
+	r, err := inStateDir(runnerreg.New)
+	if err != nil {
+		return 0, err
+	}
+	return r.Take(ctx, session, by)
+}
+
+func (stateRunners) RecordTake(session, by string) error {
+	r, err := inStateDir(runnerreg.New)
+	if err != nil {
+		return err
+	}
+	return r.RecordTake(session, by)
+}
+
+func (stateRunners) TakenBy(session string, since time.Time) string {
+	r, err := inStateDir(runnerreg.New)
+	if err != nil {
+		return ""
+	}
+	return r.TakenBy(session, since)
+}
+
+func (stateRunners) LockTake(ctx context.Context, session string, wait time.Duration) (func(), error) {
+	r, err := inStateDir(runnerreg.New)
+	if err != nil {
+		return nil, err
+	}
+	return r.LockTake(ctx, session, wait)
 }
 
 func (stateRunners) DetachToPicker(ctx context.Context, session string) (int, error) {

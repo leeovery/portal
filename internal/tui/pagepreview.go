@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/mattn/go-runewidth"
 )
@@ -143,6 +145,10 @@ type previewModel struct {
 	th         theme.Theme
 	colourless bool
 	helpOpen   bool
+	// lines is the body shown, row by row, and read whether it is the
+	// session's own rather than a line saying why there is none.
+	lines []string
+	read  bool
 }
 
 // NewPreviewModel opens a preview of session showing body, which the
@@ -163,12 +169,64 @@ func NewPreviewModel(session Session, body string, width, height int) previewMod
 	return m
 }
 
-// setBody shows body anchored at its bottom, where the session's cursor is.
+// land shows what a read found. A line saying why there is no body, for a
+// reason that may pass, leaves a body read before as it is, so a read that
+// fails for a moment neither blanks the preview nor loses the user's place.
+func (m *previewModel) land(body string, kind bodyKind) {
+	if kind == bodyPassing && m.read {
+		return
+	}
+	m.read = kind == bodyRead
+	m.setBody(body)
+}
+
+// setBody shows body where the user left the last: anchored at its bottom,
+// where the session's cursor is, while the last was there, as the first body
+// always is, and otherwise at the rows the user scrolled to, found again by
+// what they hold.
 func (m *previewModel) setBody(body string) {
+	following, offset := m.viewport.AtBottom(), m.viewport.YOffset()
+	lines := strings.Split(body, "\n")
 	m.viewport.SetContent(body)
 	// viewport.SetContent auto-jumps to the bottom only when the previous YOffset
 	// overshoots, so the explicit jump is what anchors.
-	m.viewport.GotoBottom()
+	if following {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.SetYOffset(anchoredOffset(m.lines, lines, offset))
+	}
+	m.lines = lines
+}
+
+// anchorRows is how many rows from the top of the view say where the user
+// is, and anchorReach how far from that row a new body is searched for them.
+const (
+	anchorRows  = 3
+	anchorReach = 1000
+)
+
+// anchoredOffset is the row of next holding what prev held from row offset,
+// the top of the view: the nearest within anchorReach, above first, since a
+// history at zmx's cap loses rows from its top as it grows. Rows holding
+// nothing to see anchor nothing, and with no match the view stays at offset.
+func anchoredOffset(prev, next []string, offset int) int {
+	want := prev[min(offset, len(prev)):min(offset+anchorRows, len(prev))]
+	if !slices.ContainsFunc(want, showsAnything) {
+		return offset
+	}
+	for d := range anchorReach + 1 {
+		for _, i := range []int{offset - d, offset + d} {
+			if i >= 0 && i+len(want) <= len(next) && slices.Equal(next[i:i+len(want)], want) {
+				return i
+			}
+		}
+	}
+	return offset
+}
+
+// showsAnything reports whether a row of the body shows anything.
+func showsAnything(row string) bool {
+	return strings.TrimSpace(ansi.Strip(row)) != ""
 }
 
 // Plain ↑/↓ belong to the preview's session step, so the viewport's line scroll

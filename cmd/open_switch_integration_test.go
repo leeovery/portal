@@ -26,11 +26,18 @@ import (
 // in the world's environment, so a portal typed there stays in the world.
 func (w *portalWorld) create(t *testing.T, name string) {
 	t.Helper()
+	w.createRunning(t, name, nil)
+}
+
+// createRunning makes a detached session in the world's zmx directory
+// running command in the world's environment, its shell when command is nil.
+func (w *portalWorld) createRunning(t *testing.T, name string, command []string) {
+	t.Helper()
 	b, err := zmx.New(zmx.Config{Binary: zmxtest.Binary(t), Dir: w.b.Dir(), Environ: func() []string { return slices.Clone(w.env) }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Create(t.Context(), name, t.TempDir(), nil); err != nil {
+	if _, err := b.Create(t.Context(), name, t.TempDir(), command); err != nil {
 		t.Fatalf("create %s: %v", name, err)
 	}
 }
@@ -122,32 +129,12 @@ func (p *portalTerm) token(t *testing.T) string {
 // session.
 func (p *portalTerm) awaitRunner(t *testing.T, session string) {
 	t.Helper()
-	p.awaitRunners(t, session, "alone", func(pids []int) bool {
-		return slices.Equal(pids, []int{p.cmd.Process.Pid})
-	})
-}
-
-// awaitListed waits for the registry to list p's portal among the runners on
-// session. A runner lists itself only once its attach has begun, so a client
-// count, which its zmx client meets first, can't tell that the registry will
-// find it.
-func (p *portalTerm) awaitListed(t *testing.T, session string) {
-	t.Helper()
-	p.awaitRunners(t, session, "among the runners", func(pids []int) bool {
-		return slices.Contains(pids, p.cmd.Process.Pid)
-	})
-}
-
-// awaitRunners waits for the pids the registry lists on session to satisfy
-// want, described by how p's portal should be listed there.
-func (p *portalTerm) awaitRunners(t *testing.T, session, how string, want func(pids []int) bool) {
-	t.Helper()
 	var got map[string][]int
 	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
 		got = p.runners(t)
-		return want(got[session])
+		return slices.Equal(got[session], []int{p.cmd.Process.Pid})
 	}) {
-		t.Fatalf("runners = %v, want portal %d %s on %s", got, p.cmd.Process.Pid, how, session)
+		t.Fatalf("runners = %v, want portal %d alone on %s", got, p.cmd.Process.Pid, session)
 	}
 }
 
@@ -253,23 +240,21 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		p.awaitRunner(t, alpha)
 	})
 
-	t.Run("of two terminals on a session, the one typed in last switches, and the other stays", func(t *testing.T) {
+	t.Run("of a runner and a raw zmx client on a session, the runner typed in last switches through its runner, and the raw client stays", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
-		first, alpha := w.openProject(t)
-		second := w.portal(t, "open", alpha)
+		p, alpha := w.openProject(t)
+		raw := w.start(t, zmxtest.Binary(t), "attach", alpha)
 		w.awaitClients(t, alpha, 2)
-		second.awaitListed(t, alpha)
 		w.create(t, "beta")
-		first.echoes(t, 6, 7)
+		raw.echoes(t, 6, 7)
 
-		second.openTyped(t, "beta")
+		p.openTyped(t, "beta")
 
 		w.awaitClients(t, "beta", 1)
 		w.awaitClients(t, alpha, 1)
-		second.showsSession(t, "beta", 21)
-		first.showsSession(t, alpha, 22)
-		second.awaitRunner(t, "beta")
-		first.awaitRunner(t, alpha)
+		p.showsSession(t, "beta", 21)
+		raw.showsSession(t, alpha, 22)
+		p.awaitRunner(t, "beta")
 	})
 
 	t.Run("with no runner, a plain zmx attach, portal open falls back and zmx switches", func(t *testing.T) {
@@ -364,28 +349,29 @@ func TestPortalOpenInsideASessionSwitchesAgainstZmx(t *testing.T) {
 		}
 	})
 
-	t.Run("detach to the picker brings the picker on every runner on the session, and no other", func(t *testing.T) {
+	t.Run("detach to the picker brings the picker on the runner on the session, and no other terminal", func(t *testing.T) {
 		w := newPortalWorld(t, binary)
-		first, alpha := w.openProject(t)
-		second := w.portal(t, "open", alpha)
+		p, alpha := w.openProject(t)
+		raw := w.start(t, zmxtest.Binary(t), "attach", alpha)
 		w.awaitClients(t, alpha, 2)
-		second.awaitListed(t, alpha)
 		w.create(t, "beta")
 		other := w.portal(t, "open", "beta")
-		w.awaitClients(t, "beta", 1)
-		marks := []int{first.mark(), second.mark(), other.mark()}
+		other.awaitLeading(t, "beta")
+		marks := []int{p.mark(), raw.mark(), other.mark()}
 
 		accepted, err := runnerreg.New(w.stateDir).DetachToPicker(t.Context(), alpha)
 
-		if err != nil || accepted != 2 {
-			t.Fatalf("DetachToPicker = %d, %v; want both runners on %s", accepted, err, alpha)
+		if err != nil || accepted != 1 {
+			t.Fatalf("DetachToPicker = %d, %v; want the runner on %s", accepted, err, alpha)
 		}
-		w.awaitClients(t, alpha, 0)
-		first.awaitAfter(t, marks[0], pickerMark)
-		second.awaitAfter(t, marks[1], pickerMark)
+		w.awaitClients(t, alpha, 1)
+		p.awaitAfter(t, marks[0], pickerMark)
+		raw.showsSession(t, alpha, 22)
 		other.showsSession(t, "beta", 23)
-		if shown := other.shownSince(marks[2]); strings.Contains(shown, pickerMark) {
-			t.Errorf("the terminal on beta showed the picker:\n%s", shown)
+		for i, term := range []*portalTerm{raw, other} {
+			if shown := term.shownSince(marks[i+1]); strings.Contains(shown, pickerMark) {
+				t.Errorf("a terminal the request didn't reach showed the picker:\n%s", shown)
+			}
 		}
 		if !w.alive(t, alpha) {
 			t.Error("the session ended on a detach to the picker")
