@@ -181,7 +181,7 @@ These encode incidents and data-loss traps. Most have a source guard.
 ### Session names and labels
 
 - Session names are zmx's and never change, since zmx has no rename; `session.SanitiseProjectName` and the driver's name check keep generated ones valid.
-- Labels take any printable text: `sessionindex.ErrLabelUnprintable` carries the refusal wording `portal rename` and the picker's `r` both show, mirrored in README's `hook` section, so change both together.
+- Labels take any printable text: `sessionindex.ErrLabelUnprintable` carries the refusal wording `portal rename` and the picker's `r` both show, mirrored in `docs/sessions.md`'s Labels section, so change both together.
 
 
 ### Saving
