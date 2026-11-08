@@ -76,7 +76,7 @@ The size is the one the screen is designed for:
 | Frames | Count | Size | Why |
 |---|---|---|---|
 | Every picker fixture and the contrast swatch, unless below | 39 | `120x40` | the harness size the package's tests have always drawn at |
-| `theme-panel-narrow`, `theme-panel-confirm` | 2 | `63x40` | the panel's minimum-width terminal (`tui.ThemePanelMinWidthTerminal`); the narrow fixture declares it, the confirm wraps its message there |
+| `theme-panel-narrow` | 1 | `63x40` | the panel's minimum-width terminal (`tui.ThemePanelMinWidthTerminal`), which the fixture declares |
 | `theme-panel-min-height-message` | 1 | `63x10` | its declared size: the minimum width on the panel's height floor |
 | `theme-panel-dir-unreadable` | 1 | `120x18` | short enough that the panel's list spans two pages, which is where the warning shows |
 | `resume-panel-*` (card) | 4 | `80x24` | the surface's pinned size |
@@ -227,7 +227,7 @@ No tape needed to look at something:
 
 ```bash
 go run ./cmd/capturetool --fixture sessions-flat
-go run ./cmd/capturetool --fixture theme-panel-confirm --theme nord
+go run ./cmd/capturetool --fixture theme-panel-open --theme nord
 ```
 
 The fixture runs full screen, at the size the terminal gives, until you quit it. An empty or

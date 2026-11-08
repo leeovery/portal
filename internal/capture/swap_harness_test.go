@@ -61,7 +61,6 @@ func capturedStates() []capturedStateWant {
 		{fixture: "theme-panel-narrow", page: tui.PageSessions, present: []string{sessionRow, "Themes", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-paginated", page: tui.PageSessions, present: []string{sessionRow, "Themes", "vivid-01", "● light", "● dark"}, absent: []string{"No sessions yet"}},
 		{fixture: "theme-panel-projects", page: tui.PageProjects, present: []string{"relay-v1-api", "Projects", "Themes", "● light", "● dark"}},
-		{fixture: "theme-panel-confirm", page: tui.PageSessions, present: []string{sessionRow, "Themes", "clear constant nord?  y / n", "confirm", "cancel"}, absent: []string{"No sessions yet", "set as dark", "set as light"}},
 		{fixture: "theme-panel-commit-failed", page: tui.PageSessions, present: []string{sessionRow, "Themes", "⚠ couldn't save theme", "● light", "● dark", "set as dark"}, absent: []string{"No sessions yet", "confirm", "cancel"}},
 		// The floor's body is one list row, the first by the text rows show, so
 		// the light badge's row is off the frame rather than missing from it.

@@ -51,14 +51,6 @@ func panelText(lines []panelLine) string {
 	return strings.Join(visible, "\n")
 }
 
-func panelFieldText(lines []panelLine) string {
-	fields := make([]string, 0, len(lines))
-	for _, line := range lines {
-		fields = append(fields, strings.Join(strings.Fields(line.visible), " "))
-	}
-	return strings.Join(fields, "\n")
-}
-
 func panelLineIndex(t *testing.T, lines []panelLine, want string) int {
 	t.Helper()
 

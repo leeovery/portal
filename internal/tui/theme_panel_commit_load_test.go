@@ -99,11 +99,7 @@ func convertToSlot(t *testing.T, m Model, target string, press tea.KeyPressMsg) 
 	t.Helper()
 
 	m = arrowToThemeRow(t, m, target)
-	m, _ = pressSlotKey(t, m, press)
-	if got := m.themePanel.message; got.Kind != themeMessageConfirm {
-		t.Fatalf("fixture: the slot key left the message %+v, want the confirm live over a constant", got)
-	}
-	return pressConfirmKey(t, m, confirmYes)
+	return pressSlotKey(t, m, press)
 }
 
 func requireLoadedLine(t *testing.T, sink *logtest.Sink, slug, slot string) {
@@ -518,7 +514,6 @@ func TestCommitSlotLoad_ActiveThemeUnchanged(t *testing.T) {
 	previewed := m.themeState.active
 
 	m, _ = pressSlotKey(t, m, slotDarkPress)
-	m, _ = pressConfirmKey(t, m, confirmYes)
 
 	if m.themeState.active != previewed {
 		t.Errorf("the conversion rendered %s, want the previewed %s — a commit is a WRITE, not a navigation", themeLabel(m.themeState.active), themeLabel(previewed))
@@ -805,7 +800,6 @@ func TestCommitSlotLoad_AnswerIsIndependentOfTheLoad(t *testing.T) {
 			seam.err = tc.err
 
 			m, _ = pressSlotKey(t, m, slotDarkPress)
-			m, _ = pressConfirmKey(t, m, confirmYes)
 
 			if len(seam.slotLoads) != 1 {
 				t.Fatalf("the conversion asked for %d slot load(s), want 1", len(seam.slotLoads))
@@ -832,8 +826,7 @@ func TestCommitSlotLoad_BrokenBuiltinDegrades(t *testing.T) {
 	nomination, mode, active := m.themeState.nomination, m.themeState.inForceMode(), m.themeState.active
 	seam.err = errThemeResolveFatal
 
-	m, _ = pressSlotKey(t, m, slotDarkPress)
-	m, cmd := pressConfirmKey(t, m, confirmYes)
+	m, cmd := pressSlotKey(t, m, slotDarkPress)
 
 	if len(seam.slotLoads) != 1 {
 		t.Fatalf("the conversion asked for %d slot load(s), want 1 — the degrade must be the seam's answer rather than a load that never ran", len(seam.slotLoads))

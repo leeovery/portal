@@ -18,22 +18,14 @@ import (
 
 func messagePanelFixtureNames() []string {
 	return []string{
-		panelFixtureNamePrefix + "confirm",
 		panelFixtureNamePrefix + "commit-failed",
 		panelFixtureNamePrefix + "min-height-message",
 	}
 }
 
-const messagePanelTermWidth = 54
-
 var messagePanelFloorTermHeight = tui.ThemePanelFloorTerminalHeight()
 
-const themePanelConfirmCopy = "clear constant nord?  y / n"
-
-var (
-	confirmFooterRows  = []string{"y confirm", "n cancel"}
-	standingFooterRows = []string{"⏎ set theme", "d set as dark", "l set as light", "esc close"}
-)
+var standingFooterRows = []string{"⏎ set theme", "d set as dark", "l set as light", "esc close"}
 
 func footerBlock(t *testing.T, lines []panelLine, want []string) (start int, rows []string) {
 	t.Helper()
@@ -46,83 +38,6 @@ func footerBlock(t *testing.T, lines []panelLine, want []string) (start int, row
 		rows = append(rows, strings.Join(strings.Fields(line.visible), " "))
 	}
 	return start, rows
-}
-
-func TestPanelFixture_ConfirmFrame(t *testing.T) {
-	palette := themetest.Builtin(t, theme.DefaultLightSlug)
-	lines := panelLines(t, panelFrameAt(t, "theme-panel-confirm", palette, messagePanelTermWidth, harnessHeight))
-	start := panelLineIndex(t, lines, "clear constant")
-	footerStart, footerRows := footerBlock(t, lines, confirmFooterRows)
-
-	t.Run("the slot carries the pinned confirm verbatim", func(t *testing.T) {
-		if got, want := joinMessageLines(lines[start:footerStart]), strings.Join(strings.Fields(themePanelConfirmCopy), " "); got != want {
-			t.Errorf("the message slot reads %q, want the pinned %q", got, want)
-		}
-	})
-
-	t.Run("it renders in text.secondary with no band", func(t *testing.T) {
-		raw := lines[start].raw
-		if !strings.Contains(raw, fgSeq(t, palette.TextSecondary)) {
-			t.Error("the confirm is not text.secondary; the slot's confirm state carries that token and no other")
-		}
-		for _, band := range []struct {
-			name  string
-			token theme.Token
-		}{
-			{"bg.attention", palette.BgAttention},
-			{"bg.selection", palette.BgSelection},
-			{"bg.subtle", palette.BgSubtle},
-		} {
-			if strings.Contains(raw, bgSeq(t, band.token)) {
-				t.Errorf("the confirm carries a %s band; it takes NO band — it is text on the panel's own canvas", band.name)
-			}
-		}
-		if !strings.Contains(raw, bgSeq(t, palette.Canvas)) {
-			t.Error("the confirm does not carry the panel's canvas, so its cells are a terminal-bg island inside the panel body")
-		}
-	})
-
-	t.Run("the footer is the confirm's two keys and nothing else", func(t *testing.T) {
-		if got := footerRows; !slicesEqual(got, confirmFooterRows) {
-			t.Errorf("the footer renders %v, want exactly %v — the standing scope lists four keys of which none would act", got, confirmFooterRows)
-		}
-		for _, standing := range standingFooterRows {
-			if strings.Contains(panelFieldText(lines), standing) {
-				t.Errorf("the panel still advertises %q while the confirm is live; the confirm substitutes the scope rather than extending it", standing)
-			}
-		}
-	})
-}
-
-func TestPanelFixture_ConfirmWrapsAtMinWidth(t *testing.T) {
-	palette := themetest.Builtin(t, theme.DefaultLightSlug)
-	lines := panelLines(t, panelFrameAt(t, "theme-panel-confirm", palette, messagePanelTermWidth, harnessHeight))
-	start := panelLineIndex(t, lines, "clear constant")
-	footerStart, _ := footerBlock(t, lines, confirmFooterRows)
-	messageRows := footerStart - start
-
-	t.Run("the slot occupies two rows", func(t *testing.T) {
-		if messageRows != 2 {
-			t.Errorf("the confirm renders on %d row(s) at the panel's minimum width, want the 2 rows it wraps to:\n%s", messageRows, panelText(lines))
-		}
-	})
-
-	t.Run("the same copy fits on one row at the preferred width", func(t *testing.T) {
-		wide := panelLines(t, panelFixtureFrame(t, "theme-panel-confirm", palette))
-		wideStart := panelLineIndex(t, wide, "clear constant")
-		wideFooter, _ := footerBlock(t, wide, confirmFooterRows)
-		if got := wideFooter - wideStart; got != 1 {
-			t.Errorf("the confirm renders on %d row(s) at the preferred width, want 1 — the wrap must be a function of the WIDTH rather than of the copy", got)
-		}
-	})
-
-	t.Run("the wrapped rows are charged to the list body", func(t *testing.T) {
-		firstRow := panelLineIndex(t, lines, "catppuccin-latte")
-		emptySlot := len(lines) - firstRow - len(confirmFooterRows)
-		if got, want := start-firstRow, emptySlot-messageRows; got != want {
-			t.Errorf("the list body renders %d rows, want %d — the slot's %d rows must come out of the BODY, not off the bottom of the panel where the footer is:\n%s", got, want, messageRows, panelText(lines))
-		}
-	})
 }
 
 const themePanelCommitFailedCopy = "⚠ couldn't save theme"
@@ -165,7 +80,7 @@ func TestPanelFixture_CommitFailedFrame(t *testing.T) {
 
 	t.Run("the standing footer is still in force", func(t *testing.T) {
 		if !slicesEqual(footerRows, standingFooterRows) {
-			t.Errorf("the footer renders %v, want the standing %v — only the confirm substitutes a scope, and a failed commit raises no question", footerRows, standingFooterRows)
+			t.Errorf("the footer renders %v, want the standing %v — a failed commit raises no question", footerRows, standingFooterRows)
 		}
 	})
 }
@@ -243,31 +158,6 @@ func TestPanelFixture_MinHeightMessageFrame(t *testing.T) {
 	})
 }
 
-func TestPanelFixture_MinHeightMessageTruncates(t *testing.T) {
-	palette := themetest.Builtin(t, "nord")
-
-	t.Run("the seeded failure is one line", func(t *testing.T) {
-		lines := panelLines(t, panelFixtureFrame(t, "theme-panel-min-height-message", palette))
-		start := panelLineIndex(t, lines, "couldn't save theme")
-		footerStart, _ := footerBlock(t, lines, standingFooterRows)
-		if got := footerStart - start; got != 1 {
-			t.Errorf("the slot renders %d rows at the floor, want 1:\n%s", got, panelText(lines))
-		}
-	})
-
-	t.Run("the copy that wraps above the floor is truncated at it", func(t *testing.T) {
-		lines := panelLines(t, panelFrameAt(t, "theme-panel-confirm", themetest.Builtin(t, theme.DefaultLightSlug), messagePanelTermWidth, messagePanelFloorTermHeight))
-		start := panelLineIndex(t, lines, "clear constant")
-		footerStart, _ := footerBlock(t, lines, confirmFooterRows)
-		if got := footerStart - start; got != 1 {
-			t.Errorf("the confirm renders %d rows at the floor, want the 1 row the height rule pins:\n%s", got, panelText(lines))
-		}
-		if got := strings.TrimSpace(lines[start].visible); !strings.HasSuffix(got, "…") {
-			t.Errorf("the confirm reads %q at the floor; the same copy wraps at this width above the floor, so at it the line must be TRUNCATED rather than laid out whole", got)
-		}
-	})
-}
-
 func joinMessageLines(lines []panelLine) string {
 	parts := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -276,9 +166,9 @@ func joinMessageLines(lines []panelLine) string {
 	return strings.Join(parts, " ")
 }
 
-var messageSeedFields = []string{"ThemeConfirm", "ThemeCommitFailed"}
+var messageSeedFields = []string{"ThemeCommitFailed"}
 
-var pinnedMessageCopy = []string{"clear constant", "couldn't save theme"}
+var pinnedMessageCopy = []string{"couldn't save theme"}
 
 func TestPanelFixture_MessageSeedsAreStateOnly(t *testing.T) {
 	t.Run("the seams carry a boolean and nothing else", func(t *testing.T) {
@@ -310,10 +200,6 @@ func TestPanelFixture_MessageSeedsAreStateOnly(t *testing.T) {
 	})
 
 	t.Run("the frames render it all the same", func(t *testing.T) {
-		confirm := panelFixtureFrame(t, "theme-panel-confirm", themetest.Builtin(t, theme.DefaultLightSlug))
-		if !strings.Contains(ansi.Strip(confirm), themePanelConfirmCopy) {
-			t.Errorf("the confirm frame does not carry %q, so the absence above says nothing about where the copy comes from", themePanelConfirmCopy)
-		}
 		failed := panelFixtureFrame(t, "theme-panel-commit-failed", themetest.Builtin(t, "nord"))
 		if !strings.Contains(ansi.Strip(failed), themePanelCommitFailedCopy) {
 			t.Errorf("the failed-commit frame does not carry %q, so the absence above says nothing about where the copy comes from", themePanelCommitFailedCopy)

@@ -124,7 +124,6 @@ type CaptureSeeds struct {
 	// ThemeCursor is placement only — it applies no theme, so the palette
 	// stays the one the nomination carries.
 	ThemeCursor       string
-	ThemeConfirm      bool
 	ThemeCommitFailed bool
 	Detection         *spawn.Identity
 	GoneFlagged       []string
@@ -207,7 +206,6 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithInitialMultiSelect(deps.Capture.MultiSelect))
 	opts = append(opts, WithInitialCursor(deps.Capture.Cursor))
 	opts = append(opts, WithInitialThemeCursor(deps.Capture.ThemeCursor))
-	opts = append(opts, WithInitialThemeConfirm(deps.Capture.ThemeConfirm))
 	opts = append(opts, WithInitialThemeCommitFailed(deps.Capture.ThemeCommitFailed))
 
 	// WithInitialGoneFlagged applies after WithInitialMultiSelect so its
