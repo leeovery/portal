@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-11-08
+
+One terminal at a time: opening a session now takes it from any other terminal showing it, so it is drawn for yours from the first frame.
+
+✨ Added
+- Opening a session takes it from other terminals showing it — nothing is killed or typed into the session, and Portal's own `_` sessions are never taken.
+- "Open on another device" screen when your session is taken elsewhere — Enter takes it back, Space watches it, Esc goes to the picker.
+- Scrollback preview stays live while open — it re-reads the session about once a second and holds the place you scrolled to.
+
+🔧 Changed
+- A session that doesn't answer in the preview, or whose history can't be read, no longer blanks what you were already viewing — the preview keeps reading until the session responds.
+
+🐛 Fixed
+- Scrolling the mouse wheel after a momentum swipe no longer lands on a modal, preview or filter that opened meanwhile.
+- Keys typed while a resume panel is first drawn are no longer misread as answers to it.
+- Late terminal background-colour replies no longer leak into resumed sessions as stray keystrokes.
+- Resume panels are no longer drawn with a background-colour query on sessions no terminal is showing.
+
 ## [1.0.1] - 2026-11-07
 
 💥 Breaking
