@@ -217,6 +217,27 @@ func (w *waitingWorld) awaitDrawAsking(t *testing.T, mark int) int {
 	return len(raw)
 }
 
+// awaitWaiterStarted waits for a waiter on the session to start past mark in
+// the log, returning the log line that records its start, argv and all.
+func (w *waitingWorld) awaitWaiterStarted(t *testing.T, mark int) string {
+	t.Helper()
+	var logged, started string
+	if !harnesstest.PollUntil(t, attachSettle, 20*time.Millisecond, func() bool {
+		raw, _ := os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+		logged = string(raw[min(mark, len(raw)):])
+		for line := range strings.Lines(logged) {
+			if strings.Contains(line, "process: start") && strings.Contains(line, "resume-wait") {
+				started = line
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no waiter started; the log since holds:\n%s", logged)
+	}
+	return started
+}
+
 // waiterOwed reports whether a waiter that started in the log's first upTo
 // bytes was handed a background question still owed its reply.
 func (w *waitingWorld) waiterOwed(upTo int) bool {
@@ -244,9 +265,21 @@ func (w *waitingWorld) logSize() int {
 // setTheme pins the theme the world's processes read from prefs.json.
 func (w *waitingWorld) setTheme(t *testing.T, slug string) {
 	t.Helper()
+	w.writePrefs(t, `{"theme":"`+slug+`"}`)
+}
+
+// setPair pins an adaptive pair as the theme the world's processes read from
+// prefs.json, so a draw asks the terminal its background.
+func (w *waitingWorld) setPair(t *testing.T, light, dark string) {
+	t.Helper()
+	w.writePrefs(t, `{"theme_light":"`+light+`","theme_dark":"`+dark+`"}`)
+}
+
+func (w *waitingWorld) writePrefs(t *testing.T, prefs string) {
+	t.Helper()
 	for _, kv := range slices.Backward(w.env) {
 		if path, ok := strings.CutPrefix(kv, "PORTAL_PREFS_FILE="); ok {
-			if err := os.WriteFile(path, []byte(`{"theme":"`+slug+`"}`), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte(prefs), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			return
@@ -306,7 +339,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	// on every attach, a switch's included, is the redraw, so these hold zmx to
 	// its contract. Each attach is at the size an earlier one left the session
 	// at, so only that signal can redraw the panel.
-	for _, tc := range []struct {
+	arrivals := []struct {
 		name string
 		// arrive readies a way to the waiting session, then returns the step
 		// that takes it.
@@ -328,7 +361,8 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			w.awaitClients(t, "other", 1)
 			return func() { raw.openTyped(t, waitingSession) }
 		}},
-	} {
+	}
+	for _, tc := range arrivals {
 		t.Run("zmx redraws a waiting panel in the theme in force on "+tc.name+" at an unchanged size", func(t *testing.T) {
 			w := newWaitingWorld(t, binary)
 			w.awaitPanel(t)
@@ -343,6 +377,28 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			w.awaitDrawIn(t, mark, "nord")
 			if !w.flagRaised(t) {
 				t.Error("the redraw lowered the session's flag; it still waits")
+			}
+		})
+	}
+
+	// A terminal holds the session once each of these lands, so the redraw of
+	// an adaptive pair asks it the light/dark question, which these terminals
+	// never answer: the waiter it hands to is owed the reply. This holds the
+	// ask rule, backend.Held, to real zmx from inside the session.
+	for _, tc := range arrivals {
+		t.Run("a redraw of an adaptive pair on "+tc.name+" asks the terminal, its waiter owed the reply", func(t *testing.T) {
+			w := newWaitingWorld(t, binary)
+			w.awaitPanel(t)
+			picker := w.leftAtTermSize(t)
+			attach := tc.arrive(t, w, picker)
+			w.setPair(t, "tokyo-night-day", "tokyo-night")
+
+			mark := w.logSize()
+			attach()
+			w.awaitClients(t, waitingSession, 1)
+
+			if line := w.awaitWaiterStarted(t, mark); !strings.Contains(line, "--replies-owed") {
+				t.Errorf("the redraw's waiter was owed no reply; it started as:\n%s", line)
 			}
 		})
 	}
