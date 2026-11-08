@@ -137,6 +137,16 @@ type probeHarness struct {
 	// pane, and asks counts how often it asked.
 	attached bool
 	asks     int
+
+	// clock is what the probe's clock reads; datings records, for each time
+	// the probe read it, what it had done by then and how often it had read.
+	clock   time.Time
+	datings []probeDating
+}
+
+type probeDating struct {
+	events []string
+	reads  int
 }
 
 func newProbeHarness(t *testing.T) *probeHarness {
@@ -156,6 +166,7 @@ func newProbeHarness(t *testing.T) *probeHarness {
 		timeout:  testProbeTimeout,
 		terminal: true,
 		attached: true,
+		clock:    time.UnixMilli(1_762_560_000_000),
 	}
 }
 
@@ -213,6 +224,10 @@ func (h *probeHarness) probe() paneAppearanceProbe {
 		attached: func() bool {
 			h.asks++
 			return h.attached
+		},
+		now: func() time.Time {
+			h.datings = append(h.datings, probeDating{events: slices.Clone(h.events), reads: h.reader.reads})
+			return h.clock
 		},
 	}
 }
@@ -512,8 +527,8 @@ func TestResolvePaneTheme(t *testing.T) {
 
 				found, _ := resolvePaneTheme(tc.n, tc.colourless, 0, h.dropInput(nil), h.probe())
 
-				if found.Asked != tc.asked {
-					t.Errorf("Asked = %v, want %v", found.Asked, tc.asked)
+				if found.Asked() != tc.asked {
+					t.Errorf("Asked() = %v, want %v", found.Asked(), tc.asked)
 				}
 			})
 		}
@@ -612,6 +627,23 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		h.probe().detect(0)
 
 		h.assertWroteQuery(t)
+	})
+
+	// The reply's window runs from the question: dated any earlier, a reply
+	// near the window's end would reach whatever the session is handed to.
+	t.Run("it dates its question as it writes it, before it reads a reply", func(t *testing.T) {
+		h := newProbeHarness(t)
+		h.reply(t, darkReply)
+
+		_, found := h.probe().detect(0)
+
+		if !found.AskedAt.Equal(h.clock) {
+			t.Errorf("AskedAt = %v, want %v, the clock as the question was written", found.AskedAt, h.clock)
+		}
+		want := probeDating{events: []string{eventArmRead, eventWriteQuery}}
+		if len(h.datings) != 1 || !slices.Equal(h.datings[0].events, want.events) || h.datings[0].reads != want.reads {
+			t.Errorf("read the clock %+v, want once, with the question written and nothing read", h.datings)
+		}
 	})
 
 	t.Run("it selects the light member for a light reply", func(t *testing.T) {
@@ -720,8 +752,8 @@ func TestPaneAppearanceProbe(t *testing.T) {
 		if got != theme.MemberDark {
 			t.Errorf("resolved %v with no terminal showing the pane, want %v", got, theme.MemberDark)
 		}
-		if found.Asked || found.Replies != 0 {
-			t.Errorf("Asked = %v, Replies = %d; want no question asked and no reply read", found.Asked, found.Replies)
+		if found.Asked() || found.Replies != 0 {
+			t.Errorf("Asked() = %v, Replies = %d; want no question asked and no reply read", found.Asked(), found.Replies)
 		}
 		h.assertWroteNothing(t)
 		h.assertReadNothing(t)
@@ -877,8 +909,8 @@ func TestPaneAppearanceProbe(t *testing.T) {
 
 				_, found := h.probe().detect(0)
 
-				if !found.Asked || found.Replies != tc.replies {
-					t.Errorf("Asked = %v, Replies = %d for %q; want true, %d", found.Asked, found.Replies, tc.input, tc.replies)
+				if !found.Asked() || found.Replies != tc.replies {
+					t.Errorf("Asked() = %v, Replies = %d for %q; want true, %d", found.Asked(), found.Replies, tc.input, tc.replies)
 				}
 			})
 		}

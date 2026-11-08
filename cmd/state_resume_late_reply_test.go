@@ -475,6 +475,27 @@ func TestResumeLateReply_BeforeTheHandOff(t *testing.T) {
 		h.assertRead("\r" + lateReplyHead + lateReplyTail)
 	})
 
+	// The question's window closes a quiet window after the head lands: waited
+	// on only from the wait's start, the rest would reach the hook.
+	t.Run("a reply's head landing late in the wait is waited on for its rest from the head's arrival", func(t *testing.T) {
+		payload := drawnPayload()
+		// Asked so its window closes two quiet windows into a wait that
+		// begins once Enter's own quiet window has passed.
+		payload.RepliesOwed = askedAgo(resumeReplyWindow - 3*resumeInputQuiet)
+		h := startArrivals(t, payload)
+		h.probe.lookup = foundHook(payload.Command)
+
+		h.answerWith("\r")
+		h.silentFor(1)
+		h.inTheWait(lateReplyHead)
+		h.silentFor(1)
+		h.inTheWait(lateReplyTail)
+
+		h.answered()
+		assertHookHandOff(t, h.probe, payload.Command)
+		h.assertRead("\r" + lateReplyHead + lateReplyTail)
+	})
+
 	t.Run("two replies back to back in the wait settle two questions, and it waits on for the third", func(t *testing.T) {
 		payload := drawnPayload()
 		payload.RepliesOwed = askedAgo(2*resumeInputQuiet, resumeInputQuiet, 0)
@@ -695,7 +716,10 @@ func TestResumeLateReply_TheDraw(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := samplePayload()
 			payload.RepliesOwed = tc.owed
-			probe := &resumeDrawProbe{asked: tc.asked, replies: tc.replies}
+			probe := &resumeDrawProbe{replies: tc.replies}
+			if tc.asked {
+				probe.askedAt = resumeTestEpoch
+			}
 
 			if err := runResumeDraw(newResumeDrawConfig(t, probe, payload, fixedSize(100, 30))); err != nil {
 				t.Fatalf("runResumeDraw() error = %v", err)
@@ -710,6 +734,23 @@ func TestResumeLateReply_TheDraw(t *testing.T) {
 		})
 	}
 
+	// The probe writes its question once the session's daemon has counted its
+	// clients and the theme has loaded, which can take a quarter of a second.
+	t.Run("its question is owed from when the probe wrote it, not from when the draw began", func(t *testing.T) {
+		const late = 300 * time.Millisecond
+		payload := samplePayload()
+		payload.RepliesOwed = askedAgo(before)
+		probe := &resumeDrawProbe{askedAt: resumeTestEpoch.Add(late)}
+
+		if err := runResumeDraw(newResumeDrawConfig(t, probe, payload, fixedSize(100, 30))); err != nil {
+			t.Fatalf("runResumeDraw() error = %v", err)
+		}
+
+		if got, want := waiterOf(t, probe.execArgs).RepliesOwed, askedAgo(before, -late); got != want {
+			t.Errorf("waiter owes %v, want %v", got, want)
+		}
+	})
+
 	t.Run("the replies the drop read settle questions as the query's do", func(t *testing.T) {
 		for _, tc := range []struct {
 			name    string
@@ -722,7 +763,7 @@ func TestResumeLateReply_TheDraw(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				payload := openingPayload()
 				payload.RepliesOwed = askedAgo(before)
-				probe := &resumeDrawProbe{asked: true}
+				probe := &resumeDrawProbe{askedAt: resumeTestEpoch}
 				cfg := newResumeDrawConfig(t, probe, payload, fixedSize(100, 30))
 				cfg.DropInputQueue = func() (int, error) { return tc.replies, nil }
 

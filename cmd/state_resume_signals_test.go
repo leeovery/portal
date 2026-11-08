@@ -271,7 +271,7 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 		var probe resumeWaitProbe
 		input := newTypeAhead("\x1b")
 		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
-		cfg.AwaitInput = input.await
+		listenOn(&cfg, input)
 
 		if err := runResumeWait(cfg); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -284,7 +284,7 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 		var probe resumeWaitProbe
 		input := newTypeAhead("")
 		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
-		cfg.AwaitInput = input.await
+		listenOn(&cfg, input)
 		winch := make(chan os.Signal, 1)
 		winch <- syscall.SIGWINCH
 		cfg.Winch = winch

@@ -395,7 +395,6 @@ func TestRunResumeWait_Screens(t *testing.T) {
 				h.arrive(chord.keys)
 				h.quiet()
 				h.resizeSettled()
-				h.quiet()
 
 				h.answered()
 				assertHandOff(t, h.probe, payload)

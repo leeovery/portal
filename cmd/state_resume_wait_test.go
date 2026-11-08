@@ -102,6 +102,7 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		Settle:             time.After,
 		// Input handed in whole is already queued behind whatever is read.
 		AwaitInput: func(time.Duration) (bool, error) { return true, nil },
+		OpenWaker:  func() (resumeWaker, error) { return queuedInput{}, nil },
 		Now:        testClockAtEpoch,
 		Size:       fixedSize(payload.Width, payload.Height),
 		MakeRaw: func() (func(), error) {
@@ -157,6 +158,14 @@ func newResumeWaitConfig(t *testing.T, p *resumeWaitProbe, payload resumeChainPa
 		},
 	}
 }
+
+// queuedInput is the listen over input handed in whole, already queued behind
+// whatever is read.
+type queuedInput struct{}
+
+func (queuedInput) Await() (bool, error) { return true, nil }
+func (queuedInput) Wake()                {}
+func (queuedInput) Close() error         { return nil }
 
 // oneByteReader fails the test if the wait ever reads ahead: a byte pulled into
 // a buffer the loop did not dispatch is a byte the next process image loses.
@@ -341,6 +350,65 @@ func TestRunResumeWait_TerminalMode(t *testing.T) {
 		}
 		assertNoHandOff(t, &probe)
 	})
+
+	t.Run("it refuses to wait when its listen for input cannot be opened", func(t *testing.T) {
+		var probe resumeWaitProbe
+		reader := keystrokes(t, "d")
+		cfg := newResumeWaitConfig(t, &probe, samplePayload(), reader)
+		openErr := errors.New("too many open files")
+		cfg.OpenWaker = func() (resumeWaker, error) { return nil, openErr }
+
+		err := runResumeWait(cfg)
+
+		if !errors.Is(err, openErr) {
+			t.Fatalf("runResumeWait() error = %v, want the listen's failure", err)
+		}
+		if reader.reads != 0 {
+			t.Errorf("the wait read %d times with no listen open, want 0", reader.reads)
+		}
+		if probe.rawCalls != 0 {
+			t.Errorf("MakeRaw called %d times with no listen open, want 0", probe.rawCalls)
+		}
+		assertNoHandOff(t, &probe)
+	})
+
+	t.Run("it closes its listen for input however the wait ends", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			keys  string
+			stage func(cfg *resumeWaitConfig)
+		}{
+			{"answered", "d", func(*resumeWaitConfig) {}},
+			{"its input ended", "", func(*resumeWaitConfig) {}},
+			{"raw mode refused", "d", func(cfg *resumeWaitConfig) {
+				cfg.MakeRaw = func() (func(), error) { return nil, errors.New("inappropriate ioctl for device") }
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg := newResumeWaitConfig(t, new(resumeWaitProbe), samplePayload(), keystrokes(t, tc.keys))
+				waker := &closeCounted{resumeWaker: queuedInput{}}
+				cfg.OpenWaker = func() (resumeWaker, error) { return waker, nil }
+				tc.stage(&cfg)
+
+				_ = runResumeWait(cfg)
+
+				if waker.closes != 1 {
+					t.Errorf("the listen was closed %d times, want 1", waker.closes)
+				}
+			})
+		}
+	})
+}
+
+type closeCounted struct {
+	resumeWaker
+	closes int
+}
+
+func (w *closeCounted) Close() error {
+	w.closes++
+	return w.resumeWaker.Close()
 }
 
 func TestRunResumeWait_Waiting(t *testing.T) {
@@ -381,6 +449,8 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 		// wires its seams by reference.
 		samePackageRoute := []string{
 			"sessionDrawTheme",
+			"sessionAttached",
+			"resolvePaneThemeFunc",
 			"sessionDrawNomination",
 			"shippedSessionThemePair",
 			"renderResumeScreen",
@@ -443,23 +513,32 @@ func TestRunResumeWait_Waiting(t *testing.T) {
 					fired <- time.Now()
 					return fired
 				}
+				listenOn(&cfg, input)
 				cfg.AwaitInput = func(d time.Duration) (bool, error) {
-					if d != resumeIdleListen {
-						quietListens.Add(1)
-					}
+					quietListens.Add(1)
 					return input.await(d)
 				}
 
 				done := make(chan error, 1)
 				go func() { done <- runResumeWait(cfg) }()
+				select {
+				case <-input.listening:
+				case <-time.After(2 * time.Second):
+					t.Fatal("the wait never listened for input")
+				}
 
+				// Six times the quiet that ends an arrival: a listen that ended
+				// on a timeout of its own would have been taken again by now.
 				select {
 				case err := <-done:
 					t.Fatalf("the wait ended on its own with no input: %v", err)
-				case <-time.After(150 * time.Millisecond):
+				case <-time.After(6 * resumeInputQuiet):
 				}
 				if got := settleWindows.Load() + quietListens.Load(); got != 0 {
 					t.Fatalf("the wait armed %d windows or listens past a byte while left alone, want 0", got)
+				}
+				if got := input.idle.Load(); got != 1 {
+					t.Fatalf("the wait took %d listens while left alone, want the one it holds until a byte arrives or a redraw wakes it", got)
 				}
 
 				tc.deliver(input, func() { resize.deliver(winch) })

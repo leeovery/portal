@@ -41,12 +41,16 @@ const resumeInputQuiet = 50 * time.Millisecond
 // judged as keys.
 const resumeReplyTailHolds = int(bgreply.TailWait / resumeInputQuiet)
 
-// resumeIdleListen is how long the waiter listens for input with no arrival
-// open. Every read the waiter makes is of a byte a listen has found arrived,
-// and every listen ends within its window, so the waiter never execs with a
-// read outstanding to take a byte the next process image should have: a
-// redraw that comes due waits for the listen in flight, this at most.
-const resumeIdleListen = 100 * time.Millisecond
+// resumeWaker is the listen the waiter takes with no arrival open. Await
+// reports whether a byte arrived on the session, reading nothing, or false
+// once Wake has been called, and has no timeout, so a waiter left alone for
+// days makes no wakeups. Wake ends the Await in flight, or the next to begin;
+// one that finds a byte as well reports the byte and takes the wake with it.
+type resumeWaker interface {
+	Await() (bool, error)
+	Wake()
+	Close() error
+}
 
 type resumeWaitConfig struct {
 	resumeChainPayload
@@ -74,6 +78,10 @@ type resumeWaitConfig struct {
 	// AwaitInput reports whether a byte arrived on the session within window,
 	// reading nothing.
 	AwaitInput func(window time.Duration) (bool, error)
+
+	// OpenWaker opens the listen the waiter takes with no arrival open, which a
+	// redraw coming due wakes.
+	OpenWaker func() (resumeWaker, error)
 
 	// Now is the wall clock the questions owed a reply were asked by.
 	Now func() time.Time
@@ -121,6 +129,8 @@ type resumeRedraws struct {
 	// attaching a client at an unchanged size.
 	signalled bool
 	due       bool
+	// wake ends the listen in flight once the redraw is due.
+	wake func()
 }
 
 // awaitRead waits for the listen in flight to answer, taking every size
@@ -135,7 +145,10 @@ func (r *resumeRedraws) awaitRead(cfg resumeWaitConfig, results <-chan resumeRea
 			r.signalled = true
 		case <-r.settled:
 			r.settled = nil
-			r.due = r.due || r.signalled || !resumeSizeUnchanged(cfg)
+			if !r.due && (r.signalled || !resumeSizeUnchanged(cfg)) {
+				r.due = true
+				r.wake()
+			}
 		}
 	}
 }
@@ -161,6 +174,11 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	if !cfg.IsTerminal() {
 		return errors.New("resume wait: stdin is not a terminal")
 	}
+	waker, err := cfg.OpenWaker()
+	if err != nil {
+		return fmt.Errorf("resume wait: open the input listen: %w", err)
+	}
+	defer func() { _ = waker.Close() }()
 	restore, err := cfg.MakeRaw()
 	if err != nil {
 		return fmt.Errorf("resume wait: enter raw mode: %w", err)
@@ -168,7 +186,7 @@ func runResumeWait(cfg resumeWaitConfig) error {
 	cfg.restoreTerminal = sync.OnceFunc(restore)
 	defer cfg.restore()
 
-	return resumeWaitLoop(cfg)
+	return resumeWaitLoop(cfg, waker)
 }
 
 // resumeKey is what one key does on one screen. ended reports whether it ended
@@ -248,15 +266,6 @@ func (a *resumeArrival) open() bool {
 	return a.carried || len(a.kept) > 0
 }
 
-// window is how long the next listen waits: the quiet that ends an arrival
-// while one is open, and the idle listen otherwise.
-func (a *resumeArrival) window() time.Duration {
-	if a.open() {
-		return resumeInputQuiet
-	}
-	return resumeIdleListen
-}
-
 // hold keeps the arrival open through a quiet window while it ends in a reply
 // whose rest is still to come, for as long as resumeReplyTailHolds allows.
 func (a *resumeArrival) hold() bool {
@@ -302,23 +311,28 @@ func (cfg *resumeWaitConfig) judge(arrival *resumeArrival) resumeJudged {
 
 // The pending redraw dies with the process image a dispatched key execs, so a
 // key answered inside a settle window cancels nothing. A redraw that comes due
-// waits for the listen in flight to answer, and inside an arrival for the
-// arrival to end and be judged: zmx's SIGWINCH on every attach opens the
-// window, so a key typed as the session is opened may arrive as it closes, and
-// a redraw then would drop it.
-func resumeWaitLoop(cfg resumeWaitConfig) error {
+// wakes the listen in flight and waits for it to answer, and inside an arrival
+// for the arrival to end and be judged: zmx's SIGWINCH on every attach opens
+// the window, so a key typed as the session is opened may arrive as it closes,
+// and a redraw then would drop it.
+func resumeWaitLoop(cfg resumeWaitConfig, waker resumeWaker) error {
 	keys := resumeKeysFor(cfg.Screen)
-	reader := startResumeReader(cfg.In, cfg.AwaitInput)
+	reader := startResumeReader(cfg.In, func(arrivalOpen bool) (bool, error) {
+		if arrivalOpen {
+			return cfg.AwaitInput(resumeInputQuiet)
+		}
+		return waker.Await()
+	})
 	defer close(reader.requests)
 
-	redraws := resumeRedraws{settled: resumeStartupSettle(cfg)}
+	redraws := resumeRedraws{settled: resumeStartupSettle(cfg), wake: waker.Wake}
 	arrival := resumeArrival{carried: cfg.InputArriving}
 	for _, b := range []byte(cfg.Typed) {
 		arrival.add(b)
 	}
 	cfg.InputArriving, cfg.Typed = false, ""
 	for {
-		reader.requests <- arrival.window()
+		reader.requests <- arrival.open()
 		read := redraws.awaitRead(cfg, reader.results)
 		if !read.quiet {
 			if read.n > 0 {
@@ -381,24 +395,24 @@ type resumeRead struct {
 }
 
 // resumeReader listens for the session's input off the waiter's goroutine, so
-// a size change is taken as it comes. Each request is a listen of the window
-// it names.
+// a size change is taken as it comes. Each request is a listen, saying whether
+// an arrival is open.
 type resumeReader struct {
-	requests chan time.Duration
+	requests chan bool
 	results  chan resumeRead
 }
 
-// startResumeReader answers each listen with the byte that arrived within its
-// window, or with quiet, reading nothing. It reads only a byte a listen has
-// found arrived, one per listen and never ahead, so an answer taken on a
-// result runs with no read outstanding and input typed then is inherited by
-// the process image the hand-off execs.
-func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error)) resumeReader {
-	reader := resumeReader{requests: make(chan time.Duration), results: make(chan resumeRead, 1)}
+// startResumeReader answers each listen with the byte that arrived, or with
+// quiet, reading nothing. It reads only a byte a listen has found arrived, one
+// per listen and never ahead, so an answer taken on a result runs with no read
+// outstanding and input typed then is inherited by the process image the
+// hand-off execs.
+func startResumeReader(in io.Reader, listen func(arrivalOpen bool) (bool, error)) resumeReader {
+	reader := resumeReader{requests: make(chan bool), results: make(chan resumeRead, 1)}
 	go func() {
 		buf := make([]byte, 1)
-		for window := range reader.requests {
-			arrived, err := awaitInput(window)
+		for arrivalOpen := range reader.requests {
+			arrived, err := listen(arrivalOpen)
 			if err != nil || !arrived {
 				reader.results <- resumeRead{err: err, quiet: err == nil}
 				continue
@@ -636,6 +650,14 @@ func awaitStdinInput(window time.Duration) (bool, error) {
 	return awaitTTYInput(int(os.Stdin.Fd()), window)
 }
 
+func openStdinWaker() (resumeWaker, error) {
+	waker, err := newTTYWaker(int(os.Stdin.Fd()))
+	if err != nil {
+		return nil, err
+	}
+	return waker, nil
+}
+
 func stdinIsTerminal() bool {
 	return term.IsTerminal(os.Stdin.Fd())
 }
@@ -692,6 +714,7 @@ var stateResumeWaitCmd = &cobra.Command{
 			Settle:              time.After,
 			Size:                sessionSizeFromStdin,
 			AwaitInput:          awaitStdinInput,
+			OpenWaker:           openStdinWaker,
 			Now:                 time.Now,
 			ClearPending:        func() error { return clearResumePending(session) },
 			LookupResume:        lookupResumeRegistration,

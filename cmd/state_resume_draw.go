@@ -26,8 +26,9 @@ type resumeDrawConfig struct {
 	Size       func() (int, int, error)
 	ExecSelf   func(prog string, args []string)
 
-	// Now is the wall clock a question is asked by: it rides the hand-off to
-	// another process, which no monotonic reading survives.
+	// Now is the wall clock the questions earlier draws asked are judged by,
+	// as the probe dates its own: each rides the hand-off to another process,
+	// which no monotonic reading survives.
 	Now func() time.Time
 
 	CatchSIGTERM func()
@@ -39,9 +40,9 @@ type resumeDrawConfig struct {
 	// ResolveTheme asks the terminal its background, with owed questions still
 	// owed their replies ahead of it, when a terminal shows the session to
 	// answer, and runs dropInput, when handed one, after the question and
-	// before it returns, answering the drop's error beside the palette,
-	// whether it asked, what it read of the input that wasn't a terminal's
-	// reply, and how many replies it read.
+	// before it returns, answering the drop's error beside the palette, when
+	// it asked, what it read of the input that wasn't a terminal's reply, and
+	// how many replies it read.
 	ResolveTheme func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error)
 
 	// DropInputQueue discards the session's input, answering how many replies
@@ -71,11 +72,10 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	if cfg.DropInput {
 		dropInput = cfg.DropInputQueue
 	}
-	asked := cfg.Now()
-	owed := cfg.RepliesOwed.live(asked)
+	owed := cfg.RepliesOwed.live(cfg.Now())
 	found, dropErr := cfg.ResolveTheme(cfg.Colourless, owed.count(), dropInput)
-	if found.Asked {
-		owed = owed.owe(asked)
+	if found.Asked() {
+		owed = owed.owe(found.AskedAt)
 	}
 
 	shown := cfg.resumeChainPayload
@@ -124,9 +124,11 @@ func sessionDrawTheme(session string) func(colourless bool, owed int, dropInput 
 	attached := func() bool { return sessionAttached(session) }
 	return func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error) {
 		nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
-		return tui.ResolvePaneTheme(nomination, colourless, owed, attached, dropInput)
+		return resolvePaneThemeFunc(nomination, colourless, owed, attached, dropInput)
 	}
 }
+
+var resolvePaneThemeFunc = tui.ResolvePaneTheme
 
 // resumeAttachedBound bounds a draw's ask of its session's zmx daemon, so one
 // slow to answer delays the panel by this at most.

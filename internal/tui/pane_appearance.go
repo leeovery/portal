@@ -35,6 +35,9 @@ type paneAppearanceProbe struct {
 	// attached reports whether a terminal shows the pane to answer a
 	// question, asked only once one would be written.
 	attached func() bool
+
+	// now dates the question as it is written.
+	now func() time.Time
 }
 
 func newPaneAppearanceProbe(attached func() bool) paneAppearanceProbe {
@@ -45,6 +48,7 @@ func newPaneAppearanceProbe(attached func() bool) paneAppearanceProbe {
 		makeRaw:    makeStdinRaw,
 		timeout:    appearanceDetectTimeout,
 		attached:   attached,
+		now:        time.Now,
 	}
 }
 
@@ -59,16 +63,20 @@ type PaneAppearance struct {
 	// the input, so it is nil when one was supplied.
 	Typed []byte
 
-	// Asked reports a question written: the terminal answers it, after the
-	// probe has stopped reading if not before, into whatever reads the pane's
-	// input next.
-	Asked bool
+	// AskedAt is when the question was written, by the wall clock, and zero
+	// when none was: the terminal answers it, after the probe has stopped
+	// reading if not before, into whatever reads the pane's input next, and
+	// the reply's window runs from here.
+	AskedAt time.Time
 
 	// Replies is how many whole replies were read off the pane's input, the
 	// probe's and the drop's, each answering this question or one an earlier
 	// draw asked.
 	Replies int
 }
+
+// Asked reports whether a question was written.
+func (a PaneAppearance) Asked() bool { return !a.AskedAt.IsZero() }
 
 // ResolvePaneTheme answers which palette a pane draw paints in. A constant
 // nomination paints from the first frame and a colourless draw detects nothing,
@@ -138,8 +146,9 @@ func (p paneAppearanceProbe) detect(owed int) (theme.Member, PaneAppearance) {
 	if _, err := io.WriteString(p.out, ansi.RequestBackgroundColor); err != nil {
 		return theme.MemberDark, PaneAppearance{}
 	}
+	asked := p.now()
 	replies, typed := p.readBackgroundReplies(reader, owed+1)
-	found := PaneAppearance{Typed: typed, Asked: true, Replies: len(replies)}
+	found := PaneAppearance{Typed: typed, AskedAt: asked, Replies: len(replies)}
 	if len(replies) == 0 {
 		return theme.MemberDark, found
 	}

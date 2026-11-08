@@ -23,7 +23,7 @@ func drawReading(t *testing.T, typed string) []string {
 // drawReadingUnanswered is drawReading for a query no reply answered in time.
 func drawReadingUnanswered(t *testing.T, typed string) []string {
 	t.Helper()
-	return drawThrough(t, &resumeDrawProbe{typed: []byte(typed), asked: true})
+	return drawThrough(t, &resumeDrawProbe{typed: []byte(typed), askedAt: resumeTestEpoch})
 }
 
 func drawThrough(t *testing.T, probe *resumeDrawProbe) []string {
@@ -145,7 +145,6 @@ func TestResumeTypedDuringTheDraw(t *testing.T) {
 
 		h.quiet()
 		h.resizeSettled()
-		h.quiet()
 
 		h.answered()
 		assertHandOff(t, h.probe, handedOn(payload))

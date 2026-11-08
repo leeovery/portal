@@ -212,7 +212,7 @@ func (p termPaneProcess) holdDraw() {
 func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	cfg.IsTerminal = func() bool { return true }
 	cfg.MakeRaw = func() (func(), error) { return func() {}, nil }
-	cfg.AwaitInput = announcingListen(cfg.AwaitInput, func() { p.recordSelf(termEventWait) })
+	announceListens(&cfg, func() { p.recordSelf(termEventWait) })
 	cfg.Size = p.size
 	cfg.LookupResume = func(string) (hooks.OnResume, error) {
 		return hooks.OnResume{Command: os.Getenv(termPaneHookEnv), Found: true}, nil
@@ -227,14 +227,32 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	return cfg
 }
 
-// announcingListen reports the waiter's first listen, the point it is holding
-// the pane on its panel.
-func announcingListen(await func(time.Duration) (bool, error), announce func()) func(time.Duration) (bool, error) {
-	var once sync.Once
-	return func(window time.Duration) (bool, error) {
-		once.Do(announce)
+// announceListens reports the waiter's first listen, of either kind, the point
+// it is holding the pane on its panel.
+func announceListens(cfg *resumeWaitConfig, announce func()) {
+	once := sync.OnceFunc(announce)
+	await, open := cfg.AwaitInput, cfg.OpenWaker
+	cfg.AwaitInput = func(window time.Duration) (bool, error) {
+		once()
 		return await(window)
 	}
+	cfg.OpenWaker = func() (resumeWaker, error) {
+		waker, err := open()
+		if err != nil {
+			return nil, err
+		}
+		return announcingWaker{resumeWaker: waker, announce: once}, nil
+	}
+}
+
+type announcingWaker struct {
+	resumeWaker
+	announce func()
+}
+
+func (w announcingWaker) Await() (bool, error) {
+	w.announce()
+	return w.resumeWaker.Await()
 }
 
 // termPane is a waiting session: the parked chain, started as restore leaves

@@ -63,9 +63,10 @@ type resumeResizeHarness struct {
 	input *typeAhead
 	done  chan error
 
-	// inFlightAtExec is how many reads of the session were outstanding as the
-	// wait exec'd.
-	inFlightAtExec int32
+	// readsAtExec and listensAtExec are how many reads of the session, and
+	// listens for its input, were outstanding as the wait exec'd.
+	readsAtExec   int32
+	listensAtExec int32
 
 	// The read the wait takes once at start-up is kept out of sizes and sized,
 	// which count the reads a settle window's elapse takes.
@@ -101,7 +102,8 @@ func startResumeResizeFrom(t *testing.T, payload resumeChainPayload, startup, si
 	cfg := newResumeWaitConfig(t, h.probe, payload, h.reader)
 	execSelf := cfg.ExecSelf
 	cfg.ExecSelf = func(prog string, args []string) {
-		h.inFlightAtExec = h.reader.inFlight.Load()
+		h.readsAtExec = h.reader.inFlight.Load()
+		h.listensAtExec = input.listens.Load()
 		execSelf(prog, args)
 	}
 	cfg.Winch = h.winch
@@ -114,7 +116,7 @@ func startResumeResizeFrom(t *testing.T, payload resumeChainPayload, startup, si
 		h.settles <- timer
 		return timer
 	}
-	cfg.AwaitInput = input.await
+	listenOn(&cfg, input)
 	cfg.Size = func() (int, int, error) {
 		if !h.startupRead.Swap(true) {
 			defer close(h.startedUp)
@@ -185,18 +187,6 @@ func (h *resumeResizeHarness) awaitListen() {
 	case <-h.input.listening:
 	case <-time.After(resumeResizeTestBudget):
 		h.t.Fatal("the wait never listened for input")
-	}
-}
-
-// awaitWaiting returns once the wait is waiting on the session's input,
-// listening for it or reading it.
-func (h *resumeResizeHarness) awaitWaiting() {
-	h.t.Helper()
-	select {
-	case <-h.input.listening:
-	case <-h.reader.started:
-	case <-time.After(resumeResizeTestBudget):
-		h.t.Fatal("the wait never waited on the session's input")
 	}
 }
 
@@ -436,12 +426,14 @@ func TestRunResumeWait_Resize(t *testing.T) {
 	})
 
 	// A redraw comes due as zmx's SIGWINCH on an attach settles, just as the
-	// user reaches for Enter: a read still outstanding as it execs would take
-	// the key, and the key would die with the process image.
-	t.Run("it redraws with no read of the session outstanding", func(t *testing.T) {
+	// user reaches for Enter. The listen in flight has no timeout, so only its
+	// wake brings the redraw at the settle's end; and a listen or a read still
+	// outstanding as the redraw execs could take the key, which would die with
+	// the process image.
+	t.Run("it wakes the listen in flight and redraws once it has answered", func(t *testing.T) {
 		payload := drawnPayload()
 		h := startResumeResize(t, payload, resizedSize)
-		h.awaitWaiting()
+		h.awaitListen()
 
 		h.elapse(h.resize())
 
@@ -449,8 +441,11 @@ func TestRunResumeWait_Resize(t *testing.T) {
 			t.Fatalf("runResumeWait() error = %v", err)
 		}
 		assertHandOff(t, h.probe, payload)
-		if h.inFlightAtExec != 0 {
-			t.Errorf("%d reads of the session were outstanding as the redraw exec'd, want none", h.inFlightAtExec)
+		if h.listensAtExec != 0 {
+			t.Errorf("%d listens for the session's input were outstanding as the redraw exec'd, want none", h.listensAtExec)
+		}
+		if h.readsAtExec != 0 {
+			t.Errorf("%d reads of the session were outstanding as the redraw exec'd, want none", h.readsAtExec)
 		}
 	})
 }

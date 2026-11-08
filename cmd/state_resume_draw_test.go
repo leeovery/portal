@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/prefs"
@@ -38,11 +39,11 @@ type resumeDrawProbe struct {
 	execsAtEchoOff    int
 
 	// typed is what the appearance query read of the input that wasn't its
-	// reply, which a drop discards, as the real query's does; asked, whether
-	// it asked; replies, the whole replies it read, to which a drop adds its
-	// own, as the real query's does.
+	// reply, which a drop discards, as the real query's does; askedAt, when it
+	// asked, zero for no question; replies, the whole replies it read, to
+	// which a drop adds its own, as the real query's does.
 	typed   []byte
-	asked   bool
+	askedAt time.Time
 	replies int
 
 	// owed is how many questions owed a reply each query was told of.
@@ -69,7 +70,7 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 			p.owed = append(p.owed, owed)
 			p.paintedAtResolve = p.stdout.Len()
 			p.echoOffsAtResolve = p.echoOffCalls
-			found := tui.PaneAppearance{Theme: th, Typed: p.typed, Asked: p.asked, Replies: p.replies}
+			found := tui.PaneAppearance{Theme: th, Typed: p.typed, AskedAt: p.askedAt, Replies: p.replies}
 			if dropInput == nil {
 				return found, nil
 			}

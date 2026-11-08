@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/bgreply"
-	"github.com/leeovery/portal/internal/harnesstest"
 )
 
 const resumeArrivalTestBudget = 2 * time.Second
@@ -20,8 +20,9 @@ const resumeArrivalTestBudget = 2 * time.Second
 // arrivalHarness delivers input to a wait in arrivals — bytes landing together,
 // then the pane falling quiet — and holds every listen and window the wait
 // takes until the test answers it, so which bytes arrived together is decided
-// by the test and never by the clock. The wait's wall clock moves on only by
-// the windows it listened through in quiet.
+// by the test and never by the clock. Each wake of the idle listen is the
+// test's to take before it answers that listen woken. The wait's wall clock
+// moves on only by the windows it listened through in quiet.
 type arrivalHarness struct {
 	t       *testing.T
 	probe   *resumeWaitProbe
@@ -30,6 +31,7 @@ type arrivalHarness struct {
 	sizes   *paneResize
 	winch   chan os.Signal
 	listens chan listen
+	wakes   chan struct{}
 	settles chan chan time.Time
 	done    chan error
 	ended   chan struct{}
@@ -45,10 +47,12 @@ type arrivalHarness struct {
 	heldFor int
 }
 
-// listen is one listen the wait takes, held until the test answers it.
+// listen is one listen the wait takes, held until the test answers it: for the
+// quiet that ends an arrival, or, idle, with no arrival open, for as long as
+// nothing arrives and the wait does not wake it.
 type listen struct {
-	window time.Duration
-	reply  chan bool
+	idle  bool
+	reply chan bool
 }
 
 func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
@@ -62,6 +66,7 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 		sizes:   &paneResize{drawn: payload, to: resizedSize},
 		winch:   make(chan os.Signal, 1),
 		listens: make(chan listen),
+		wakes:   make(chan struct{}, 8),
 		settles: make(chan chan time.Time, 8),
 		done:    make(chan error, 1),
 		ended:   make(chan struct{}),
@@ -75,17 +80,16 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 	cfg.Size = h.sizes.size
 	cfg.Now = h.clock.now
 	cfg.AwaitInput = func(d time.Duration) (bool, error) {
-		if d != resumeInputQuiet && d != resumeIdleListen {
-			t.Errorf("listen window = %v, want the quiet %v or the idle %v", d, resumeInputQuiet, resumeIdleListen)
+		if d != resumeInputQuiet {
+			t.Errorf("listen window = %v, want the quiet %v", d, resumeInputQuiet)
 		}
-		l := listen{window: d, reply: make(chan bool)}
-		h.listens <- l
-		arrived := <-l.reply
+		arrived := h.listened(false)
 		if !arrived {
 			h.clock.advance(d)
 		}
 		return arrived, nil
 	}
+	cfg.OpenWaker = func() (resumeWaker, error) { return arrivalWaker{h}, nil }
 	cfg.Settle = func(d time.Duration) <-chan time.Time {
 		if d != resumeResizeSettle {
 			t.Errorf("window = %v, want the resize settle", d)
@@ -103,6 +107,28 @@ func startArrivals(t *testing.T, payload resumeChainPayload) *arrivalHarness {
 	h.live = h.awaitListen("the wait's first listen")
 	return h
 }
+
+// listened takes one listen until the test answers it, reporting the answer.
+func (h *arrivalHarness) listened(idle bool) bool {
+	l := listen{idle: idle, reply: make(chan bool)}
+	h.listens <- l
+	return <-l.reply
+}
+
+// arrivalWaker holds the wait's idle listen as it holds every other, and hands
+// each wake to the test, which answers the listen woken once it has seen one.
+type arrivalWaker struct{ h *arrivalHarness }
+
+func (w arrivalWaker) Await() (bool, error) { return w.h.listened(true), nil }
+
+func (w arrivalWaker) Wake() {
+	select {
+	case w.h.wakes <- struct{}{}:
+	default:
+	}
+}
+
+func (arrivalWaker) Close() error { return nil }
 
 func (h *arrivalHarness) awaitListen(what string) *listen {
 	h.t.Helper()
@@ -144,10 +170,12 @@ func (h *arrivalHarness) answerListen(arrived bool) {
 
 // quiet lets the pane fall silent after the latest arrival, through every
 // quiet window the wait holds an arrival ending in a reply's head open for,
-// or through the listen in flight with no arrival open, and returns once the
-// wait has acted on it: taken its next listen, or ended.
+// and returns once the wait has acted on it: taken its next listen, or ended.
 func (h *arrivalHarness) quiet() {
 	h.t.Helper()
+	if h.live != nil && h.live.idle {
+		h.t.Fatal("no arrival is open to fall quiet after: the idle listen ends only on a byte or a wake")
+	}
 	if _, _, head := bgreply.Split(h.pending); head != nil {
 		for h.heldFor < resumeReplyTailHolds {
 			h.held()
@@ -486,7 +514,6 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 		h.arrive("echo o")
 		h.quiet()
 		h.resizeSettled()
-		h.quiet()
 
 		h.answered()
 		want := start
@@ -495,16 +522,16 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 	})
 
 	// The redraw an attach's SIGWINCH asks for comes due about as the user
-	// reaches for a key: the listen in flight as it does finds the key, and
-	// the key answers as it would have with no redraw due.
-	t.Run("a key arriving as a redraw comes due answers, the redraw waiting on the listen in flight", func(t *testing.T) {
+	// reaches for a key: the listen the redraw wakes finds the key, and the key
+	// answers as it would have with no redraw due.
+	t.Run("a key arriving as a redraw comes due answers, the redraw waiting on the listen it woke", func(t *testing.T) {
 		payload := drawnPayload()
 		h := startArrivals(t, payload)
-		if h.live.window != resumeIdleListen {
-			t.Fatalf("the wait's first listen lasts %v, want the idle %v", h.live.window, resumeIdleListen)
+		if !h.live.idle {
+			t.Fatal("the wait's first listen is for the quiet that ends an arrival, want the idle listen")
 		}
 
-		h.resizeSettled()
+		h.redrawDue()
 		h.arrive("d")
 		h.quiet()
 
@@ -513,16 +540,28 @@ func TestRunResumeWait_InputStillArriving(t *testing.T) {
 	})
 }
 
-// resizeSettled delivers a size change and elapses the settle window it opens,
-// returning once the wait has taken the window's end, and so before any
-// answer to the listen in flight.
-func (h *arrivalHarness) resizeSettled() {
+// redrawDue delivers a size change and elapses the settle window it opens,
+// returning once the wait, the redraw due, has woken its listen, and so before
+// any answer to the listen in flight.
+func (h *arrivalHarness) redrawDue() {
 	h.t.Helper()
 	h.sizes.deliver(h.winch)
-	timer := h.awaitSettle()
-	timer <- time.Now()
-	if !harnesstest.PollUntil(h.t, resumeArrivalTestBudget, time.Millisecond, func() bool { return len(timer) == 0 }) {
-		h.t.Fatal("the wait never took the settle window's end")
+	h.awaitSettle() <- time.Now()
+	select {
+	case <-h.wakes:
+	case <-time.After(resumeArrivalTestBudget):
+		h.t.Fatal("the redraw came due and the wait never woke its listen")
+	}
+}
+
+// resizeSettled makes a redraw due, the listen in flight ending as the wake
+// ends it: with no arrival open, at once, and inside one, at the quiet that
+// ends it, which is the test's to deliver.
+func (h *arrivalHarness) resizeSettled() {
+	h.t.Helper()
+	h.redrawDue()
+	if h.live != nil && h.live.idle {
+		h.answerListen(false)
 	}
 }
 
@@ -618,20 +657,33 @@ func executeChainArgv(t *testing.T, args []string) {
 
 // typeAhead is input a user is still typing: bytes join it while the wait runs,
 // and a byte nobody has read stays for whichever program reads the pane next.
+// It answers the wait's listens as a terminal does, the one with no arrival
+// open with no timeout.
 type typeAhead struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
 	bytes  []byte
 	closed bool
+	woken  bool
 
-	// listening is signalled, never blocking, as each await begins.
+	// listening is signalled, never blocking, as each listen begins.
 	listening chan struct{}
+	// listens counts the listens in flight, and idle the listens with no
+	// arrival open the wait has begun.
+	listens atomic.Int32
+	idle    atomic.Int64
 }
 
 func newTypeAhead(typed string) *typeAhead {
 	q := &typeAhead{bytes: []byte(typed), listening: make(chan struct{}, 1)}
 	q.cond = sync.NewCond(&q.mu)
 	return q
+}
+
+// listenOn hands every listen the wait takes to input.
+func listenOn(cfg *resumeWaitConfig, input *typeAhead) {
+	cfg.AwaitInput = input.await
+	cfg.OpenWaker = func() (resumeWaker, error) { return input, nil }
 }
 
 func (q *typeAhead) Read(p []byte) (int, error) {
@@ -676,13 +728,20 @@ func (q *typeAhead) arrived(time.Duration) (bool, error) {
 	return len(q.bytes) > 0, nil
 }
 
-// await answers as a terminal's select does: at once for a byte unread or the
-// input ended, and otherwise once a key is typed or window has passed.
-func (q *typeAhead) await(window time.Duration) (bool, error) {
+// listen begins a listen, returning its end.
+func (q *typeAhead) listen() (done func()) {
+	q.listens.Add(1)
 	select {
 	case q.listening <- struct{}{}:
 	default:
 	}
+	return func() { q.listens.Add(-1) }
+}
+
+// await answers as a terminal's select does: at once for a byte unread or the
+// input ended, and otherwise once a key is typed or window has passed.
+func (q *typeAhead) await(window time.Duration) (bool, error) {
+	defer q.listen()()
 	passed := time.AfterFunc(window, func() {
 		q.mu.Lock()
 		defer q.mu.Unlock()
@@ -700,6 +759,30 @@ func (q *typeAhead) await(window time.Duration) (bool, error) {
 	}
 	return true, nil
 }
+
+// Await answers as a select with no timeout over the terminal and the wake
+// pipe does: at once for a byte unread or the input ended, and otherwise once
+// a key is typed or the wait wakes it, a byte winning over a wake.
+func (q *typeAhead) Await() (bool, error) {
+	defer q.listen()()
+	q.idle.Add(1)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.bytes) == 0 && !q.closed && !q.woken {
+		q.cond.Wait()
+	}
+	q.woken = false
+	return len(q.bytes) > 0 || q.closed, nil
+}
+
+func (q *typeAhead) Wake() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.woken = true
+	q.cond.Broadcast()
+}
+
+func (q *typeAhead) Close() error { return nil }
 
 func (q *typeAhead) unread() string {
 	q.mu.Lock()
