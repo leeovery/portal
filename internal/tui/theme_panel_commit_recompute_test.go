@@ -61,8 +61,8 @@ func TestPanelRecompute_RowDisappearsOnConstantCommit(t *testing.T) {
 	requireCursorOn(t, m, "sunset")
 }
 
-// Calls the commit directly because the key is gated behind the confirm while a
-// constant is set.
+// Calls the commit directly, so the recompute is held apart from the key's
+// dispatch.
 func commitSlotForTest(t *testing.T, m Model, slug string, member theme.Member) Model {
 	t.Helper()
 

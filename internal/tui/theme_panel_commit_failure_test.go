@@ -53,7 +53,7 @@ func requireCommitFailedMessage(t *testing.T, m Model) {
 
 func themePanelMessageRow(m Model) string {
 	lines := themePanelLines(renderRecomputePanel(m))
-	row := lines[len(lines)-themePanelFooterHeight(themePanelFooterScope(m.themePanel.message))-1]
+	row := lines[len(lines)-themePanelFooterHeight(themePanelKeymap())-1]
 	return strings.TrimRight(strings.TrimPrefix(row, themePanelContentPrefix()), " ")
 }
 
@@ -280,32 +280,6 @@ func TestCommitFailure_StateOutlivesTheMessage(t *testing.T) {
 		}
 		requireOutstandingWithNoMessage(t, m)
 	})
-
-	t.Run("a confirm raised and cancelled", func(t *testing.T) {
-		dir := t.TempDir()
-		themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
-		m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Theme: "aurora"})
-		m = arrowToThemeRow(t, m, "nord")
-		persister.err = errThemeCommitFailed
-
-		m, cmd := pressCommitKey(t, m)
-		requireCommitFailedMessage(t, m)
-		if cmd != nil {
-			t.Errorf("a failed `Enter` scheduled %T; the commit-failure line takes no tick lifecycle on any commit key", cmd)
-		}
-
-		m, _ = pressSlotKey(t, m, slotDarkPress)
-		requireConfirmLive(t, m, themeSlotConfirm{slug: "nord", member: theme.MemberDark})
-		if !m.themeState.commitFailed {
-			t.Error("raising the confirm discharged the outstanding failure")
-		}
-
-		m, _ = pressConfirmKey(t, m, confirmNo)
-
-		requireConfirmResolved(t, m)
-		requireOutstandingWithNoMessage(t, m)
-		requireConstantKeys(t, m, "aurora")
-	})
 }
 
 func requireOutstandingWithNoMessage(t *testing.T, m Model) {
@@ -382,7 +356,7 @@ func TestCommitFailure_RetryIsJustPressingAgain(t *testing.T) {
 	requireBadge(t, m, commitFailureTarget, theme.BadgeDark)
 }
 
-func TestCommitFailure_ConfirmDrivenFailure(t *testing.T) {
+func TestCommitFailure_OverAConstant(t *testing.T) {
 	dir := t.TempDir()
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
 	m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Theme: "aurora"})
@@ -393,69 +367,27 @@ func TestCommitFailure_ConfirmDrivenFailure(t *testing.T) {
 	m = arrowToThemeRow(t, m, "nord")
 	previewed := m.themeState.active
 	persister.err = errThemeCommitFailed
-	m, _ = pressSlotKey(t, m, slotDarkPress)
-	requireConfirmLive(t, m, themeSlotConfirm{slug: "nord", member: theme.MemberDark})
-
-	m, cmd := pressConfirmKey(t, m, confirmYes)
+	m, cmd := pressSlotKey(t, m, slotDarkPress)
 
 	requireSlotCommits(t, persister, slotCommit{slug: "nord", member: theme.MemberDark})
 	requireCommitFailedMessage(t, m)
 	if !m.themeState.commitFailed {
-		t.Error("a failed confirmed commit left nothing outstanding")
+		t.Error("a failed commit over a constant left nothing outstanding")
 	}
-	requireConfirmGone(t, m)
-	requireStandingFooter(t, m)
 	requireConstantKeys(t, m, "aurora")
 	requireBadge(t, m, "aurora", theme.BadgeConstant)
 	requireBadgeText(t, m, 1, 0, 0)
 	if got := m.themePanel.badges; !maps.Equal(got, badges) {
-		t.Errorf("a failed confirmed commit left badges %v, want the untouched %v", got, badges)
+		t.Errorf("a failed commit over a constant left badges %v, want the untouched %v", got, badges)
 	}
 	if got := themePanelRowLabels(m); !slices.Equal(got, labels) {
-		t.Errorf("a failed confirmed commit left rows %v, want the untouched %v — only a SUCCESSFUL commit recomputes", got, labels)
+		t.Errorf("a failed commit over a constant left rows %v, want the untouched %v — only a SUCCESSFUL commit recomputes", got, labels)
 	}
 	if m.themeState.active != previewed {
-		t.Errorf("a failed confirmed commit rendered %s, want the previewed %s left alone", themeLabel(m.themeState.active), themeLabel(previewed))
+		t.Errorf("a failed commit over a constant rendered %s, want the previewed %s left alone", themeLabel(m.themeState.active), themeLabel(previewed))
 	}
 	if cmd != nil {
-		t.Errorf("a failed confirmed commit scheduled %T, want nothing", cmd)
-	}
-}
-
-func TestCommitFailure_NeverLiveWithTheConfirm(t *testing.T) {
-	dir := t.TempDir()
-	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
-	m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Theme: "aurora"})
-	m = arrowToThemeRow(t, m, "nord")
-	persister.err = errThemeCommitFailed
-
-	m, _ = pressSlotKey(t, m, slotDarkPress)
-	requireOnlySlotContender(t, m, slotConfirmLine(m, "aurora"))
-
-	m, _ = pressConfirmKey(t, m, confirmYes)
-	requireOnlySlotContender(t, m, messageTestFailedCopy)
-
-	m, _ = pressSlotKey(t, m, slotDarkPress)
-
-	requireOnlySlotContender(t, m, slotConfirmLine(m, "aurora"))
-	requireConfirmLive(t, m, themeSlotConfirm{slug: "nord", member: theme.MemberDark})
-	if !m.themeState.commitFailed {
-		t.Error("raising the confirm discharged the outstanding failure; only a successful commit does")
-	}
-}
-
-func requireOnlySlotContender(t *testing.T, m Model, want string) {
-	t.Helper()
-
-	if got := themePanelMessageRow(m); got != want {
-		t.Errorf("the message slot reads %q, want %q", got, want)
-	}
-	other := messageTestFailedCopy
-	if want == other {
-		other = "clear constant"
-	}
-	if rendered := slotConfirmPanelText(m); strings.Contains(rendered, other) {
-		t.Errorf("the panel renders %q alongside %q; the message slot's two contenders are never live at once\n%s", other, want, rendered)
+		t.Errorf("a failed commit over a constant scheduled %T, want nothing", cmd)
 	}
 }
 

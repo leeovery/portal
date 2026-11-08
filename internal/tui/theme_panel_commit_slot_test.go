@@ -213,8 +213,8 @@ func TestPanelSlotCommit_DThenLYieldsBoth(t *testing.T) {
 	}
 }
 
-// The memory half is driven through commitSlot directly: the key is inert over
-// a constant until the confirm resolves.
+// The memory half is driven through commitSlot directly, so the clear is the
+// write's own and not the key's.
 func TestPanelSlotCommit_ClearsTheConstantAtomically(t *testing.T) {
 	t.Run("one call, not two", func(t *testing.T) {
 		rows := arrowValidRows(t, 4)
@@ -255,7 +255,9 @@ func TestPanelSlotCommit_ClearsTheConstantAtomically(t *testing.T) {
 	})
 }
 
-func TestPanelSlotCommit_InertOverAConstant(t *testing.T) {
+// Assigning a slot is not destructive, so over a constant it asks nothing: the
+// keypress clears the constant and assigns the slot in the one write.
+func TestPanelSlotCommit_OverAConstantWritesAtOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		press  tea.KeyPressMsg
@@ -273,28 +275,26 @@ func TestPanelSlotCommit_InertOverAConstant(t *testing.T) {
 
 			m, cmd := pressSlotKey(t, m, tc.press)
 
-			if len(persister.slugs) != 0 {
-				t.Errorf("%q wrote %v over a constant; the write waits for the confirm's `y`", tc.name, persister.slugs)
+			requireSlotCommits(t, persister, slotCommit{slug: target, member: tc.member})
+			if len(persister.slugs) != 1 {
+				t.Errorf("%q made %d seam call(s) (%v), want the single slot write that clears the constant with it", tc.name, len(persister.slugs), persister.slugs)
 			}
-			requireConstantKeys(t, m, persisted)
+			if tc.member == theme.MemberLight {
+				requirePairKeys(t, m, target, "")
+			} else {
+				requirePairKeys(t, m, "", target)
+			}
 			if !m.themePanel.open {
 				t.Errorf("%q closed the panel over a constant", tc.name)
 			}
-			if got := m.themePanel.message; got.Kind != themeMessageConfirm {
-				t.Errorf("%q left the message %+v; over a constant the keypress ASKS", tc.name, got)
+			if got := m.themePanel.message; got.Kind != themeMessageNone {
+				t.Errorf("%q left the message %+v, want the slot empty — nothing is asked", tc.name, got)
 			}
 			if m.themeState.active != previewed {
 				t.Errorf("%q rendered canvas %s, want the previewed %s left alone", tc.name, m.themeState.active.Canvas.Value, previewed.Canvas.Value)
 			}
 			if cmd != nil {
 				t.Errorf("%q over a constant scheduled %T, want nothing", tc.name, cmd)
-			}
-
-			pair, pairPersister := newCommitPairPanelModel(t, rows)
-			pair, _ = pressSlotKey(t, arrowToThemeRow(t, pair, target), tc.press)
-			requireSlotCommits(t, pairPersister, slotCommit{slug: target, member: tc.member})
-			if pair.themeState.keys.Theme != "" {
-				t.Errorf("positive control: the adaptive commit left the constant %q set", pair.themeState.keys.Theme)
 			}
 		})
 	}
@@ -591,7 +591,7 @@ func TestPanelSlotCommit_NilPersisterIsInert(t *testing.T) {
 	requirePairKeys(t, wired, rows[0].Slug, target)
 }
 
-func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
+func TestPanelSlotCommit_EnterAfterSlotRaisesNoMessageAndSchedulesNothing(t *testing.T) {
 	dir := t.TempDir()
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
 	m, persister := newSlotPairPanelModel(t, dir, theme.DefaultLightSlug, "aurora")
@@ -599,7 +599,6 @@ func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
 	m, _ = pressSlotKey(t, m, slotDarkPress)
 	requireSlotCommits(t, persister, slotCommit{slug: "aurora", member: theme.MemberDark})
 	requirePairKeys(t, m, theme.DefaultLightSlug, "aurora")
-	footer := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
 
 	m, cmd := pressCommitKey(t, m)
 
@@ -610,17 +609,13 @@ func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
 	requireBadge(t, m, "aurora", theme.BadgeConstant)
 	requireBadge(t, m, theme.DefaultLightSlug, theme.BadgeNone)
 	if got := m.themePanel.message; got.Kind != themeMessageNone {
-		t.Errorf("`Enter` after a slot commit raised the message %+v; the reverse direction needs no confirm", got)
+		t.Errorf("`Enter` after a slot commit raised the message %+v, want the slot empty", got)
 	}
 	if cmd != nil {
 		t.Errorf("`Enter` scheduled %T; the write lands on this keypress rather than awaiting an answer", cmd)
 	}
 	if !m.themePanel.open {
 		t.Error("`Enter` closed the panel")
-	}
-	after := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
-	if after != footer {
-		t.Errorf("`Enter` swapped the panel footer\nbefore: %q\nafter:  %q", escSeq(footer), escSeq(after))
 	}
 }
 

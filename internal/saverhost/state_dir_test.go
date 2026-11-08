@@ -280,19 +280,35 @@ func TestEnsureSaver_ProvesASteadySaverOnce(t *testing.T) {
 	})
 
 	t.Run("a process proved neither way is proved again every RejudgeEvery readings, no oftener", func(t *testing.T) {
-		b := withSaver(daemonPID)
+		const every = saverhost.RejudgeEvery
+		const readings = 2*every + 1
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		p := newProcs(map[int]*proc{daemonPID: {identifyErr: errors.New("ps failed")}})
+		// made[k] is how many proofs had been made before reading k+1 began.
+		var made []int
+		b := &endsAfterReadings{Fake: withSaver(daemonPID), readings: readings, end: cancel, begin: func() {
+			made = append(made, p.identified(daemonPID))
+		}}
 		cfg := config(b, p, t.TempDir())
 		cfg.ReadyWait = lockWait
-		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-		defer cancel()
 
-		if err := ensurerOf(t, hostOf(t, cfg), release).EnsureSaver(ctx, nil); !errors.Is(err, context.DeadlineExceeded) {
+		if err := ensurerOf(t, hostOf(t, cfg), release).EnsureSaver(ctx, nil); !errors.Is(err, context.Canceled) {
 			t.Fatalf("EnsureSaver = %v, want the wait cut short by ctx", err)
 		}
-		readings := len(b.CallsTo(backendtest.OpSession))
-		if n, want := p.identified(daemonPID), 1+(readings-1)/saverhost.RejudgeEvery; n != want {
-			t.Errorf("pid %d identified %d times over %d readings, want %d", daemonPID, n, readings, want)
+		if b.answered != readings {
+			t.Fatalf("the saver answered %d readings, want %d", b.answered, readings)
+		}
+		made = append(made, p.identified(daemonPID))
+
+		var provedAt []int
+		for reading := 1; reading <= readings; reading++ {
+			if made[reading] > made[reading-1] {
+				provedAt = append(provedAt, reading)
+			}
+		}
+		if want := []int{1, every + 1, 2*every + 1}; !slices.Equal(provedAt, want) {
+			t.Errorf("pid %d proved at readings %v of %d, want %v: at the first, and again each %d readings after", daemonPID, provedAt, readings, want, every)
 		}
 	})
 
@@ -306,6 +322,27 @@ func TestEnsureSaver_ProvesASteadySaverOnce(t *testing.T) {
 			t.Errorf("pid %d identified %d times over %d polls, want once", firstMade, n, readyWait/poll)
 		}
 	})
+}
+
+// endsAfterReadings is the Fake whose saver answers readings readings, then
+// ends the ensure's context, so how many readings the wait took is set by
+// the test, not raced against a clock: a reading begun after the end fails
+// and is no reading. begin runs as each reading begins.
+type endsAfterReadings struct {
+	*backendtest.Fake
+	readings, answered int
+	end, begin         func()
+}
+
+func (b *endsAfterReadings) Session(ctx context.Context, name string) (backend.Session, error) {
+	b.begin()
+	s, err := b.Fake.Session(ctx, name)
+	if err == nil {
+		if b.answered++; b.answered == b.readings {
+			b.end()
+		}
+	}
+	return s, err
 }
 
 func TestRecorded(t *testing.T) {

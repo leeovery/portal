@@ -24,6 +24,25 @@ const (
 	resumeKeyEscape  = 0x1b
 )
 
+// resumeKeypadEnter is what the keypad's Enter sends in application keypad
+// mode (SS3 M). In normal keypad mode it sends Return's CR. Its kitty form
+// never reaches the panel: nothing on its path asks for the kitty keyboard,
+// and the reset zmx or the runner writes as an attach ends or switches clears
+// what another session asked for.
+const resumeKeypadEnter = "\x1bOM"
+
+// resumeKeyIn is the key input holds alone: one byte, or the keypad's Enter,
+// read as Return.
+func resumeKeyIn(input []byte) (key byte, ok bool) {
+	switch {
+	case len(input) == 1:
+		return input[0], true
+	case string(input) == resumeKeypadEnter:
+		return resumeKeyEnterCR, true
+	}
+	return 0, false
+}
+
 // resumeResizeSettle is how long a size change waits for the next one before
 // the panel is redrawn. A drag delivers changes every few tens of milliseconds,
 // so the window closes when the drag stops rather than during it, and a single
@@ -233,14 +252,14 @@ func (k resumeKeys) answer(cfg resumeWaitConfig, judged resumeJudged) (ended boo
 }
 
 // resumeArrivalKept bounds the bytes an arrival keeps to be judged by: a key
-// is one byte and a terminal's reply a few dozen, so an arrival longer than
-// this holds no key alone.
+// is three bytes at most and a terminal's reply a few dozen, so an arrival
+// longer than this holds no key alone.
 const resumeArrivalKept = 256
 
 // resumeArrival is the input that has reached the session since it was last
-// quiet. A key is only a byte that arrived alone, with nothing behind it before
-// the session fell quiet but the terminals' replies to a background question,
-// which are no input of the user's.
+// quiet. A key is only a byte, or the keypad's Enter, that arrived alone, with
+// nothing behind it before the session fell quiet but the terminals' replies
+// to a background question, which are no input of the user's.
 type resumeArrival struct {
 	kept     []byte
 	overflow bool
@@ -279,9 +298,9 @@ func (a *resumeArrival) hold() bool {
 	return true
 }
 
-// resumeJudged is an arrival closed: the byte left once every reply is taken
-// out of it, whether that byte arrived alone, how many replies were among it,
-// and a reply cut off at its end.
+// resumeJudged is an arrival closed: the key left once every reply is taken
+// out of it, as the byte it answers as, whether that key arrived alone, how
+// many replies were among it, and a reply cut off at its end.
 type resumeJudged struct {
 	key     byte
 	alone   bool
@@ -292,8 +311,8 @@ type resumeJudged struct {
 func (a *resumeArrival) end() resumeJudged {
 	rest, payloads, head := bgreply.Split(a.kept)
 	judged := resumeJudged{replies: len(payloads), head: head}
-	if len(rest) == 1 && !a.carried && !a.overflow {
-		judged.key, judged.alone = rest[0], true
+	if key, ok := resumeKeyIn(rest); ok && !a.carried && !a.overflow {
+		judged.key, judged.alone = key, true
 	}
 	*a = resumeArrival{}
 	return judged

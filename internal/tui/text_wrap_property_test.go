@@ -81,9 +81,9 @@ func TestWrap_Properties(t *testing.T) {
 	t.Run("a capped wrap holds no line break and no row too wide", func(t *testing.T) {
 		rng := rand.New(rand.NewPCG(3, 4))
 		check := func(text string, width, maxRows int) bool {
-			for _, row := range wrapCapped(text, width, maxRows, "…") {
+			for _, row := range wrapCappedAtSpaces(text, width, maxRows, "…") {
 				if strings.ContainsAny(row, "\n\t\r") || ansi.StringWidth(row) > width {
-					t.Errorf("wrapCapped(%q, %d, %d) gives row %q", text, width, maxRows, row)
+					t.Errorf("wrapCappedAtSpaces(%q, %d, %d) gives row %q", text, width, maxRows, row)
 					return false
 				}
 			}
@@ -120,10 +120,7 @@ func TestWrap_LeakCasesReadAsBefore(t *testing.T) {
 			t.Errorf("%q at a width of %d wraps to\n got: %q\nwant: %q", c.text, c.width, got, c.want)
 		}
 	}
-	if got, want := wrapCapped("-aaaaa\n\nb", 5, 2, "…"), []string{"-aaaa", "a b…"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("the capped rows read\n got: %q\nwant: %q", got, want)
-	}
-	if got, want := wrapCapped("aaaa\n\tbbbb cccc", 12, 1, "…"), []string{"aaaa bbbb c…"}; !reflect.DeepEqual(got, want) {
+	if got, want := wrapCappedAtSpaces("aaaa\n\tbbbb cccc", 12, 1, "…"), []string{"aaaa bbbb c…"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("a line break and the next line's leading whitespace join as one space\n got: %q\nwant: %q", got, want)
 	}
 	if got, want := resumeCommandLines("e\u0301e\u0301e\u0301", 2), []string{"e\u0301e\u0301", "e\u0301"}; !reflect.DeepEqual(got, want) {

@@ -5,12 +5,11 @@ import (
 	"github.com/leeovery/portal/internal/theme"
 )
 
-// Fixed rather than derived from the widest glyph handed in: a per-slice column
-// would step labels sideways as the confirm raises and resolves.
+// Fixed rather than derived from the widest glyph handed in, so the key column
+// never moves with what the keymap holds.
 const themePanelFooterKeyColumnWidth = 3
 
 // Vertical because a horizontal keymap cannot fit the panel's column budget.
-// Entries are a parameter because the confirm scope substitutes a shorter footer.
 // Over-wide rows are returned unpadded, never truncated.
 func renderThemePanelFooter(entries []keymapEntry, width int, th theme.Theme, colourless bool) string {
 	return lipgloss.JoinVertical(lipgloss.Left, themePanelFooterRows(entries, width, th, colourless)...)

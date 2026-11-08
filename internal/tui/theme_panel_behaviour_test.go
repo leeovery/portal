@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/leeovery/portal/internal/theme"
@@ -430,10 +429,6 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 	before := m.themePanel.list.Index()
 
 	m, _ = pressSlotKey(t, m, slotDarkPress)
-	if !m.themePanel.confirming() {
-		t.Fatal("`d` over a constant did not raise the confirm, so the commit below is not the one the confirm gates")
-	}
-	m, _ = pressConfirmKey(t, m, confirmYes)
 
 	requireSlotCommits(t, persister, slotCommit{slug: "sunset", member: theme.MemberDark})
 	requirePairKeys(t, m, "ghost", "sunset")
@@ -455,7 +450,7 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 		t.Fatalf("`Enter` recorded the constants %v, want [sunset]", got)
 	}
 	if got := len(persister.slotCommits); got != 1 {
-		t.Errorf("`Enter` recorded %d slot commits, want the 1 the confirm made — it writes the CONSTANT and clears both slots", got)
+		t.Errorf("`Enter` recorded %d slot commits, want the 1 `d` made — it writes the CONSTANT and clears both slots", got)
 	}
 	requireConstantKeys(t, m, "sunset")
 	requireRenderedOrder(t, m, "gitlab-dark-grey", "horizon", "nord", "nord-wave", "sunset", theme.DefaultDarkSlug, theme.DefaultLightSlug)
@@ -465,84 +460,6 @@ func TestThemePanelBehaviour_CommitRecompute(t *testing.T) {
 	if got := m.themePanel.list.Index(); got != before {
 		t.Errorf("the cursor sits at index %d, want %d — the removed row above it pulled the previewed row back up", got, before)
 	}
-}
-
-var behaviourConfirmAnswers = []tea.KeyPressMsg{
-	confirmYes, confirmYesShift, confirmNo, confirmNoShift, confirmEsc,
-}
-
-func TestThemePanelBehaviour_Confirm(t *testing.T) {
-	t.Run("the three answers resolve it", func(t *testing.T) {
-		for _, press := range behaviourConfirmAnswers {
-			t.Run(press.String(), func(t *testing.T) {
-				m := behaviourConfirmModel(t)
-
-				m, _ = pressConfirmKey(t, m, press)
-
-				if m.themePanel.confirming() {
-					t.Errorf("%v left the question standing; it is one of the three resolving inputs", press)
-				}
-				if !m.themePanel.open {
-					t.Errorf("%v closed the panel; the confirm resolves, and only an `Esc` with no confirm live closes", press)
-				}
-			})
-		}
-	})
-
-	t.Run("every other key the panel binds is swallowed", func(t *testing.T) {
-		swallowed := 0
-		for name, probe := range themePanelProbes(livePanelDispatch) {
-			if slices.Contains(behaviourConfirmAnswers, probe.press) {
-				continue
-			}
-			swallowed++
-			t.Run(name, func(t *testing.T) {
-				m := behaviourConfirmModel(t)
-				pending, index := m.themePanel.pending, m.themePanel.list.Index()
-				persister, ok := m.themeState.persister.(*fakeThemePersister)
-				if !ok {
-					t.Fatalf("the fixture wired a %T persister, want the recording fake", m.themeState.persister)
-				}
-
-				got, cmd := pressConfirmKey(t, m, probe.press)
-
-				if !got.themePanel.confirming() || got.themePanel.pending != pending {
-					t.Errorf("%v resolved the question (pending %+v, want the standing %+v); only the three resolving inputs may", probe.press, got.themePanel.pending, pending)
-				}
-				if len(persister.slugs) != 0 {
-					t.Errorf("%v wrote %v while the question was live; nothing is written until `y`", probe.press, persister.slugs)
-				}
-				if got.themePanel.list.Index() != index {
-					t.Errorf("%v moved the cursor to row %d, want it left on %d — a move mid-question re-themes the screen behind the answer", probe.press, got.themePanel.list.Index(), index)
-				}
-				if cmd != nil {
-					t.Errorf("%v scheduled %T while the question was live, want nothing", probe.press, cmd)
-				}
-			})
-		}
-		if want := len(themePanelKeymap()) - 1; swallowed != want {
-			t.Errorf("the partition covered %d swallowed panel keys, want %d — every descriptor entry but `esc`, which is an answer", swallowed, want)
-		}
-	})
-}
-
-func behaviourConfirmModel(t *testing.T) Model {
-	t.Helper()
-
-	m, _ := behaviourPanel(t, []theme.Entry{
-		behaviourFile(t, "aurora", 0),
-		behaviourFile(t, "sunset", 1),
-	}, theme.RawKeys{Theme: "aurora"})
-	m = arrowToThemeRow(t, m, "sunset")
-
-	m, _ = pressSlotKey(t, m, slotLightPress)
-	if !m.themePanel.confirming() {
-		t.Fatal("fixture: `l` over a constant raised no confirm, so there is no question to resolve")
-	}
-	if m.themePanel.pending != (themeSlotConfirm{slug: "sunset", member: theme.MemberLight}) {
-		t.Fatalf("fixture: the pending assignment is %+v, want `sunset` into the light slot", m.themePanel.pending)
-	}
-	return m
 }
 
 func TestThemePanelBehaviour_FailureStateMachine(t *testing.T) {

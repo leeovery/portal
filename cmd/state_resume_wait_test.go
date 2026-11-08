@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -235,7 +236,7 @@ func assertNoHandOff(t *testing.T, p *resumeWaitProbe) {
 
 func TestRunResumeWait_ActingKeys(t *testing.T) {
 	t.Run("it resumes the pane on Enter", func(t *testing.T) {
-		for _, key := range []string{"\r", "\n"} {
+		for _, key := range []string{"\r", "\n", resumeKeypadEnter} {
 			t.Run(keyName(key), func(t *testing.T) {
 				var probe resumeWaitProbe
 				payload := samplePayload()
@@ -262,6 +263,41 @@ func TestRunResumeWait_SwallowedKeys(t *testing.T) {
 			t.Fatalf("runResumeWait() error = %v, want EOF", err)
 		}
 		assertNoHandOff(t, &probe)
+	})
+
+	// Only the keypad's Enter as application keypad mode sends it reads as a
+	// key: the same key modified, its kitty form, which nothing on the panel's
+	// path asks for, and it in a burst are swallowed as any sequence is.
+	t.Run("it swallows what only resembles the keypad's Enter", func(t *testing.T) {
+		for _, input := range []string{"\x1bO2M", "\x1b[57414u", resumeKeypadEnter + resumeKeypadEnter, resumeKeypadEnter + "\r", "\x1bO"} {
+			t.Run(strconv.Quote(input), func(t *testing.T) {
+				var probe resumeWaitProbe
+
+				err := runResumeWait(newResumeWaitConfig(t, &probe, samplePayload(), keystrokes(t, input)))
+
+				if !errors.Is(err, io.EOF) {
+					t.Fatalf("runResumeWait() error = %v, want EOF", err)
+				}
+				assertNoHandOff(t, &probe)
+				assertNoStateTouched(t, &probe)
+			})
+		}
+	})
+
+	t.Run("on the confirmation the keypad's Enter means nothing, as Return does", func(t *testing.T) {
+		for _, key := range []string{"\r", resumeKeypadEnter} {
+			t.Run(keyName(key), func(t *testing.T) {
+				var probe resumeWaitProbe
+
+				err := runResumeWait(newResumeWaitConfig(t, &probe, confirmationPayload(), keystrokes(t, key)))
+
+				if !errors.Is(err, io.EOF) {
+					t.Fatalf("runResumeWait() error = %v, want EOF", err)
+				}
+				assertNoHandOff(t, &probe)
+				assertNoStateTouched(t, &probe)
+			})
+		}
 	})
 
 	t.Run("it answers nothing in a burst, however many acting keys it carries", func(t *testing.T) {
@@ -624,6 +660,8 @@ func keyName(key string) string {
 		return "LF"
 	case " ":
 		return "space"
+	case resumeKeypadEnter:
+		return "keypad Enter"
 	}
 	if b := key[0]; b < 0x20 {
 		return "ctrl-" + string(rune('a'+b-1))

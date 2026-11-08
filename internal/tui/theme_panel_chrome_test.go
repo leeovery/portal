@@ -359,10 +359,10 @@ func TestPanelChrome_FloorFollowsTheHeader(t *testing.T) {
 	entries := themePanelKeymap()
 
 	want := chromeMeasuredFloor(t, m)
-	if got := themePanelMinHeight(entries, false); got != want {
+	if got := themePanelMinHeight(false); got != want {
 		t.Errorf("themePanelMinHeight = %d, want %d — the header draws a rule and a label, and the floor charges for those", got, want)
 	}
-	if got, wantDir := themePanelMinHeight(entries, true), want+1; got != wantDir {
+	if got, wantDir := themePanelMinHeight(true), want+1; got != wantDir {
 		t.Errorf("the directory-inclusive floor = %d, want %d", got, wantDir)
 	}
 
@@ -426,8 +426,4 @@ func newChromeGateModel(t *testing.T, contentH int) Model {
 		t.Fatalf("fixture: the content region is %d rows tall, want %d", got, contentH)
 	}
 	return m
-}
-
-func chromeWords(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }

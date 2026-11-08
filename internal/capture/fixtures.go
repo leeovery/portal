@@ -59,7 +59,6 @@ type Fixture struct {
 	initialThemeCursor string
 	// State, never text: the message slot composes its own copy, so no fixture
 	// can put a paraphrase on a captured frame.
-	initialThemeConfirm      bool
 	initialThemeCommitFailed bool
 	initialDetection         *spawn.Identity
 	initialGoneFlagged       []string
@@ -118,10 +117,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 		Home:        fixtureHome,
 		NoColor:     f.noColor,
 		Capture: tui.CaptureSeeds{
-			ThemeCursor:  f.initialThemeCursor,
-			ThemeConfirm: f.initialThemeConfirm,
-			// The panel's message slot is a single-slot arbiter: a fixture declares
-			// at most one of ThemeConfirm / ThemeCommitFailed.
+			ThemeCursor:       f.initialThemeCursor,
 			ThemeCommitFailed: f.initialThemeCommitFailed,
 			MultiSelect:       f.initialMultiSelect,
 			Cursor:            f.initialCursor,
@@ -211,7 +207,6 @@ func fixtureBuilders() []func() *Fixture {
 		themePanelNarrowFixture,
 		themePanelPaginatedFixture,
 		themePanelProjectsFixture,
-		themePanelConfirmFixture,
 		themePanelCommitFailedFixture,
 		themePanelMinHeightMessageFixture,
 		previewScreenFixture,
@@ -740,18 +735,6 @@ func themePanelOpenFixture() *Fixture {
 	}
 	fx.initialThemeCursor = FramesThemeSlug
 	fx.captureKeys = []tea.KeyPressMsg{keyRune('t')}
-	return fx
-}
-
-// Capture at the panel's minimum width (the message slot may wrap there) with
-// `--theme tokyo-night-day`, the row under the seeded cursor. The fixture
-// declares no render size, only its frame size, so live that width comes from
-// the capturing terminal: at a wide one it renders the confirm on a single row.
-func themePanelConfirmFixture() *Fixture {
-	fx := themePanelConstantPreviewingFixture()
-	fx.name = "theme-panel-confirm"
-	fx.initialThemeConfirm = true
-	fx.frame.Width = tui.ThemePanelMinWidthTerminal()
 	return fx
 }
 

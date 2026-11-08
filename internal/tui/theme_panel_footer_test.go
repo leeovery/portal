@@ -99,7 +99,6 @@ func TestThemePanelFooter_KeyColumnIsFixedWidth(t *testing.T) {
 			entries []keymapEntry
 		}{
 			{"panel scope", themePanelKeymap()},
-			{"substituted confirm scope", themePanelConfirmKeymap()},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rows := themePanelFooterLines(renderThemePanelFooter(tc.entries, themePanelFooterTestWidth, th, false))
@@ -129,26 +128,6 @@ func TestThemePanelFooter_KeyColumnIsFixedWidth(t *testing.T) {
 	})
 }
 
-func TestThemePanelFooter_AcceptsASubstitutedScope(t *testing.T) {
-	block := renderThemePanelFooter(themePanelConfirmKeymap(), themePanelFooterTestWidth, testDarkTheme(t), false)
-	rows := themePanelFooterLines(block)
-
-	want := []string{"y confirm", "n cancel"}
-	if len(rows) != len(want) {
-		t.Fatalf("substituted footer has %d rows, want %d:\n%s", len(rows), len(want), block)
-	}
-	for i, w := range want {
-		if got := themePanelFooterCopy(rows[i]); got != w {
-			t.Errorf("substituted row %d reads %q, want %q", i, got, w)
-		}
-	}
-	for _, pinned := range themePanelFooterPinnedRows() {
-		if strings.Contains(ansi.Strip(block), themePanelFooterCopy(pinned)) {
-			t.Errorf("substituted footer still carries the panel scope's %q:\n%s", pinned, ansi.Strip(block))
-		}
-	}
-}
-
 func TestThemePanelFooter_HeightMatchesRender(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -156,7 +135,6 @@ func TestThemePanelFooter_HeightMatchesRender(t *testing.T) {
 		want    int
 	}{
 		{"panel scope", themePanelKeymap(), 4},
-		{"substituted confirm scope", themePanelConfirmKeymap(), 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := themePanelFooterHeight(tc.entries); got != tc.want {

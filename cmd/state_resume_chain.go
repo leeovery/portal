@@ -196,13 +196,14 @@ func (p resumeChainPayload) logAttrs(attrs ...any) []any {
 }
 
 // carryTyped hands the waiter what a draw read as typed: a key alone as Typed,
-// and any more as input still arriving, which answers nothing, as a paste
-// read whole would not.
+// the byte it answers as, and any more as input still arriving, which answers
+// nothing, as a paste read whole would not.
 func (p *resumeChainPayload) carryTyped(typed []byte) {
-	switch {
-	case len(typed) == 1:
-		p.Typed = string(typed)
-	case len(typed) > 1:
+	if key, ok := resumeKeyIn(typed); ok {
+		p.Typed = string(key)
+		return
+	}
+	if len(typed) > 0 {
 		p.InputArriving = true
 	}
 }

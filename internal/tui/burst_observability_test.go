@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -90,6 +91,28 @@ func TestBurstObservability_FullSuccessOpenedNofN(t *testing.T) {
 		t.Errorf("batch = %q, want batch-xyz", got)
 	}
 	assertClosedSpawnKeys(t, sink)
+}
+
+// A burst that never started opened nothing, so it has no `opened 0/N`
+// summary, as the CLI's has none; one WARN says why.
+func TestBurstObservability_PreSpawnErrorEmitsNoSummary(t *testing.T) {
+	m := newPendingBurstModel(t, []string{"alpha", "bravo", "charlie"})
+	logger, sink := logtest.NewCaptureLogger(t)
+	m.spawnLogger = logger
+	boom := errors.New("os.Executable: boom")
+
+	injectComplete(t, m, spawnCompleteMsg{Identity: ghosttyIdentity(), Resolution: spawn.ResolutionNative, Err: boom})
+
+	if infos := sink.Records().AtExactLevel(slog.LevelInfo); len(infos) != 0 {
+		t.Errorf("INFO records = %+v, want no batch summary for a burst that never started", infos)
+	}
+	warn := sink.Records().AtOrAboveLevel(slog.LevelWarn).Only(t, "the WARN saying why the burst never started")
+	if warn.Msg != "burst not started" {
+		t.Errorf("WARN msg = %q, want %q", warn.Msg, "burst not started")
+	}
+	if err := warn.ErrorAttr(t, "error"); !errors.Is(err, boom) {
+		t.Errorf("WARN error = %v, want %v", err, boom)
+	}
 }
 
 func TestBurstObservability_PartialFailureOpenedKofN(t *testing.T) {

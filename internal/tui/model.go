@@ -853,12 +853,6 @@ func WithInitialThemeCursor(slug string) Option {
 	}
 }
 
-func WithInitialThemeConfirm(on bool) Option {
-	return func(m *Model) {
-		m.themeState.initialConfirm = on
-	}
-}
-
 func WithInitialThemeCommitFailed(on bool) Option {
 	return func(m *Model) {
 		m.themeState.initialCommitFailed = on
@@ -1927,6 +1921,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
+	msg = keypadEnterAsReturn(msg)
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.termWidth = wsm.Width
 		m.termHeight = wsm.Height

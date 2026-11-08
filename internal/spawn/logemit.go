@@ -23,7 +23,7 @@ func LogWindowResults(logger *slog.Logger, results []WindowResult) {
 }
 
 // LogBatchSummary takes total rather than deriving it from len(results): a
-// pre-spawn abort or a cancelled burst leaves fewer results than windows.
+// cancelled burst leaves fewer results than windows.
 func LogBatchSummary(logger *slog.Logger, id Identity, resolution Resolution, results []WindowResult, total int, triggerAttached bool, batch string) {
 	logger = log.OrDiscard(logger)
 	LogWindowResults(logger, results)
@@ -69,6 +69,13 @@ func LogUnsupported(logger *slog.Logger, id Identity) {
 		"terminal", id.Name,
 		"bundle_id", id.BundleID,
 	)
+}
+
+// LogNotStarted is a burst that failed before its first window: it opened
+// nothing, so it has no batch summary, as the CLI's, which returns the error,
+// has none.
+func LogNotStarted(logger *slog.Logger, err error) {
+	log.OrDiscard(logger).Warn("burst not started", "error", err)
 }
 
 // LogAckCleanFailed is a burst's acks left behind: each goes once stale, with

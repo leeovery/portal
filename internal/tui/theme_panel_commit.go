@@ -68,18 +68,43 @@ func (m *Model) reportCommitFailure() {
 	m.themeState.commitFailed = true
 }
 
-// Over a constant a slot write would clear the constant as a side effect — the
-// case the confirm gates, so it asks instead of writing. The shape comes from
-// themeSetting so it cannot disagree with what the panel resolves.
+// The shape comes from themeSetting so it cannot disagree with what the panel
+// resolves.
 func (m Model) handleSlotCommitKey(member theme.Member) (tea.Model, tea.Cmd) {
-	if !m.themeSetting().IsConstant {
-		_ = (&m).commitSelected(func(slug string) error { return (&m).commitSlot(slug, member) })
-		return m, nil
+	commit := (&m).commitSlot
+	if m.themeSetting().IsConstant {
+		commit = (&m).commitSlotOverConstant
 	}
-	if slug, ok := committableThemeSlug(m.themePanel.list); ok {
-		(&m).raiseSlotConfirm(slug, member)
-	}
+	_ = (&m).commitSelected(func(slug string) error { return commit(slug, member) })
 	return m, nil
+}
+
+// A slot write over a constant clears it, bringing the other slot into force
+// with it. The persister nil-check cannot be inferred from the nil error —
+// commitSlot returns nil on the writer-less path too, where the keys still hold
+// the constant.
+func (m *Model) commitSlotOverConstant(slug string, member theme.Member) error {
+	if err := m.commitSlot(slug, member); err != nil {
+		return err
+	}
+	if m.themeState.persister == nil {
+		return nil
+	}
+	m.loadNewlyLiveSlot(member)
+	return nil
+}
+
+// The classification is assigned first and unconditionally — gating it on the
+// load would let a failed palette decide which half is in force, so the load's
+// error is nothing this site can act on. The newly-live slot's palette stays out
+// of the nomination too: applyCommittedSetting is its single owner, and a second
+// writer would put two sources of truth behind one screen. Never ApplyTheme —
+// the screen keeps previewing the cursor's row.
+func (m *Model) loadNewlyLiveSlot(assigned theme.Member) {
+	m.themeState.adoptRetainedReply()
+
+	newlyLive := assigned.Opposite()
+	_ = m.themeState.source.LoadSlot(m.themePanel.enumeration, newlyLive.Slot(), m.themeState.keys)
 }
 
 // The untouched other slot is what makes `● both` reachable via `d` then `l` on

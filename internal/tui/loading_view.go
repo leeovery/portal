@@ -34,6 +34,9 @@ const (
 	// Full blocks over matching backgrounds render as flush solid cells.
 	loadingBarFilledGlyph = "█"
 	loadingBarTrackGlyph  = "█"
+	// Under NO_COLOR no background tells the track from the fill, so the
+	// track takes a glyph of its own.
+	loadingBarColourlessTrackGlyph = "░"
 )
 
 const (
@@ -224,7 +227,7 @@ func renderLoadingBar(fraction float64, w, barWidth int, th theme.Theme, colourl
 
 	if colourless {
 		return strings.Repeat(loadingBarFilledGlyph, filled) +
-			strings.Repeat(loadingBarTrackGlyph, barW-filled)
+			strings.Repeat(loadingBarColourlessTrackGlyph, barW-filled)
 	}
 
 	filledStyle := lipgloss.NewStyle().

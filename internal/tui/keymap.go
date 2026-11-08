@@ -85,15 +85,6 @@ func helpModalKeymap() []keymapEntry {
 	}
 }
 
-// Key-exclusive within the panel while the confirm is live, so its footer
-// replaces the standing keys. Uppercase Y/N dispatches but is not restated.
-func themePanelConfirmKeymap() []keymapEntry {
-	return []keymapEntry{
-		{Key: "y", Action: "confirm", HelpAction: "Clear the constant and set the slot", Core: true},
-		{Key: "n", Action: "cancel", HelpAction: "Keep the constant", Core: true},
-	}
-}
-
 // A footer-copy source, not a help reference — no Core/RightAligned flags.
 func commandPendingKeymap() []keymapEntry {
 	return []keymapEntry{

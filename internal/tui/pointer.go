@@ -67,9 +67,7 @@ func (m Model) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case m.themePanel.open:
-		if m.themePanel.confirming() {
-			return m, nil
-		}
+		// The panel takes the step as the arrow it stands for.
 	case m.activePage == pagePreview:
 		// The viewport scrolls the captured scrollback itself.
 		if m.preview.helpOpen {
@@ -106,19 +104,17 @@ type wheelSurface struct {
 	burstPending    bool
 	filterFocused   bool
 	themePanel      bool
-	themeConfirming bool
 	previewHelpOpen bool
 	previewGen      uint64
 }
 
 func (m Model) wheelSurface() wheelSurface {
 	s := wheelSurface{
-		page:            m.activePage,
-		modal:           m.modal,
-		burstPending:    m.burstPending,
-		filterFocused:   m.filterFocused(),
-		themePanel:      m.themePanel.open,
-		themeConfirming: m.themePanel.open && m.themePanel.confirming(),
+		page:          m.activePage,
+		modal:         m.modal,
+		burstPending:  m.burstPending,
+		filterFocused: m.filterFocused(),
+		themePanel:    m.themePanel.open,
 	}
 	if m.activePage == pagePreview {
 		s.previewHelpOpen = m.preview.helpOpen

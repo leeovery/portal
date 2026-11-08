@@ -211,7 +211,7 @@ func TestPanelEntry_NoColorBlocked(t *testing.T) {
 }
 
 func TestPanelEntry_FloorBlocked(t *testing.T) {
-	floor := themePanelMinHeight(themePanelKeymap(), false)
+	floor := themePanelMinHeight(false)
 
 	for _, tc := range []struct {
 		name      string
@@ -243,11 +243,10 @@ func TestPanelEntry_FloorBlocked(t *testing.T) {
 // The height is exactly the non-directory floor — where the pre-read assumption
 // (DirUnusable false, since the enumeration has not run) and the real one differ.
 func TestPanelEntry_UsableDirectoryOpensAtTheNonDirFloor(t *testing.T) {
-	entries := themePanelKeymap()
-	floor := themePanelMinHeight(entries, false)
-	if themePanelMinHeight(entries, true) != floor+1 {
+	floor := themePanelMinHeight(false)
+	if themePanelMinHeight(true) != floor+1 {
 		t.Fatalf("fixture: the directory-inclusive floor is %d and the plain one %d; the two must differ by exactly one row or this height discriminates nothing",
-			themePanelMinHeight(entries, true), floor)
+			themePanelMinHeight(true), floor)
 	}
 
 	m, rec := newEntryModel(t, newEntryThemeSource(t, false), entryModelOpts{
@@ -270,8 +269,7 @@ func TestPanelEntry_UsableDirectoryOpensAtTheNonDirFloor(t *testing.T) {
 }
 
 func TestPanelEntry_UnusableDirectoryBlocksOnTheReEvaluation(t *testing.T) {
-	entries := themePanelKeymap()
-	floor := themePanelMinHeight(entries, false)
+	floor := themePanelMinHeight(false)
 
 	t.Run("at the non-directory floor it discards the enumeration and refuses", func(t *testing.T) {
 		m, rec := newEntryModel(t, newEntryThemeSource(t, true), entryModelOpts{
@@ -293,7 +291,7 @@ func TestPanelEntry_UnusableDirectoryBlocksOnTheReEvaluation(t *testing.T) {
 	})
 
 	t.Run("one row higher it opens with a list row beneath the warning", func(t *testing.T) {
-		height := themePanelMinHeight(entries, true)
+		height := themePanelMinHeight(true)
 		m, _ := newEntryModel(t, newEntryThemeSource(t, true), entryModelOpts{
 			page:     PageSessions,
 			contentW: entryContentW,
@@ -320,7 +318,7 @@ func TestPanelEntry_UnusableDirectoryBlocksOnTheReEvaluation(t *testing.T) {
 }
 
 func TestPanelEntry_SameFloorAsResize(t *testing.T) {
-	floor := themePanelMinHeight(themePanelKeymap(), false)
+	floor := themePanelMinHeight(false)
 
 	for _, region := range [][2]int{
 		{entryContentW, entryContentH},
