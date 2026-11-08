@@ -25,7 +25,6 @@ that legitimately wrap a sink (`internal/logtest/capture.go`,
 `internal/restoretest/logger.go`, and the `slog.New(...)` sites in `cmd/logging_capture_test.go`,
 `cmd/state_hydrate_exec_failure_test.go`, `cmd/state_daemon_self_eject_log_test.go`,
 `cmd/bootstrap/{bootstrap,latch,orphan_sweep,stale_marker_cleanup}_test.go`,
-`internal/tmux/hooks_register*_test.go`, `internal/tmux/portal_saver_test.go`,
 `internal/state/capture_test.go`, `internal/restore/session_hydrate_exe_test.go`,
 `internal/hooks/store_test.go`, `internal/hookstest/hooks_lock_test.go`), and forbid the
 rest. Medium-sized because each of those sites needs a sanction or a rewrite onto the
