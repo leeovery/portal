@@ -1,7 +1,7 @@
 # Themes (`.theme` files)
 
 A Portal theme is one palette: 19 named colour roles in a flat `key = value`
-file. Everything Portal draws — the picker, and the resume panel a restored pane
+file. Everything Portal draws — the picker, and the resume panel a restored session
 can hold — resolves through those 19 roles. No part of the interface carries a
 colour of its own, so a new palette restyles all of it.
 
@@ -456,12 +456,13 @@ change, so Portal is correct *at launch* rather than live-following. Change your
 terminal's background mid-session and Portal notices at the next launch.
 
 **The resume panel decides the same way, once per draw.** Each time a waiting
-pane draws its panel — at restore, and again on a resize or when it moves between
-the panel and its discard confirmation — it reads the theme setting afresh and,
-under a pair, asks the terminal in front of it. Most panels are first drawn at
-restore with no client attached, so nothing answers and they resolve **dark**; a
-redraw with you attached resolves against your terminal. Under a constant the
-named theme paints every draw, attached or not.
+session draws its panel — at restore, as you open it, on a resize, and when it
+moves between the panel and its discard confirmation — it reads the theme setting
+afresh and, under a pair, asks the terminal in front of it, but only while a
+terminal is attached to answer. Most panels are first drawn at restore with
+nothing attached, so they ask nothing and paint **dark**; the redraw as you open
+the session resolves against your terminal. Under a constant the named theme
+paints every draw, attached or not.
 
 ### Going back to the shipped pair
 

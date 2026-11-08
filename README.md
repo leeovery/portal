@@ -362,7 +362,7 @@ The lists move with the **arrows only** (no vim or page-jump aliases); the [prev
 | `?` | Show the full keymap for the current page |
 | `q` / `Esc` | Quit (`Esc` clears an active filter first) |
 
-**Mouse and touch.** The picker reads the mouse, so a wheel, a trackpad, or a swipe on a touch terminal moves the highlight through the sessions, projects and theme lists and scrolls the preview. Tapping a session or project row opens it, as `Enter` would; in multi-select a tap marks the row instead, as `m` would. Selecting text while the picker is open takes your terminal's mouse-override modifier, such as `Shift`-drag in Ghostty.
+**Mouse and touch.** The picker reads the mouse, so a wheel, a trackpad, or a swipe on a touch terminal moves the highlight through the sessions, projects and theme lists and scrolls the preview. A scroll stays with what it began on: momentum still running as you close the preview or a panel doesn't carry into the list behind it. Tapping a session or project row opens it, as `Enter` would; in multi-select a tap marks the row instead, as `m` would. Selecting text while the picker is open takes your terminal's mouse-override modifier, such as `Shift`-drag in Ghostty.
 
 The TUI has three views: session list, project picker, and scrollback preview. It paints its own canvas in the colours of the active theme — press `t` for the theme picker, or name a theme in `prefs.json` (see [Configuration](#configuration) and [docs/theming.md](docs/theming.md)); `NO_COLOR` gives a colourless render.
 
@@ -627,7 +627,17 @@ and the command's own process starts only for the work you go back to.
   session's saved scrollback at what it was when the session was restored.
 - **It repaints when you arrive.** Opening a waiting session, or switching to it, redraws
   its panel, so a panel drawn days ago at restore shows the theme — and the light or dark
-  half of a pair — that is in force now.
+  half of a pair — that is in force now. A key you press as it repaints still counts, so
+  `Enter` the moment the session opens resumes it.
+- **Keys typed before it appears don't count.** Anything typed while a restored session
+  is still replaying its scrollback, before its panel is first drawn, is dropped, so a
+  stray `Enter` or `d` can't answer a panel you haven't seen.
+- **Over a slow link it may wait a moment.** Under a light/dark pair the panel asks your
+  terminal its background each time it draws, and over a slow link, such as SSH from a
+  phone, the answer can arrive after you have already pressed `Enter`. Portal then waits
+  for it, at most a second after the panel was drawn, before the command (or, after a
+  discard, the shell) starts, so the answer never lands there as stray text; a key typed
+  in that moment is dropped.
 - **A failed answer says so.** If an answer can't be carried out — `hooks.json`
   unreadable or locked on a discard, say — the panel states the reason on its own row
   and the session keeps waiting, so the key can be pressed again.
