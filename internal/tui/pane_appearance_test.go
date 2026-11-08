@@ -23,6 +23,7 @@ const (
 	darkReply        = "\x1b]11;rgb:0b0b/0c0c/1414\a"
 	lightReply       = "\x1b]11;rgb:e1e1/e2e2/e7e7\a"
 	stTerminatedDark = "\x1b]11;rgb:0b0b/0c0c/1414\x1b\\"
+	c1TerminatedLite = "\x1b]11;rgb:e1e1/e2e2/e7e7\x9c"
 	truncatedReply   = "\x1b]11;rgb:0b0b/0c0c/14"
 	unparseableReply = "\x1b]11;not-a-colour\a"
 )
@@ -40,11 +41,15 @@ const (
 )
 
 // fakePaneReader reads the pipe the harness writes replies into, under the
-// deadline the harness set on it when the read was armed.
+// deadline the harness set on it when the read was armed, or, once scripted,
+// one chunk of its script per read and then the deadline.
 type fakePaneReader struct {
 	f       *os.File
 	readErr error
 	reads   int
+
+	scripted bool
+	script   [][]byte
 }
 
 func (r *fakePaneReader) Read(p []byte) (int, error) {
@@ -52,7 +57,26 @@ func (r *fakePaneReader) Read(p []byte) (int, error) {
 	if r.readErr != nil {
 		return 0, r.readErr
 	}
+	if r.scripted {
+		if len(r.script) == 0 {
+			return 0, os.ErrDeadlineExceeded
+		}
+		n := copy(p, r.script[0])
+		if r.script[0] = r.script[0][n:]; len(r.script[0]) == 0 {
+			r.script = r.script[1:]
+		}
+		return n, nil
+	}
 	return r.f.Read(p)
+}
+
+// readsInChunks has every read of the probe take the next chunk alone, as a
+// terminal's input does when its bytes arrive apart.
+func (h *probeHarness) readsInChunks(chunks ...string) {
+	h.reader.scripted = true
+	for _, c := range chunks {
+		h.reader.script = append(h.reader.script, []byte(c))
+	}
 }
 
 // recordingWriter puts the query write into the same sequence as the read's
@@ -198,7 +222,8 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		constant := themetest.DefaultLight(t)
 
-		got, _, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
+		found, err := resolvePaneTheme(theme.ConstantNomination(constant), false, nil, h.probe())
+		got := found.Theme
 
 		if got != constant {
 			t.Errorf("resolved %q, want the constant nomination's palette %q", got.Canvas.Value, constant.Canvas.Value)
@@ -211,7 +236,8 @@ func TestResolvePaneTheme(t *testing.T) {
 	t.Run("it returns the zero theme for a zero nomination", func(t *testing.T) {
 		h := newProbeHarness(t)
 
-		got, _, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
+		found, err := resolvePaneTheme(theme.Nomination{}, false, nil, h.probe())
+		got := found.Theme
 
 		if got != (theme.Theme{}) {
 			t.Errorf("resolved a theme with canvas %q for a zero nomination, want the zero theme", got.Canvas.Value)
@@ -238,7 +264,8 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, lightReply)
 
-				got, _, err := resolvePaneTheme(tc.n, true, nil, h.probe())
+				found, err := resolvePaneTheme(tc.n, true, nil, h.probe())
+				got := found.Theme
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q under NO_COLOR, want %q", got.Canvas.Value, tc.want.Canvas.Value)
@@ -268,7 +295,8 @@ func TestResolvePaneTheme(t *testing.T) {
 					h.reply(t, tc.reply)
 				}
 
-				got, _, err := resolvePaneTheme(pair, false, nil, h.probe())
+				found, err := resolvePaneTheme(pair, false, nil, h.probe())
+				got := found.Theme
 
 				if got != tc.want {
 					t.Errorf("resolved canvas %q, want %q", got.Canvas.Value, tc.want.Canvas.Value)
@@ -295,7 +323,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				tc.arrange(h)
 
-				_, _, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
+				_, _ = resolvePaneTheme(pair, false, h.dropInput(nil), h.probe())
 
 				if !slices.Equal(h.events, tc.want) {
 					t.Errorf("ran %v with %s, want %v — the query waits on a ready read, and a drop taken before the query resolves cannot clear the query's own reply", h.events, tc.name, tc.want)
@@ -322,7 +350,7 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, darkReply)
 
-				_, _, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
+				_, _ = resolvePaneTheme(tc.n, tc.colourless, h.dropInput(nil), h.probe())
 
 				if h.drops != 1 {
 					t.Errorf("ran the drop %d times for a %s resolution, want exactly 1 — every pane draw owes one drop", h.drops, tc.name)
@@ -354,8 +382,10 @@ func TestResolvePaneTheme(t *testing.T) {
 				bare.reply(t, lightReply)
 				dropping.reply(t, lightReply)
 
-				got, _, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
-				want, _, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
+				found, err := resolvePaneTheme(tc.n, tc.colourless, nil, bare.probe())
+				got := found.Theme
+				wanted, _ := resolvePaneTheme(tc.n, tc.colourless, dropping.dropInput(nil), dropping.probe())
+				want := wanted.Theme
 
 				if got != want {
 					t.Errorf("resolved canvas %q with no drop and %q with one, want a draw that owes no drop to paint what it paints today", got.Canvas.Value, want.Canvas.Value)
@@ -370,7 +400,8 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, lightReply)
 
-		got, _, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		found, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		got := found.Theme
 
 		if got != light {
 			t.Errorf("resolved canvas %q after a failed drop, want the probe's own answer %q — the caller still has a fallback screen to paint", got.Canvas.Value, light.Canvas.Value)
@@ -398,10 +429,42 @@ func TestResolvePaneTheme(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, "\r"+darkReply)
 
-				_, typed, _ := resolvePaneTheme(tc.n, tc.colourless, nil, h.probe())
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, nil, h.probe())
 
-				if string(typed) != tc.typed {
-					t.Errorf("handed back %q as typed, want %q", typed, tc.typed)
+				if string(found.Typed) != tc.typed {
+					t.Errorf("handed back %q as typed, want %q", found.Typed, tc.typed)
+				}
+			})
+		}
+	})
+
+	t.Run("it reports an unanswered question only where it asked one, a drop changing nothing", func(t *testing.T) {
+		pair, _, _ := adaptivePair(t)
+		cases := []struct {
+			name       string
+			n          theme.Nomination
+			colourless bool
+			drop       bool
+			unanswered bool
+		}{
+			{"adaptive pair", pair, false, false, true},
+			{"adaptive pair, dropping its input", pair, false, true, true},
+			{"constant", theme.ConstantNomination(themetest.DefaultLight(t)), false, false, false},
+			{"zero", theme.Nomination{}, false, false, false},
+			{"colourless", pair, true, false, false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				var drop func() error
+				if tc.drop {
+					drop = h.dropInput(nil)
+				}
+
+				found, _ := resolvePaneTheme(tc.n, tc.colourless, drop, h.probe())
+
+				if found.Unanswered != tc.unanswered {
+					t.Errorf("Unanswered = %v, want %v", found.Unanswered, tc.unanswered)
 				}
 			})
 		}
@@ -413,10 +476,10 @@ func TestResolvePaneTheme(t *testing.T) {
 			h := newProbeHarness(t)
 			h.reply(t, "\r"+darkReply)
 
-			_, typed, _ := resolvePaneTheme(pair, false, h.dropInput(dropErr), h.probe())
+			found, _ := resolvePaneTheme(pair, false, h.dropInput(dropErr), h.probe())
 
-			if typed != nil {
-				t.Errorf("handed back %q as typed beside a drop failing with %v, want nothing: the drop discards it with the rest", typed, dropErr)
+			if found.Typed != nil {
+				t.Errorf("handed back %q as typed beside a drop failing with %v, want nothing: the drop discards it with the rest", found.Typed, dropErr)
 			}
 		}
 	})
@@ -426,7 +489,7 @@ func TestResolvePaneTheme(t *testing.T) {
 		h := newProbeHarness(t)
 		h.reply(t, darkReply)
 
-		_, _, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
+		_, err := resolvePaneTheme(pair, false, h.dropInput(errSeam), h.probe())
 
 		if err != errSeam {
 			t.Errorf("returned %v, want the drop's own error %v unchanged — nothing here wraps it, retries it or swallows it", err, errSeam)
@@ -612,19 +675,81 @@ func TestPaneAppearanceProbe(t *testing.T) {
 			{"a key and a reply cut off two bytes in", "q\x1b]", theme.MemberDark, "q"},
 			{"a key and a reply cut off four bytes in", "q\x1b]11", theme.MemberDark, "q"},
 			{"something that is no reply at all", "garbage\a", theme.MemberDark, "garbage\a"},
+			{"a C1 ST-terminated reply alone", c1TerminatedLite, theme.MemberLight, ""},
+			{"Enter before a C1 ST-terminated reply", "\r" + c1TerminatedLite, theme.MemberLight, "\r"},
+			{"two terminals' replies with Enter between them", darkReply + "\r" + lightReply, theme.MemberDark, "\r"},
+			{"two terminals' replies, then d", lightReply + stTerminatedDark + "d", theme.MemberLight, "d"},
+			{"a reply, Enter, and a second cut off", darkReply + "\r\x1b]11;rgb:0b", theme.MemberDark, "\r"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				h := newProbeHarness(t)
 				h.reply(t, tc.input)
 
-				got, typed := h.probe().detect()
+				got, found := h.probe().detect()
 
 				if got != tc.want {
 					t.Errorf("resolved %v for %q, want %v", got, tc.input, tc.want)
 				}
-				if string(typed) != tc.typed {
-					t.Errorf("handed back %q as typed for %q, want %q", typed, tc.input, tc.typed)
+				if string(found.Typed) != tc.typed {
+					t.Errorf("handed back %q as typed for %q, want %q", found.Typed, tc.input, tc.typed)
+				}
+			})
+		}
+	})
+
+	t.Run("it reads on past a read that holds no whole reply", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			chunks []string
+			want   theme.Member
+			typed  string
+		}{
+			{"Enter, then the reply", []string{"\r", lightReply}, theme.MemberLight, "\r"},
+			{"an ESC \\ reply split between its escape and backslash", []string{"\x1b]11;rgb:e1e1/e2e2/e7e7\x1b", "\\"}, theme.MemberLight, ""},
+			{"a reply split in its payload", []string{"\x1b]11;rgb:e1e1/e2", "e2/e7e7\a"}, theme.MemberLight, ""},
+			{"a second terminal's reply split, then d", []string{lightReply + "\x1b]11;rgb:0b0b", "/0c0c/1414\ad"}, theme.MemberLight, "d"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				h.readsInChunks(tc.chunks...)
+
+				got, found := h.probe().detect()
+
+				if got != tc.want {
+					t.Errorf("resolved %v for reads %q, want %v", got, tc.chunks, tc.want)
+				}
+				if string(found.Typed) != tc.typed {
+					t.Errorf("handed back %q as typed for reads %q, want %q", found.Typed, tc.chunks, tc.typed)
+				}
+			})
+		}
+	})
+
+	t.Run("it reports a question no reply answered", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			input      string
+			unanswered bool
+		}{
+			{"a reply", darkReply, false},
+			{"Enter, then a reply", "\r" + lightReply, false},
+			{"no reply", "", true},
+			{"Enter and no reply", "\r", true},
+			{"a truncated reply", truncatedReply, true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newProbeHarness(t)
+				if tc.input != "" {
+					h.reply(t, tc.input)
+				}
+
+				_, found := h.probe().detect()
+
+				if found.Unanswered != tc.unanswered {
+					t.Errorf("Unanswered = %v for %q, want %v", found.Unanswered, tc.input, tc.unanswered)
 				}
 			})
 		}

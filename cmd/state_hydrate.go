@@ -532,12 +532,19 @@ func execShellOrHookAndExit(cfg hydrateConfig, registration hooks.OnResume, park
 // A session whose signal generation could not be turned off still parks: the
 // chain's trap turns a kill key that lands into the recovery tail.
 func execResumeChainAndExit(cfg hydrateConfig, command string, parked parkedChain) {
-	payload := resumeChainPayload{Command: command, Session: cfg.Session}
+	payload := parkedPayload(command, cfg.Session)
 	if err := cfg.DisableTTYSignals(); err != nil {
 		cfg.Logger.Warn("disable terminal signals failed", payload.logAttrs("error", err)...)
 	}
 	args := []string{"sh", "-c", parkedResumeChain(parked, payload)}
 	execHandOff(cfg.Logger, cfg.ExecShell, "/bin/sh", args, true)
+}
+
+// parkedPayload is what a parked session's first draw is handed. Input queued
+// before the panel is first drawn, a key typed during the transcript's replay
+// among it, answers nothing on it, so that draw drops it.
+func parkedPayload(command, session string) resumeChainPayload {
+	return resumeChainPayload{Command: command, Session: session, DropInput: true}
 }
 
 // parkedChainTrap keeps the parked shell alive through a group interrupt or

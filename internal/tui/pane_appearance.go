@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -10,11 +9,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	"github.com/leeovery/portal/internal/bgreply"
 	"github.com/leeovery/portal/internal/theme"
 	"golang.org/x/sys/unix"
 )
-
-const oscBackgroundPrefix = "\x1b]11;"
 
 // A background reply is some 30 bytes; the cap bounds a terminal that answers
 // something else entirely without ever terminating it.
@@ -45,53 +43,68 @@ func newPaneAppearanceProbe() paneAppearanceProbe {
 	}
 }
 
+// PaneAppearance is what resolving a pane draw's palette found.
+type PaneAppearance struct {
+	Theme theme.Theme
+
+	// Typed is what the probe read of the pane's input that was not a
+	// terminal's reply, in the order it arrived: keys typed while the question
+	// was out, for the caller to judge as if typed after the draw. No reply,
+	// whole or cut off, is ever among it. A drop discards it with the rest of
+	// the input, so it is nil when one was supplied.
+	Typed []byte
+
+	// Unanswered reports a question written and given up on with no reply
+	// read: the terminal may still answer, after the probe has stopped
+	// reading, into whatever reads the pane's input next. A drop doesn't
+	// change it, since the reply can arrive after the drop as well.
+	Unanswered bool
+}
+
 // ResolvePaneTheme answers which palette a pane draw paints in. A constant
 // nomination paints from the first frame and a colourless draw detects nothing,
 // both without writing a byte to the terminal; a pair is raced against the
 // picker's own detect timeout and resolves dark for every way the question can
 // go unanswered.
 //
-// typed is what the probe read of the pane's input that was not the terminal's
-// reply, in the order it arrived: keys typed while the question was out, for
-// the caller to judge as if typed after the draw. The reply, a partial one
-// included, is never among them.
-//
 // dropInput runs once the appearance question has resolved and never before it:
 // the terminal's own answer can arrive after the probe's deadline, and a drop
-// taken first cannot clear it. A nil dropInput is a no-op. A drop discards what
-// was typed with the rest of the input, so typed is nil when one is supplied.
-// The palette is returned whether or not the drop succeeded, alongside the
-// drop's own error.
-func ResolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error) (resolved theme.Theme, typed []byte, err error) {
+// taken first cannot clear it. A nil dropInput is a no-op. The palette is
+// returned whether or not the drop succeeded, alongside the drop's own error.
+func ResolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error) (PaneAppearance, error) {
 	return resolvePaneTheme(n, colourless, dropInput, newPaneAppearanceProbe())
 }
 
-func resolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error, p paneAppearanceProbe) (theme.Theme, []byte, error) {
-	resolved, typed := selectPaneTheme(n, colourless, p)
+func resolvePaneTheme(n theme.Nomination, colourless bool, dropInput func() error, p paneAppearanceProbe) (PaneAppearance, error) {
+	found := selectPaneTheme(n, colourless, p)
 	if dropInput == nil {
-		return resolved, typed, nil
+		return found, nil
 	}
-	return resolved, nil, dropInput()
+	found.Typed = nil
+	return found, dropInput()
 }
 
-func selectPaneTheme(n theme.Nomination, colourless bool, p paneAppearanceProbe) (theme.Theme, []byte) {
+func selectPaneTheme(n theme.Nomination, colourless bool, p paneAppearanceProbe) PaneAppearance {
 	if n.IsConstant() {
-		return n.Constant(), nil
+		return PaneAppearance{Theme: n.Constant()}
 	}
 	if n.IsZero() || colourless {
-		return n.Select(theme.MemberDark), nil
+		return PaneAppearance{Theme: n.Select(theme.MemberDark)}
 	}
-	member, typed := p.detect()
-	return n.Select(member), typed
+	member, found := p.detect()
+	found.Theme = n.Select(member)
+	return found
 }
 
-func (p paneAppearanceProbe) detect() (theme.Member, []byte) {
+// detect asks the terminal its background. The palette is left to the caller;
+// what it read beside the answer, and whether one came, is in the appearance.
+func (p paneAppearanceProbe) detect() (theme.Member, PaneAppearance) {
 	if !p.isTerminal() {
-		return theme.MemberDark, nil
+		return theme.MemberDark, PaneAppearance{}
 	}
 	restore, err := p.makeRaw()
 	if err != nil {
-		return theme.MemberDark, nil
+		return theme.MemberDark, PaneAppearance{}
 	}
 	defer restore()
 
@@ -99,64 +112,35 @@ func (p paneAppearanceProbe) detect() (theme.Member, []byte) {
 	// leaves the terminal's reply on the pane's input for whatever reads it next.
 	reader, err := p.armRead(p.timeout)
 	if err != nil {
-		return theme.MemberDark, nil
+		return theme.MemberDark, PaneAppearance{}
 	}
 	if _, err := io.WriteString(p.out, ansi.RequestBackgroundColor); err != nil {
-		return theme.MemberDark, nil
+		return theme.MemberDark, PaneAppearance{}
 	}
 	payload, typed, ok := readBackgroundReply(reader)
 	if !ok {
-		return theme.MemberDark, typed
+		return theme.MemberDark, PaneAppearance{Typed: typed, Unanswered: true}
 	}
-	return terminalReplyFrom(tea.BackgroundColorMsg{Color: ansi.XParseColor(payload)}).member, typed
+	return terminalReplyFrom(tea.BackgroundColorMsg{Color: ansi.XParseColor(payload)}).member, PaneAppearance{Typed: typed}
 }
 
+// readBackgroundReply reads until a whole reply has arrived with no other cut
+// off behind it, as a second terminal on the same pane answering sends, or the
+// read gives up. ok reports a reply read, payload being the first one's.
 func readBackgroundReply(r io.Reader) (payload string, typed []byte, ok bool) {
 	buf := make([]byte, paneReplyCap)
 	filled := 0
-	for filled < len(buf) {
+	for {
 		n, err := r.Read(buf[filled:])
 		filled += n
-		if payload, typed, ok := splitBackgroundReply(buf[:filled]); ok || err != nil {
-			return payload, typed, ok
-		}
-	}
-	return splitBackgroundReply(buf)
-}
-
-// splitBackgroundReply parts what the probe read into the reply's payload, the
-// text between the OSC 11 introducer and its terminator (BEL or either form of
-// ST), and the bytes on either side of the reply, which were typed. An
-// introducer with no terminator after it is the reply still arriving, so
-// nothing from it on is typed; nor is the start of one cut off at the end of
-// what was read, though an escape alone there is the Escape key.
-func splitBackgroundReply(buf []byte) (payload string, typed []byte, ok bool) {
-	before, rest, found := bytes.Cut(buf, []byte(oscBackgroundPrefix))
-	if !found {
-		return "", withoutIntroducerStart(buf), false
-	}
-	typed = bytes.Clone(before)
-	for i, b := range rest {
-		switch b {
-		case ansi.BEL, ansi.ST:
-			return string(rest[:i]), append(typed, rest[i+1:]...), true
-		case ansi.ESC:
-			if i+1 < len(rest) && rest[i+1] == '\\' {
-				return string(rest[:i]), append(typed, rest[i+2:]...), true
+		rest, payloads, cut := bgreply.Split(buf[:filled])
+		if (len(payloads) > 0 && !cut) || err != nil || filled == len(buf) {
+			if len(payloads) == 0 {
+				return "", rest, false
 			}
-			return "", typed, false
+			return payloads[0], rest, true
 		}
 	}
-	return "", typed, false
-}
-
-func withoutIntroducerStart(buf []byte) []byte {
-	for n := min(len(oscBackgroundPrefix)-1, len(buf)); n >= 2; n-- {
-		if bytes.HasSuffix(buf, []byte(oscBackgroundPrefix[:n])) {
-			return bytes.Clone(buf[:len(buf)-n])
-		}
-	}
-	return bytes.Clone(buf)
 }
 
 // armStdinRead bounds reads of stdin with select rather than a read deadline:

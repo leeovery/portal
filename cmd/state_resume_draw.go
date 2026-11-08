@@ -31,9 +31,10 @@ type resumeDrawConfig struct {
 	DisableEcho func() error
 
 	// ResolveTheme runs dropInput, when handed one, after the appearance query
-	// and before it returns, answering the drop's error beside the palette and
-	// what the query read of the input that wasn't the terminal's reply.
-	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, []byte, error)
+	// and before it returns, answering the drop's error beside the palette,
+	// what the query read of the input that wasn't a terminal's reply, and
+	// whether a reply came.
+	ResolveTheme   func(colourless bool, dropInput func() error) (tui.PaneAppearance, error)
 	DropInputQueue func() error
 }
 
@@ -59,13 +60,16 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	if cfg.DropInput {
 		dropInput = cfg.DropInputQueue
 	}
-	th, typed, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
+	found, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
 
 	shown := cfg.resumeChainPayload
 	shown.DropInput = false
 	// A key typed while the query was out was read with it; the waiter judges
 	// it as if typed after the draw.
-	shown.carryTyped(typed)
+	shown.carryTyped(found.Typed)
+	// A reply still owed from an earlier draw is owed still: what this draw
+	// read may have been that one.
+	shown.ReplyOwed = shown.ReplyOwed || found.Unanswered
 	// Input the drop could not discard may still answer the confirmation, so it
 	// is never put up over that input, and the waiter is told the input is its
 	// own to swallow.
@@ -83,7 +87,7 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 		Report:     shown.Report,
 		Width:      width,
 		Height:     height,
-		Theme:      th,
+		Theme:      found.Theme,
 		Colourless: cfg.Colourless,
 	}, shown.Screen))
 
@@ -102,7 +106,7 @@ func renderResumeScreen(s tui.ResumeScreen, screen string) string {
 // non-migrating prefs route: the migrating one performs the one-shot appearance
 // translation and writes, and a boot's worth of sessions taking it at once is
 // a write storm over one file for a value none of them is setting.
-func sessionDrawTheme(colourless bool, dropInput func() error) (theme.Theme, []byte, error) {
+func sessionDrawTheme(colourless bool, dropInput func() error) (tui.PaneAppearance, error) {
 	nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
 	return tui.ResolvePaneTheme(nomination, colourless, dropInput)
 }
@@ -164,6 +168,7 @@ var stateResumeDrawCmd = &cobra.Command{
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
+		replyOwed, _ := cmd.Flags().GetBool(resumeFlagReplyOwed)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -173,6 +178,7 @@ var stateResumeDrawCmd = &cobra.Command{
 				Screen:        screen,
 				DropInput:     dropInput,
 				InputArriving: inputArriving,
+				ReplyOwed:     replyOwed,
 			},
 			Stdout:         os.Stdout,
 			Logger:         hydrateLogger,
@@ -199,6 +205,7 @@ func init() {
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the session before drawing")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
+	stateResumeDrawCmd.Flags().Bool(resumeFlagReplyOwed, false, "A draw's background question is still owed its reply")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagSession)
 

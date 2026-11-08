@@ -515,7 +515,7 @@ func TestResumeInputArriving_Draw(t *testing.T) {
 		}
 	})
 
-	t.Run("it hands on an arrival a redraw carried to it", func(t *testing.T) {
+	t.Run("it hands on an arrival a waiter from before the upgrade carried to it", func(t *testing.T) {
 		payload := drawnPayload()
 		payload.InputArriving = true
 

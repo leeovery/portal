@@ -18,8 +18,8 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/shellquote"
-	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 // The waiting session's processes are run for real here, as this test binary
@@ -162,10 +162,10 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 	cfg.Size = p.size
 	cfg.DisableEcho = func() error { return nil }
 	cfg.DropInputQueue = func() error { return nil }
-	cfg.ResolveTheme = func(bool, func() error) (theme.Theme, []byte, error) {
+	cfg.ResolveTheme = func(bool, func() error) (tui.PaneAppearance, error) {
 		p.recordSelf(termEventDraw)
 		p.holdDraw()
-		return th, nil, nil
+		return tui.PaneAppearance{Theme: th}, nil
 	}
 	cfg.ExecSelf = p.execSelf
 	cfg.CatchSIGTERM = p.holdingCatch(termEventDraw, cfg.CatchSIGTERM)

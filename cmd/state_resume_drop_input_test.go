@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/sourceguardtest"
-	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/leeovery/portal/internal/xdg"
@@ -68,13 +67,13 @@ func runDropDraw(t *testing.T, payload resumeChainPayload, dropErr error) *dropD
 		Size:               fixedSize(100, 30),
 		CatchSIGTERM:       func() {},
 		DisableEcho:        func() error { return nil },
-		ResolveTheme: func(_ bool, dropInput func() error) (theme.Theme, []byte, error) {
+		ResolveTheme: func(_ bool, dropInput func() error) (tui.PaneAppearance, error) {
 			d.calls = append(d.calls, "appearance-query")
 			d.handed = append(d.handed, dropInput != nil)
 			if dropInput == nil {
-				return th, nil, nil
+				return tui.PaneAppearance{Theme: th}, nil
 			}
-			return th, nil, dropInput()
+			return tui.PaneAppearance{Theme: th}, dropInput()
 		},
 		DropInputQueue: func() error {
 			d.calls = append(d.calls, "drop")
@@ -163,7 +162,7 @@ func TestResumeDropInput_HandOffs(t *testing.T) {
 		}
 	})
 
-	t.Run("only the confirmation's opening sets the drop flag", func(t *testing.T) {
+	t.Run("only the confirmation's opening and the park set the drop flag", func(t *testing.T) {
 		var setters []string
 		for _, source := range sourceguardtest.ParsePackageSources(t, ".", false) {
 			ast.Inspect(source.File, func(n ast.Node) bool {
@@ -177,7 +176,7 @@ func TestResumeDropInput_HandOffs(t *testing.T) {
 				return false
 			})
 		}
-		if want := []string{"resumeOpenDiscardConfirm"}; !slices.Equal(setters, want) {
+		if want := []string{"parkedPayload", "resumeOpenDiscardConfirm"}; !slices.Equal(setters, want) {
 			t.Errorf("functions setting DropInput true = %q, want %q", setters, want)
 		}
 	})
@@ -389,7 +388,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	t.Run("it runs the drop once and answers its error", func(t *testing.T) {
 		refused := errors.New("ioctl refused")
 		calls := 0
-		_, _, err := sessionDrawTheme(true, func() error {
+		_, err := sessionDrawTheme(true, func() error {
 			calls++
 			return refused
 		})
@@ -402,7 +401,7 @@ func TestPaneDrawTheme_HandsTheDropThrough(t *testing.T) {
 	})
 
 	t.Run("it answers no error for a nil drop", func(t *testing.T) {
-		if _, _, err := sessionDrawTheme(true, nil); err != nil {
+		if _, err := sessionDrawTheme(true, nil); err != nil {
 			t.Errorf("sessionDrawTheme() error = %v, want nil", err)
 		}
 	})

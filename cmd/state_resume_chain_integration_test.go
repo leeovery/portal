@@ -134,6 +134,41 @@ func (w *waitingWorld) awaitDrawIn(t *testing.T, mark int, slug string) {
 	}
 }
 
+// awaitStarted waits, polling closely, for the chain's subcommand to start
+// past mark in the log, returning the log's size then.
+func (w *waitingWorld) awaitStarted(t *testing.T, mark int, subcommand string) int {
+	t.Helper()
+	var raw []byte
+	if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, func() bool {
+		raw, _ = os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+		for line := range strings.Lines(string(raw[min(mark, len(raw)):])) {
+			if strings.Contains(line, "process: start") && strings.Contains(line, subcommand) {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no %s started; the log since holds:\n%s", subcommand, raw[min(mark, len(raw)):])
+	}
+	return len(raw)
+}
+
+// attachedDuringItsRedraw attaches a raw client to the waiting panel and
+// returns it once the redraw zmx's SIGWINCH on the attach asks for has started.
+// A raw client has no terminal, so only that signal redraws, and the attach
+// waits for the waiter that takes it. The waiter before the redraw has exec'd
+// it by then, so a key typed next is read by the draw's background question,
+// which a raw client never answers, and so stays open its whole 50 ms: the key
+// answers only if the draw carries it to the waiter.
+func (w *waitingWorld) attachedDuringItsRedraw(t *testing.T) *zmxtest.Client {
+	t.Helper()
+	mark := w.awaitStarted(t, 0, "resume-wait")
+	c := zmxtest.Attach(t, w.b, waitingSession)
+	w.awaitClients(t, waitingSession, 1)
+	w.awaitStarted(t, mark, "resume-draw")
+	return c
+}
+
 // logField is the value of a key=value field of a log line.
 func logField(line, key string) string {
 	_, rest, _ := strings.Cut(line, " "+key+"=")
@@ -255,8 +290,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	t.Run("Escape on the panel of a session only a raw client shows detaches it through the backend", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)
 		w.awaitPanel(t)
-		c := zmxtest.Attach(t, w.b, waitingSession)
-		w.awaitClients(t, waitingSession, 1)
+		c := w.attachedDuringItsRedraw(t)
 
 		c.Type(t, "\x1b")
 
@@ -274,8 +308,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	t.Run("Enter on the panel runs the resume command and lowers the session's flag", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)
 		w.awaitPanel(t)
-		c := zmxtest.Attach(t, w.b, waitingSession)
-		w.awaitClients(t, waitingSession, 1)
+		c := w.attachedDuringItsRedraw(t)
 
 		c.Type(t, "\r")
 

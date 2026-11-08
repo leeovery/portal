@@ -38,8 +38,10 @@ type resumeDrawProbe struct {
 	execsAtEchoOff    int
 
 	// typed is what the appearance query read of the input that wasn't its
-	// reply; a drop discards it, as the real query's does.
-	typed []byte
+	// reply, which a drop discards, as the real query's does; unanswered, a
+	// query it gave up on.
+	typed      []byte
+	unanswered bool
 }
 
 func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPayload, size func() (int, int, error)) resumeDrawConfig {
@@ -56,14 +58,16 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 			p.execsAtEchoOff = p.execCalls
 			return p.echoOffErr
 		},
-		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, []byte, error) {
+		ResolveTheme: func(colourless bool, dropInput func() error) (tui.PaneAppearance, error) {
 			p.colourless = append(p.colourless, colourless)
 			p.paintedAtResolve = p.stdout.Len()
 			p.echoOffsAtResolve = p.echoOffCalls
+			found := tui.PaneAppearance{Theme: th, Typed: p.typed, Unanswered: p.unanswered}
 			if dropInput == nil {
-				return th, p.typed, nil
+				return found, nil
 			}
-			return th, nil, dropInput()
+			found.Typed = nil
+			return found, dropInput()
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.execProg = prog

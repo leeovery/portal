@@ -87,9 +87,9 @@ func runPaneProbeChild() {
 		theme.Theme{Canvas: theme.Token{Name: "canvas", Value: childLightCanvas}},
 		theme.Theme{Canvas: theme.Token{Name: "canvas", Value: childDarkCanvas}},
 	)
-	resolved, typed, _ := ResolvePaneTheme(pair, false, nil)
+	found, _ := ResolvePaneTheme(pair, false, nil)
 	result := os.NewFile(paneProbeResultFD, "result")
-	_, _ = result.WriteString(resolved.Canvas.Value + " " + hex.EncodeToString(typed))
+	_, _ = result.WriteString(found.Theme.Canvas.Value + " " + hex.EncodeToString(found.Typed))
 	_ = result.Close()
 	os.Exit(0)
 }

@@ -17,7 +17,17 @@ import (
 // and returns the argv it hands the waiter.
 func drawReading(t *testing.T, typed string) []string {
 	t.Helper()
-	probe := &resumeDrawProbe{typed: []byte(typed)}
+	return drawThrough(t, &resumeDrawProbe{typed: []byte(typed)})
+}
+
+// drawReadingUnanswered is drawReading for a query no reply answered in time.
+func drawReadingUnanswered(t *testing.T, typed string) []string {
+	t.Helper()
+	return drawThrough(t, &resumeDrawProbe{typed: []byte(typed), unanswered: true})
+}
+
+func drawThrough(t *testing.T, probe *resumeDrawProbe) []string {
+	t.Helper()
 	if err := runResumeDraw(newResumeDrawConfig(t, probe, samplePayload(), fixedSize(100, 30))); err != nil {
 		t.Fatalf("runResumeDraw() error = %v", err)
 	}
@@ -168,6 +178,26 @@ func TestResumeTypedFlag(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("only the waiter's argv carries a key, so a draw handed one still parses", func(t *testing.T) {
+		payload := samplePayload()
+		payload.Typed = "\r"
+
+		if argv := resumeChainArgv("portal", resumeWaitSubcommand, payload); !slices.Contains(argv, flagArg(resumeFlagTyped)) {
+			t.Errorf("waiter argv = %q, want %s", argv, flagArg(resumeFlagTyped))
+		}
+		argv := resumeChainArgv("portal", resumeDrawSubcommand, payload)
+		assertArgvLacks(t, argv, resumeFlagTyped)
+		ran := false
+		withFuncSeam(t, &resumeDrawRunFunc, func(resumeDrawConfig) error {
+			ran = true
+			return nil
+		})
+		executeChainArgv(t, argv[1:])
+		if !ran {
+			t.Errorf("draw argv %q ran no draw", argv)
+		}
+	})
 
 	t.Run("a payload's key round-trips through the waiter's argv", func(t *testing.T) {
 		payload := samplePayload()

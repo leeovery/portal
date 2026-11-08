@@ -29,6 +29,7 @@ const (
 	resumeFlagDropInput     = "drop-input"
 	resumeFlagInputArriving = "input-arriving"
 	resumeFlagTyped         = "typed"
+	resumeFlagReplyOwed     = "reply-owed"
 )
 
 // The screens one draw of the waiting session can put up. The panel is the
@@ -56,9 +57,11 @@ type resumeChainPayload struct {
 	Height  int
 	Screen  string
 
-	// DropInput is set by the hand-off that opens the confirmation and
-	// cleared by the draw that honours it, so a later draw of the same screen
-	// never discards a key the user typed while reading it.
+	// DropInput is set by the hand-off that opens the confirmation, and by the
+	// helper that parks the session, since input queued before a screen is
+	// first drawn answers nothing on it, and cleared by the draw that honours
+	// it, so a later draw of the same screen never discards a key the user
+	// typed while reading it.
 	DropInput bool
 
 	// InputArriving tells a waiter its session was handed over while input
@@ -73,6 +76,12 @@ type resumeChainPayload struct {
 	// at most here, and more as InputArriving, so nothing pasted is ever
 	// carried in the waiter's argv.
 	Typed string
+
+	// ReplyOwed marks a background question a draw gave up on with no reply
+	// read, as a terminal over a slow link answers late. It rides each hand-off
+	// until a waiter takes a reply out of its input, so the reply, whenever it
+	// lands, never answers the panel nor reaches what the session is handed to.
+	ReplyOwed bool
 }
 
 func (p resumeChainPayload) logAttrs(attrs ...any) []any {
@@ -136,7 +145,12 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	if p.InputArriving {
 		argv = append(argv, flagArg(resumeFlagInputArriving))
 	}
-	if p.Typed != "" {
+	if p.ReplyOwed {
+		argv = append(argv, flagArg(resumeFlagReplyOwed))
+	}
+	// Only the waiter takes a key: a draw handed one would refuse its argv,
+	// and the session would lose its panel to the chain's recovery.
+	if p.Typed != "" && subcommand == resumeWaitSubcommand {
 		argv = append(argv, flagArg(resumeFlagTyped), hex.EncodeToString([]byte(p.Typed)))
 	}
 	return argv

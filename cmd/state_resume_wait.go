@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/leeovery/portal/internal/bgreply"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/resumekeys"
 	"github.com/spf13/cobra"
@@ -34,6 +35,14 @@ const resumeResizeSettle = 150 * time.Millisecond
 // a paste, an escape sequence and a burst each arrive as bytes far closer
 // together than this.
 const resumeInputQuiet = 50 * time.Millisecond
+
+// resumeLateReplyWait bounds how long a session whose draw's background
+// question went unanswered waits, before it is handed to its hook or a shell,
+// for the reply: a terminal over a slow link answers after the draw's 50 ms,
+// and the reply would otherwise land in what the session runs next, echoed. It
+// is spent in quiet windows, so it is the silence waited through, not counting
+// the reply's own bytes.
+const resumeLateReplyWait = 300 * time.Millisecond
 
 type resumeWaitConfig struct {
 	resumeChainPayload
@@ -155,23 +164,28 @@ func resumeKeysFor(screen string) resumeKeys {
 	}
 }
 
-// answer closes the arrival and does what it means on this screen, reporting
-// whether that ended the wait. Only a byte that arrived alone means anything.
-func (k resumeKeys) answer(cfg resumeWaitConfig, arrival *resumeArrival) (ended bool, err error) {
-	key, alone := arrival.end()
-	act := k[key]
-	if !alone || act == nil {
+// answer does what a closed arrival means on this screen, reporting whether
+// that ended the wait. Only a byte that arrived alone means anything.
+func (k resumeKeys) answer(cfg resumeWaitConfig, judged resumeJudged) (ended bool, err error) {
+	act := k[judged.key]
+	if !judged.alone || act == nil {
 		return false, nil
 	}
 	return act(cfg)
 }
 
+// resumeArrivalKept bounds the bytes an arrival keeps to be judged by: a key
+// is one byte and a terminal's reply a few dozen, so an arrival longer than
+// this holds no key alone.
+const resumeArrivalKept = 256
+
 // resumeArrival is the input that has reached the session since it was last
 // quiet. A key is only a byte that arrived alone, with nothing behind it before
-// the session fell quiet.
+// the session fell quiet but the terminals' replies to a background question,
+// which are no input of the user's.
 type resumeArrival struct {
-	key   byte
-	bytes int
+	kept     []byte
+	overflow bool
 
 	// carried marks input already arriving when the waiter started, whose
 	// earlier bytes this waiter never read.
@@ -179,22 +193,42 @@ type resumeArrival struct {
 }
 
 func (a *resumeArrival) add(b byte) {
-	if a.bytes == 0 {
-		a.key = b
+	if len(a.kept) == resumeArrivalKept {
+		a.overflow = true
+		return
 	}
-	a.bytes++
+	a.kept = append(a.kept, b)
 }
 
 func (a *resumeArrival) open() bool {
-	return a.carried || a.bytes > 0
+	return a.carried || len(a.kept) > 0
 }
 
-// end closes the arrival, answering the byte it opened with and whether that
-// byte arrived alone.
-func (a *resumeArrival) end() (key byte, alone bool) {
-	key, alone = a.key, a.bytes == 1 && !a.carried
+// resumeJudged is an arrival closed: the byte left once every reply is taken
+// out of it, whether that byte arrived alone, and whether a reply was among it.
+type resumeJudged struct {
+	key     byte
+	alone   bool
+	replied bool
+}
+
+func (a *resumeArrival) end() resumeJudged {
+	rest, payloads, _ := bgreply.Split(a.kept)
+	judged := resumeJudged{replied: len(payloads) > 0}
+	if len(rest) == 1 && !a.carried && !a.overflow {
+		judged.key, judged.alone = rest[0], true
+	}
 	*a = resumeArrival{}
-	return key, alone
+	return judged
+}
+
+// judge closes the arrival, and a reply among it is the one owed.
+func (cfg *resumeWaitConfig) judge(arrival *resumeArrival) resumeJudged {
+	judged := arrival.end()
+	if judged.replied {
+		cfg.ReplyOwed = false
+	}
+	return judged
 }
 
 // The pending redraw dies with the process image a dispatched key execs, so a
@@ -228,7 +262,8 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 		case read := <-reader.results:
 			outstanding = false
 			if read.quiet {
-				if ended, err := keys.answer(cfg, &arrival); ended {
+				judged := cfg.judge(&arrival)
+				if ended, err := keys.answer(cfg, judged); ended {
 					return err
 				}
 				if redrawDue {
@@ -242,7 +277,8 @@ func resumeWaitLoop(cfg resumeWaitConfig) error {
 			if read.err != nil {
 				// No byte can follow the end of the input, so what arrived
 				// last is judged as it stands.
-				if ended, err := keys.answer(cfg, &arrival); ended {
+				judged := cfg.judge(&arrival)
+				if ended, err := keys.answer(cfg, judged); ended {
 					return err
 				}
 				return fmt.Errorf("resume wait: read: %w", read.err)
@@ -334,6 +370,7 @@ func startResumeReader(in io.Reader, awaitInput func(time.Duration) (bool, error
 // resumeAnswerEnter hands the session back to its own transcript and starts
 // what the store holds now over it, once its flag is lowered.
 func resumeAnswerEnter(cfg resumeWaitConfig) error {
+	cfg.awaitLateReply()
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
@@ -387,6 +424,7 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 		return resumeReport(cfg, resumeScreenDiscard, resumeDiscardRefusal(err))
 	}
 
+	cfg.awaitLateReply()
 	if cleared, err := resumeUnfreeze(cfg); !cleared {
 		return err
 	}
@@ -396,6 +434,38 @@ func resumeAnswerDiscard(cfg resumeWaitConfig) error {
 
 	handOffToHookOrShell(cfg.Logger, cfg.ExecSelf, "")
 	return nil
+}
+
+// awaitLateReply reads off the session's input, while its draw's background
+// question is owed a reply, the reply as it comes within resumeLateReplyWait,
+// so the hook or the shell the session is handed to never reads it, and hands
+// on at once when it has come. An answer is taken with no read outstanding, so
+// nothing else reads the input meanwhile. It reads only while what has come
+// can still be a reply: the first byte that can't, typed in the wait, ends it
+// and is lost, the one cost, which the hook's own start-up would mostly outlast.
+func (cfg resumeWaitConfig) awaitLateReply() {
+	if !cfg.ReplyOwed {
+		return
+	}
+	var got []byte
+	buf := make([]byte, 1)
+	for quiet := time.Duration(0); quiet < resumeLateReplyWait && len(got) < resumeArrivalKept; {
+		arrived, err := cfg.AwaitInput(resumeInputQuiet)
+		if err != nil {
+			return
+		}
+		if !arrived {
+			quiet += resumeInputQuiet
+			continue
+		}
+		if n, err := cfg.In.Read(buf); n == 0 || err != nil {
+			return
+		}
+		got = append(got, buf[0])
+		if whole, partial := bgreply.ReadsAsOne(got); whole || !partial {
+			return
+		}
+	}
 }
 
 // resumeUnfreeze hands the session back to its own transcript and then lowers
@@ -510,6 +580,7 @@ var stateResumeWaitCmd = &cobra.Command{
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
 		typedHex, _ := cmd.Flags().GetString(resumeFlagTyped)
 		typed, unnamed := typedFromFlag(typedHex)
+		replyOwed, _ := cmd.Flags().GetBool(resumeFlagReplyOwed)
 
 		return resumeWaitRunFunc(resumeWaitConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -522,6 +593,7 @@ var stateResumeWaitCmd = &cobra.Command{
 
 				InputArriving: inputArriving || unnamed,
 				Typed:         typed,
+				ReplyOwed:     replyOwed,
 			},
 			Stdout:              os.Stdout,
 			In:                  os.Stdin,
@@ -553,6 +625,7 @@ func init() {
 	stateResumeWaitCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen the session is showing: discard for the confirmation, else the panel")
 	stateResumeWaitCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
 	stateResumeWaitCmd.Flags().String(resumeFlagTyped, "", "The key, in hex, the draw read while it asked the terminal its background")
+	stateResumeWaitCmd.Flags().Bool(resumeFlagReplyOwed, false, "A draw's background question is still owed its reply")
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeWaitCmd.MarkFlagRequired(resumeFlagSession)
 
