@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-08
+
+Portal no longer migrates from the tmux version, so its saved state is now unsupported.
+
+💥 Breaking
+- `portal migrate` is removed, and the tmux version's saved sessions and resume hooks can no longer be moved across — Portal now stops with a pointer to "Coming from the tmux version" in the README.
+- `xctl hook rm --pane-key` is renamed `--key` — update scripts that use the old flag.
+
+✨ Added
+- The keypad's Enter now works like Return in the picker and on the resume panel.
+- A glob given to `x` now attaches the live sessions it matches, each in its own window when there are several.
+
+🔧 Changed
+- Portal now refuses a zmx older than 1.0.0 up front, and `xctl doctor`'s zmx line shows the zmx's path or why Portal can't use it.
+- The resume panel now asks whether a terminal is attached the same way opening a session does, so a reader such as a preview no longer counts as one.
+- Setting a light or dark theme slot over a pinned theme now applies at once, without the `y/n` confirmation.
+- The loading bar's empty track uses a distinct glyph under `NO_COLOR`, so it can be told from the fill.
+- The README is reorganised and the user guide is split into pages under `docs/`.
+
+🗑️ Removed
+- The tmux-version compatibility hold on hooks, and the `xctl doctor` and hook-sweep checks tied to a migration cut short, are gone.
+
+🐛 Fixed
+- A failed window burst that opened nothing no longer logs a batch summary.
+
 ## [1.0.2] - 2026-11-08
 
 One terminal at a time: opening a session now takes it from any other terminal showing it, so it is drawn for yours from the first frame.
