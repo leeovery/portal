@@ -5,22 +5,44 @@ import (
 	"slices"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/leeovery/portal/internal/sourceguardtest"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 )
 
 // A real loader: a stub seam answering with a fixed union would make every row
-// and every `●` a statement about the fixture.
+// and every `●` a statement about the fixture. Its log is how the newly live
+// slot's load shows: a plain slot write over the constant would load nothing.
 func TestSlotOverConstant_ClearsTheConstantAndSetsTheSlot(t *testing.T) {
 	dir := t.TempDir()
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
-	m, _, persister := newRecomputePanelModel(t, dir, theme.RawKeys{Theme: "aurora"})
+	m, _, sink := newClosePanelModel(t, dir, theme.RawKeys{Theme: "aurora"})
+	persister := &fakeThemePersister{}
+	WithThemePersister(persister)(&m)
+	m.termWidth, m.termHeight = arrowTermW, arrowTermH
+	m.applySessions(closePanelSessions(), nil)
+	m = pressThemeKey(t, m)
+	if !m.themePanel.open {
+		t.Fatal("fixture: the panel did not open")
+	}
 	requireBadge(t, m, "aurora", theme.BadgeConstant)
 	requireBadgeText(t, m, 1, 0, 0)
 
 	m = arrowToThemeRow(t, m, "nord")
+	loadedBefore := len(sink.Records().WithMessage("loaded"))
 	m, cmd := pressSlotKey(t, m, slotLightPress)
+
+	loads := sink.Records().WithMessage("loaded")[loadedBefore:]
+	if len(loads) != 1 {
+		t.Fatalf("`l` over a constant made %d slot load(s), want the 1 that loads the newly live dark slot\n%s", len(loads), sink.Body())
+	}
+	if got := loads[0].AttrString(t, "slug"); got != theme.DefaultDarkSlug {
+		t.Errorf("the load carries slug=%q, want the shipped dark default %q now in force", got, theme.DefaultDarkSlug)
+	}
+	if got := loads[0].AttrString(t, "slot"); got != "dark" {
+		t.Errorf("the load carries slot=%q, want dark — the slot `l` left unassigned", got)
+	}
 
 	requireSlotCommits(t, persister, slotCommit{slug: "nord", member: theme.MemberLight})
 	if len(persister.slugs) != 1 {
@@ -102,6 +124,46 @@ func TestSlotOverConstant_NilPersisterIsInert(t *testing.T) {
 		}
 		requireConstantKeys(t, m, conversionConstant)
 	})
+}
+
+// The keys that answered the removed confirm are bound to nothing in the panel.
+func TestSlotOverConstant_YAndNAfterTheKeyDoNothing(t *testing.T) {
+	for _, press := range []tea.KeyPressMsg{
+		{Code: 'y', Text: "y"},
+		{Code: 'n', Text: "n"},
+	} {
+		t.Run(press.String(), func(t *testing.T) {
+			rows := arrowValidRows(t, 4)
+			persisted, target := rows[0].Slug, rows[2].Slug
+			m, persister := newCommitPanelModel(t, rows, persisted)
+			m = arrowToThemeRow(t, m, target)
+			m, _ = pressSlotKey(t, m, slotDarkPress)
+			requireSlotCommits(t, persister, slotCommit{slug: target, member: theme.MemberDark})
+			keys, index := m.themeState.keys, m.themePanel.list.Index()
+
+			m, cmd := pressSlotKey(t, m, press)
+
+			requireSlotCommits(t, persister, slotCommit{slug: target, member: theme.MemberDark})
+			if len(persister.slugs) != 1 {
+				t.Errorf("%v made seam calls %v after `d`, want none", press, persister.slugs[1:])
+			}
+			if m.themeState.keys != keys {
+				t.Errorf("%v moved the keys to %+v, want the %+v `d` wrote", press, m.themeState.keys, keys)
+			}
+			if got := m.themePanel.message; got.Kind != themeMessageNone {
+				t.Errorf("%v raised the message %+v, want the slot empty", press, got)
+			}
+			if got := m.themePanel.list.Index(); got != index {
+				t.Errorf("%v moved the cursor to row %d, want it left on %d", press, got, index)
+			}
+			if !m.themePanel.open {
+				t.Errorf("%v closed the panel", press)
+			}
+			if cmd != nil {
+				t.Errorf("%v scheduled %T, want nothing", press, cmd)
+			}
+		})
+	}
 }
 
 // Structurally unreachable, so the cursor is placed directly.

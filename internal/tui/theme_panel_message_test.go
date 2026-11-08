@@ -92,8 +92,8 @@ func TestPanelMessage_UnreservedWhenEmpty(t *testing.T) {
 		t.Errorf("themeMessageNone reserved %d rows, want 0", got)
 	}
 
-	// The failed-commit contender leaves the standing footer in place, so the slot's
-	// row is what separates the two layouts.
+	// The footer is the same either way, so the slot's row is what separates the
+	// two layouts.
 	_, empty := themePanelListSize(messageTestPanel(th, themePanelPreferredWidth, themePanelMessage{}), height)
 	_, live := themePanelListSize(messageTestPanel(th, themePanelPreferredWidth, messageTestFailed()), height)
 	if live != empty-1 {

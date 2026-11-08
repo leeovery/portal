@@ -103,8 +103,9 @@ func TestPanelGeometry_WidthFloor(t *testing.T) {
 // against whatever the header measures pins nothing.
 const wantPanelHeaderRows = 2
 
-// The message row is counted although the slot is unreserved when empty: both of
-// its contenders are non-suppressible, and a floor without it lands one row short.
+// The message row is counted although the slot is unreserved when empty: the
+// failed-commit line cannot be suppressed, and a floor without it lands one row
+// short.
 func TestPanelGeometry_HeightFloorArithmetic(t *testing.T) {
 	entries := themePanelKeymap()
 	footer := themePanelFooterHeight(entries)

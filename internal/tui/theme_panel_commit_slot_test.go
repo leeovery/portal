@@ -213,8 +213,8 @@ func TestPanelSlotCommit_DThenLYieldsBoth(t *testing.T) {
 	}
 }
 
-// The memory half is driven through commitSlot directly: the key is inert over
-// a constant until the confirm resolves.
+// The memory half is driven through commitSlot directly, so the clear is the
+// write's own and not the key's.
 func TestPanelSlotCommit_ClearsTheConstantAtomically(t *testing.T) {
 	t.Run("one call, not two", func(t *testing.T) {
 		rows := arrowValidRows(t, 4)
@@ -591,7 +591,7 @@ func TestPanelSlotCommit_NilPersisterIsInert(t *testing.T) {
 	requirePairKeys(t, wired, rows[0].Slug, target)
 }
 
-func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
+func TestPanelSlotCommit_EnterAfterSlotRaisesNoMessageAndSchedulesNothing(t *testing.T) {
 	dir := t.TempDir()
 	themetest.Write(t, dir, "aurora.theme", themetest.MonochromeLines("#101010"))
 	m, persister := newSlotPairPanelModel(t, dir, theme.DefaultLightSlug, "aurora")
@@ -599,7 +599,6 @@ func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
 	m, _ = pressSlotKey(t, m, slotDarkPress)
 	requireSlotCommits(t, persister, slotCommit{slug: "aurora", member: theme.MemberDark})
 	requirePairKeys(t, m, theme.DefaultLightSlug, "aurora")
-	footer := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
 
 	m, cmd := pressCommitKey(t, m)
 
@@ -610,17 +609,13 @@ func TestPanelSlotCommit_EnterAfterSlotNeedsNoConfirm(t *testing.T) {
 	requireBadge(t, m, "aurora", theme.BadgeConstant)
 	requireBadge(t, m, theme.DefaultLightSlug, theme.BadgeNone)
 	if got := m.themePanel.message; got.Kind != themeMessageNone {
-		t.Errorf("`Enter` after a slot commit raised the message %+v; the reverse direction needs no confirm", got)
+		t.Errorf("`Enter` after a slot commit raised the message %+v, want the slot empty", got)
 	}
 	if cmd != nil {
 		t.Errorf("`Enter` scheduled %T; the write lands on this keypress rather than awaiting an answer", cmd)
 	}
 	if !m.themePanel.open {
 		t.Error("`Enter` closed the panel")
-	}
-	after := renderThemePanelFooter(themePanelKeymap(), themePanelInnerWidth(m.themePanel.width), m.themeState.active, m.colourless)
-	if after != footer {
-		t.Errorf("`Enter` swapped the panel footer\nbefore: %q\nafter:  %q", escSeq(footer), escSeq(after))
 	}
 }
 

@@ -25,7 +25,7 @@ func messagePanelFixtureNames() []string {
 
 var messagePanelFloorTermHeight = tui.ThemePanelFloorTerminalHeight()
 
-var standingFooterRows = []string{"⏎ set theme", "d set as dark", "l set as light", "esc close"}
+var panelFooterRows = []string{"⏎ set theme", "d set as dark", "l set as light", "esc close"}
 
 func footerBlock(t *testing.T, lines []panelLine, want []string) (start int, rows []string) {
 	t.Helper()
@@ -54,7 +54,7 @@ func TestPanelFixture_CommitFailedFrame(t *testing.T) {
 	palette := themetest.Builtin(t, "nord")
 	lines := panelLines(t, panelFixtureFrame(t, "theme-panel-commit-failed", palette))
 	start := panelLineIndex(t, lines, "couldn't save theme")
-	footerStart, footerRows := footerBlock(t, lines, standingFooterRows)
+	footerStart, footerRows := footerBlock(t, lines, panelFooterRows)
 
 	t.Run("the slot carries the pinned failed-commit line verbatim", func(t *testing.T) {
 		if got, want := joinMessageLines(lines[start:footerStart]), themePanelCommitFailedCopy; got != want {
@@ -78,9 +78,9 @@ func TestPanelFixture_CommitFailedFrame(t *testing.T) {
 		}
 	})
 
-	t.Run("the standing footer is still in force", func(t *testing.T) {
-		if !slicesEqual(footerRows, standingFooterRows) {
-			t.Errorf("the footer renders %v, want the standing %v — a failed commit raises no question", footerRows, standingFooterRows)
+	t.Run("the footer is the panel's own", func(t *testing.T) {
+		if !slicesEqual(footerRows, panelFooterRows) {
+			t.Errorf("the footer renders %v, want the panel's %v", footerRows, panelFooterRows)
 		}
 	})
 }
@@ -137,7 +137,7 @@ func TestPanelFixture_MinHeightMessageFrame(t *testing.T) {
 
 	body := panelLineIndex(t, lines, "nord")
 	message := panelLineIndex(t, lines, "couldn't save theme")
-	footerStart, footerRows := footerBlock(t, lines, standingFooterRows)
+	footerStart, footerRows := footerBlock(t, lines, panelFooterRows)
 
 	t.Run("the body is the floor's one list row", func(t *testing.T) {
 		if got := message - body; got != 1 {
@@ -151,9 +151,9 @@ func TestPanelFixture_MinHeightMessageFrame(t *testing.T) {
 		}
 	})
 
-	t.Run("the standing footer is in force and intact", func(t *testing.T) {
-		if !slicesEqual(footerRows, standingFooterRows) {
-			t.Errorf("the footer renders %v, want the standing %v — the floor is the standing scope's arithmetic, and a footer cut from the bottom loses `esc close` first", footerRows, standingFooterRows)
+	t.Run("the footer is intact", func(t *testing.T) {
+		if !slicesEqual(footerRows, panelFooterRows) {
+			t.Errorf("the footer renders %v, want the panel's %v — the floor counts the whole footer, and one cut from the bottom loses `esc close` first", footerRows, panelFooterRows)
 		}
 	})
 }
