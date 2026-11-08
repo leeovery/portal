@@ -384,6 +384,19 @@ func TestCreateReturnsTheSessionItMade(t *testing.T) {
 		}
 	})
 
+	t.Run("it skips a new daemon's output in Portal's protocol before its answer", func(t *testing.T) {
+		dir := socketDir(t)
+		got := createBringingUp(t, dir, "work", func() {
+			serve(t, dir, "work", answering(frame(1, 1, []byte("prompt$ ")), infoFrame(t)))
+		})
+		if got.err != nil || !got.session.Answered {
+			t.Errorf("Create = %+v, %v; want the session read past its output", got.session, got.err)
+		}
+		if args := lastRun(t, got.log); args[0] != "attach" {
+			t.Errorf("zmx last ran %q, want only the attach: output in Portal's protocol is not ended", args)
+		}
+	})
+
 	t.Run("a new daemon that answers in Portal's protocol only once the read-back is over is returned by name", func(t *testing.T) {
 		dir := socketDir(t)
 		got := createBringingUp(t, dir, "work", func() { serve(t, dir, "work", silentOnce(infoFrame(t))) })
@@ -413,7 +426,7 @@ func silentOnce(reply ...[]byte) func(*daemon, net.Conn) {
 	}
 }
 
-// A session the create made that answers in another protocol version was
+// A session the create made that writes in another protocol version was
 // made by a zmx Portal can't talk to, as every session that zmx makes would
 // be: it is ended by that zmx's own kill and refused, so no caller keeps it.
 func TestCreateRefusesASessionOfAnotherProtocol(t *testing.T) {
@@ -429,12 +442,55 @@ func TestCreateRefusesASessionOfAnotherProtocol(t *testing.T) {
 		if args := lastRun(t, got.log); !slices.Equal(args, []string{"kill", "work"}) {
 			t.Errorf("zmx last ran %q, want kill work", args)
 		}
-		if msg := got.err.Error(); !strings.Contains(msg, "zmx kill ended the session") || !strings.Contains(msg, "protocol 2, not 1") {
+		if msg := got.err.Error(); !strings.Contains(msg, "zmx kill ended the session") || !strings.Contains(msg, "protocol version 2") {
 			t.Errorf("Create = %v, want it to name the protocol and say the session was ended", got.err)
 		}
 	})
 
-	// The read-back asks no more once an answer reads another version, so the
+	// A daemon broadcasts its session's output to every connection, the
+	// read-back's and the ask past it included, so a prompt can come before
+	// the answer. A daemon of protocol 1 never writes a frame whose header
+	// names another version, nor an Info record that does, so either proves
+	// it speaks another protocol, whichever order it writes them in. What
+	// the read-back read is proof enough: a daemon that answers it alone,
+	// silent to every later ask, is refused all the same.
+	t.Run("it refuses one whose frames or record name another version, in any order", func(t *testing.T) {
+		prompt := frame(1, 2, []byte("prompt$ "))
+		record := slices.Clone(infoFrame(t)[8:])
+		record[545] = 2
+		otherRecord := frame(6, 1, record)
+		for _, tt := range []struct {
+			name   string
+			daemon func(*daemon, net.Conn)
+			read   string
+		}{
+			{"its output before its answer, to the read-back alone", answeringOnce(prompt, otherInfo), "in a frame header"},
+			{"its answer before its output, to the read-back alone", answeringOnce(otherInfo, prompt), "in a frame header"},
+			{"its output before its answer, to the ask past the read-back", silentOnce(prompt, otherInfo), "in a frame header"},
+			{"its output in a framing with no version byte", broadcastingUnversionedOutput(143), "in a frame header"},
+			{"its record, in a header of Portal's version, to the read-back alone", answeringOnce(otherRecord), "in an info record"},
+			{"its record, in a header of Portal's version, to the ask past the read-back", silentOnce(otherRecord), "in an info record"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				dir := socketDir(t)
+				kill := "rm -f " + shellquote.Single(filepath.Join(dir, "work"))
+
+				got := createBringingUpKilling(t, dir, "work", ceiling, kill, func() { serve(t, dir, "work", tt.daemon) })
+
+				if !errors.Is(got.err, backend.ErrUnsupportedProtocol) || got.session != (backend.Session{}) {
+					t.Fatalf("Create = %+v, %v; want no session and ErrUnsupportedProtocol", got.session, got.err)
+				}
+				if args := lastRun(t, got.log); !slices.Equal(args, []string{"kill", "work"}) {
+					t.Errorf("zmx last ran %q, want kill work", args)
+				}
+				if msg := got.err.Error(); !strings.Contains(msg, tt.read) || !strings.Contains(msg, "zmx kill ended the session") {
+					t.Errorf("Create = %v, want it to name what it read, the version %s, and say the session was ended", got.err, tt.read)
+				}
+			})
+		}
+	})
+
+	// The read-back asks no more once it reads another version, so the
 	// refusal never waits out the probe ceiling.
 	t.Run("it refuses it at once, never waiting out the read-back", func(t *testing.T) {
 		dir := socketDir(t)

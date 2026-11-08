@@ -10,13 +10,17 @@ import (
 )
 
 // FirstRelease is the first zmx release whose daemons speak ProtocolVersion.
+// Portal supports zmx's releases alone: a build of zmx's main from between
+// the protocol's freeze and this release's version bump speaks
+// ProtocolVersion but prints an older release, and is refused with it.
 const FirstRelease = "1.0.0"
 
 // firstRelease is FirstRelease as releaseOf reads one.
 var firstRelease, _ = releaseOf(FirstRelease)
 
 // OlderReleaseError is a zmx whose version line reads a release older than
-// FirstRelease: every session it made would speak no protocol Portal does.
+// FirstRelease: a release whose daemons speak no protocol Portal does, or a
+// build of zmx's main that prints one, whatever protocol that build speaks.
 type OlderReleaseError struct {
 	// Release is the release the version line reads.
 	Release string
@@ -52,7 +56,8 @@ func (b *Backend) Runs(ctx context.Context) error {
 }
 
 // refuseOlderRelease refuses the release zmx's version line, the first line
-// of out, names after "zmx", when it reads older than FirstRelease.
+// of out, names after "zmx", when it reads older than FirstRelease. It judges
+// the number alone, never the protocol the build speaks.
 func refuseOlderRelease(out string) error {
 	line, _, _ := strings.Cut(out, "\n")
 	fields := strings.Fields(line)

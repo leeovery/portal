@@ -44,11 +44,11 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 	}
 	stdout, runErr := b.attach(run, name, dir, command, env)
 	if strings.HasPrefix(stdout, created(name)) {
-		s := b.made(run, name)
+		s, other := b.made(run, name)
 		if s.Answered {
 			return s, nil
 		}
-		if err := b.refuseUnsupported(ctx, name); err != nil {
+		if err := b.refuseUnsupported(ctx, name, other); err != nil {
 			return backend.Session{}, err
 		}
 		return s, nil
@@ -64,10 +64,13 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 }
 
 // refuseUnsupported refuses the session name, just made, when its daemon
-// answers ProtocolVersion in another version: the zmx that made it speaks a
-// protocol Portal doesn't, so every session it made would be one Portal
-// can't talk to. A session that answers in Portal's version, answers
-// nothing, or has already ended, is made all the same.
+// writes a frame or an Info record that names another protocol version,
+// which a daemon of ProtocolVersion never writes, its output broadcast before
+// the answer included: the zmx that made it speaks a protocol Portal
+// doesn't, so every session it made would be one Portal can't talk to. other
+// is the read-back's error for what it read of another version; with none,
+// the session is asked once more. A session that answers in Portal's
+// version, answers nothing, or has already ended, is made all the same.
 //
 // The refused session is ended by that zmx's own kill, which speaks its
 // daemon's protocol, and nothing else: a signal's proof of which daemon this
@@ -76,39 +79,57 @@ func (b *Backend) Create(ctx context.Context, name, dir string, command []string
 // past a cancelled ctx, within its own ceiling: a caller giving up between
 // the created line and the judgement would otherwise keep a session Portal
 // can't talk to as made.
-func (b *Backend) refuseUnsupported(ctx context.Context, name string) error {
+func (b *Backend) refuseUnsupported(ctx context.Context, name string, other error) error {
 	ctx = context.WithoutCancel(ctx)
-	speaks, err := b.ProtocolVersion(ctx, name)
-	if err != nil || speaks == ProtocolVersion {
+	if other == nil {
+		other = b.otherProtocol(ctx, name)
+	}
+	if other == nil {
 		return nil
 	}
-	refused := fmt.Errorf("create session %q: its daemon speaks zmx protocol %d, not %d: %w", name, speaks, ProtocolVersion, backend.ErrUnsupportedProtocol)
+	refused := fmt.Errorf("create session %q: its daemon doesn't speak zmx protocol %d: %w: %w", name, ProtocolVersion, other, backend.ErrUnsupportedProtocol)
 	if err := b.KillByCLI(ctx, name); err != nil {
 		return fmt.Errorf("%w; the session is left running: %w", refused, err)
 	}
 	return fmt.Errorf("%w; zmx kill ended the session", refused)
 }
 
+// otherProtocol asks the session name for its Info once, within a probe
+// ceiling: the read's error when a frame or the record it read names another
+// protocol version, nil for any other read.
+func (b *Backend) otherProtocol(ctx context.Context, name string) error {
+	ctx, cancel := b.bound(ctx, b.limits.probe, "")
+	defer cancel()
+	_, err := b.readInfo(ctx, name)
+	if errors.Is(err, errProtocolVersion) {
+		return err
+	}
+	return nil
+}
+
 // made reads back the session zmx has just made, asking again while its
 // fresh daemon comes up, for at most a probe ceiling within the create one.
-// A session that has already ended, answers in another protocol version or
-// does not answer by then is made all the same, and is returned with only
-// its name: another version's answer is that daemon's for good.
-func (b *Backend) made(ctx context.Context, name string) backend.Session {
+// A session that has already ended, or does not answer by then, is made all
+// the same, and is returned with only its name. A read of a frame or a record
+// that names another protocol version ends the asking, since a daemon writes
+// in one protocol for good, and its error is returned with the name.
+func (b *Backend) made(ctx context.Context, name string) (backend.Session, error) {
 	ctx, cancel := b.bound(ctx, b.limits.probe, "")
 	defer cancel()
 	hostname, _ := b.hostname()
 	for {
 		i, err := b.readInfo(ctx, name)
-		if err == nil {
-			return sessionOf(name, i, hostname)
-		}
-		if gone(err) || errors.Is(err, errProtocolVersion) {
-			return backend.Session{Name: name}
+		switch {
+		case err == nil:
+			return sessionOf(name, i, hostname), nil
+		case errors.Is(err, errProtocolVersion):
+			return backend.Session{Name: name}, err
+		case gone(err):
+			return backend.Session{Name: name}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return backend.Session{Name: name}
+			return backend.Session{Name: name}, nil
 		case <-time.After(madeRetry):
 		}
 	}

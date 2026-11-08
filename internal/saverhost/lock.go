@@ -34,13 +34,14 @@ const (
 // zmx's ceilings from one place.
 const DetachCeiling = 5 * time.Second
 
-// JudgeRun bounds a judgement of the saver's protocol: a read of it, and the
-// end of a saver judged unusable, zmx kill, a run of the binary, then the
-// wait for a proved signal's end, each bounded as a kill. Ensure's caller
-// keeps its judge of a saver made within it. A create that refuses a session
-// of another protocol, a read of it and then its zmx kill, takes the judge's
-// place within the same bound.
-const JudgeRun = ReadCeiling + 2*KillCeiling + RunGrace
+// JudgeRun bounds what runs past the create's ceiling to judge the saver it
+// makes: the create's own read of a session that gave no answer within the
+// read-back; then a read of the saver's protocol, and the end of one judged
+// unusable, zmx kill, a run of the binary, then the wait for a proved
+// signal's end, each bounded as a kill. Ensure's caller keeps its judge of a
+// saver made within it. A create that refuses a session of another protocol,
+// its read and then its zmx kill, ends there, within the same bound.
+const JudgeRun = 2*ReadCeiling + 2*KillCeiling + RunGrace
 
 // holderRun is the longest a holder of saver.lock runs, each wait at its
 // bound and each backend call at its ceiling: the ensure's wait for a saver
