@@ -21,6 +21,10 @@ func (m Model) emitPermission(id spawn.Identity, resolution spawn.Resolution, de
 	spawn.LogPermission(m.spawnLogger, id, resolution, detail)
 }
 
+func (m Model) emitNotStarted(err error) {
+	spawn.LogNotStarted(m.spawnLogger, err)
+}
+
 func (m Model) emitUnsupportedNoop(id spawn.Identity) {
 	spawn.LogUnsupported(m.spawnLogger, id)
 }

@@ -12,17 +12,19 @@ const burstPreSpawnErrorFlash = "could not start opening windows"
 // host windows and the adapter has no close seam), and the trigger self-attach is
 // skipped so the picker stays open.
 func (m Model) handleBurstPartialFailure(msg spawnCompleteMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		// Pre-spawn abort: nothing opened, so there is no summary and the
+		// selection is left unchanged.
+		m.emitNotStarted(msg.Err)
+		m.setFlash(burstPreSpawnErrorFlash)
+		(&m).resetBurstState()
+		return m, nil
+	}
+
 	if perm, ok := spawn.FirstPermission(msg.Results); ok {
 		m.emitPermission(msg.Identity, msg.Resolution, perm.Result.Detail)
 	} else {
 		m.emitBurstSummary(msg.Batch, msg.Identity, msg.Resolution, msg.Results, false)
-	}
-
-	if msg.Err != nil {
-		// Pre-spawn abort: nothing opened, so the selection is left unchanged.
-		m.setFlash(burstPreSpawnErrorFlash)
-		(&m).resetBurstState()
-		return m, nil
 	}
 
 	confirmed, _ := spawn.PartitionResults(msg.Results)
