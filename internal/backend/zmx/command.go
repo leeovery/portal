@@ -40,7 +40,9 @@ func DisplayCommand(command []string) string {
 // alone does, whatever follows it, and one after it shows start whole, then
 // each further argument that fits, or the mark alone when even the first
 // doesn't. zmx never shows an argument in part, so a start whose last argument
-// is a prefix of shown's next one doesn't begin it.
+// is a prefix of shown's next one doesn't begin it. A report cut before the
+// argument that tells two commands apart shows both alike, and so begins with
+// either.
 func CommandBegins(shown string, start []string) bool {
 	alone := DisplayCommand(start)
 	switch {

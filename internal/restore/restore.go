@@ -905,9 +905,9 @@ func helperAt(exe, name string) []string {
 // RunsHelper reports whether s was made running the hydrate helper restore
 // gives every session it restores, for s's own name, followed by its
 // transcript's arguments, or any others, or none: such a session's hydrating
-// flag is its helper's to lower, never restore's or a sweep's. Any binary named portal counts, wherever it is: a
-// session restored by one at another path, a dev build or another install,
-// keeps its flag under this one. The path is read from s's command as
+// flag is its helper's to lower, never restore's or a sweep's. Any binary
+// named portal counts, wherever it is: a session restored by one at another
+// path, a dev build or another install, keeps its flag under this one. The path is read from s's command as
 // reported, as the words before one of its spaces, and counts only when the
 // helper run from it would be reported as s's command is: so the words
 // `env X=1 /x/portal`, which that path's own argument would show quoted, name

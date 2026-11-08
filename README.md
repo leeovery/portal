@@ -260,7 +260,7 @@ A label takes any printable text. Only a label holding a control or formatting c
 xctl hook set --on-resume "npm start"            # register a resume hook
 xctl hook set --on-resume "npm start" --resume-mode lazy   # register it pinned to a resume mode
 xctl hook rm --on-resume                         # remove the current session's hook
-xctl hook rm --on-resume --key 'api-Rf4TmZ' # remove the entry under any hook key, verbatim (works outside a session)
+xctl hook rm --on-resume --key 'api-Rf4TmZ'      # remove the entry under any hook key, verbatim (works outside a session)
 xctl hook list                                   # list hooks: key, event, command, the session's label (4th column, empty if no live session carries the key), and the registration's resume mode (5th column: eager, lazy, or empty when it follows the install)
 ```
 
