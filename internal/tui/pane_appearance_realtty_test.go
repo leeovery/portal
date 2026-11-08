@@ -4,9 +4,11 @@ package tui
 
 import (
 	"bytes"
+	"encoding/hex"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -43,21 +45,32 @@ func TestProductionPaneProbe_RealTerminal(t *testing.T) {
 		return
 	}
 
+	// input is what reaches the terminal's input once the query is out: the
+	// reply, keys typed around it, or keys alone from a terminal that never
+	// answers.
 	cases := []struct {
 		name  string
-		reply string
+		input string
 		want  string
+		typed string
 	}{
-		{"it resolves the light member for a terminal answering with a light background", lightReply, childLightCanvas},
-		{"it resolves the dark member for a terminal answering with a dark background", darkReply, childDarkCanvas},
-		{"it resolves dark for a terminal that never answers", "", childDarkCanvas},
+		{"it resolves the light member for a terminal answering with a light background", lightReply, childLightCanvas, ""},
+		{"it resolves the dark member for a terminal answering with a dark background", darkReply, childDarkCanvas, ""},
+		{"it resolves dark for a terminal that never answers", "", childDarkCanvas, ""},
+		{"it hands back a key typed before the reply, and none of the reply", "\r" + lightReply, childLightCanvas, "\r"},
+		{"it hands back a key typed after the reply in the same read", darkReply + "d", childDarkCanvas, "d"},
+		{"it hands back a key typed to a terminal that never answers", "\x1b", childDarkCanvas, "\x1b"},
+		{"it hands back a paste typed to a terminal that never answers, whole", "echo hi\r", childDarkCanvas, "echo hi\r"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			run := probeOnPTY(t, tc.reply)
+			run := probeOnPTY(t, tc.input)
 
 			if run.resolved != tc.want {
 				t.Errorf("the probe resolved %q, want %q", run.resolved, tc.want)
+			}
+			if run.typed != tc.typed {
+				t.Errorf("the probe handed back %q as typed, want %q", run.typed, tc.typed)
 			}
 			if run.transcript != backgroundQuery {
 				t.Errorf("the terminal received %q, want exactly one background-colour query %q and nothing of the reply echoed back", run.transcript, backgroundQuery)
@@ -67,28 +80,31 @@ func TestProductionPaneProbe_RealTerminal(t *testing.T) {
 }
 
 // runPaneProbeChild resolves a pane's palette through the production probe and
-// exits before the test framework can write its verdict onto the pty.
+// exits before the test framework can write its verdict onto the pty: the
+// member's canvas, a space, and what it read as typed, in hex.
 func runPaneProbeChild() {
 	pair := theme.AdaptivePair(
 		theme.Theme{Canvas: theme.Token{Name: "canvas", Value: childLightCanvas}},
 		theme.Theme{Canvas: theme.Token{Name: "canvas", Value: childDarkCanvas}},
 	)
-	resolved, _ := ResolvePaneTheme(pair, false, nil)
+	found, _ := ResolvePaneTheme(pair, false, 0, func() bool { return true }, nil)
 	result := os.NewFile(paneProbeResultFD, "result")
-	_, _ = result.WriteString(resolved.Canvas.Value)
+	_, _ = result.WriteString(found.Theme.Canvas.Value + " " + hex.EncodeToString(found.Typed))
 	_ = result.Close()
 	os.Exit(0)
 }
 
 type paneProbeRun struct {
 	resolved   string
+	typed      string
 	transcript string
 }
 
 // probeOnPTY runs the production probe in a child whose controlling terminal is
-// a fresh pty, answering its query with reply (or never, for an empty reply),
-// and returns what the child resolved alongside everything the terminal saw.
-func probeOnPTY(t *testing.T, reply string) paneProbeRun {
+// a fresh pty, answering its query with input (or never, for an empty input),
+// and returns what the child resolved and read as typed alongside everything
+// the terminal saw.
+func probeOnPTY(t *testing.T, input string) paneProbeRun {
 	t.Helper()
 	master, slave := openProbePTY(t)
 	results, resultWriter, err := os.Pipe()
@@ -116,21 +132,26 @@ func probeOnPTY(t *testing.T, reply string) paneProbeRun {
 		<-exited
 	})
 
-	transcript := answerQuery(t, readChunks(master), master, reply, exited)
-	resolved, err := io.ReadAll(results)
+	transcript := answerQuery(t, readChunks(master), master, input, exited)
+	answer, err := io.ReadAll(results)
 	if err != nil {
 		t.Fatalf("read the probe's answer: %v", err)
 	}
-	return paneProbeRun{resolved: string(resolved), transcript: transcript}
+	resolved, typedHex, _ := strings.Cut(string(answer), " ")
+	typed, err := hex.DecodeString(typedHex)
+	if err != nil {
+		t.Fatalf("read what the probe read as typed from %q: %v", answer, err)
+	}
+	return paneProbeRun{resolved: resolved, typed: string(typed), transcript: transcript}
 }
 
 // answerQuery collects what the terminal receives until the child has exited
-// and the drain window has passed, writing reply to the terminal the moment the
+// and the drain window has passed, writing input to the terminal the moment the
 // query has arrived.
-func answerQuery(t *testing.T, chunks <-chan []byte, master *os.File, reply string, exited <-chan struct{}) string {
+func answerQuery(t *testing.T, chunks <-chan []byte, master *os.File, input string, exited <-chan struct{}) string {
 	t.Helper()
 	var seen bytes.Buffer
-	answered := reply == ""
+	answered := input == ""
 	budget := time.After(paneProbeChildBudget)
 	var drained <-chan time.Time
 	for {
@@ -139,7 +160,7 @@ func answerQuery(t *testing.T, chunks <-chan []byte, master *os.File, reply stri
 			seen.Write(chunk)
 			if !answered && bytes.Contains(seen.Bytes(), []byte(backgroundQuery)) {
 				answered = true
-				if _, err := master.WriteString(reply); err != nil {
+				if _, err := master.WriteString(input); err != nil {
 					t.Fatalf("answer the query: %v", err)
 				}
 			}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,7 +10,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/shellquote"
@@ -27,6 +30,8 @@ const (
 	resumeFlagScreen        = "screen"
 	resumeFlagDropInput     = "drop-input"
 	resumeFlagInputArriving = "input-arriving"
+	resumeFlagTyped         = "typed"
+	resumeFlagRepliesOwed   = "replies-owed"
 )
 
 // The screens one draw of the waiting session can put up. The panel is the
@@ -54,19 +59,166 @@ type resumeChainPayload struct {
 	Height  int
 	Screen  string
 
-	// DropInput is set by the hand-off that opens the confirmation and
-	// cleared by the draw that honours it, so a later draw of the same screen
-	// never discards a key the user typed while reading it.
+	// DropInput is set by the hand-off that opens the confirmation, and by the
+	// helper that parks the session, since input queued before a screen is
+	// first drawn answers nothing on it, and cleared by the draw that honours
+	// it, so a later draw of the same screen never discards a key the user
+	// typed while reading it.
 	DropInput bool
 
 	// InputArriving tells a waiter its session was handed over while input
-	// was still arriving, so what arrives first belongs to that input and
-	// answers nothing.
+	// was still arriving, as a draw whose input drop failed hands it over, or
+	// one that read more than a key of it, so what arrives first belongs to
+	// that input and answers nothing.
 	InputArriving bool
+
+	// Typed is the key a draw read while it asked the terminal its background,
+	// handed to the waiter as the first byte of an arrival, so it answers as
+	// it would have had it been typed after the draw. A draw hands on one byte
+	// at most here, and more as InputArriving, so nothing pasted is ever
+	// carried in the waiter's argv.
+	Typed string
+
+	// RepliesOwed is the background questions draws gave up on with no reply
+	// read, as a terminal over a slow link answers late. It rides each
+	// hand-off, so the hand-off to a hook or a shell reads the replies off
+	// while one is owed.
+	RepliesOwed replyDebt
+}
+
+// resumeReplyWindow is how long a background question is owed its reply. Only
+// a terminal attached when it was asked answers it, within its round trip, and
+// a phone over SSH answers well within this, so a question older than it is
+// owed nothing.
+const resumeReplyWindow = time.Second
+
+// replyDebtKept bounds a debt to its newest questions. More go unanswered
+// within one window only while the terminal answers none, as a drag's redraws
+// can, and the newest is the one the wait before a hand-off lasts for.
+const replyDebtKept = 4
+
+// replyDebt is the background questions a session's draws asked and have read
+// no reply to, each by when it was asked, in unix milliseconds, oldest first.
+// A reply read settles the newest question owed: a terminal answers in the
+// order it is asked, but only a terminal that saw a question answers it, so
+// one asked as a terminal came or went may never be answered, and settled
+// oldest first, it would take the next real reply and leave the question that
+// reply answered owed in its place. Settled newest first, a question never
+// answered is owed only until its own window closes. An array, not a slice, so
+// a payload compares whole.
+type replyDebt struct {
+	asked [replyDebtKept]int64
+	n     int
+}
+
+// replyDebtFrom is the debt of the questions asked, oldest first, keeping the
+// newest replyDebtKept.
+func replyDebtFrom(asked []int64) replyDebt {
+	var d replyDebt
+	d.n = copy(d.asked[:], asked[max(0, len(asked)-replyDebtKept):])
+	return d
+}
+
+// replyDebtFromFlag reads the replies-owed flag's comma-separated times, a
+// time later than now read as now, as live reads one. A value Portal didn't
+// write is read as one question asked now, so a reply it may stand for is
+// still waited for, a window at most.
+func replyDebtFromFlag(value string, now time.Time) replyDebt {
+	if value == "" {
+		return replyDebt{}
+	}
+	fields := strings.Split(value, ",")
+	asked := make([]int64, len(fields))
+	for i, field := range fields {
+		ms, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return replyDebt{}.owe(now)
+		}
+		asked[i] = min(ms, now.UnixMilli())
+	}
+	return replyDebtFrom(asked)
+}
+
+func (d replyDebt) owing() bool {
+	return d.n > 0
+}
+
+func (d replyDebt) count() int {
+	return d.n
+}
+
+// owe adds a question asked at at, letting the oldest go past the bound.
+func (d replyDebt) owe(at time.Time) replyDebt {
+	if d.n == replyDebtKept {
+		d = replyDebtFrom(d.asked[1:d.n])
+	}
+	d.asked[d.n] = at.UnixMilli()
+	d.n++
+	return d
+}
+
+// settle drops the k newest questions, one for each reply read.
+func (d replyDebt) settle(k int) replyDebt {
+	return replyDebtFrom(d.asked[:d.n-min(max(k, 0), d.n)])
+}
+
+// live drops the questions asked a window or more before now, which are owed
+// nothing, and reads a question the clock says is yet to be asked as asked
+// now, so a clock set back, or a time Portal didn't write, keeps none owed
+// for longer than a window.
+func (d replyDebt) live(now time.Time) replyDebt {
+	var kept replyDebt
+	for _, asked := range d.asked[:d.n] {
+		asked = min(asked, now.UnixMilli())
+		if now.Sub(time.UnixMilli(asked)) < resumeReplyWindow {
+			kept.asked[kept.n] = asked
+			kept.n++
+		}
+	}
+	return kept
+}
+
+// lastDue is when the newest question's window closes.
+func (d replyDebt) lastDue() time.Time {
+	return time.UnixMilli(d.asked[d.n-1]).Add(resumeReplyWindow)
+}
+
+func (d replyDebt) flagValue() string {
+	asked := make([]string, d.n)
+	for i, a := range d.asked[:d.n] {
+		asked[i] = strconv.FormatInt(a, 10)
+	}
+	return strings.Join(asked, ",")
 }
 
 func (p resumeChainPayload) logAttrs(attrs ...any) []any {
 	return resumeLogAttrs(p.Session, attrs...)
+}
+
+// carryTyped hands the waiter what a draw read as typed: a key alone as Typed,
+// and any more as input still arriving, which answers nothing, as a paste
+// read whole would not.
+func (p *resumeChainPayload) carryTyped(typed []byte) {
+	switch {
+	case len(typed) == 1:
+		p.Typed = string(typed)
+	case len(typed) > 1:
+		p.InputArriving = true
+	}
+}
+
+// typedFromFlag reads the typed flag's hex. A value that isn't one byte's is
+// input the waiter can't name, so it is taken as input still arriving and
+// answers nothing.
+func typedFromFlag(hexed string) (typed string, arriving bool) {
+	if hexed == "" {
+		return "", false
+	}
+	key, err := hex.DecodeString(hexed)
+	if err != nil || len(key) != 1 {
+		return "", true
+	}
+	return string(key), false
 }
 
 // resumeLogAttrs is how the chain's records name the waiting session.
@@ -99,6 +251,14 @@ func resumeChainArgv(exe, subcommand string, p resumeChainPayload) []string {
 	}
 	if p.InputArriving {
 		argv = append(argv, flagArg(resumeFlagInputArriving))
+	}
+	if p.RepliesOwed.owing() {
+		argv = append(argv, flagArg(resumeFlagRepliesOwed), p.RepliesOwed.flagValue())
+	}
+	// Only the waiter takes a key: a draw handed one would refuse its argv,
+	// and the session would lose its panel to the chain's recovery.
+	if p.Typed != "" && subcommand == resumeWaitSubcommand {
+		argv = append(argv, flagArg(resumeFlagTyped), hex.EncodeToString([]byte(p.Typed)))
 	}
 	return argv
 }

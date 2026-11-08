@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/prefs"
@@ -36,6 +37,17 @@ type resumeDrawProbe struct {
 	echoOffErr        error
 	echoOffsAtResolve int
 	execsAtEchoOff    int
+
+	// typed is what the appearance query read of the input that wasn't its
+	// reply, which a drop discards, as the real query's does; askedAt, when it
+	// asked, zero for no question; replies, the whole replies it read, to
+	// which a drop adds its own, as the real query's does.
+	typed   []byte
+	askedAt time.Time
+	replies int
+
+	// owed is how many questions owed a reply each query was told of.
+	owed []int
 }
 
 func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPayload, size func() (int, int, error)) resumeDrawConfig {
@@ -46,20 +58,26 @@ func newResumeDrawConfig(t *testing.T, p *resumeDrawProbe, payload resumeChainPa
 		Stdout:             &p.stdout,
 		Logger:             drawTestLogger(t),
 		Size:               size,
+		Now:                testClockAtEpoch,
 		CatchSIGTERM:       func() {},
 		DisableEcho: func() error {
 			p.echoOffCalls++
 			p.execsAtEchoOff = p.execCalls
 			return p.echoOffErr
 		},
-		ResolveTheme: func(colourless bool, dropInput func() error) (theme.Theme, error) {
+		ResolveTheme: func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error) {
 			p.colourless = append(p.colourless, colourless)
+			p.owed = append(p.owed, owed)
 			p.paintedAtResolve = p.stdout.Len()
 			p.echoOffsAtResolve = p.echoOffCalls
+			found := tui.PaneAppearance{Theme: th, Typed: p.typed, AskedAt: p.askedAt, Replies: p.replies}
 			if dropInput == nil {
-				return th, nil
+				return found, nil
 			}
-			return th, dropInput()
+			found.Typed = nil
+			replies, err := dropInput()
+			found.Replies += replies
+			return found, err
 		},
 		ExecSelf: func(prog string, args []string) {
 			p.execProg = prog

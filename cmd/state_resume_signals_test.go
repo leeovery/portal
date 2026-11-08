@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -270,8 +269,9 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 
 	t.Run("Escape on the confirmation redraws with signal generation still off", func(t *testing.T) {
 		var probe resumeWaitProbe
-		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), heldInput(t, "\x1b"))
-		cfg.AwaitInput = quietAtOnce
+		input := newTypeAhead("\x1b")
+		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
+		listenOn(&cfg, input)
 
 		if err := runResumeWait(cfg); err != nil {
 			t.Fatalf("runResumeWait() error = %v", err)
@@ -282,7 +282,9 @@ func TestResumeWait_SignalGenerationStaysOffAcrossScreens(t *testing.T) {
 
 	t.Run("a resize redraws with signal generation still off", func(t *testing.T) {
 		var probe resumeWaitProbe
-		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), heldInput(t, ""))
+		input := newTypeAhead("")
+		cfg := newResumeWaitConfig(t, &probe, confirmationPayload(), input)
+		listenOn(&cfg, input)
 		winch := make(chan os.Signal, 1)
 		winch <- syscall.SIGWINCH
 		cfg.Winch = winch
@@ -310,19 +312,6 @@ func assertRedrawnWithSignalsOff(t *testing.T, probe *resumeWaitProbe) {
 		t.Errorf("signal generation turned on %d times on a redraw, want 0", probe.signalsOnCalls)
 	}
 }
-
-// heldInput delivers typed and then holds the input open, so the wait ends on
-// whatever it is waiting for rather than on end of input.
-func heldInput(t *testing.T, typed string) io.Reader {
-	t.Helper()
-	r, w := io.Pipe()
-	t.Cleanup(func() { _ = w.Close() })
-	go func() { _, _ = w.Write([]byte(typed)) }()
-	return r
-}
-
-// quietAtOnce is a session on which nothing follows the key just read.
-func quietAtOnce(time.Duration) (bool, error) { return false, nil }
 
 func elapsedAtOnce(time.Duration) <-chan time.Time {
 	c := make(chan time.Time, 1)

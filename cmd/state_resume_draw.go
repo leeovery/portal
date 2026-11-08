@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/leeovery/portal/internal/prefs"
@@ -24,16 +26,28 @@ type resumeDrawConfig struct {
 	Size       func() (int, int, error)
 	ExecSelf   func(prog string, args []string)
 
+	// Now is the wall clock the questions earlier draws asked are judged by,
+	// as the probe dates its own: each rides the hand-off to another process,
+	// which no monotonic reading survives.
+	Now func() time.Time
+
 	CatchSIGTERM func()
 
 	// DisableEcho runs ahead of the appearance query and the input drop, so the
 	// modes each puts back on its way out have echo off.
 	DisableEcho func() error
 
-	// ResolveTheme runs dropInput, when handed one, after the appearance query
-	// and before it returns, answering the drop's error beside the palette.
-	ResolveTheme   func(colourless bool, dropInput func() error) (theme.Theme, error)
-	DropInputQueue func() error
+	// ResolveTheme asks the terminal its background, with owed questions still
+	// owed their replies ahead of it, when a terminal shows the session to
+	// answer, and runs dropInput, when handed one, after the question and
+	// before it returns, answering the drop's error beside the palette, when
+	// it asked, what it read of the input that wasn't a terminal's reply, and
+	// how many replies it read.
+	ResolveTheme func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error)
+
+	// DropInputQueue discards the session's input, answering how many replies
+	// were among it.
+	DropInputQueue func() (int, error)
 }
 
 // runResumeDraw paints one screen of the waiting session and replaces its own
@@ -54,14 +68,22 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 	// session that drew nothing would read as restored with a dead keyboard.
 	width, height, _ := cfg.Size()
 
-	var dropInput func() error
+	var dropInput func() (int, error)
 	if cfg.DropInput {
 		dropInput = cfg.DropInputQueue
 	}
-	th, dropErr := cfg.ResolveTheme(cfg.Colourless, dropInput)
+	owed := cfg.RepliesOwed.live(cfg.Now())
+	found, dropErr := cfg.ResolveTheme(cfg.Colourless, owed.count(), dropInput)
+	if found.Asked() {
+		owed = owed.owe(found.AskedAt)
+	}
 
 	shown := cfg.resumeChainPayload
 	shown.DropInput = false
+	// A key typed while the query was out was read with it; the waiter judges
+	// it as if typed after the draw.
+	shown.carryTyped(found.Typed)
+	shown.RepliesOwed = owed.settle(found.Replies)
 	// Input the drop could not discard may still answer the confirmation, so it
 	// is never put up over that input, and the waiter is told the input is its
 	// own to swallow.
@@ -79,7 +101,7 @@ func runResumeDraw(cfg resumeDrawConfig) error {
 		Report:     shown.Report,
 		Width:      width,
 		Height:     height,
-		Theme:      th,
+		Theme:      found.Theme,
 		Colourless: cfg.Colourless,
 	}, shown.Screen))
 
@@ -94,13 +116,37 @@ func renderResumeScreen(s tui.ResumeScreen, screen string) string {
 	return tui.RenderResumePanel(s)
 }
 
-// sessionDrawTheme is the palette one draw paints in, read through the
-// non-migrating prefs route: the migrating one performs the one-shot appearance
-// translation and writes, and a boot's worth of sessions taking it at once is
-// a write storm over one file for a value none of them is setting.
-func sessionDrawTheme(colourless bool, dropInput func() error) (theme.Theme, error) {
-	nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
-	return tui.ResolvePaneTheme(nomination, colourless, dropInput)
+// sessionDrawTheme is the palette one draw of session paints in, read through
+// the non-migrating prefs route: the migrating one performs the one-shot
+// appearance translation and writes, and a boot's worth of sessions taking it
+// at once is a write storm over one file for a value none of them is setting.
+func sessionDrawTheme(session string) func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error) {
+	attached := func() bool { return sessionAttached(session) }
+	return func(colourless bool, owed int, dropInput func() (int, error)) (tui.PaneAppearance, error) {
+		nomination := sessionDrawNomination(loadPrefsStoreNoMigrate, newThemeLoader())
+		return resolvePaneThemeFunc(nomination, colourless, owed, attached, dropInput)
+	}
+}
+
+var resolvePaneThemeFunc = tui.ResolvePaneTheme
+
+// resumeAttachedBound bounds a draw's ask of its session's zmx daemon, so one
+// slow to answer delays the panel by this at most.
+const resumeAttachedBound = 250 * time.Millisecond
+
+// sessionAttached reports whether a terminal shows session to answer a
+// question, as its zmx daemon counts its clients. Only a session that answers
+// with none has none: one that can't be asked is taken to have one, so a reply
+// that may come is still owed.
+func sessionAttached(session string) bool {
+	b, err := sessionBackend()
+	if err != nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), resumeAttachedBound)
+	defer cancel()
+	s, err := b.Session(ctx, session)
+	return err != nil || s.Attached()
 }
 
 // Every failure along the route degrades to the shipped pair rather than
@@ -131,11 +177,12 @@ func shippedSessionThemePair() theme.Nomination {
 	return theme.AdaptivePair(light.Theme, dark.Theme)
 }
 
-func dropStdinInputQueue() error {
-	if err := resumeInputDrain.drain(int(os.Stdin.Fd())); err != nil {
-		return fmt.Errorf("could not clear pending input: %w", err)
+func dropStdinInputQueue() (replies int, err error) {
+	replies, err = resumeInputDrain.drain(int(os.Stdin.Fd()))
+	if err != nil {
+		return replies, fmt.Errorf("could not clear pending input: %w", err)
 	}
-	return nil
+	return replies, nil
 }
 
 // The session's own tty, so a boot's worth of waiting sessions asks the
@@ -160,6 +207,7 @@ var stateResumeDrawCmd = &cobra.Command{
 		screen, _ := cmd.Flags().GetString(resumeFlagScreen)
 		dropInput, _ := cmd.Flags().GetBool(resumeFlagDropInput)
 		inputArriving, _ := cmd.Flags().GetBool(resumeFlagInputArriving)
+		repliesOwed, _ := cmd.Flags().GetString(resumeFlagRepliesOwed)
 
 		return resumeDrawRunFunc(resumeDrawConfig{
 			resumeChainPayload: resumeChainPayload{
@@ -169,13 +217,15 @@ var stateResumeDrawCmd = &cobra.Command{
 				Screen:        screen,
 				DropInput:     dropInput,
 				InputArriving: inputArriving,
+				RepliesOwed:   replyDebtFromFlag(repliesOwed, time.Now()),
 			},
 			Stdout:         os.Stdout,
 			Logger:         hydrateLogger,
 			Colourless:     noColorEnabled(),
+			Now:            time.Now,
 			Size:           sessionSizeFromStdin,
 			DisableEcho:    clearStdinEcho,
-			ResolveTheme:   sessionDrawTheme,
+			ResolveTheme:   sessionDrawTheme(session),
 			DropInputQueue: dropStdinInputQueue,
 			ExecSelf:       defaultExecShell,
 			CatchSIGTERM:   catchSIGTERM,
@@ -195,6 +245,7 @@ func init() {
 	stateResumeDrawCmd.Flags().String(resumeFlagScreen, resumeScreenPanel, "Which screen to draw: discard for the confirmation, else the panel")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagDropInput, false, "Discard input already queued on the session before drawing")
 	stateResumeDrawCmd.Flags().Bool(resumeFlagInputArriving, false, "Input was still arriving on the session when it was handed over")
+	stateResumeDrawCmd.Flags().String(resumeFlagRepliesOwed, "", "When each background question still owed its reply was asked, in unix milliseconds, oldest first, comma-separated")
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagCommand)
 	_ = stateResumeDrawCmd.MarkFlagRequired(resumeFlagSession)
 

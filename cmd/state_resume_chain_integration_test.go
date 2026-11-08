@@ -62,6 +62,15 @@ func newWaitingWorld(t *testing.T, binary string) *waitingWorld {
 	return &waitingWorld{portalWorld: w, work: work}
 }
 
+func (w *waitingWorld) flagPath(t *testing.T) string {
+	t.Helper()
+	flag, err := state.ResumePending.Path(w.stateDir, waitingSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return flag
+}
+
 func (w *waitingWorld) flagRaised(t *testing.T) bool {
 	t.Helper()
 	raised, err := state.ResumePending.Exists(w.stateDir, waitingSession)
@@ -78,8 +87,8 @@ func (w *waitingWorld) awaitPanel(t *testing.T) {
 }
 
 // awaitWaiterAt waits for a waiter on the session to start at cols by rows,
-// as the log's process start records it: a key typed while the redraw a
-// resize asks for is pending is dropped with the panel it was typed to.
+// as the log's process start records it: the redraw the attach asked for has
+// landed, so the session's tty is at the terminal's size.
 func (w *waitingWorld) awaitWaiterAt(t *testing.T, cols, rows int) {
 	t.Helper()
 	size := "--width " + strconv.Itoa(cols) + " --height " + strconv.Itoa(rows)
@@ -132,6 +141,92 @@ func (w *waitingWorld) awaitDrawIn(t *testing.T, mark int, slug string) {
 	}) {
 		t.Fatalf("no draw of the panel in %s; the log since holds:\n%s", slug, logged)
 	}
+}
+
+// awaitStarted waits, polling closely, for the chain's subcommand to start
+// past mark in the log, returning the log's size then.
+func (w *waitingWorld) awaitStarted(t *testing.T, mark int, subcommand string) int {
+	t.Helper()
+	var raw []byte
+	if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, func() bool {
+		raw, _ = os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+		for line := range strings.Lines(string(raw[min(mark, len(raw)):])) {
+			if strings.Contains(line, "process: start") && strings.Contains(line, subcommand) {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no %s started; the log since holds:\n%s", subcommand, raw[min(mark, len(raw)):])
+	}
+	return len(raw)
+}
+
+// attachedDuringItsRedraw attaches a raw client to the waiting panel and
+// returns it once the redraw zmx's SIGWINCH on the attach asks for has started.
+// A raw client has no terminal, so only that signal redraws, and the attach
+// waits for the waiter that takes it. The waiter before the redraw has exec'd
+// it by then, so a key typed next is read by the draw's background question,
+// which a raw client never answers, and so stays open its whole 50 ms: the key
+// answers only if the draw carries it to the waiter.
+func (w *waitingWorld) attachedDuringItsRedraw(t *testing.T) *zmxtest.Client {
+	t.Helper()
+	mark := w.awaitStarted(t, 0, "resume-wait")
+	c := zmxtest.Attach(t, w.b, waitingSession)
+	w.awaitClients(t, waitingSession, 1)
+	w.awaitStarted(t, mark, "resume-draw")
+	return c
+}
+
+// answeredOnAttach attaches a raw client to the panel as soon as it parks and
+// answers the background question the attach's redraw asks, as the client's
+// terminal would, returning once the redraw's waiter has started.
+func (w *waitingWorld) answeredOnAttach(t *testing.T) *zmxtest.Client {
+	t.Helper()
+	parked := w.awaitStarted(t, 0, "resume-wait")
+	c := zmxtest.Attach(t, w.b, waitingSession)
+	w.awaitClients(t, waitingSession, 1)
+	drawn := w.awaitStarted(t, parked, "resume-draw")
+	c.Type(t, backgroundReply)
+	w.awaitStarted(t, drawn, "resume-wait")
+	return c
+}
+
+// awaitDrawAsking waits, polling closely, for a draw started past mark to load
+// its theme, the last step before it asks its question, returning the log's
+// size then.
+func (w *waitingWorld) awaitDrawAsking(t *testing.T, mark int) int {
+	t.Helper()
+	var raw []byte
+	if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, func() bool {
+		raw, _ = os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+		draws := map[string]bool{}
+		for line := range strings.Lines(string(raw[min(mark, len(raw)):])) {
+			pid := " pid=" + logField(line, "pid")
+			switch {
+			case strings.Contains(line, "process: start") && strings.Contains(line, "resume-draw"):
+				draws[pid] = true
+			case strings.Contains(line, "theme: loaded") && draws[pid]:
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no draw loaded its theme; the log since holds:\n%s", raw[min(mark, len(raw)):])
+	}
+	return len(raw)
+}
+
+// waiterOwed reports whether a waiter that started in the log's first upTo
+// bytes was handed a background question still owed its reply.
+func (w *waitingWorld) waiterOwed(upTo int) bool {
+	raw, _ := os.ReadFile(filepath.Join(w.stateDir, "portal.log"))
+	for line := range strings.Lines(string(raw[:min(upTo, len(raw))])) {
+		if strings.Contains(line, "process: start") && strings.Contains(line, "resume-wait") && strings.Contains(line, "--replies-owed") {
+			return true
+		}
+	}
+	return false
 }
 
 // logField is the value of a key=value field of a log line.
@@ -255,8 +350,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	t.Run("Escape on the panel of a session only a raw client shows detaches it through the backend", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)
 		w.awaitPanel(t)
-		c := zmxtest.Attach(t, w.b, waitingSession)
-		w.awaitClients(t, waitingSession, 1)
+		c := w.attachedDuringItsRedraw(t)
 
 		c.Type(t, "\x1b")
 
@@ -274,8 +368,7 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 	t.Run("Enter on the panel runs the resume command and lowers the session's flag", func(t *testing.T) {
 		w := newWaitingWorld(t, binary)
 		w.awaitPanel(t)
-		c := zmxtest.Attach(t, w.b, waitingSession)
-		w.awaitClients(t, waitingSession, 1)
+		c := w.attachedDuringItsRedraw(t)
 
 		c.Type(t, "\r")
 
@@ -289,4 +382,82 @@ func TestResumeChainAgainstZmx(t *testing.T) {
 			t.Error("the session ended; Enter hands it its shell")
 		}
 	})
+
+	// A parked session's first draw runs as restore makes it, with no terminal
+	// attached, so it asks no question: zmx answers none itself and replays
+	// none to a client that attaches later, so none would ever be answered. A
+	// terminal attached at once answers the redraw's question, so nothing is
+	// owed: Enter hands on at once, and keys typed just after it reach the
+	// shell rather than a wait for a reply.
+	t.Run("Enter on a panel attached as it parks hands on at once, keys typed after it reaching the shell", func(t *testing.T) {
+		w := newWaitingWorld(t, binary)
+		if parked := w.awaitStarted(t, 0, "resume-wait"); w.waiterOwed(parked) {
+			t.Error("the first draw, with no terminal attached, owed a reply")
+		}
+		c := w.answeredOnAttach(t)
+
+		entered := time.Now()
+		c.Type(t, "\r")
+		time.Sleep(typedAfterEnter)
+		c.Type(t, typedNext)
+
+		if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, w.hookRan) {
+			t.Fatal("the resume command never ran")
+		}
+		if ran, err := os.Stat(filepath.Join(w.work, hookMark)); err == nil {
+			t.Logf("Enter typed to the resume command's mark made: %v", ran.ModTime().Sub(entered))
+		}
+		w.awaitScreen(t, "the keys typed after Enter at its shell", func(screen string) bool {
+			return strings.Contains(screen, typedNext)
+		})
+	})
+
+	// The confirmation's draw gives up on its question at 50 ms and drops the
+	// session's input. A terminal over a slow link answers into the drop,
+	// which reads the reply off with what it discards, so nothing is owed: y
+	// lowers the flag at once, and keys typed just after it reach the shell.
+	t.Run("y on a confirmation whose reply landed in its input's drop hands on at once, keys typed after it reaching the shell", func(t *testing.T) {
+		w := newWaitingWorld(t, binary)
+		c := w.answeredOnAttach(t)
+		// Past every earlier question's window, so only the confirmation's own
+		// can be owed.
+		time.Sleep(cmd.ResumeReplyWindow)
+
+		mark := w.logSize()
+		c.Type(t, "d")
+		asking := w.awaitDrawAsking(t, mark)
+		time.Sleep(replyIntoTheDrop)
+		c.Type(t, backgroundReply)
+		w.awaitStarted(t, asking, "resume-wait")
+
+		confirmed := time.Now()
+		c.Type(t, "y")
+		time.Sleep(typedAfterEnter)
+		c.Type(t, typedNext)
+
+		if !harnesstest.PollUntil(t, attachSettle, 2*time.Millisecond, func() bool { return !w.flagRaised(t) }) {
+			t.Fatal("the session's flag was never lowered")
+		}
+		if lowered, err := os.Stat(filepath.Dir(w.flagPath(t))); err == nil {
+			t.Logf("y typed to the session's flag lowered: %v", lowered.ModTime().Sub(confirmed))
+		}
+		w.awaitScreen(t, "the keys typed after y at its shell", func(screen string) bool {
+			return strings.Contains(screen, typedNext)
+		})
+	})
 }
+
+const (
+	// backgroundReply is a terminal's answer to the background question.
+	backgroundReply = "\x1b]11;rgb:0b0b/0c0c/1414\a"
+	// typedNext is what is typed once the panel is answered, for the shell.
+	typedNext = "zqv"
+	// replyIntoTheDrop is how long after a draw's question goes out a slow
+	// link's reply lands: past the draw's 50 ms, inside the drop's settle.
+	replyIntoTheDrop = 70 * time.Millisecond
+)
+
+// typedAfterEnter is how long after Enter a key is typed: past Enter's own
+// quiet window, so it is judged alone, and well inside the wait a reply still
+// owed would hold the hand-off for.
+const typedAfterEnter = 250 * time.Millisecond

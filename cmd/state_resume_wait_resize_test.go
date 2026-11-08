@@ -59,9 +59,14 @@ type resumeResizeHarness struct {
 	// A settle window that elapsed is observed here rather than inferred from a
 	// later rendezvous: the loop's select is free to take a winch arriving
 	// alongside a fired timer first.
-	sized  chan struct{}
-	writer *io.PipeWriter
-	done   chan error
+	sized chan struct{}
+	input *typeAhead
+	done  chan error
+
+	// readsAtExec and listensAtExec are how many reads of the session, and
+	// listens for its input, were outstanding as the wait exec'd.
+	readsAtExec   int32
+	listensAtExec int32
 
 	// The read the wait takes once at start-up is kept out of sizes and sized,
 	// which count the reads a settle window's elapse takes.
@@ -80,21 +85,27 @@ func startResumeResize(t *testing.T, payload resumeChainPayload, size func() (in
 // read, so no size change can be delivered before it.
 func startResumeResizeFrom(t *testing.T, payload resumeChainPayload, startup, size func() (int, int, error)) *resumeResizeHarness {
 	t.Helper()
-	pipeReader, pipeWriter := io.Pipe()
+	input := newTypeAhead("")
 	h := &resumeResizeHarness{
 		t:         t,
 		probe:     new(resumeWaitProbe),
-		reader:    &trackedReader{t: t, inner: pipeReader, started: make(chan struct{}, 1)},
+		reader:    &trackedReader{t: t, inner: input, started: make(chan struct{}, 1)},
 		winch:     make(chan os.Signal, 1),
 		settles:   make(chan chan time.Time),
-		writer:    pipeWriter,
+		input:     input,
 		done:      make(chan error, 1),
 		sized:     make(chan struct{}, 1),
 		startedUp: make(chan struct{}),
 	}
-	t.Cleanup(func() { _ = pipeWriter.Close() })
+	t.Cleanup(input.end)
 
 	cfg := newResumeWaitConfig(t, h.probe, payload, h.reader)
+	execSelf := cfg.ExecSelf
+	cfg.ExecSelf = func(prog string, args []string) {
+		h.readsAtExec = h.reader.inFlight.Load()
+		h.listensAtExec = input.listens.Load()
+		execSelf(prog, args)
+	}
 	cfg.Winch = h.winch
 	cfg.Settle = func(d time.Duration) <-chan time.Time {
 		if d != resumeResizeSettle {
@@ -105,7 +116,7 @@ func startResumeResizeFrom(t *testing.T, payload resumeChainPayload, startup, si
 		h.settles <- timer
 		return timer
 	}
-	cfg.AwaitInput = quietAtOnce
+	listenOn(&cfg, input)
 	cfg.Size = func() (int, int, error) {
 		if !h.startupRead.Swap(true) {
 			defer close(h.startedUp)
@@ -170,12 +181,12 @@ func (h *resumeResizeHarness) awaitSize() {
 	}
 }
 
-func (h *resumeResizeHarness) awaitRead() {
+func (h *resumeResizeHarness) awaitListen() {
 	h.t.Helper()
 	select {
-	case <-h.reader.started:
+	case <-h.input.listening:
 	case <-time.After(resumeResizeTestBudget):
-		h.t.Fatal("the wait never started a read")
+		h.t.Fatal("the wait never listened for input")
 	}
 }
 
@@ -185,7 +196,7 @@ func (h *resumeResizeHarness) elapse(timer chan time.Time) {
 }
 
 func (h *resumeResizeHarness) press(key string) {
-	go func() { _, _ = h.writer.Write([]byte(key)) }()
+	h.input.typeKeys(key)
 }
 
 func (h *resumeResizeHarness) wait() error {
@@ -387,7 +398,7 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		assertHandOff(t, h.probe, payload)
 	})
 
-	t.Run("it keeps one read outstanding at a time", func(t *testing.T) {
+	t.Run("it reads only a byte that has arrived, one read at a time", func(t *testing.T) {
 		payload := drawnPayload()
 		h := startResumeResizeFrom(t, payload, resizedSize, func() (int, int, error) {
 			return payload.Width, payload.Height, nil
@@ -397,9 +408,9 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		h.awaitSize()
 		h.resize()
 
-		h.awaitRead()
-		if got := h.reader.reads.Load(); got != 1 {
-			t.Errorf("the wait started %d reads while one was still outstanding, want 1", got)
+		h.awaitListen()
+		if got := h.reader.reads.Load(); got != 0 {
+			t.Errorf("the wait started %d reads with nothing typed, want 0", got)
 		}
 
 		h.press("d")
@@ -411,6 +422,30 @@ func TestRunResumeWait_Resize(t *testing.T) {
 		}
 		if got := h.reader.reads.Load(); got != 1 {
 			t.Errorf("the wait read %d times, want 1: the dispatched byte ends the wait", got)
+		}
+	})
+
+	// A redraw comes due as zmx's SIGWINCH on an attach settles, just as the
+	// user reaches for Enter. The listen in flight has no timeout, so only its
+	// wake brings the redraw at the settle's end; and a listen or a read still
+	// outstanding as the redraw execs could take the key, which would die with
+	// the process image.
+	t.Run("it wakes the listen in flight and redraws once it has answered", func(t *testing.T) {
+		payload := drawnPayload()
+		h := startResumeResize(t, payload, resizedSize)
+		h.awaitListen()
+
+		h.elapse(h.resize())
+
+		if err := h.wait(); err != nil {
+			t.Fatalf("runResumeWait() error = %v", err)
+		}
+		assertHandOff(t, h.probe, payload)
+		if h.listensAtExec != 0 {
+			t.Errorf("%d listens for the session's input were outstanding as the redraw exec'd, want none", h.listensAtExec)
+		}
+		if h.readsAtExec != 0 {
+			t.Errorf("%d reads of the session were outstanding as the redraw exec'd, want none", h.readsAtExec)
 		}
 	})
 }
@@ -520,7 +555,7 @@ func TestRunResumeWait_StartupSize(t *testing.T) {
 		payload := drawnPayload()
 		h := startResumeResizeFrom(t, payload, failedSize, failedSize)
 
-		h.awaitRead()
+		h.awaitListen()
 		if got := h.armed.Load(); got != 0 {
 			t.Errorf("the wait armed %d settle windows over a failed start-up read, want 0", got)
 		}
@@ -562,8 +597,8 @@ func TestRunResumeWait_StartupSize(t *testing.T) {
 				payload.Width, payload.Height = drawn.w, drawn.h
 				h := startResumeResizeFrom(t, payload, resizedSize, resizedSize)
 
-				h.awaitRead()
-				_ = h.writer.Close()
+				h.awaitListen()
+				h.input.end()
 
 				if err := h.wait(); !errors.Is(err, io.EOF) {
 					t.Fatalf("runResumeWait() error = %v, want the EOF that ended the wait", err)
@@ -580,8 +615,8 @@ func TestRunResumeWait_StartupSize(t *testing.T) {
 		payload := drawnPayload()
 		h := startResumeResize(t, payload, resizedSize)
 
-		h.awaitRead()
-		_ = h.writer.Close()
+		h.awaitListen()
+		h.input.end()
 
 		if err := h.wait(); !errors.Is(err, io.EOF) {
 			t.Fatalf("runResumeWait() error = %v, want the EOF that ended the wait", err)

@@ -92,7 +92,7 @@ func lazyFlag(t *testing.T) string {
 func lazyChainArgs(t *testing.T, command string) []string {
 	t.Helper()
 	parked := parkedChain{Exe: lazyExe, Flag: lazyFlag(t)}
-	return []string{"sh", "-c", parkedResumeChain(parked, resumeChainPayload{Command: command, Session: hydrateSession})}
+	return []string{"sh", "-c", parkedResumeChain(parked, resumeChainPayload{Command: command, Session: hydrateSession, DropInput: true})}
 }
 
 func flagRaisedAt(t *testing.T, path string) bool {
@@ -304,7 +304,7 @@ func TestHydrateLazy_ParksTheDrawAndThenTheTailWithTheSessionAlone(t *testing.T)
 	lazyRun(t, hydrateTails()[0], cfg)
 
 	parked := parkedChain{Exe: lazyExe, Flag: lazyFlag(t)}
-	payload := resumeChainPayload{Command: "echo hi", Session: hydrateSession}
+	payload := resumeChainPayload{Command: "echo hi", Session: hydrateSession, DropInput: true}
 	tail, found := strings.CutPrefix(exec.args[2], parkedChainTrap+parkedChainDraw(parked, payload)+"; ")
 	if !found {
 		t.Fatalf("chain %q does not open on the draw, a semicolon after it", exec.args[2])
@@ -312,6 +312,20 @@ func TestHydrateLazy_ParksTheDrawAndThenTheTailWithTheSessionAlone(t *testing.T)
 	want := shellquote.Join([]string{lazyExe, "state", resumeRecoverSubcommand, "--session", hydrateSession}) + parkedChainBackstop(parked)
 	if tail != want {
 		t.Errorf("tail = %q, want %q", tail, want)
+	}
+}
+
+// A key typed during the transcript's replay, or before a kept session's panel
+// shows, was typed to no panel, so the first draw drops it, whatever the theme.
+func TestHydrateLazy_TheFirstDrawDropsInputQueuedBeforeIt(t *testing.T) {
+	exec := &stubExecShell{}
+	cfg := lazyConfig(t, hydrateStoreWithMode(t, hydrateSession, "echo hi", resumemode.Lazy), lazyPrefs(t, ""), exec)
+
+	lazyRun(t, hydrateTails()[0], cfg)
+
+	draw, _, _ := strings.Cut(exec.args[2], "; [ $? -eq")
+	if !strings.Contains(draw, shellquote.Single(flagArg(resumeFlagDropInput))) {
+		t.Errorf("the parked chain's first draw %q has no %s", draw, flagArg(resumeFlagDropInput))
 	}
 }
 

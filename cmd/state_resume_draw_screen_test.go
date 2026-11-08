@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
 	"github.com/leeovery/portal/internal/tui"
 )
@@ -92,6 +91,7 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 				resumeChainPayload: drawScreenPayload(screen),
 				Stdout:             rec,
 				Logger:             drawTestLogger(t),
+				Now:                testClockAtEpoch,
 				CatchSIGTERM:       func() {},
 				DisableEcho: func() error {
 					calls = append(calls, "echo-off")
@@ -101,9 +101,9 @@ func TestRunResumeDraw_Screen(t *testing.T) {
 					calls = append(calls, "size")
 					return 100, 30, nil
 				},
-				ResolveTheme: func(bool, func() error) (theme.Theme, error) {
+				ResolveTheme: func(bool, int, func() (int, error)) (tui.PaneAppearance, error) {
 					calls = append(calls, "theme")
-					return th, nil
+					return tui.PaneAppearance{Theme: th}, nil
 				},
 				ExecSelf: func(string, []string) {
 					calls = append(calls, "exec")

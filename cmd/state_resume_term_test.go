@@ -18,8 +18,8 @@ import (
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/proctest"
 	"github.com/leeovery/portal/internal/shellquote"
-	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/themetest"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 // The waiting session's processes are run for real here, as this test binary
@@ -161,11 +161,11 @@ func (p termPaneProcess) drawConfig(cfg resumeDrawConfig) resumeDrawConfig {
 	th := themetest.DefaultDark(p.t)
 	cfg.Size = p.size
 	cfg.DisableEcho = func() error { return nil }
-	cfg.DropInputQueue = func() error { return nil }
-	cfg.ResolveTheme = func(bool, func() error) (theme.Theme, error) {
+	cfg.DropInputQueue = func() (int, error) { return 0, nil }
+	cfg.ResolveTheme = func(bool, int, func() (int, error)) (tui.PaneAppearance, error) {
 		p.recordSelf(termEventDraw)
 		p.holdDraw()
-		return th, nil
+		return tui.PaneAppearance{Theme: th}, nil
 	}
 	cfg.ExecSelf = p.execSelf
 	cfg.CatchSIGTERM = p.holdingCatch(termEventDraw, cfg.CatchSIGTERM)
@@ -212,7 +212,7 @@ func (p termPaneProcess) holdDraw() {
 func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	cfg.IsTerminal = func() bool { return true }
 	cfg.MakeRaw = func() (func(), error) { return func() {}, nil }
-	cfg.In = &announcingReader{inner: cfg.In, announce: func() { p.recordSelf(termEventWait) }}
+	announceListens(&cfg, func() { p.recordSelf(termEventWait) })
 	cfg.Size = p.size
 	cfg.LookupResume = func(string) (hooks.OnResume, error) {
 		return hooks.OnResume{Command: os.Getenv(termPaneHookEnv), Found: true}, nil
@@ -227,17 +227,32 @@ func (p termPaneProcess) waitConfig(cfg resumeWaitConfig) resumeWaitConfig {
 	return cfg
 }
 
-// announcingReader reports the waiter's first read, the point it is holding the
-// pane on its panel.
-type announcingReader struct {
-	inner    io.Reader
-	announce func()
-	once     sync.Once
+// announceListens reports the waiter's first listen, of either kind, the point
+// it is holding the pane on its panel.
+func announceListens(cfg *resumeWaitConfig, announce func()) {
+	once := sync.OnceFunc(announce)
+	await, open := cfg.AwaitInput, cfg.OpenWaker
+	cfg.AwaitInput = func(window time.Duration) (bool, error) {
+		once()
+		return await(window)
+	}
+	cfg.OpenWaker = func() (resumeWaker, error) {
+		waker, err := open()
+		if err != nil {
+			return nil, err
+		}
+		return announcingWaker{resumeWaker: waker, announce: once}, nil
+	}
 }
 
-func (r *announcingReader) Read(b []byte) (int, error) {
-	r.once.Do(r.announce)
-	return r.inner.Read(b)
+type announcingWaker struct {
+	resumeWaker
+	announce func()
+}
+
+func (w announcingWaker) Await() (bool, error) {
+	w.announce()
+	return w.resumeWaker.Await()
 }
 
 // termPane is a waiting session: the parked chain, started as restore leaves

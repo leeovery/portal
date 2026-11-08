@@ -10,46 +10,10 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/charmbracelet/x/term"
 	"golang.org/x/sys/unix"
 )
 
 const ptyReadDeadline = 200 * time.Millisecond
-
-func TestFlushTTYInput_RealPTY(t *testing.T) {
-	t.Run("it discards bytes queued before the flush and keeps bytes queued after it", func(t *testing.T) {
-		master, slave := openPTY(t)
-
-		// Raw, so a byte is readable without a line terminator behind it.
-		fd := descriptorOf(t, slave)
-		prior, err := term.MakeRaw(uintptr(fd))
-		if err != nil {
-			t.Fatalf("make the slave raw: %v", err)
-		}
-		t.Cleanup(func() { _ = term.Restore(uintptr(fd), prior) })
-
-		// A write to the master runs the line discipline before it returns, so
-		// the burst is on the slave's input queue once it does.
-		if _, err := master.Write([]byte("cd ~/dev && yarn")); err != nil {
-			t.Fatalf("write the burst into the master: %v", err)
-		}
-
-		if err := flushTTYInput(fd); err != nil {
-			t.Fatalf("flushTTYInput() error = %v", err)
-		}
-
-		if got := readWithin(t, slave); len(got) != 0 {
-			t.Errorf("read %q from the slave after the flush, want nothing", got)
-		}
-
-		if _, err := master.Write([]byte("y")); err != nil {
-			t.Fatalf("write the later key into the master: %v", err)
-		}
-		if got := readWithin(t, slave); string(got) != "y" {
-			t.Errorf("read %q from the slave after a post-flush write, want %q", got, "y")
-		}
-	})
-}
 
 // openPTY is a fresh pty granted and unlocked through the host's own ioctls,
 // with both ends closed at the test's end.
