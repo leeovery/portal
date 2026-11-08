@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/theme"
 	"github.com/leeovery/portal/internal/tui"
@@ -130,13 +131,17 @@ func sessionDrawTheme(session string) func(colourless bool, owed int, dropInput 
 
 var resolvePaneThemeFunc = tui.ResolvePaneTheme
 
-// resumeAttachedBound bounds a draw's ask of its session's zmx daemon, so one
-// slow to answer delays the panel by this at most.
+// resumeAttachedBound bounds a draw's asks of its session's zmx daemon, the
+// leader's environment and the session's Info, so one slow to answer delays
+// the panel by this at most. The process table's read between them takes no
+// context, so this bound doesn't cover it: it takes about a millisecond, and
+// at worst about a tenth of a second more for each zmx it finds mid-exec,
+// which it reads again until it can, or gives up on and fails.
 const resumeAttachedBound = 250 * time.Millisecond
 
 // sessionAttached reports whether a terminal shows session to answer a
-// question, as its zmx daemon counts its clients. Only a session that answers
-// with none has none: one that can't be asked is taken to have one, so a reply
+// question, as backend.Held judges it, so a reader connected to the session
+// asks none. A session that can't be judged is taken to have one, so a reply
 // that may come is still owed.
 func sessionAttached(session string) bool {
 	b, err := sessionBackend()
@@ -145,8 +150,8 @@ func sessionAttached(session string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), resumeAttachedBound)
 	defer cancel()
-	s, err := b.Session(ctx, session)
-	return err != nil || s.Attached()
+	held, err := backend.Held(ctx, b, session)
+	return err != nil || held
 }
 
 // Every failure along the route degrades to the shipped pair rather than

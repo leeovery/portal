@@ -75,7 +75,7 @@ func (c attachConnector) take(ctx context.Context, name string) (release func())
 	// The registry logs each runner's answer; one that didn't let go is left
 	// to the backend's detach.
 	_, _ = c.runners.Take(ctx, name, by)
-	held, err := c.held(ctx, name)
+	held, err := backend.Held(ctx, c.backend, name)
 	if err != nil {
 		attachLogger.Warn("take failed", "session", name, "detail", "read", "error", err)
 		return release
@@ -108,46 +108,6 @@ func (c attachConnector) lockTake(ctx context.Context, name string) (release fun
 	return release
 }
 
-// held reports whether a terminal holds name: zmx answers the environment of
-// a client leading it, or the process table shows a zmx attach on a terminal
-// on it while the session counts a client. Only a zmx attach sends zmx its
-// environment: a reader (the saver's capture, a preview's read, a listing's
-// probe, a zmx run) sends none, so even one zmx makes the leader, as a zmx
-// run's resize can, answers none, and no reader shows in the table, so none
-// holds a session. A Portal runner's client always tracks runnertoken.Var
-// and a raw zmx attach tracks zmx's default list, so each answers one; a raw
-// one started with no variables to track answers none, and holds the
-// session only as the table shows it. The leader counts a client zmx
-// switched onto name from another session, whose process still names the
-// one it left; and that process holds the session it left only while
-// something else is connected there. Either way of holding it is enough;
-// what neither read can tell is an error, so nothing is detached on it.
-func (c attachConnector) held(ctx context.Context, name string) (bool, error) {
-	leader, leaderErr := c.backend.LeaderEnv(ctx, name)
-	if len(leader) > 0 {
-		return true, nil
-	}
-	attached, err := c.attachedTerminal(ctx, name)
-	if attached {
-		return true, nil
-	}
-	return false, errors.Join(leaderErr, err)
-}
-
-// attachedTerminal reports whether the process table shows a zmx attach on
-// a terminal on name while the session counts a client.
-func (c attachConnector) attachedTerminal(ctx context.Context, name string) (bool, error) {
-	terminals, err := c.backend.AttachClients(name)
-	if err != nil || len(terminals) == 0 {
-		return false, err
-	}
-	s, err := c.backend.Session(ctx, name)
-	if err != nil {
-		return false, err
-	}
-	return s.Attached(), nil
-}
-
 // awaitAlone waits, within c.takeWait, for no terminal to hold the session,
 // detaching every client again whenever a read finds one still holding it:
 // one that connected since the last detach, or one still going.
@@ -155,7 +115,7 @@ func (c attachConnector) awaitAlone(ctx context.Context, name string) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, c.takeWait, fmt.Errorf("%w after %s", errNotAlone, c.takeWait))
 	defer cancel()
 	for {
-		held, err := c.held(ctx, name)
+		held, err := backend.Held(ctx, c.backend, name)
 		switch {
 		case err != nil:
 			return err
@@ -244,7 +204,7 @@ func (c attachConnector) judgeDrop(ctx context.Context, name string, began time.
 	if by = c.runners.TakenBy(name, began); by != "" {
 		return by, dropRecorded, nil
 	}
-	held, err := c.held(ctx, name)
+	held, err := backend.Held(ctx, c.backend, name)
 	switch {
 	case err != nil:
 		return "", dropUnjudged, err

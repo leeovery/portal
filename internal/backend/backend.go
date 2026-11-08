@@ -145,6 +145,46 @@ func AskAgain(ctx context.Context, b Backend, name string, wait func(context.Con
 	return b.Session(ctx, name)
 }
 
+// Held reports whether a terminal holds name: b answers the environment of a
+// client leading it, or AttachClients shows a client on a terminal attached
+// to it while the session counts a client. Only an attach sends the backend
+// its environment: a reader (the saver's capture, a preview's read, a
+// listing's probe, a command run in the session) sends none, so even one the
+// backend makes the leader answers none, and no reader is an attach on a
+// terminal, so none holds a session. A Portal runner's client always tracks a
+// variable of its own and a raw attach tracks the backend's default list, so
+// each answers one; a raw one started with no variables to track answers
+// none, and holds the session only as AttachClients shows it. The leader
+// counts a client switched onto name from another session, whose process
+// still names the one it left; and that process holds the session it left
+// only while something else is connected there. Either way of holding it is
+// enough; what neither read can tell is an error.
+func Held(ctx context.Context, b Backend, name string) (bool, error) {
+	leader, leaderErr := b.LeaderEnv(ctx, name)
+	if len(leader) > 0 {
+		return true, nil
+	}
+	attached, err := attachedTerminal(ctx, b, name)
+	if attached {
+		return true, nil
+	}
+	return false, errors.Join(leaderErr, err)
+}
+
+// attachedTerminal reports whether AttachClients shows a client on a
+// terminal attached to name while the session counts a client.
+func attachedTerminal(ctx context.Context, b Backend, name string) (bool, error) {
+	terminals, err := b.AttachClients(name)
+	if err != nil || len(terminals) == 0 {
+		return false, err
+	}
+	s, err := b.Session(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	return s.Attached(), nil
+}
+
 // Pause waits d, or until ctx ends, returning its cause then.
 func Pause(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)

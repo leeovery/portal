@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/hex"
 	"errors"
 	"io"
 	"slices"
@@ -64,6 +65,20 @@ func TestResumeTypedDuringTheDraw(t *testing.T) {
 	t.Run("a key the draw read answers the panel as if typed after it", func(t *testing.T) {
 		t.Run("Enter", func(t *testing.T) {
 			payload := waiterOf(t, drawReading(t, "\r"))
+			h := startArrivals(t, payload)
+			h.probe.lookup = foundHook(payload.Command)
+
+			h.quiet()
+
+			h.answered()
+			assertHookHandOff(t, h.probe, payload.Command)
+		})
+		t.Run("the keypad's Enter, carried as Return", func(t *testing.T) {
+			argv := drawReading(t, resumeKeypadEnter)
+			if !slices.Contains(argv, hex.EncodeToString([]byte{resumeKeyEnterCR})) {
+				t.Errorf("waiter argv = %q, want Return carried as the typed key", argv)
+			}
+			payload := waiterOf(t, argv)
 			h := startArrivals(t, payload)
 			h.probe.lookup = foundHook(payload.Command)
 

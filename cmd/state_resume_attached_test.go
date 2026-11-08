@@ -15,7 +15,8 @@ import (
 )
 
 // A question no terminal saw is never answered, so a draw asks one only where
-// the session's zmx daemon counts a client, and where it can't tell, asks.
+// a terminal holds the session, as backend.Held judges it, and where it can't
+// tell, asks.
 func TestSessionAttached(t *testing.T) {
 	session := samplePayload().Session
 	cases := []struct {
@@ -23,15 +24,27 @@ func TestSessionAttached(t *testing.T) {
 		stage func(f *backendtest.Fake)
 		want  bool
 	}{
-		{"a session a client is attached to", func(f *backendtest.Fake) { f.Add(backend.Session{Name: session, Clients: 1}) }, true},
-		{"a session no client is attached to", func(f *backendtest.Fake) { f.Add(backend.Session{Name: session}) }, false},
+		{"a session a terminal leads", func(f *backendtest.Fake) {
+			f.Add(backend.Session{Name: session, Clients: 1})
+			f.SetLeaderEnv(session, aLeader)
+		}, true},
+		{"a session a terminal is attached to", func(f *backendtest.Fake) {
+			f.Add(backend.Session{Name: session, Clients: 1})
+			f.SetAttachClients(session, aTerminal)
+		}, true},
+		{"a session only a reader is connected to", func(f *backendtest.Fake) { f.Add(backend.Session{Name: session, Clients: 1}) }, false},
+		{"a session no client is connected to", func(f *backendtest.Fake) { f.Add(backend.Session{Name: session}) }, false},
 		{"a session that doesn't answer", func(f *backendtest.Fake) {
 			f.Add(backend.Session{Name: session})
 			f.StopAnswering(session)
 		}, true},
-		{"a session the backend can't ask", func(f *backendtest.Fake) {
+		{"a session whose leader the backend can't ask", func(f *backendtest.Fake) {
 			f.Add(backend.Session{Name: session})
-			f.Fail(backendtest.OpSession, errors.New("connection refused"))
+			f.Fail(backendtest.OpLeaderEnv, errors.New("connection refused"))
+		}, true},
+		{"a session whose clients the process table can't show", func(f *backendtest.Fake) {
+			f.Add(backend.Session{Name: session})
+			f.Fail(backendtest.OpAttachClients, backend.ErrUnreadableClient)
 		}, true},
 		{"no session under the name", func(*backendtest.Fake) {}, true},
 	}
@@ -48,34 +61,38 @@ func TestSessionAttached(t *testing.T) {
 	}
 
 	t.Run("it asks within its bound", func(t *testing.T) {
-		asked := &sessionAskBackend{Backend: backendtest.New(backend.Session{Name: session})}
+		fake := backendtest.New(backend.Session{Name: session, Clients: 1})
+		fake.SetAttachClients(session, aTerminal)
+		asked := &askBoundBackend{Backend: fake}
 		withBackendDeps(t, BackendDeps{Backend: asked})
 
 		sessionAttached(session)
 
-		if asked.left <= 0 || asked.left > resumeAttachedBound {
-			t.Errorf("the ask had %v left of its deadline, want no more than %v", asked.left, resumeAttachedBound)
+		for _, op := range []backendtest.Op{backendtest.OpLeaderEnv, backendtest.OpSession} {
+			if left, ok := asked.left[op]; !ok || left <= 0 || left > resumeAttachedBound {
+				t.Errorf("%s had %v left of its deadline (asked %v), want no more than %v", op, left, ok, resumeAttachedBound)
+			}
 		}
 	})
 }
 
 // The draw the command runs asks its own session, the one its argv names,
-// whether a terminal shows it: another session's clients answer nothing.
+// whether a terminal shows it: another session's terminal answers nothing.
 func TestStateResumeDrawCommand_AsksItsOwnSessionWhetherATerminalShowsIt(t *testing.T) {
 	session := samplePayload().Session
+	const other = "other-x1y2"
 	for _, tc := range []struct {
-		name    string
-		clients int
-		want    bool
+		name string
+		led  string
+		want bool
 	}{
-		{"no client attached", 0, false},
-		{"a client attached", 1, true},
+		{"no terminal on it", other, false},
+		{"a terminal on it", session, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			withBackendDeps(t, BackendDeps{Backend: backendtest.New(
-				backend.Session{Name: session, Clients: tc.clients},
-				backend.Session{Name: "other-x1y2", Clients: 1 - tc.clients},
-			)})
+			fake := backendtest.New(backend.Session{Name: session, Clients: 1}, backend.Session{Name: other, Clients: 1})
+			fake.SetLeaderEnv(tc.led, aLeader)
+			withBackendDeps(t, BackendDeps{Backend: fake})
 			t.Setenv(xdg.PrefsFile.EnvVar, filepath.Join(t.TempDir(), "prefs.json"))
 			t.Setenv(xdg.ThemesDir.EnvVar, t.TempDir())
 			var draw resumeDrawConfig
@@ -101,15 +118,28 @@ func TestStateResumeDrawCommand_AsksItsOwnSessionWhetherATerminalShowsIt(t *test
 	}
 }
 
-// sessionAskBackend records how long a Session call had left of its context.
-type sessionAskBackend struct {
+// askBoundBackend records how long each call to the session's zmx daemon had
+// left of its context.
+type askBoundBackend struct {
 	backend.Backend
-	left time.Duration
+	left map[backendtest.Op]time.Duration
 }
 
-func (b *sessionAskBackend) Session(ctx context.Context, name string) (backend.Session, error) {
-	if deadline, ok := ctx.Deadline(); ok {
-		b.left = time.Until(deadline)
+func (b *askBoundBackend) record(ctx context.Context, op backendtest.Op) {
+	if b.left == nil {
+		b.left = map[backendtest.Op]time.Duration{}
 	}
+	if deadline, ok := ctx.Deadline(); ok {
+		b.left[op] = time.Until(deadline)
+	}
+}
+
+func (b *askBoundBackend) LeaderEnv(ctx context.Context, name string) (backend.ClientEnv, error) {
+	b.record(ctx, backendtest.OpLeaderEnv)
+	return b.Backend.LeaderEnv(ctx, name)
+}
+
+func (b *askBoundBackend) Session(ctx context.Context, name string) (backend.Session, error) {
+	b.record(ctx, backendtest.OpSession)
 	return b.Backend.Session(ctx, name)
 }
