@@ -556,6 +556,25 @@ func TestLoadingScreen_ColourlessNoCanvasGlyphDistinct(t *testing.T) {
 	}
 }
 
+// With no colour, the bar's progress reads from its glyphs alone: the fill
+// in full blocks, the track in shade, so 0% and 100% differ.
+func TestLoadingBar_ColourlessShowsProgressInGlyphs(t *testing.T) {
+	const width = 10
+	for _, tc := range []struct {
+		fraction float64
+		want     string
+	}{
+		{0, strings.Repeat("░", width)},
+		{0.3, strings.Repeat("█", 3) + strings.Repeat("░", 7)},
+		{1, strings.Repeat("█", width)},
+	} {
+		got := renderLoadingBar(tc.fraction, 80, width, testDarkTheme(t), true)
+		if got != tc.want {
+			t.Errorf("colourless bar at %v = %q, want %q", tc.fraction, got, tc.want)
+		}
+	}
+}
+
 func TestWarmPath_NoLoadingScreen(t *testing.T) {
 	m := New(fakeLister{})
 	if m.ActivePage() == PageLoading {
