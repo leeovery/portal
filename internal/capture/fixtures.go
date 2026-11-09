@@ -44,7 +44,10 @@ type Fixture struct {
 	killAsk string
 	// taken opens the picker as an attach another terminal took does: on the
 	// screen saying so.
-	taken              tui.Taken
+	taken tui.Taken
+	// initialTakenEnded lands the taken screen as it shows once its session
+	// has ended.
+	initialTakenEnded  bool
 	initialMultiSelect []string
 	initialCursor      string
 	// Independent of the `--theme` palette: the union is what the panel lists —
@@ -125,6 +128,7 @@ func (f *Fixture) Deps(th theme.Theme) tui.Deps {
 			GoneFlagged:       f.initialGoneFlagged,
 			BurstOpening:      f.initialBurstOpening,
 			Flash:             f.initialFlash,
+			TakenEnded:        f.initialTakenEnded,
 		},
 		ProgressReceiver: loadingReceiverOrNil(f.loadingEvents, f.fatalEvent),
 	}
@@ -185,6 +189,7 @@ func fixtureBuilders() []func() *Fixture {
 		sessionsKillConfirmFixture,
 		sessionsKillAskFixture,
 		sessionsTakenFixture,
+		sessionsTakenEndedFixture,
 		sessionsMultiSelectActiveFixture,
 		sessionsUnsupportedTerminalFixture,
 		sessionsUnsupportedNullFixture,
@@ -483,6 +488,15 @@ func sessionsTakenFixture() *Fixture {
 	fx := sessionsByProjectLabelledFixture()
 	fx.name = "sessions-taken"
 	fx.taken = tui.Taken{Session: "orchard-pipeline-Hq7wNe", By: "SSH from 192.0.2.20"}
+	return fx
+}
+
+// The taken screen once its session has ended while taken: saying so and
+// where it had gone, offering the picker or the shell.
+func sessionsTakenEndedFixture() *Fixture {
+	fx := sessionsTakenFixture()
+	fx.name = "sessions-taken-ended"
+	fx.initialTakenEnded = true
 	return fx
 }
 

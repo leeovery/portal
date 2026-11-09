@@ -71,6 +71,11 @@ type Deps struct {
 	// opens on its modal once its row is listed, whose Enter takes it back.
 	// Keys typed before then are dropped.
 	Taken Taken
+	// SessionReader reads one session as the picker shows it: the taken
+	// modal reads its session through it every TakenRecheck while open, so it
+	// says so once the session ends. Nil, or a zero TakenRecheck, reads none.
+	SessionReader SessionReader
+	TakenRecheck  time.Duration
 
 	CWD string
 	// Home is the home directory session directories are abbreviated against.
@@ -129,6 +134,9 @@ type CaptureSeeds struct {
 	GoneFlagged       []string
 	// BurstOpening is (done, total).
 	BurstOpening [2]int
+	// TakenEnded lands the taken modal as it shows once its session has
+	// ended.
+	TakenEnded bool
 }
 
 func Build(deps Deps) Model {
@@ -198,6 +206,9 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithOpeningFlash(deps.Flash))
 	opts = append(opts, WithKillAsk(deps.KillAsk))
 	opts = append(opts, WithTaken(deps.Taken))
+	if deps.SessionReader != nil {
+		opts = append(opts, WithTakenWatch(deps.SessionReader, deps.TakenRecheck))
+	}
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.
@@ -213,6 +224,7 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithInitialDetection(deps.Capture.Detection))
 	opts = append(opts, WithInitialGoneFlagged(deps.Capture.GoneFlagged))
 	opts = append(opts, WithInitialBurstOpening(deps.Capture.BurstOpening[0], deps.Capture.BurstOpening[1]))
+	opts = append(opts, WithInitialTakenEnded(deps.Capture.TakenEnded))
 
 	m := New(deps.Lister, opts...)
 	if len(deps.Command) > 0 {

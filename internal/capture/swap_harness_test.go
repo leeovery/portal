@@ -47,6 +47,7 @@ func capturedStates() []capturedStateWant {
 		{fixture: "sessions-kill-confirm", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone."}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-kill-ask", page: tui.PageSessions, present: []string{"Kill session?", "api · user search", "Ends the session. Can't be undone.", "d detach"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-taken", page: tui.PageSessions, present: []string{"⇄ Open on another device", "api · user search", "Taken by SSH from 192.0.2.20.", "⏎ take it back", "space watch", "esc picker"}, absent: []string{"Kill session?", "No sessions yet"}},
+		{fixture: "sessions-taken-ended", page: tui.PageSessions, present: []string{"✕ Session ended", "api · user search", "Ended after it was taken by SSH from 192.0.2.20.", "⏎ picker", "q quit"}, absent: []string{"Open on another device", "take it back", "space watch", "No sessions yet"}},
 		{fixture: "sessions-multi-select-active", page: tui.PageSessions, present: []string{sessionRow, "3 selected"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-terminal", page: tui.PageSessions, present: []string{sessionRow, "unsupported terminal", "com.apple.Terminal"}, absent: []string{"No sessions yet"}},
 		{fixture: "sessions-unsupported-null", page: tui.PageSessions, present: []string{sessionRow}, absent: []string{"No sessions yet", "unsupported terminal"}},

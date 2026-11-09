@@ -51,8 +51,8 @@ func TestProjectsTransitionDispatchesRefresh(t *testing.T) {
 				t.Fatalf("expected a non-nil refresh cmd on %q transition, got nil", string(key))
 			}
 			msg := cmd()
-			if _, ok := msg.(previewSessionsRefreshedMsg); !ok {
-				t.Fatalf("expected refresh cmd to yield previewSessionsRefreshedMsg, got %T", msg)
+			if _, ok := msg.(sessionsRefreshedMsg); !ok {
+				t.Fatalf("expected refresh cmd to yield sessionsRefreshedMsg, got %T", msg)
 			}
 			if lister.calls != 1 {
 				t.Errorf("expected exactly 1 ListSessions call from the refresh, got %d", lister.calls)

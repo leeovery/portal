@@ -256,7 +256,7 @@ func TestSessionListLoad_RendersTheListWithNoDotsWhenThePendingReadFails(t *test
 			if route == "list load" {
 				got, _ = loadSessions(t, m, m.fetchSessionsCmd())
 			} else {
-				msg := m.refreshSessionsAfterPreviewCmd("")().(previewSessionsRefreshedMsg)
+				msg := m.refreshSessionsCmd("")().(sessionsRefreshedMsg)
 				if msg.Pending != nil {
 					t.Errorf("failed read carried a set onto the preview refresh: %v", msg.Pending)
 				}
@@ -297,7 +297,7 @@ func TestSessionListLoad_NeverCarriesAPendingErrorIntoTheSessionListError(t *tes
 					t.Errorf("[%s] SessionsMsg.Err = %v, want %v", route, msg.Err, tt.wantErr)
 				}
 			}
-			preview := m.refreshSessionsAfterPreviewCmd("")().(previewSessionsRefreshedMsg)
+			preview := m.refreshSessionsCmd("")().(sessionsRefreshedMsg)
 			if !errors.Is(preview.Err, tt.wantErr) || (tt.wantErr == nil && preview.Err != nil) {
 				t.Errorf("[preview] Err = %v, want %v", preview.Err, tt.wantErr)
 			}
@@ -318,7 +318,7 @@ func TestSessionListLoad_MarksNothingWhenTheSeamIsUnwired(t *testing.T) {
 			t.Errorf("[%s] unwired seam: Pending = %v, Err = %v; want nil, nil", route, msg.Pending, msg.Err)
 		}
 	}
-	if msg := m.refreshSessionsAfterPreviewCmd("")().(previewSessionsRefreshedMsg); msg.Pending != nil {
+	if msg := m.refreshSessionsCmd("")().(sessionsRefreshedMsg); msg.Pending != nil {
 		t.Errorf("[preview] unwired seam: Pending = %v, want nil", msg.Pending)
 	}
 

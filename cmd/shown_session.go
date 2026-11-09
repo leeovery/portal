@@ -72,3 +72,19 @@ type pickerLister struct {
 func (l pickerLister) ListSessions() ([]tui.Session, error) {
 	return listShownSessions(l.ctx, l.b)
 }
+
+// ReadSession reads the one session name as its row shows it, asking no
+// other. A session an attach of it would find gone, held under no spelling or
+// only another, is not found; any other failure, such as a session not
+// answering, tells neither.
+func (l pickerLister) ReadSession(name string) (tui.Session, bool, error) {
+	live, err := l.b.Session(l.ctx, name)
+	if _, gone := sessionGoneError(name, err); gone {
+		return tui.Session{}, false, nil
+	}
+	if err != nil {
+		return tui.Session{}, false, err
+	}
+	shown, _ := readShownIndex()
+	return shown.show(live), true, nil
+}

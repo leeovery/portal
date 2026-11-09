@@ -215,6 +215,60 @@ func TestPickerLister(t *testing.T) {
 	})
 }
 
+func TestPickerLister_ReadSession(t *testing.T) {
+	read := func(fake *backendtest.Fake, name string) (tui.Session, bool, error) {
+		return pickerLister{ctx: context.Background(), b: fake}.ReadSession(name)
+	}
+
+	t.Run("a live session reads as its row shows it, the index's label included", func(t *testing.T) {
+		fake := stageJoin(t)
+
+		got, found, err := read(fake, joinOwn.Name)
+
+		if err != nil || !found || got != wantJoined[0] {
+			t.Errorf("ReadSession = %+v, %v, %v; want %+v found", got, found, err, wantJoined[0])
+		}
+		if lists := fake.CallsTo(backendtest.OpList); len(lists) > 0 {
+			t.Errorf("the read listed every session: %+v", lists)
+		}
+	})
+
+	for name, asked := range map[string]string{
+		"a session gone": "gone-Ab12Cd",
+		"a session held only under another spelling": "API-X7KD9A",
+	} {
+		t.Run(name+" is not found, as an attach of it would find", func(t *testing.T) {
+			fake := stageJoin(t)
+
+			got, found, err := read(fake, asked)
+
+			if err != nil || found || got != (tui.Session{}) {
+				t.Errorf("ReadSession = %+v, %v, %v; want not found", got, found, err)
+			}
+		})
+	}
+
+	t.Run("a session not answering tells neither", func(t *testing.T) {
+		fake := stageJoin(t)
+
+		if _, found, err := read(fake, joinSilent.Name); err == nil || found {
+			t.Errorf("ReadSession found %v, error %v; want an error", found, err)
+		}
+	})
+
+	t.Run("a session read when the index cannot be read shows by its name", func(t *testing.T) {
+		fake := backendtest.New(joinOwn)
+		blockStateDir(t)
+
+		got, found, err := read(fake, joinOwn.Name)
+
+		want := tui.Session{Name: joinOwn.Name, Cwd: joinOwn.Dir, Attached: true}
+		if err != nil || !found || got != want {
+			t.Errorf("ReadSession = %+v, %v, %v; want %+v found", got, found, err, want)
+		}
+	})
+}
+
 func TestSearchCandidates_JoinsTheIndex(t *testing.T) {
 	t.Run("it counts the shown sessions, less the current one", func(t *testing.T) {
 		fake := stageJoin(t)

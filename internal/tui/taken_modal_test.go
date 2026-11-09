@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -107,7 +109,7 @@ func TestTaken_Opens(t *testing.T) {
 		th := testDarkTheme(t)
 		danger := headerStyle(th.StateDestructive, th, false).Render("x")
 
-		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "SSH from 192.168.1.20", 120, 40, th, false)
+		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "SSH from 192.168.1.20", false, 120, 40, th, false)
 
 		if strings.Contains(frame, danger[:strings.Index(danger, "x")]) {
 			t.Error("the modal paints in state.destructive")
@@ -124,7 +126,7 @@ func TestTaken_Opens(t *testing.T) {
 	})
 
 	t.Run("under NO_COLOR, the title's glyph and bold still carry it", func(t *testing.T) {
-		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "", 120, 40, testDarkTheme(t), true)
+		frame := renderTakenModalOnClearedCanvas("bravo-d4e5f6", "", false, 120, 40, testDarkTheme(t), true)
 
 		bold := lipgloss.NewStyle().Bold(true)
 		for _, want := range []string{bold.Render("⇄"), bold.Render("Open on another device"), bold.Render("bravo-d4e5f6")} {
@@ -183,14 +185,15 @@ func TestTaken_Keys(t *testing.T) {
 		assertFlashedAndOpen(t, m, cmd, "session bravo-d4e5f6 is not answering; nothing was opened", []string{"alpha-a1b2c3", "bravo-d4e5f6"})
 	})
 
-	t.Run("Esc goes to the picker, the cursor on the session's row", func(t *testing.T) {
+	t.Run("Esc goes to the picker, read again, the cursor on the session's row", func(t *testing.T) {
 		m := takenModel(t, takenOverSSHAsk, takenSessions)
 
 		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
-		if m.modal != modalNone || m.Selected() != "" || cmd != nil {
-			t.Errorf("modal %v, selected %q, cmd %v; want the plain picker", m.modal, m.Selected(), cmd != nil)
+		if m.modal != modalNone || m.Selected() != "" || quits(cmd) {
+			t.Errorf("modal %v, selected %q, quits %v; want the plain picker", m.modal, m.Selected(), quits(cmd))
 		}
+		m = landRefresh(t, m, cmd, "bravo-d4e5f6")
 		if got := selectedSessionName(t, m); got != "bravo-d4e5f6" {
 			t.Errorf("cursor on %q, want the taken session's row", got)
 		}
@@ -309,4 +312,249 @@ func TestTaken_KeysTypedAhead(t *testing.T) {
 			t.Error("q did not quit the plain picker")
 		}
 	})
+}
+
+// takenReader is a SessionReader answering every read alike, counting them.
+type takenReader struct {
+	session Session
+	found   bool
+	err     error
+	reads   int
+}
+
+func (r *takenReader) ReadSession(name string) (Session, bool, error) {
+	r.reads++
+	if r.found && r.session.Name == "" {
+		return Session{Name: name}, true, r.err
+	}
+	return r.session, r.found, r.err
+}
+
+// watchedTakenModel is takenModel listing through lister, its modal reading
+// its session through reader. The watch's ticks are delivered by hand, so its
+// gap is long enough never to pass.
+func watchedTakenModel(t *testing.T, taken Taken, lister *rowActionLister, reader SessionReader) Model {
+	t.Helper()
+	m := Build(Deps{
+		Lister:        lister,
+		Theme:         theme.ConstantNomination(testDarkTheme(t)),
+		History:       historyFor(t, "the session's screen", lister.sessions),
+		Taken:         taken,
+		SessionReader: reader,
+		TakenRecheck:  time.Hour,
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = deliver(t, updated.(Model), SessionsMsg{Sessions: lister.sessions})
+	return deliver(t, m, ProjectsLoadedMsg{})
+}
+
+// recheckTaken delivers the watch's tick and lands the read it starts,
+// returning what landing it returned.
+func recheckTaken(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	updated, read := m.Update(takenWatchTickMsg{gen: m.takenWatch.gen})
+	if read == nil {
+		t.Fatal("the watch's tick started no read")
+	}
+	updated, next := updated.(Model).Update(read())
+	return updated.(Model), next
+}
+
+// landRefresh runs cmd, which must read the list again re-anchoring on
+// preserve, and delivers what it reads.
+func landRefresh(t *testing.T, m Model, cmd tea.Cmd, preserve string) Model {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("want the list read again, got no command")
+	}
+	msg, ok := cmd().(sessionsRefreshedMsg)
+	if !ok {
+		t.Fatalf("the command read %T, want the list read again", msg)
+	}
+	if msg.PreserveName != preserve {
+		t.Errorf("the read re-anchors on %q, want %q", msg.PreserveName, preserve)
+	}
+	return deliver(t, m, msg)
+}
+
+// endedTakenModel is the taken modal turned to say its session has ended,
+// the session gone from what lister lists.
+func endedTakenModel(t *testing.T, taken Taken) (Model, *rowActionLister) {
+	t.Helper()
+	lister := &rowActionLister{sessions: slices.Clone(takenSessions)}
+	m := watchedTakenModel(t, taken, lister, &takenReader{})
+	lister.sessions = []Session{takenSessions[0], takenSessions[2]}
+	m, _ = recheckTaken(t, m)
+	if m.modal != modalTaken || !m.takenEnded {
+		t.Fatalf("modal %v, ended %v; want the taken modal saying the session has ended", m.modal, m.takenEnded)
+	}
+	return m, lister
+}
+
+func TestTaken_Watch_Reads(t *testing.T) {
+	t.Run("a session read gone turns the modal to say it has ended, and where it had gone", func(t *testing.T) {
+		m, _ := endedTakenModel(t, takenOverSSHAsk)
+
+		want := []string{"✕ Session ended", "release checklist", "", "Ended after it was taken by SSH from 192.168.1.20.", "⏎ picker   q quit"}
+		if rows := modalRows(ansi.Strip(m.View().Content)); !slices.Equal(rows, want) {
+			t.Errorf("the modal reads %q, want %q", rows, want)
+		}
+	})
+
+	t.Run("saying only that it has ended when where it went is unknown", func(t *testing.T) {
+		m, _ := endedTakenModel(t, Taken{Session: "bravo-d4e5f6"})
+
+		want := []string{"✕ Session ended", "release checklist", "", "It has ended.", "⏎ picker   q quit"}
+		if rows := modalRows(ansi.Strip(m.View().Content)); !slices.Equal(rows, want) {
+			t.Errorf("the modal reads %q, want %q", rows, want)
+		}
+	})
+
+	t.Run("an ended session is read no more", func(t *testing.T) {
+		reader := &takenReader{}
+		m := watchedTakenModel(t, takenOverSSHAsk, &rowActionLister{sessions: takenSessions}, reader)
+
+		m, next := recheckTaken(t, m)
+
+		if next != nil {
+			t.Error("the watch goes on reading a session that has ended")
+		}
+		if _, read := m.Update(takenWatchTickMsg{gen: m.takenWatch.gen}); read != nil {
+			t.Error("a tick still reads a session that has ended")
+		}
+	})
+
+	t.Run("a session read live shows as read, its label included, and is read again", func(t *testing.T) {
+		reader := &takenReader{session: Session{Name: "bravo-d4e5f6", Label: "shipped checklist"}, found: true}
+		m := watchedTakenModel(t, takenOverSSHAsk, &rowActionLister{sessions: takenSessions}, reader)
+
+		m, next := recheckTaken(t, m)
+
+		if m.takenEnded || next == nil {
+			t.Fatalf("ended %v, reads again %v; want the session live and read again", m.takenEnded, next != nil)
+		}
+		if rows := modalRows(ansi.Strip(m.View().Content)); !slices.Contains(rows, "shipped checklist") {
+			t.Errorf("the modal reads %q, want the label as read", rows)
+		}
+	})
+
+	t.Run("a read that tells neither changes nothing, and is read again", func(t *testing.T) {
+		reader := &takenReader{err: errors.New("session bravo-d4e5f6 is not answering")}
+		m := watchedTakenModel(t, takenOverSSHAsk, &rowActionLister{sessions: takenSessions}, reader)
+
+		m, next := recheckTaken(t, m)
+
+		if m.takenEnded || m.takenSession != takenSessions[1] || next == nil {
+			t.Errorf("ended %v on %+v, reads again %v; want the modal as it was, read again", m.takenEnded, m.takenSession, next != nil)
+		}
+	})
+
+	t.Run("a tick from an earlier watch, or after the modal closed, reads nothing", func(t *testing.T) {
+		reader := &takenReader{found: true}
+		m := watchedTakenModel(t, takenOverSSHAsk, &rowActionLister{sessions: takenSessions}, reader)
+
+		if _, read := m.Update(takenWatchTickMsg{gen: m.takenWatch.gen - 1}); read != nil {
+			t.Error("an earlier watch's tick read the session")
+		}
+		m, _ = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+		if _, read := m.Update(takenWatchTickMsg{gen: m.takenWatch.gen}); read != nil {
+			t.Error("a tick after the modal closed read the session")
+		}
+	})
+
+	t.Run("with no reader, nothing is read", func(t *testing.T) {
+		m := takenModel(t, takenOverSSHAsk, takenSessions)
+
+		if _, read := m.Update(takenWatchTickMsg{gen: m.takenWatch.gen}); read != nil {
+			t.Error("a picker with no reader read the session")
+		}
+	})
+}
+
+func TestTaken_Watch_Listings(t *testing.T) {
+	t.Run("a listing without the session turns the modal to say it has ended", func(t *testing.T) {
+		m := takenModel(t, takenOverSSHAsk, takenSessions)
+
+		m = deliver(t, m, SessionsMsg{Sessions: []Session{takenSessions[0], takenSessions[2]}})
+
+		if m.modal != modalTaken || !m.takenEnded {
+			t.Errorf("modal %v, ended %v; want the modal saying the session has ended", m.modal, m.takenEnded)
+		}
+	})
+
+	t.Run("a listing with the session shows it as listed", func(t *testing.T) {
+		m := takenModel(t, takenOverSSHAsk, takenSessions)
+		relabelled := Session{Name: "bravo-d4e5f6", Label: "shipped checklist"}
+
+		m = deliver(t, m, SessionsMsg{Sessions: []Session{takenSessions[0], relabelled, takenSessions[2]}})
+
+		if m.takenEnded || m.takenSession != relabelled {
+			t.Errorf("ended %v on %+v; want the session as listed", m.takenEnded, m.takenSession)
+		}
+	})
+}
+
+func TestTaken_Watch_WhileWatching(t *testing.T) {
+	t.Run("the session ending closes the watch onto the modal saying so", func(t *testing.T) {
+		lister := &rowActionLister{sessions: slices.Clone(takenSessions)}
+		m := watchedTakenModel(t, takenOverSSHAsk, lister, &takenReader{})
+		m, read := pressKeys(m, keySpaceMsg())
+		m = landRead(t, m, read)
+		lister.sessions = []Session{takenSessions[0], takenSessions[2]}
+
+		m, refresh := recheckTaken(t, m)
+
+		if m.activePage != PageSessions || m.modal != modalTaken || !m.takenEnded || m.watchingTaken {
+			t.Fatalf("page %v, modal %v, ended %v, watching %v; want the modal saying the session has ended", m.activePage, m.modal, m.takenEnded, m.watchingTaken)
+		}
+		m = landRefresh(t, m, refresh, "")
+		if m.modal != modalTaken || !m.takenEnded {
+			t.Errorf("modal %v, ended %v once the list was read again; want the ended modal still", m.modal, m.takenEnded)
+		}
+	})
+}
+
+func TestTaken_Ended_Keys(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyEnter}, {Code: tea.KeyEscape}} {
+		t.Run(key.String()+" goes to the picker, read again, the ended session gone", func(t *testing.T) {
+			m, _ := endedTakenModel(t, takenOverSSHAsk)
+
+			m, cmd := pressKeys(m, key)
+
+			if m.modal != modalNone || m.Selected() != "" || quits(cmd) {
+				t.Fatalf("modal %v, selected %q, quits %v; want the plain picker", m.modal, m.Selected(), quits(cmd))
+			}
+			m = landRefresh(t, m, cmd, "")
+			for _, s := range m.sessions {
+				if s.Name == "bravo-d4e5f6" {
+					t.Error("the picker still lists the ended session")
+				}
+			}
+			if m.takenEnded || m.takenSession.Name != "" {
+				t.Errorf("ended %v on %q; want the modal done with", m.takenEnded, m.takenSession.Name)
+			}
+		})
+	}
+
+	t.Run("q quits, picking nothing", func(t *testing.T) {
+		m, _ := endedTakenModel(t, takenOverSSHAsk)
+
+		m, cmd := pressKeys(m, tea.KeyPressMsg{Code: 'q', Text: "q"})
+
+		if !quits(cmd) || m.Selected() != "" {
+			t.Errorf("quits %v, selected %q; want a quit picking nothing", quits(cmd), m.Selected())
+		}
+	})
+
+	for _, key := range []tea.KeyPressMsg{keySpaceMsg(), {Code: 'k', Text: "k"}, {Code: 'y', Text: "y"}, {Code: tea.KeyDown}} {
+		t.Run(key.String()+" does nothing", func(t *testing.T) {
+			m, _ := endedTakenModel(t, takenOverSSHAsk)
+
+			m, cmd := pressKeys(m, key)
+
+			if m.modal != modalTaken || !m.takenEnded || m.activePage != PageSessions || cmd != nil {
+				t.Errorf("modal %v, ended %v, page %v, cmd %v; want the key ignored", m.modal, m.takenEnded, m.activePage, cmd != nil)
+			}
+		})
+	}
 }

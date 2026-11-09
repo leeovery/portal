@@ -403,6 +403,7 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 
 type tuiConfig struct {
 	lister           tui.SessionLister
+	sessionReader    tui.SessionReader
 	killer           tui.SessionKiller
 	askedKiller      tui.SessionKiller
 	labeller         tui.SessionLabeller
@@ -483,6 +484,7 @@ func (cfg *tuiConfig) wireStateReads() {
 func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.Model {
 	deps := tui.Deps{
 		Lister:           cfg.lister,
+		SessionReader:    cfg.sessionReader,
 		Killer:           cfg.killer,
 		AskedKiller:      cfg.askedKiller,
 		Labeller:         cfg.labeller,
@@ -520,6 +522,7 @@ func buildTUIModel(cfg tuiConfig, landing pickerLanding, command []string) tui.M
 	}
 	deps.PendingSettleBound = pendingSettleBound
 	deps.PreviewRefresh = tui.PreviewRefreshEvery
+	deps.TakenRecheck = tui.TakenRecheckEvery
 	if landing.search != nil {
 		deps.Search = landing.search
 	} else {
@@ -629,8 +632,10 @@ func runPicker(cmd *cobra.Command, b backend.Backend, launch pickerLaunch, conne
 
 	spawnSeams := buildProductionSpawnSeams(cmd.Context(), b, stateRunners{})
 
+	lister := pickerLister{ctx: cmd.Context(), b: b}
 	cfg := tuiConfig{
-		lister:         pickerLister{ctx: cmd.Context(), b: b},
+		lister:         lister,
+		sessionReader:  lister,
 		killer:         pickerKiller{ctx: cmd.Context(), b: b},
 		askedKiller:    askedKiller(cmd.Context(), b),
 		labeller:       pickerLabeller{ctx: cmd.Context(), b: b},
