@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-09
+
+✨ Added
+- The "taken" screen now rechecks its session every couple of seconds and says "Session ended" once the session is killed or its shell exits — Enter or Esc goes to the picker, `q` quits to the shell.
+
+🔧 Changed
+- The taken screen keeps its session's label current while it is open or being watched.
+- Pressing Esc on the taken screen now re-reads the session list before going to the picker, so a session ended elsewhere no longer lingers.
+
 ## [1.1.0] - 2026-11-08
 
 Portal no longer migrates from the tmux version, so its saved state is now unsupported.
