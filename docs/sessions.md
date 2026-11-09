@@ -165,3 +165,22 @@ The last line of the message reads `SSH from <address>` when the session was tak
 | `Esc` | Go to the picker, its cursor on the session |
 
 A detach from anywhere else lands on the same screen, without the line saying where, only while another terminal has the session. One that leaves no terminal on it, such as `zmx detach` typed in the session, exits to the shell.
+
+The screen keeps checking the session, every couple of seconds, while it's open or you're watching it, and keeps its label current. If the session ends meanwhile, whether it was killed or its shell exited, the screen says so:
+
+```
+✕ Session ended
+
+release checklist
+
+Ended after it was taken by SSH from 192.168.1.20.
+
+⏎ picker   q quit
+```
+
+Portal can't tell where a session was ended, only that it ended after it was taken, so the line names where it went; without that, it reads `It has ended.`
+
+| Key | Action |
+|---|---|
+| `Enter` or `Esc` | Go to the picker |
+| `q` | Quit to the shell |

@@ -42,6 +42,9 @@ type destructiveConfirmSpec struct {
 	keep footerHintGroup
 	// cancelLabel is what Esc's hint says it does, cancel when empty.
 	cancelLabel string
+	// hints, when set, are the footer's key hints whole, in place of the
+	// confirmation's, keep's and cancel's: for a modal that confirms nothing.
+	hints []footerHintGroup
 }
 
 func renderDestructiveConfirm(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
@@ -108,6 +111,9 @@ func destructiveConsequenceRows(text string, wrapWidth int, th theme.Theme, colo
 }
 
 func destructiveFooterRow(spec destructiveConfirmSpec, th theme.Theme, colourless bool) string {
+	if len(spec.hints) > 0 {
+		return renderModalFooter(spec.hints, th, colourless)
+	}
 	groups := []footerHintGroup{{spec.confirmKey, spec.confirmLabel}}
 	if spec.keep.key != "" {
 		groups = append(groups, spec.keep)

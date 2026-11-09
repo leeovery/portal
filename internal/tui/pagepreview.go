@@ -267,10 +267,11 @@ type previewOpenMsg struct {
 	Session string
 }
 
-// PreserveName is the session highlighted when preview opened, used to re-anchor
-// the cursor by name. Err is surfaced rather than swallowed so the handler can
-// keep the pre-refresh list intact.
-type previewSessionsRefreshedMsg struct {
+// sessionsRefreshedMsg is the listing read again as the preview or the taken
+// modal closes. PreserveName is the session to re-anchor the cursor on by name,
+// empty to leave it where it is. Err is surfaced rather than swallowed so the
+// handler can keep the pre-refresh list intact.
+type sessionsRefreshedMsg struct {
 	Sessions     []Session
 	Pending      map[string]struct{}
 	Err          error
