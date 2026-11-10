@@ -113,7 +113,7 @@ The deciding point was lifetime: under B a transient search wipes out a lasting 
 - **Search** (`/`) — finds sessions within the scope, as today; clearing the search returns to the scoped list, never to the unscoped one.
 - **Arrangement** (`s`) — Flat, By Project or By Tag over whatever is in scope; switching views leaves the scope as it is.
 
-How the scope is set is Setting The Filter's; whether it survives a relaunch is Filter Persistence's.
+How the scope is set is Setting The Filter's; how long it lives is Filter Persistence's.
 
 Sibling check: command-line-filters (discovery brief) — whether `x --tag work` opens the picker narrowed is open there; a scope separate from the search box gives that flag something to set without pre-filling `/`, as `-f` does. No overlap.
 
@@ -284,7 +284,7 @@ Raised by the background review (review-001 F2): the picker's screens were writt
 
 - **A search that finds nothing inside the scope.** Filtered to `fabric`, the user types `/goose` to find goosemates, tagged personal. The screen reads `No sessions match "goose"` with "⌫ to widen the search · esc to clear the filter" (`grep -n 'noMatchesHint' internal/tui/filtering_no_matches.go` → `"⌫ to widen the search · esc to clear the filter"`, 2026-10-28). Under Filter Model, Esc clears the search only and lands back on the fabric sessions — goosemates still hidden, and the "find one session fast" job fails without a word.
 - **A scope that matches nothing.** The last session carrying an included tag is killed, or an exclusion removes everything. The list is empty and the empty state reads "No sessions yet" with "Press n to start one in the current directory · x for projects" (`grep -n 'emptySessions' internal/tui/empty_states.go` → `"No sessions yet"`, `"Press n to start one in the current directory · x for projects"`, 2026-10-28), while 33 sessions are running.
-- **The header count.** Nothing said whether the count beside "Sessions" counts the scoped list alone or also tells the user how many are hidden — after a relaunch, if the scope persists, it is the first clue that something is.
+- **The header count.** Nothing said whether the count beside "Sessions" counts the scoped list alone or also tells the user how many are hidden — on landing back in the picker after a detach, with the scope still set, it is the first clue that something is.
 
 ### Options Considered
 
@@ -336,12 +336,49 @@ Every one of these changes is made inside Portal by the user, so Portal knows wh
 
 - A renamed tag stays in the scope under its new name; a tag merged into another becomes that tag in the scope; a deleted tag leaves the scope.
 - A project re-pointed at a new folder stays in the scope; two projects merged become the one in the scope.
-- If the scope persists between launches (Filter Persistence), the saved scope is updated by the same change.
+- The scope is never saved between runs (Filter Persistence), so there is no saved copy to update.
 - A change Portal does not make — a hand edit of the projects file — is not followed: the stale pick stays listed in the panel with no sessions, as any pick already in the scope does, so it can be switched off.
 
 Tag Case already makes the scope compare tags ignoring case, so the casing rewrite on write changes nothing here.
 
 Sibling check: tagging — Tag Management's rename, merge and delete are the changes followed; consistent. Project-link — Renamed Or Moved Folders' re-pointing and merging are the project changes followed; consistent. No overlap.
+
+---
+
+## Filter Persistence
+
+### Context
+
+Discovery left open whether a filter persists between launches, as the grouping mode does. Raised alongside it by the background review (review-001 F4): a scope that persisted would meet the entry points that open the picker already searching — `x /term` searches every live session and attaches outright on exactly one match, `x -f` opens the picker pre-filtered — so the shell and the picker could disagree about what matched, and the planned `x --tag` would have to replace or stack on a saved scope.
+
+Portal's picker now outlives a single pick. Since the move from tmux to zmx, an attach runs inside Portal: detaching, the kill key (which returns on the kill prompt) and a take all reopen the picker in the same run, which goes on until it is quit (`grep -n 'func reopenPicker' cmd/open_attach.go` → `cmd/open_attach.go:221`, its doc comment: "opens the plain picker an attach's end asked for"; 2026-11-10). The reopened picker is plain: no search text, no command.
+
+### Options Considered
+
+**Saved between runs** — the scope is written beside the grouping mode and every `x` opens with it.
+- Cons: every fresh picker starts narrowed by a choice made in another window, hours earlier; a shell search would have to decide whether to look past it.
+
+**Lives for the run** — the scope survives every return to the picker within one run; a new `x` starts clean.
+- Pros: the working loop — filter to fabric, attach, work, detach, pick the next — keeps its scope; nothing is saved, so every new picker starts as it does today.
+
+**Clears on every return** — each reopened picker starts unscoped.
+- Cons: the scope would last one visit, the search's lifetime, and would have to be set again after every session.
+
+### Journey
+
+The first proposal was to save the scope, on the ground that the picker exits on every pick, so an unsaved scope would last one visit — the search's lifetime, which Filter Model had separated it from. That ground was the tmux-era picker and no longer holds: since the zmx move, detach returns to the picker in the same run. The user pushed back on saving — every picker should start clean, as now — and the corrected picture gave a middle path: the scope lives exactly as long as the run. The user agreed: having filtered, attached and then detached or killed, they expect to land back on the filter, one Esc away from clearing it as the search is today; a new picker in a new window starts with none. With nothing saved, the shell-search conflict dissolves: `x /term` and `x -f` start a fresh run, which has no scope.
+
+### Decision
+
+**The scope lives for the run and is never saved.** (resolves review-001 F4)
+
+- Every `x` — a new run, a shell search included — opens with no scope, as today.
+- Within a run, the scope survives every return to the picker: after a detach, after the kill key's return, after a take. The search text still clears on return, as today.
+- `x /term` and `x -f` search every live session as they do today; with nothing saved there is no scope for them to look past.
+
+The user expects one Esc to clear the scope, as one Esc clears the search today; how Esc divides between an active search and the scope is Keys And Footer's.
+
+Sibling check: command-line-filters (discovery brief) — whether `x --tag` opens the picker narrowed, and how it sits beside `-f` and `x /term`, is open there; with no saved scope, a scope set from the command line can only be that run's. The brief anticipates this; nothing owed. Open-with-forced-filter (specification) — the search form's matching and its direct attach on one match are untouched.
 
 ---
 

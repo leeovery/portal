@@ -164,7 +164,7 @@
               "parent": null
             },
             "filter-persistence": {
-              "status": "exploring",
+              "status": "decided",
               "parent": null
             },
             "projects-list-filtering": {
