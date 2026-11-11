@@ -67,10 +67,10 @@ The six built-in themes: Tokyo Night, Tokyo Night Day, Nord, Nord Wave, GitLab D
 You need macOS and **[zmx](https://github.com/neurosnap/zmx)** 1.0.1 or later. Portal talks to zmx through its socket protocol 1; 1.0.0 was the first release to speak it, but its macOS downloads don't resize a session. What Portal refuses is in [zmx](docs/how-it-works.md#zmx). Building from source needs **Go** 1.26+.
 
 ```bash
-brew install leeovery/tools/portal
+brew install neurosnap/tap/zmx leeovery/tools/portal
 ```
 
-Homebrew installs zmx with it, as a dependency. Or, with Go:
+zmx lives in its own tap, which Homebrew won't add or trust for a dependency, so the command names it beside Portal. Or, with Go:
 
 ```bash
 go install github.com/leeovery/portal@latest
