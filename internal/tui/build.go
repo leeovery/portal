@@ -73,7 +73,10 @@ type Deps struct {
 	Taken Taken
 	// SessionReader reads one session as the picker shows it: the taken
 	// modal reads its session through it every TakenRecheck while open, so it
-	// says so once the session ends. Nil, or a zero TakenRecheck, reads none.
+	// says so once the session ends, and an open of a session the listing
+	// found not answering reads it again before refusing it. Nil, or a zero
+	// TakenRecheck, has the modal read none, and nil refuses such an open on
+	// the listing's word.
 	SessionReader SessionReader
 	TakenRecheck  time.Duration
 
@@ -206,9 +209,8 @@ func Build(deps Deps) Model {
 	opts = append(opts, WithOpeningFlash(deps.Flash))
 	opts = append(opts, WithKillAsk(deps.KillAsk))
 	opts = append(opts, WithTaken(deps.Taken))
-	if deps.SessionReader != nil {
-		opts = append(opts, WithTakenWatch(deps.SessionReader, deps.TakenRecheck))
-	}
+	opts = append(opts, WithSessionReader(deps.SessionReader))
+	opts = append(opts, WithTakenWatch(deps.TakenRecheck))
 
 	// Capture seeds must apply as Options — before armAppearanceDetection and
 	// the first WindowSizeMsg resync reserve the band row.

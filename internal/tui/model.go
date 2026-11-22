@@ -242,6 +242,11 @@ type Model struct {
 	takenEnded    bool
 	// takenWatch reads the taken session again while its modal is open.
 	takenWatch takenWatch
+	// sessionReader reads one session afresh: the taken watch's reads, and
+	// an open of a session the listing found not answering. openReadGen
+	// numbers those opens, so only the last one asked acts.
+	sessionReader SessionReader
+	openReadGen   uint64
 	// initialTakenEnded lands the taken modal ended: a capture seed.
 	initialTakenEnded bool
 	// askedKiller kills on y at the prompt the kill key asked for.
@@ -1976,6 +1981,8 @@ func (m Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, nil
 	case SessionsMsg:
 		return m.applySessionsMsg(msg)
+	case openReadMsg:
+		return m.landOpenRead(msg)
 	case takenWatchTickMsg:
 		return m, m.readTaken(msg)
 	case takenReadMsg:
@@ -3382,23 +3389,6 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.openSession(si.Session.Name)
-}
-
-// openSession picks the session name to attach once the picker ends, refusing
-// one that does not answer. Every open of a listed session comes through here.
-func (m Model) openSession(name string) (tea.Model, tea.Cmd) {
-	if !m.answering(name) {
-		return m.flashError(fmt.Errorf("session %s is not answering; nothing was opened", name))
-	}
-	m.selected = name
-	return m, tea.Quit
-}
-
-// answering reports whether the listed session name answered its listing; one
-// not listed is taken as answering, there being nothing to say otherwise.
-func (m Model) answering(name string) bool {
-	i := slices.IndexFunc(m.sessions, func(s Session) bool { return s.Name == name })
-	return i < 0 || !m.sessions[i].NotAnswering
 }
 
 // Alt-screen is set declaratively here so page composers stay string builders.

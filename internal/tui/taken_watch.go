@@ -12,18 +12,11 @@ import (
 // session's read, so a screen left open for days costs next to nothing.
 const TakenRecheckEvery = 2 * time.Second
 
-// SessionReader reads one session as the picker's rows show it. found is
-// false for a session an attach of it would find gone; an error is a read
-// that could tell neither.
-type SessionReader interface {
-	ReadSession(name string) (s Session, found bool, err error)
-}
-
-// takenWatch reads the taken screen's session again while the screen, or its
-// watch, is open, so the screen says so once the session ends rather than
-// offering to take back a session that is gone.
+// takenWatch reads the taken screen's session again, through the picker's
+// SessionReader, while the screen, or its watch, is open, so the screen says
+// so once the session ends rather than offering to take back a session that
+// is gone.
 type takenWatch struct {
-	reader SessionReader
 	// every is how long it waits between reads; zero reads none.
 	every time.Duration
 	// gen numbers the watch, so a tick or a read an earlier one sent lands on
@@ -40,11 +33,11 @@ type takenReadMsg struct {
 	err     error
 }
 
-// WithTakenWatch has the taken screen read its session through reader every
-// on while it is open.
-func WithTakenWatch(reader SessionReader, every time.Duration) Option {
+// WithTakenWatch has the taken screen read its session every on while it is
+// open, through the reader WithSessionReader gives.
+func WithTakenWatch(every time.Duration) Option {
 	return func(m *Model) {
-		m.takenWatch.reader, m.takenWatch.every = reader, every
+		m.takenWatch.every = every
 	}
 }
 
@@ -56,14 +49,14 @@ func WithInitialTakenEnded(ended bool) Option {
 	}
 }
 
-// tick waits out the gap before the next read of the taken session; with no
-// reader or no gap, there is none.
-func (w takenWatch) tick() tea.Cmd {
-	if w.reader == nil || w.every <= 0 {
+// takenTick waits out the gap before the next read of the taken session;
+// with no reader or no gap, there is none.
+func (m Model) takenTick() tea.Cmd {
+	if m.sessionReader == nil || m.takenWatch.every <= 0 {
 		return nil
 	}
-	gen := w.gen
-	return tea.Tick(w.every, func(time.Time) tea.Msg { return takenWatchTickMsg{gen: gen} })
+	gen := m.takenWatch.gen
+	return tea.Tick(m.takenWatch.every, func(time.Time) tea.Msg { return takenWatchTickMsg{gen: gen} })
 }
 
 // startTakenWatch begins a watch of the session the taken screen just opened
@@ -73,7 +66,7 @@ func (m *Model) startTakenWatch() tea.Cmd {
 	if m.takenEnded {
 		return nil
 	}
-	return m.takenWatch.tick()
+	return m.takenTick()
 }
 
 // takenLive reports whether the taken screen, or its watch, is open on a
@@ -85,10 +78,10 @@ func (m Model) takenLive() bool {
 // readTaken reads the taken session again, off the update loop, once the
 // watch's tick comes.
 func (m Model) readTaken(msg takenWatchTickMsg) tea.Cmd {
-	if msg.gen != m.takenWatch.gen || !m.takenLive() || m.takenWatch.reader == nil {
+	if msg.gen != m.takenWatch.gen || !m.takenLive() || m.sessionReader == nil {
 		return nil
 	}
-	reader, name, gen := m.takenWatch.reader, m.takenSession.Name, msg.gen
+	reader, name, gen := m.sessionReader, m.takenSession.Name, msg.gen
 	return func() tea.Msg {
 		s, found, err := reader.ReadSession(name)
 		return takenReadMsg{gen: gen, session: s, found: found, err: err}
@@ -96,21 +89,26 @@ func (m Model) readTaken(msg takenWatchTickMsg) tea.Cmd {
 }
 
 // applyTakenRead takes in a read of the taken session: gone, the screen says
-// it has ended; found, it shows the session as read, its label included; a
-// read that could tell neither changes nothing. Until the session has ended,
-// the watch reads it again.
+// it has ended; found, the screen and the session's row both show it as read,
+// its label included, so a row the listing caught not answering (the take
+// that opened the screen detaches every client of the session, the listing's
+// probe among them) answers once the session does; a read that could tell
+// neither changes nothing. Until the session has ended, the watch reads it
+// again.
 func (m *Model) applyTakenRead(msg takenReadMsg) tea.Cmd {
 	if msg.gen != m.takenWatch.gen || !m.takenLive() {
 		return nil
 	}
+	var row tea.Cmd
 	switch {
 	case msg.err != nil:
 	case !msg.found:
 		return m.endTaken()
 	default:
 		m.takenSession = msg.session
+		row = m.takeInRead(msg.session)
 	}
-	return m.takenWatch.tick()
+	return tea.Batch(row, m.takenTick())
 }
 
 // reconcileTaken holds the taken screen to the listing just taken in: a
