@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-11-22
+
+🔧 Changed
+
+- Opening a session the picker listed as not answering now re-checks it first — a session that answers again opens instead of being refused on a stale listing.
+- A session's row in the picker updates once the taken screen's re-read finds it answering — rows caught not answering right after a take no longer stay marked that way.
+
+🐛 Fixed
+
+- Sessions caught not answering right after a take can now be opened and no longer stay marked as not answering.
+
 ## [1.1.1] - 2026-11-09
 
 ✨ Added
