@@ -2,7 +2,7 @@
 
 **A source guard is a test that reads the module's own source and fails where a rule breaks.**
 
-Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · keeping the helpers out of the binaries.
+Contents: a linter first · the shape of a guard · the helpers · guard 1, packages named for a job · guard 2, values worded by their owner · guard 3, a field read only through its owner · guard 4, table rows run under `t.Run` · guard 5, what each build-tag set links · guard 6, starting the binary runs nothing · the detection file · keeping the helpers out of the binaries.
 
 ## A linter first
 
@@ -14,6 +14,8 @@ A linter setting is cheaper than a guard, so reach for one where it can say the 
 | a package mustn't call a function or use a variable | forbidigo, with an exclusion for the one place allowed |
 
 A guard is for what no linter can say: a package's name, which function a call sits in, what a format string holds, what a name refers to, or a rule across the module's files.
+
+A rule that ties an import to the one function or file that may use it, such as "only `start` names `os.Stdin`", stays a guard test whole, even where depguard could hold the import half. Split across a linter and a test, one rule has two homes, and the test is the half that can be seen to fail.
 
 ## The shape of a guard
 
@@ -384,7 +386,7 @@ func isDueAt(field types.Object) bool {
 
 ## Guard 4: table rows run under `t.Run`
 
-Every row of a table runs as a subtest, so a failing row names itself and runs alone with `-run` ([go-testing](../../go-testing/SKILL.md)). Syntax alone holds it: a `range` over a variable named `tests` or `cases`, in a test file, whose body calls no `Run`.
+Every row of a table runs as a subtest, so a failing row names itself and runs alone with `-run` ([go-testing](../../go-testing/SKILL.md)). Syntax alone holds it: a `range` over a variable named `tests` or `cases`, in a test file's function or package-level function literal, whose body calls `Run` on a `*testing.T` or `*testing.B` parameter (of that function, or of a function literal in it), or calls a runner of its package's own: a function of its test files, not itself a `Test`, `Benchmark` or `Fuzz` function, that takes a `*testing.T` or `*testing.B` and calls `Run` on it (`forEachEra(t, tt.name, func(t *testing.T, e era) {…})`).
 
 ```go
 // internal/guard/rows_test.go
@@ -393,6 +395,7 @@ package guard_test
 
 import (
 	"go/ast"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -411,7 +414,14 @@ func TestTheRowGuardFindsWhatItGuardsAgainst(t *testing.T) {
 	guard.Write(t, root, "go.mod", "module example.com/fixture\n")
 	guard.Write(t, root, "order/order_test.go", `package order
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
+
+type era string
+
+var shared *testing.T
 
 func TestTotal(t *testing.T) {
 	tests := []struct{ in, want int }{{1, 1}}
@@ -428,31 +438,188 @@ func TestParse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {})
 	}
 }
+
+func TestLoad(t *testing.T) {
+	tests := []struct{ name string }{{"empty"}}
+	for _, tt := range tests {
+		forEachEra(t, tt.name, func(t *testing.T, e era) {})
+	}
+}
+
+func TestSum(t *testing.T) {
+	tests := []struct{ name string }{{"empty"}}
+	for _, tt := range tests {
+		forAll[int](t, tt.name, []int{1, 2}, func(t *testing.T, v int) {})
+	}
+}
+
+func TestHelp(t *testing.T) {
+	tests := []struct{ args []string }{{[]string{"help"}}}
+	for _, tt := range tests {
+		shop(t, tt.args...)
+	}
+}
+
+func TestShared(t *testing.T) {
+	tests := []struct{ name string }{{"empty"}}
+	for _, tt := range tests {
+		viaShared(tt.name, func(t *testing.T) {})
+	}
+}
+
+func TestExec(t *testing.T) {
+	tests := []struct{ args []string }{{[]string{"help"}}}
+	for _, tt := range tests {
+		if err := exec.Command("shop", tt.args...).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestEntry(t *testing.T) {
+	tests := []struct{ args []string }{{[]string{"help"}}}
+	for _, tt := range tests {
+		if err := cli.Run(tt.args); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestFake(t *testing.T) {
+	tests := []struct{ name string }{{"git"}}
+	for _, tt := range tests {
+		f := &fakeRunner{}
+		if err := f.Run(tt.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// forEachEra runs a row as a subtest named for it, each era a subtest inside.
+func forEachEra(t *testing.T, name string, row func(t *testing.T, e era)) {
+	t.Run(name, func(t *testing.T) {
+		for _, e := range []era{"old", "new"} {
+			t.Run(string(e), func(t *testing.T) { row(t, e) })
+		}
+	})
+}
+
+// forAll runs a row as a subtest named for it, each value a subtest inside.
+func forAll[V any](t *testing.T, name string, vs []V, row func(t *testing.T, v V)) {
+	t.Run(name, func(t *testing.T) {
+		for _, v := range vs {
+			t.Run("", func(t *testing.T) { row(t, v) })
+		}
+	})
+}
+
+// shop runs the binary: its Run is exec's, so it runs no subtest.
+func shop(t *testing.T, args ...string) {
+	if err := exec.Command("shop", args...).Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// viaShared calls Run on a *testing.T it didn't take, so it's no runner.
+func viaShared(name string, row func(t *testing.T)) {
+	shared.Run(name, row)
+}
+
+// app is a command line's entry point, as a CLI's own package has one.
+type app struct{}
+
+func (app) Run(args []string) error { return nil }
+
+var cli app
+
+// fakeRunner stands in for the program a test runs.
+type fakeRunner struct{ ran []string }
+
+func (f *fakeRunner) Run(name string) error {
+	f.ran = append(f.ran, name)
+	return nil
+}
+
+// checkTotals is a test's body in a package-level function literal.
+var checkTotals = func(t *testing.T) {
+	tests := []struct{ in, want int }{{1, 1}}
+	for _, tt := range tests {
+		if tt.in != tt.want {
+			t.Errorf("Total(%d) = %d, want %d", tt.in, tt.in, tt.want)
+		}
+	}
+}
 `)
-	want := []string{"order/order_test.go:7: a table's rows run outside t.Run: run each as t.Run(tt.name, …)"}
+	want := []string{
+		"order/order_test.go:14: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:44: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:51: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:58: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:67: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:76: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+		"order/order_test.go:132: a table's rows run outside t.Run: run each as t.Run(tt.name, …)",
+	}
 	if got := rowsOutsideRun(t, root); !slices.Equal(got, want) {
 		t.Errorf("rowsOutsideRun = %q, want %q", got, want)
 	}
 }
 
 // rowsOutsideRun are the loops in the test files under root that range over a
-// table, a variable named tests or cases, without calling Run in their body.
+// table, a variable named tests or cases, running neither a subtest of their
+// own nor one of their package's runners in their body. Each function is read
+// with its own testing parameters: a FuncDecl, or a function literal outside
+// one, as a package-level var's.
 func rowsOutsideRun(t *testing.T, root string) []string {
 	t.Helper()
-	var problems []string
+	var testFiles []guard.File
 	for _, f := range guard.Files(t, root) {
-		if !strings.HasSuffix(f.Path, "_test.go") {
-			continue
+		if strings.HasSuffix(f.Path, "_test.go") {
+			testFiles = append(testFiles, f)
 		}
-		ast.Inspect(f.AST, func(n ast.Node) bool {
-			loop, ok := n.(*ast.RangeStmt)
-			if ok && isTable(loop.X) && !callsRun(loop.Body) {
-				problems = append(problems, f.At(loop.Pos())+": a table's rows run outside t.Run: run each as t.Run(tt.name, …)")
+	}
+	runs := runners(testFiles)
+	var problems []string
+	for _, f := range testFiles {
+		for _, d := range f.AST.Decls {
+			for _, fn := range functionsIn(d) {
+				tees := testingParamsIn(fn)
+				ast.Inspect(fn.body, func(n ast.Node) bool {
+					loop, ok := n.(*ast.RangeStmt)
+					if ok && isTable(loop.X) && !runsSubtests(loop.Body, tees, runs[packageOf(f)]) {
+						problems = append(problems, f.At(loop.Pos())+": a table's rows run outside t.Run: run each as t.Run(tt.name, …)")
+					}
+					return true
+				})
 			}
-			return true
-		})
+		}
 	}
 	return problems
+}
+
+// function is a function's type and body, a FuncDecl's or a literal's.
+type function struct {
+	typ  *ast.FuncType
+	body *ast.BlockStmt
+}
+
+// functionsIn are d's functions: a FuncDecl with a body, else each outermost
+// function literal in d, whose own literals are read inside it.
+func functionsIn(d ast.Decl) []function {
+	if fn, ok := d.(*ast.FuncDecl); ok {
+		if fn.Body == nil {
+			return nil
+		}
+		return []function{{fn.Type, fn.Body}}
+	}
+	var fns []function
+	ast.Inspect(d, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if ok {
+			fns = append(fns, function{lit.Type, lit.Body})
+		}
+		return !ok
+	})
+	return fns
 }
 
 func isTable(x ast.Expr) bool {
@@ -460,12 +627,108 @@ func isTable(x ast.Expr) bool {
 	return ok && (id.Name == "tests" || id.Name == "cases")
 }
 
-// callsRun reports whether body calls a Run method: t.Run, or b.Run in a benchmark.
-func callsRun(body *ast.BlockStmt) bool {
+// runsSubtests reports whether body calls Run on one of the testing
+// parameters named, or calls one of the runners named.
+func runsSubtests(body *ast.BlockStmt, tees, runners []string) bool {
+	return slices.ContainsFunc(tees, func(name string) bool { return callsRunOn(body, name) }) ||
+		callsRunner(body, runners)
+}
+
+// packageOf is f's package, by its directory and its name, so a package
+// and its _test package in one directory don't lend each other runners.
+func packageOf(f guard.File) string {
+	return path.Dir(f.Path) + ":" + f.AST.Name.Name
+}
+
+// runners are, by package, the functions of the test files that take a
+// *testing.T or *testing.B and call Run on it: a row handed to one runs as a
+// subtest. A Test, Benchmark or Fuzz function is none.
+func runners(testFiles []guard.File) map[string][]string {
+	found := map[string][]string{}
+	for _, f := range testFiles {
+		for _, d := range f.AST.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil || isTestFunc(fn.Name.Name) {
+				continue
+			}
+			if slices.ContainsFunc(testingParams(fn.Type), func(name string) bool { return callsRunOn(fn.Body, name) }) {
+				found[packageOf(f)] = append(found[packageOf(f)], fn.Name.Name)
+			}
+		}
+	}
+	return found
+}
+
+func isTestFunc(name string) bool {
+	return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Fuzz")
+}
+
+// testingParamsIn are the names of the *testing.T and *testing.B parameters
+// of fn and of every function literal in it.
+func testingParamsIn(fn function) []string {
+	names := testingParams(fn.typ)
+	ast.Inspect(fn.body, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok {
+			names = append(names, testingParams(lit.Type)...)
+		}
+		return true
+	})
+	return names
+}
+
+// testingParams are the names of a function's *testing.T and *testing.B
+// parameters.
+func testingParams(fn *ast.FuncType) []string {
+	var names []string
+	for _, field := range fn.Params.List {
+		star, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := star.X.(*ast.SelectorExpr)
+		if !ok || (sel.Sel.Name != "T" && sel.Sel.Name != "B") {
+			continue
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "testing" {
+			continue
+		}
+		for _, n := range field.Names {
+			names = append(names, n.Name)
+		}
+	}
+	return names
+}
+
+// callsRunOn reports whether body calls Run on the variable named.
+func callsRunOn(body *ast.BlockStmt, name string) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok {
 			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
+				if id, ok := sel.X.(*ast.Ident); ok && id.Name == name {
+					found = true
+				}
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// callsRunner reports whether body calls one of the runners named, a
+// generic one instantiated explicitly (forAll[int](…)) among them.
+func callsRunner(body *ast.BlockStmt, names []string) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			fun := call.Fun
+			switch x := fun.(type) {
+			case *ast.IndexExpr:
+				fun = x.X
+			case *ast.IndexListExpr:
+				fun = x.X
+			}
+			if id, ok := fun.(*ast.Ident); ok && slices.Contains(names, id.Name) {
 				found = true
 			}
 		}
@@ -475,8 +738,120 @@ func callsRun(body *ast.BlockStmt) bool {
 }
 ```
 
-- It goes by the variable's name, so a table named otherwise passes unseen. Name every table `tests`, or `cases` beside another, and the guard reads them all.
-- It looks for any `X.Run` call in the loop's body, so `b.Run` in a benchmark passes as `t.Run` does. A loop that calls `t.Run` for some rows and not others passes too: review catches that, and rule 3 of go-testing forbids the branch.
+- It goes by the variable's name, so a table named otherwise passes unseen. Name every test's own table `tests`, or `cases` beside another, and the guard reads them all. A set of variants several tests share, at the package's level (`eras`, `modes`), keeps a name of its own: it's no test's table, and its rows run inside each test's.
+- A `Run` counts only on a name the function, or any function literal in it, takes as a `*testing.T` or `*testing.B`, so a row that runs a binary (`exec.Command(…).Run()`), a CLI's entry (`cli.Run(…)`) or a fake runner (`f.Run(…)`) inline is flagged, and `b.Run` in a benchmark passes as `t.Run` does. It reads names alone, anywhere in the loop body, nested literals included: a fake or a variable of such a name passes, whether or not it shadows one, as does a literal holding `t.Run` that is stored and never run; review catches those.
+- A runner is read by its plain name within its package, a generic one included, called bare or instantiated (`forAll[int](…)`). A runner it can't read by name is flagged, which fails loudly: a method or a method value, a closure in a variable, a runner exported from `export_test.go` to the `_test` package, one that wraps another; unless the row body itself calls `Run` on such a name, as a literal handed to it that runs `t.Run` inside does. A local closure bearing a runner's name passes; review catches that.
+- It can't tell whether a runner names its row: one that runs `t.Run("old", …)` alone passes though its rows can't run alone. Review checks that a runner takes the row's name, as `forEachEra` does. A loop that calls `t.Run` for some rows and not others passes too: review catches that, and rule 3 of go-testing forbids the branch.
+
+## Guard 5: what each build-tag set links
+
+A module that ships a second build behind a tag (`//go:build demo`, a demo with a world of its own) holds which packages each build links. Syntax can't say it: an import three packages away pulls the demo into the shipped binary. `go list -deps` can:
+
+```go
+// internal/guard/builds_test.go
+
+package guard_test
+
+import (
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
+
+	"example.com/shop/internal/guard"
+)
+
+// demoWorld is the demo's made-up shop, which only a -tags demo build links.
+const demoWorld = "example.com/shop/internal/demoworld"
+
+func TestTheShippedBinaryLinksNoDemo(t *testing.T) {
+	if slices.Contains(linked(t, ""), demoWorld) {
+		t.Errorf("cmd/shop links %s: only the -tags demo build may", demoWorld)
+	}
+}
+
+func TestTheDemoBuildLinksItsWorld(t *testing.T) {
+	if !slices.Contains(linked(t, "demo"), demoWorld) {
+		t.Errorf("cmd/shop with -tags demo doesn't link %s, so the guard above proves nothing", demoWorld)
+	}
+}
+
+// linked lists every package cmd/shop links when built with tags.
+func linked(t *testing.T, tags string) []string {
+	t.Helper()
+	args := []string{"list", "-deps", "-tags", tags, "./cmd/shop"}
+	cmd := exec.CommandContext(t.Context(), "go", args...)
+	cmd.Dir = guard.ModuleRoot(t)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.Fields(string(out))
+}
+```
+
+- **Each set is checked both ways:** the shipped build lacks the package, and the tagged one has it, so a renamed package can't leave the first test passing over nothing.
+- **A tag for tests alone** (`integration`) needs no guard: it builds no binary.
+- Like guard 3, it needs the `go` command when tests run.
+
+## Guard 6: starting the binary runs nothing
+
+The runner seam keeps every process the program starts in one place ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md)), but a dependency's `init` runs before `main` and outside it: a terminal-colour library that asks `tmux` what it supports starts a process on every run. Only running the built binary shows it:
+
+```go
+//go:build unix
+
+// cmd/shop/startup_test.go
+
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+// started are the binaries the tool, or a library it links, could start.
+var started = []string{"git", "gh", "tmux", "tput", "stty", "infocmp"}
+
+func TestStartingTheBinaryRunsNothing(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "shop")
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	fakes, ran := filepath.Join(dir, "bin"), filepath.Join(dir, "ran")
+	if err := os.Mkdir(fakes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range started {
+		script := "#!/bin/sh\necho \"$0 $*\" >> " + ran + "\n"
+		if err := os.WriteFile(filepath.Join(fakes, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"--version"}, {"help", "cancel"}} {
+		cmd := exec.CommandContext(t.Context(), bin, args...)
+		cmd.Env = append(os.Environ(), "PATH="+fakes+string(os.PathListSeparator)+os.Getenv("PATH"), "TMUX=/tmp/tmux-0/default")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("shop %v: %v\n%s", args, err, out)
+		}
+	}
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Errorf("starting shop ran:\n%s", b)
+	}
+}
+```
+
+- **Each fake records being started** and does nothing else; a run that started none leaves no record.
+- **The environment invites the start:** `TMUX` set, so a library that asks tmux only inside it is caught.
+- **It can't see a start made only at a terminal.** `CombinedOutput` gives the binary pipes, and most detection runs only where stdout is a terminal. A guard over a terminal tool also runs it under a pseudo-terminal, from a package such as `github.com/creack/pty`, or with `TERM` set and the tool's own way to force its styled mode; without one, note the gap beside the test.
+- **Run every build-tag set the module ships,** `go build -tags demo` too.
+
+## The detection file
+
+A terminal program asks once, at startup, whether its streams are terminals and what `TERM`, `NO_COLOR` and `CI` say ([go-concurrency's terminals.md](../../go-concurrency/references/terminals.md)). `run` hands that file the `*os.File` streams and `getenv`, as it hands everything else, so it names nothing forbidigo bans and needs no exclusion. A guard holds what no linter can: that it alone imports `golang.org/x/term` and asks a stream whether it is a terminal.
 
 ## Keeping the helpers out of the binaries
 

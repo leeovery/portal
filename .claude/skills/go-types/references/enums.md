@@ -2,7 +2,7 @@
 
 **A fixed set is a defined type and its constants. What the set means lives in methods on that type, so every caller asks it the same way.**
 
-Contents: string or iota · the zero value · the string shape · the int shape · behaviour · transitions · decoding · checklist.
+Contents: string or iota · the zero value · naming the members · the string shape · the int shape · behaviour · transitions · decoding · one type per vocabulary · checklist.
 
 ## String or iota
 
@@ -22,6 +22,23 @@ Zero is whatever an unset field holds, so choose what it means:
 - **For a string enum, the empty string is the unknown.** No constant names it, and `ParseX` refuses it.
 
 Never let zero be an arbitrary member, such as `StatusPending = iota`: every order nobody set reads as pending.
+
+## Naming the members
+
+Every constant starts with its type's full name: `StatusPaid`, `PaymentStatusDeclined`, `RunStatusQueued`. Where the member repeats a word of the name, the stutter is accepted:
+
+```go
+// PushStatus is how a push of one ref ended.
+type PushStatus string
+
+const (
+	PushStatusPushed   PushStatus = "pushed"
+	PushStatusRejected PushStatus = "rejected"
+)
+```
+
+- **The full name, never a shortened one.** It never collides, since two types can't share a name; it always says its set, even once a sibling set (`RefundOutcome` beside `RefundStatus`) shares its stem; and it asks no judgement of which words to drop.
+- **Never no prefix:** a bare `Pushed` reads as a value of anything, and the next set in the package takes the name.
 
 ## The string shape
 
@@ -172,13 +189,79 @@ func (s *Status) UnmarshalText(b []byte) error {
 
 A missing key never reaches `UnmarshalText`, so the field stays `""`. Whatever needs the status still checks for the unknown.
 
+**A vocabulary an outside system owns** is the exception: a CI's run statuses, a payment provider's states, a code host's review decisions. Refusing a value you don't know breaks the tool the day the vendor adds one, so it decodes as it comes, and each reading decides the unknown in the line after its `switch`, with its fallback stated:
+
+```go
+// RunStatus is a CI run's status, in the CI's own words. It isn't refused when
+// unknown: the CI adds statuses, and each method says how it reads one.
+type RunStatus string
+
+// The statuses the CI documents today.
+const (
+	RunStatusQueued     RunStatus = "queued"
+	RunStatusInProgress RunStatus = "in_progress"
+	RunStatusCompleted  RunStatus = "completed"
+)
+
+// Done reports whether the run has ended. A status it doesn't know reads as not
+// ended, so a caller waits rather than reading a result that isn't there.
+func (s RunStatus) Done() bool {
+	switch s {
+	case RunStatusCompleted:
+		return true
+	case RunStatusQueued, RunStatusInProgress:
+		return false
+	}
+	return false
+}
+```
+
+- **Each reading picks its own fallback,** the one that fails safe for its question: "not ended" for `Done`, "failed" for a reading of whether it passed.
+- **There's no `ParseRunStatus`.** A mapper passes the value on; exhaustive still checks each switch names every documented member.
+
 An `iota` enum that must be written out gets `MarshalText` and `UnmarshalText` writing its name, never its number. Usually that's the sign it should have been a string.
+
+## One type per vocabulary
+
+exhaustive makes every switch on a type name every member. A type that holds two vocabularies, one `Outcome` with each command's outcomes as its constants, makes the refund's text say what it does for a shipment's outcome too. So each vocabulary is a type of its own:
+
+```go
+// RefundOutcome is what shop refund did.
+type RefundOutcome string
+
+const (
+	RefundOutcomeIssued   RefundOutcome = "issued"
+	RefundOutcomeDeclined RefundOutcome = "declined"
+)
+
+// RefundResult is what shop refund shows.
+type RefundResult struct {
+	Outcome RefundOutcome `json:"outcome"`
+}
+```
+
+Some fields carry several vocabularies: an event's `kind`, an open set that other packages add to, switched over whole by none. Such a field is typed by none of them. It's a type with no constants of its own, and each package converts its own vocabulary into it:
+
+```go
+// Kind is what an event records. It has no constants: each package's events
+// are a type of their own, converted in, so no switch names every package's.
+type Kind string
+
+e := Event{Kind: Kind(refund.EventKindIssued)}
+```
+
+A `Kind` has no `ParseKind`: one listing every package's members is the shared type this section rules out. It decodes as it comes, and its reader converts it back into the vocabulary it expects and parses it there, refusing what isn't its own:
+
+```go
+k, err := refund.ParseEventKind(string(e.Kind))
+```
 
 ## Checklist
 
 - [ ] String for anything stored or sent; `iota` only for memory.
 - [ ] Zero is the real default or an explicit unknown.
-- [ ] Constants prefixed with the type's name.
-- [ ] `ParseX`, a function listing the members, and `String` for an int.
+- [ ] Constants prefixed with the type's full name, the stutter accepted.
+- [ ] One type per vocabulary; a field holding several is a type with no constants.
+- [ ] `ParseX`, a function listing the members, and `String` for an int; a type with no constants has none, its readers parsing in their own vocabulary.
 - [ ] Behaviour as methods whose `switch` names every member.
-- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`.
+- [ ] Values from outside pass through `ParseX`, in the mapper or `UnmarshalText`, a type with no constants converted into its reader's vocabulary first; a vocabulary an outside system owns decodes as it comes, each method's fallback stated.

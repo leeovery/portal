@@ -59,6 +59,64 @@ The deadline covers reading the body too. `json` is `encoding/json/v2` ([Go 1.27
 
 noctx flags `http.Get`, `http.NewRequest`, `net.Dial`, `exec.Command` and the other calls that take no context. Use `NewRequestWithContext`, a `net.Dialer`'s `DialContext`, and `exec.CommandContext`.
 
+Writes are decided by whether the other side can de-duplicate them:
+
+- **A write that carries an idempotency key keeps its deadline,** anywhere, and may be retried: a second attempt after an unknown outcome lands once. The gateway's refund is one ([go-interfaces' services.md](../../go-interfaces/references/services.md)).
+- **A write idempotent in itself keeps its deadline,** and may be retried, as a read does. Closing a pull request is one: whether a close that timed out landed, a later read of the pull request tells.
+- **A write the other side can't de-duplicate,** a push, a workflow dispatch or a comment posted, whose outcome a timeout would leave unknown, takes no timeout of its own in a program a person runs and can interrupt: the interrupt bounds it, so a run that ends knows what it did ([go-actions' writes.md](../../go-actions/references/writes.md)).
+- **A server or a worker** has no one to interrupt it, so it makes each such write keyed or idempotent in itself, and keeps the deadline.
+
+An adapter whose calls include a write the other side can't de-duplicate, all through one function ([go-errors' shelling-out.md](../../go-errors/references/shelling-out.md#an-adapter-per-binary)), keeps both rules by taking each call's kind as a parameter, never fixing one bound inside it: a read, a keyed write or a write idempotent in itself gets its deadline, and the write the other side can't de-duplicate gets none, so the interrupt bounds it. The kind is an enum whose zero is refused, never a duration whose zero means "no deadline", so a call that forgets its kind fails at once rather than running unbounded. An adapter that only reads keeps one deadline for every call, as the `Client` above does.
+
+```go
+// callKind is how a call to the deploy CLI is bounded. The zero value is
+// refused, so every call names its kind.
+type callKind int
+
+const (
+	callKindUnknown   callKind = iota
+	callKindBounded            // a read, a keyed write, or a write idempotent in itself: bounded by callBound
+	callKindUnbounded          // a write that can't be de-duplicated: bounded by the interrupt alone
+)
+
+const callBound = 30 * time.Second
+
+// call is the one runner of the deploy CLI.
+func (c *Client) call(ctx context.Context, kind callKind, args ...string) ([]byte, error) {
+	switch kind {
+	case callKindBounded:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, callBound)
+		defer cancel()
+	case callKindUnbounded:
+		// No deadline of its own: a timeout would leave unknown whether it
+		// started. ctx ends on the person's interrupt.
+	case callKindUnknown:
+		return nil, fmt.Errorf("deploy %s: no call kind", strings.Join(args, " "))
+	default:
+		return nil, fmt.Errorf("deploy %s: call kind %d", strings.Join(args, " "), kind)
+	}
+	res, err := c.run.Run(ctx, runner.Command{Name: "deploy", Args: args})
+	if err != nil {
+		return nil, failed(res, err)
+	}
+	return res.Stdout, nil
+}
+
+// Releases lists an app's releases: a read, so it gives up after callBound.
+func (c *Client) Releases(ctx context.Context, app string) ([]byte, error) {
+	return c.call(ctx, callKindBounded, "release", "list", app)
+}
+
+// StartRelease dispatches the release workflow, which takes no idempotency
+// key: a second dispatch starts a second release.
+func (c *Client) StartRelease(ctx context.Context, app, version string) ([]byte, error) {
+	return c.call(ctx, callKindUnbounded, "release", "start", app, version)
+}
+```
+
+Each method names its kind where it calls, so a new write is a choice made at the call, never a bound it inherits. A money write such as a payout is not this kind: a payment provider takes an idempotency key, so it keeps its deadline, as the refund does.
+
 ## Work that outlives its caller
 
 Some work must finish even when the caller has gone: an audit record, a rollback, a cleanup after cancellation. Run it on `context.WithoutCancel(ctx)`, which keeps the caller's values and drops its cancellation and deadline, then give it a deadline of its own.
@@ -117,6 +175,7 @@ func serveUntilSignal(ctx context.Context, srv *http.Server, p *Poller) error {
 - Calling `stop` gives the signals back their default, so a second Ctrl-C during a slow shutdown kills the process instead of being ignored.
 - Since [Go 1.26](https://go.dev/doc/go1.26), `context.Cause(ctx)` on the context `NotifyContext` returns names the signal that ended it. Log it as the reason for stopping.
 - `serve` is the shutdown in [goroutines.md](goroutines.md).
+- Code that changes the terminal's mode watches the signals itself while the mode is changed, to put the terminal back before the process ends ([terminals.md](terminals.md)).
 
 ## The one place a context is kept
 
