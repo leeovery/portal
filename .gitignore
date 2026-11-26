@@ -53,3 +53,4 @@ testdata/vhs/*.gif
 
 # The pinned zmx build (scripts/zmx-build).
 /.cache/
+.ledger/
