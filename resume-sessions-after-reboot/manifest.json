@@ -1,0 +1,22 @@
+{
+  "name": "resume-sessions-after-reboot",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-03-25",
+  "description": "Generic restart command registry for resuming processes in tmux sessions after system reboot",
+  "phases": {
+    "discussion": {
+      "items": {
+        "resume-sessions-after-reboot": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-03-28",
+  "spec": {
+    "joined": [
+      "resume-sessions-after-reboot"
+    ]
+  }
+}

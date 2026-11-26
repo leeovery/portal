@@ -1,0 +1,22 @@
+{
+  "name": "tui-session-picker",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-02-27",
+  "description": "tui-session-picker work unit",
+  "phases": {
+    "discussion": {
+      "items": {
+        "tui-session-picker": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-03-17",
+  "spec": {
+    "joined": [
+      "tui-session-picker"
+    ]
+  }
+}

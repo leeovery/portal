@@ -1,0 +1,60 @@
+{
+  "name": "tagging-and-filtering",
+  "work_type": "epic",
+  "status": "in-progress",
+  "created": "2026-10-08",
+  "description": "Improve tagging, filtering and the related display surfaces in the picker — tag suggestions while typing, bulk tagging, tag management, filtering the session list by tags and by project, and settling what project a session belongs to.",
+  "phases": {
+    "discovery": {
+      "items": {
+        "project-link": {
+          "source": "discovery",
+          "summary": "Every session reliably linked to the right project — worktrees, unregistered folders, renamed folders, nested projects and folder-name case",
+          "description": "Settles which project a session belongs to, since tags and project filters are only as good as that link. Discovery decided a session's project is the repository it was started in and a worktree belongs to the repository it was made from, decided while the folder still exists; still open are whether a folder with no project is saved as one, linking an Unknown session to a project from the picker, what happens to a project and its tags when its folder is renamed or moved (housekeeping silently drops both today), whether a project takes in the projects nested inside it (Folio's api and sdk, the ~/code project), and the folder-name case mismatch on a case-insensitive Mac. Builds on the separate reboot bugfix that restores the link after a reboot.",
+          "order": 1
+        },
+        "tagging": {
+          "source": "discovery",
+          "summary": "Getting tags onto projects with less effort — suggestions while typing, bulk tagging, tag management and tagging from the sessions list",
+          "description": "Covers every way tags are added, changed and removed: suggestions drawn from tags already in use while typing, bulk tagging across several marked projects, managing tags in one place (rename, delete, merge, how many projects carry each), and tagging a session's project without leaving the sessions list. Discovery decided tags stay on projects only, with sessions tagged through their project; open are whether a new project inherits the tags of the project whose folder encloses it (32 of 34 nested projects already match their parent), how case-sensitive tags behave once suggestions and merging put near-duplicates side by side, and which key tagging takes now that t opens the theme panel.",
+          "order": 2
+        },
+        "filtering": {
+          "source": "discovery",
+          "summary": "Narrowing the picker by tag and by project, with the active filter visible on screen",
+          "description": "Narrowing the sessions list to one or more tags (matching any or all), to a project, or excluding a tag, keeping group headings while filtered, and showing the active filter as chips in the header. Open are how these filters sit beside the existing text filter and the grouping cycle, whether a filter persists between launches, whether the projects list filters too, and whether typing a tag name in the text filter matches its sessions. Filter chips add a row to the same vertical space where the keymap footer already disappears on short terminals.",
+          "order": 3
+        },
+        "command-line-filters": {
+          "source": "discovery",
+          "summary": "Opening sessions by tag or project from the command line, e.g. x --tag work",
+          "description": "A command-line way to reach tagged or project sessions, deferred when tagging first shipped. Open are whether it opens the picker already narrowed or opens every matching session at once in its own window, how it sits beside the existing -f filter flag and the x /term search, and shell completion for tag names.",
+          "order": 4
+        },
+        "missing-projects": {
+          "source": "gap-analysis",
+          "summary": "Seeing a project whose folder has gone, and pointing it at its new folder from the projects page",
+          "description": "Project-link decided that a tagged project whose folder disappears — renamed, moved or deleted — is kept and marked missing on the projects page, where the user points it at a new folder or deletes it; re-pointing carries its tags and sessions, merges it with a project already at that folder, renames it when its name still follows the old folder, and rewrites the recorded folder of every session started under it. Tagging then counts missing projects toward their tags and marks them in a tag's checklist. Neither discussion decided the surface the repair happens on: Portal has no way today to enter or choose a folder — projects are only ever saved by starting a session — so how the user gives the new folder is open (typing a path, or picking from the folders the project's own sessions now sit in, the way the link chooser already offers a session pane's current folder after a rename). Also open: which key re-points on the projects page (tagging's key decisions cover `t`, `c` and `l` only), how a missing project is marked there and wherever else projects are listed (the link chooser reuses the projects list), what Enter — start a session — and edit do on a project whose folder is gone, and whether merging into a project already at the chosen folder asks first, as renaming one tag into another does.\n\nWithout this, the keep-tagged rule protects the user's tags from silent deletion but leaves no way to get them back onto the renamed folder, so the goosemates case discovery started from would still end with sessions under a missing project and nothing to do but delete it. The surface needs designing in Paper alongside tagging's new surfaces, under the same no-colour rule.",
+          "order": 5
+        }
+      },
+      "approved_at": "2026-10-08T00:00:00.000Z"
+    },
+    "discussion": {
+      "items": {
+        "project-link": {
+          "status": "in-progress"
+        },
+        "command-line-filters": {
+          "status": "unstarted"
+        },
+        "tagging": {
+          "status": "completed"
+        },
+        "filtering": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}

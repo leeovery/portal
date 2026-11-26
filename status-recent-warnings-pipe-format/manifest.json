@@ -1,0 +1,29 @@
+{
+  "name": "status-recent-warnings-pipe-format",
+  "work_type": "bugfix",
+  "status": "completed",
+  "created": "2026-06-08",
+  "description": "portal state status reports zero recent warnings because its log scanner still parses the legacy pipe-delimited format while logs are now written in slog text format",
+  "phases": {
+    "investigation": {
+      "items": {
+        "status-recent-warnings-pipe-format": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-06-02-status-recent-warnings-pipe-format.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-06-08T19:21:40Z"
+    }
+  ],
+  "completed_at": "2026-06-09",
+  "spec": {
+    "joined": [
+      "status-recent-warnings-pipe-format"
+    ]
+  }
+}

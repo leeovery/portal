@@ -1,0 +1,22 @@
+{
+  "name": "daemon-merge-reintroduces-dead-sessions",
+  "work_type": "bugfix",
+  "status": "completed",
+  "created": "2026-05-08",
+  "description": "Daemon's mergeSkippedPanes appends sessions from prior index without checking they still exist in tmux, causing killed sessions to be re-committed and resurrected on next bootstrap",
+  "phases": {
+    "investigation": {
+      "items": {
+        "daemon-merge-reintroduces-dead-sessions": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-05-09",
+  "spec": {
+    "joined": [
+      "daemon-merge-reintroduces-dead-sessions"
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "v1",
+  "work_type": "epic",
+  "status": "completed",
+  "created": "2026-03-17",
+  "description": "v1 work unit",
+  "phases": {
+    "discussion": {
+      "items": {
+        "cx-design": {
+          "status": "completed"
+        },
+        "fzf-output-mode": {
+          "status": "completed"
+        },
+        "git-root-and-completions": {
+          "status": "completed"
+        },
+        "session-launch-command": {
+          "status": "completed"
+        },
+        "x-xctl-split": {
+          "status": "completed"
+        },
+        "zellij-multi-directory": {
+          "status": "completed"
+        },
+        "zellij-to-tmux-migration": {
+          "status": "completed"
+        }
+      }
+    },
+    "discovery": {
+      "items": {
+        "cx-design": {
+          "source": "migration-seeded",
+          "order": 1
+        },
+        "fzf-output-mode": {
+          "source": "migration-seeded",
+          "order": 2
+        },
+        "git-root-and-completions": {
+          "source": "migration-seeded",
+          "order": 3
+        },
+        "session-launch-command": {
+          "source": "migration-seeded",
+          "order": 4
+        },
+        "x-xctl-split": {
+          "source": "migration-seeded",
+          "order": 5
+        },
+        "zellij-multi-directory": {
+          "source": "migration-seeded",
+          "order": 6
+        },
+        "zellij-to-tmux-migration": {
+          "source": "migration-seeded",
+          "order": 7
+        }
+      },
+      "approved_at": "2026-03-17T00:00:00.000Z"
+    }
+  },
+  "completed_at": "2026-03-17",
+  "spec": {
+    "joined": [
+      "portal"
+    ]
+  }
+}

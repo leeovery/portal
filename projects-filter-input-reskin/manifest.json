@@ -1,0 +1,16 @@
+{
+  "name": "projects-filter-input-reskin",
+  "work_type": "quick-fix",
+  "status": "completed",
+  "created": "2026-07-27",
+  "description": "Reskin the Projects page live filter input to Modern Vivid (orange prompt/query/cursor), mirroring the Sessions filter-input restyle.",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-06-25-projects-filter-input-reskin.md",
+      "source": "inbox:quickfix",
+      "seeded_at": "2026-07-27T10:28:41Z"
+    }
+  ],
+  "completed_at": "2026-07-27"
+}

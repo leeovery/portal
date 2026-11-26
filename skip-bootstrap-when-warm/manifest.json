@@ -1,0 +1,29 @@
+{
+  "name": "skip-bootstrap-when-warm",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-06-30",
+  "description": "Server-lifetime tmux latch set at the end of a successful bootstrap so only the first command on a cold server runs the full 11-step orchestrator; warm commands fast-skip restore/sweep/clean. Prerequisite for restore-host-terminal-windows.",
+  "phases": {
+    "discussion": {
+      "items": {
+        "skip-bootstrap-when-warm": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-06-30-warm-command-bootstrap-latch.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-06-30T19:26:08Z"
+    }
+  ],
+  "completed_at": "2026-07-04",
+  "spec": {
+    "joined": [
+      "skip-bootstrap-when-warm"
+    ]
+  }
+}

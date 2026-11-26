@@ -1,0 +1,3 @@
+# Agent State
+
+The core per-session agent-state model (Working, Waiting, Idle, Unknown) captured on the host. Per-agent hooks report events to the daemon over a unix IPC socket, correlated to panes via $TMUX_PANE and normalised through an adapter interface (Claude Code first; Codex, OpenCode and others added later as additive adapters). A concurrency-safe agent store in the daemon is the single source of truth, with a persisted snapshot so state survives a daemon blip. This is the spine of the whole epic: picker, status line, notifications and mobile client all read from it. Open thread for the downstream phase: verifying the Claude hook-event to state mapping against current Claude Code behaviour, and how non-Claude agents signal state.

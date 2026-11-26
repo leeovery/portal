@@ -1,0 +1,22 @@
+{
+  "name": "session-scrollback-preview",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-05-01",
+  "description": "Quick Look-style scrollback preview in TUI picker so sessions can be disambiguated without attaching",
+  "phases": {
+    "discussion": {
+      "items": {
+        "session-scrollback-preview": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-05-08",
+  "spec": {
+    "joined": [
+      "session-scrollback-preview"
+    ]
+  }
+}

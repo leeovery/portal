@@ -1,0 +1,22 @@
+{
+  "name": "enter-attaches-from-preview",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-05-14",
+  "description": "Wire Enter from scrollback-preview page to attach to the previewed session, closing the Space → look → Enter → attach loop on Sessions",
+  "phases": {
+    "discussion": {
+      "items": {
+        "enter-attaches-from-preview": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-05-16",
+  "spec": {
+    "joined": [
+      "enter-attaches-from-preview"
+    ]
+  }
+}

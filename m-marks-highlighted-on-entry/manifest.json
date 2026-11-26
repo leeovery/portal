@@ -1,0 +1,16 @@
+{
+  "name": "m-marks-highlighted-on-entry",
+  "work_type": "quick-fix",
+  "status": "completed",
+  "created": "2026-07-15",
+  "description": "Pressing m on a highlighted session marks it as the first multi-select selection on entry, instead of entering multi-select mode with an empty set",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-07-14-m-marks-highlighted-on-entry.md",
+      "source": "inbox:quickfix",
+      "seeded_at": "2026-07-15T06:49:46Z"
+    }
+  ],
+  "completed_at": "2026-07-15"
+}

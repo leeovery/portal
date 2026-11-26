@@ -1,0 +1,22 @@
+{
+  "name": "portal-observability-layer",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-05-28",
+  "description": "Build portal logging into a deliberate observability layer with subsystem-prefixed lines, decision-point INFO summaries, DEBUG breadcrumbs on swallowed errors, preserved diagnostic context, cycle-level summaries, log-level discipline, daily log rotation with retention, and saver/daemon lifecycle events",
+  "phases": {
+    "discussion": {
+      "items": {
+        "portal-observability-layer": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-06-02",
+  "spec": {
+    "joined": [
+      "portal-observability-layer"
+    ]
+  }
+}

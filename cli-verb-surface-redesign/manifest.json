@@ -1,0 +1,29 @@
+{
+  "name": "cli-verb-surface-redesign",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-07-15",
+  "description": "Intentional one-pass redesign of Portal's full CLI verb surface — reconciling open/attach/spawn and auditing every command, with a back-compat/deprecation story",
+  "phases": {
+    "discussion": {
+      "items": {
+        "cli-verb-surface-redesign": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-07-09-cli-verb-surface-redesign.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-07-15T17:49:50Z"
+    }
+  ],
+  "completed_at": "2026-07-20",
+  "spec": {
+    "joined": [
+      "cli-verb-surface-redesign"
+    ]
+  }
+}

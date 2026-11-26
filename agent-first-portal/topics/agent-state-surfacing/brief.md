@@ -1,0 +1,3 @@
+# Agent State Surfacing
+
+How agent state surfaces on the desktop and in the terminal, distinct from host capture. An inline agent-state glyph on every session row in every picker view, distinct from the existing attached dot. A new by-status / needs-attention view mode alongside flat, by-project and by-tag, sorted so Waiting floats to the top. A Portal-owned tmux status-line segment showing the aggregate (for example: 2 waiting) from inside any session, with a keybind to jump to waiting sessions. Notifications: macOS at the desk, and on mobile an OSC 9 banner through Blink for the active session until the client exists. No separate dashboard page; the dashboard is a lens, not a page.

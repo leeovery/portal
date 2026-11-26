@@ -1,0 +1,39 @@
+{
+  "name": "resume-hooks-silently-lost",
+  "work_type": "bugfix",
+  "status": "completed",
+  "created": "2026-08-22",
+  "description": "Per-pane resume hooks go missing without any error — registration accepts a pane that doesn't resolve and writes a degenerate key, and valid entries are orphaned when a pane's window/pane coordinates change — so panes come back from a reboot with no resume.",
+  "phases": {
+    "investigation": {
+      "items": {
+        "resume-hooks-silently-lost": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-08-16-hook-set-persists-degenerate-pane-key.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-08-22T09:02:24Z"
+    },
+    {
+      "path": "seeds/2026-08-21-resume-hooks-vanish-when-pane-moves.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-08-22T09:02:24Z"
+    },
+    {
+      "path": "seeds/2026-06-29-some-sessions-skip-resume-on-reboot.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-08-22T09:02:24Z"
+    }
+  ],
+  "completed_at": "2026-09-09",
+  "spec": {
+    "joined": [
+      "resume-hooks-silently-lost"
+    ]
+  }
+}

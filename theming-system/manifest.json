@@ -1,0 +1,34 @@
+{
+  "name": "theming-system",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-07-27",
+  "description": "Make Portal's Modern Vivid colour-token layer user-themeable — load token values from config rather than code, ship additional built-in themes, add a live-preview in-app theme selector, and settle the border token names before they become the public contract.",
+  "phases": {
+    "discussion": {
+      "items": {
+        "theming-system": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-06-17-user-overridable-theme-system.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-07-27T13:25:01Z"
+    },
+    {
+      "path": "seeds/2026-06-21-border-token-role-names.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-07-27T13:25:01Z"
+    }
+  ],
+  "completed_at": "2026-08-12",
+  "spec": {
+    "joined": [
+      "theming-system"
+    ]
+  }
+}

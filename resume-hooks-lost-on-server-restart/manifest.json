@@ -1,0 +1,22 @@
+{
+  "name": "resume-hooks-lost-on-server-restart",
+  "work_type": "bugfix",
+  "status": "completed",
+  "created": "2026-04-01",
+  "description": "CleanStale() destroys resume hooks after tmux server restart because old pane IDs no longer exist in the new server",
+  "phases": {
+    "investigation": {
+      "items": {
+        "resume-hooks-lost-on-server-restart": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-04-03",
+  "spec": {
+    "joined": [
+      "resume-hooks-lost-on-server-restart"
+    ]
+  }
+}

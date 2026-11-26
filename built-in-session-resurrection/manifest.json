@@ -1,0 +1,22 @@
+{
+  "name": "built-in-session-resurrection",
+  "work_type": "feature",
+  "status": "completed",
+  "created": "2026-04-07",
+  "description": "Replace tmux-resurrect/continuum with native Portal session resurrection: event-driven state capture, bootstrap-integrated restore, Zellij-style suspended commands",
+  "phases": {
+    "discussion": {
+      "items": {
+        "built-in-session-resurrection": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-04-30",
+  "spec": {
+    "joined": [
+      "built-in-session-resurrection"
+    ]
+  }
+}

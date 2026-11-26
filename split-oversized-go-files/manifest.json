@@ -1,0 +1,23 @@
+{
+  "name": "split-oversized-go-files",
+  "work_type": "feature",
+  "status": "cancelled",
+  "created": "2026-08-15",
+  "description": "Set Portal's own file-organisation standard, record it in CLAUDE.md, and split the oversized Go files along their concern seams — standard and sweep landing in the same release.",
+  "phases": {
+    "discussion": {
+      "items": {
+        "split-oversized-go-files": {
+          "status": "completed"
+        }
+      }
+    }
+  },
+  "seeds": [
+    {
+      "path": "seeds/2026-08-09-split-oversized-go-files.md",
+      "source": "inbox:idea",
+      "seeded_at": "2026-08-15T14:20:26Z"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "hooks-skip-bootstrap",
+  "work_type": "quick-fix",
+  "status": "completed",
+  "created": "2026-05-26",
+  "description": "Add 'hooks' to skipTmuxCheck allowlist in cmd/root.go to prevent bootstrap cascade from SessionStart-triggered hooks set invocations",
+  "phases": {},
+  "completed_at": "2026-05-26"
+}
