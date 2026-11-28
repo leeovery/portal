@@ -36,6 +36,7 @@ This page explains how Portal sits on zmx: how it opens sessions, how it saves t
 - **Portal runs `zmx attach` itself** and stays running while you're attached, watching for [its own keys](sessions.md#keys-in-a-session).
 - **Inside a session it switches** the terminal you typed in, so sessions never nest.
 - **Opening a session takes it** from any other terminal showing it, so it is drawn for yours from the first frame. See [One terminal at a time](sessions.md#one-terminal-at-a-time).
+- **Leaving lands you where you worked.** As Portal exits it writes the directory of the last session it left, read then, to a file `x` handed it, and `x` changes to it once Portal has gone, as a program can't change its shell's directory itself.
 
 How `x` decides what to open is in [Opening a session](sessions.md#opening-a-session).
 

@@ -26,7 +26,7 @@ var openTargetPins = map[string]resolver.Domain{
 	"-a": resolver.DomainAlias, "--alias": resolver.DomainAlias,
 	"-e": "", "--exec": "",
 	"-f": "", "--filter": "",
-	"--ack": "",
+	"--ack": "", "--cwd-file": "",
 }
 
 // orderedOpenTargets recovers the interleaved order and repeats that cobra's

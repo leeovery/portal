@@ -28,8 +28,12 @@ func TestInitZsh(t *testing.T) {
 		wantInOut string
 	}{
 		{
-			name:      "outputs x function routing to portal open",
-			wantInOut: "function x() { portal open \"$@\" }",
+			name:      "outputs x function",
+			wantInOut: "function x() {\n    local __portal_file __portal_status=0 __portal_dir\n",
+		},
+		{
+			name:      "x routes to portal open with a cwd file",
+			wantInOut: "\n    command portal open --cwd-file \"$__portal_file\" \"$@\" || __portal_status=$?\n",
 		},
 		{
 			name:      "outputs xctl function routing to portal",
@@ -128,8 +132,12 @@ func TestInitBash(t *testing.T) {
 		wantInOut string
 	}{
 		{
-			name:      "outputs x function routing to portal open",
-			wantInOut: `x() { portal open "$@"; }`,
+			name:      "outputs x function",
+			wantInOut: "x() {\n    local __portal_file __portal_status=0 __portal_dir\n",
+		},
+		{
+			name:      "x routes to portal open with a cwd file",
+			wantInOut: "\n    command portal open --cwd-file \"$__portal_file\" \"$@\" || __portal_status=$?\n",
 		},
 		{
 			name:      "outputs xctl function routing to portal",
@@ -183,7 +191,7 @@ func TestInitBash_CmdFlag(t *testing.T) {
 			name: "cmd flag changes launcher function name",
 			args: []string{"init", "bash", "--cmd", "p"},
 			wantInOut: []string{
-				`p() { portal open "$@"; }`,
+				"p() {\n    local __portal_file",
 			},
 		},
 		{
@@ -231,8 +239,12 @@ func TestInitFish(t *testing.T) {
 		wantInOut string
 	}{
 		{
-			name:      "outputs x function routing to portal open",
-			wantInOut: "function x\n    portal open $argv\nend",
+			name:      "outputs x function",
+			wantInOut: "function x\n    set -l __portal_tmp $TMPDIR\n",
+		},
+		{
+			name:      "x routes to portal open with a cwd file",
+			wantInOut: "\n    command portal open --cwd-file \"$__portal_file\" $argv\n",
 		},
 		{
 			name:      "outputs xctl function routing to portal",
@@ -282,7 +294,7 @@ func TestInitFish_CmdFlag(t *testing.T) {
 			name: "cmd flag changes launcher function name",
 			args: []string{"init", "fish", "--cmd", "p"},
 			wantInOut: []string{
-				"function p\n    portal open $argv\nend",
+				"function p\n    set -l __portal_tmp $TMPDIR\n",
 			},
 		},
 		{
@@ -369,7 +381,7 @@ func TestInitZsh_CmdFlag(t *testing.T) {
 			name: "cmd flag changes launcher function name",
 			args: []string{"init", "zsh", "--cmd", "p"},
 			wantInOut: []string{
-				`function p() { portal open "$@" }`,
+				"function p() {\n    local __portal_file",
 			},
 		},
 		{
@@ -391,20 +403,10 @@ func TestInitZsh_CmdFlag(t *testing.T) {
 			name: "default without cmd flag uses x and xctl",
 			args: []string{"init", "zsh"},
 			wantInOut: []string{
-				`function x() { portal open "$@" }`,
+				"function x() {\n    local __portal_file",
 				`function xctl() { portal "$@" }`,
 				"compdef _portal_open x\n",
 				"compdef _portal xctl\n",
-			},
-		},
-		{
-			name: "cmd flag with a name shadowing a real command",
-			args: []string{"init", "zsh", "--cmd", "portal"},
-			wantInOut: []string{
-				`function portal() { portal open "$@" }`,
-				`function portalctl() { portal "$@" }`,
-				"compdef _portal_open portal\n",
-				"compdef _portal portalctl\n",
 			},
 		},
 	}
@@ -479,5 +481,27 @@ func TestInitBash_EmitsNoPinnedCompletionCursor(t *testing.T) {
 
 	if pinned := "COMP_POINT=${#COMP_LINE}"; strings.Contains(buf.String(), pinned) {
 		t.Errorf("output pins the completion cursor with %q\ngot:\n%s", pinned, buf.String())
+	}
+}
+
+// A function named portal would hide the binary from portalctl and from the
+// completion scripts, which run it bare and would reach the opener instead.
+func TestInit_RefusesToNameTheFunctionsPortal(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		t.Run(shell, func(t *testing.T) {
+			resetRootCmd()
+			buf := new(bytes.Buffer)
+			rootCmd.SetOut(buf)
+			rootCmd.SetArgs([]string{"init", shell, "--cmd", "portal"})
+
+			err := rootCmd.Execute()
+
+			if usage, ok := errors.AsType[*UsageError](err); !ok || usage.Error() != portalNameRefusal {
+				t.Errorf("init %s --cmd portal = %v, want the usage error %q", shell, err, portalNameRefusal)
+			}
+			if buf.Len() != 0 {
+				t.Errorf("init %s --cmd portal printed %q, want no script", shell, buf.String())
+			}
+		})
 	}
 }

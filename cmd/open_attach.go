@@ -42,10 +42,13 @@ type attachConnector struct {
 	// takeWait bounds each take's wait for the session to have no other
 	// client.
 	takeWait time.Duration
+	// left is the run's record of the directory of the last session left,
+	// which every connector the run makes shares.
+	left *leftDir
 }
 
 func newSessionConnector(cmd *cobra.Command, b backend.Backend) attachConnector {
-	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd), takeWait: takeWait}
+	c := attachConnector{cmd: cmd, backend: b, execer: realExecer{}, run: runner.Run, runners: stateRunners{}, acked: ackOnce(cmd), takeWait: takeWait, left: leftDirOf(cmd)}
 	if openDeps != nil && openDeps.Execer != nil {
 		c.execer = openDeps.Execer
 	}
@@ -121,8 +124,9 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 
 // attach runs one attach, once the session has been told the directory its
 // work runs in and the take has left no other terminal on it, holding the
-// session's take lock until the attach leads it. An exec returns only if it
-// fails, so beside its error the outcome is the zero one.
+// session's take lock until the attach leads it, and records the session
+// left once an attach that began ends. An exec returns only if it fails, so
+// beside its error the outcome is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
@@ -137,7 +141,7 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 	if command.Switches {
 		return runner.Outcome{}, c.switchTo(name, command)
 	}
-	reportWorkDir(ctx, c.backend, name)
+	found := reportWorkDir(ctx, c.backend, name)
 	cfg := runner.Config{
 		Session: name,
 		Command: command,
@@ -150,8 +154,9 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 	defer release()
 	attached, ended := context.WithCancel(ctx)
 	defer ended()
-	listed := cfg.Began
+	listed, begun := cfg.Began, false
 	cfg.Began = func() {
+		begun = true
 		if listed != nil {
 			listed()
 		}
@@ -164,6 +169,9 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 	if errors.Is(err, runner.ErrNoTerminal) {
 		release()
 		return runner.Outcome{}, c.exec(command)
+	}
+	if begun {
+		c.left.leave(c.backend, name, found)
 	}
 	return c.takenAway(name, out, began), err
 }
@@ -193,8 +201,13 @@ func (c attachConnector) leader(ctx context.Context, session string) string {
 	return leader.Token
 }
 
+// exec hands the terminal to command, replacing this process, which so runs
+// no deferred write of the cwd file: it is written first. Within one run an
+// attach's terminal and whether it switches don't change, so a session left
+// before an exec is rare; the write is a cheap guard for it.
 func (c attachConnector) exec(command backend.Command) error {
 	c.acked()
+	c.left.write(c.cmd.Context())
 	logExecHandoff(command.Argv)
 	return c.execer.Exec(command.Argv[0], command.Argv, command.Env)
 }

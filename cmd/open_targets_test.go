@@ -144,6 +144,11 @@ func TestOrderedOpenTargets(t *testing.T) {
 			args: []string{"-s", "api", "--ack=b:t"},
 			want: []Target{{Value: "api", Domain: "session"}},
 		},
+		{
+			name: "cwd-file value excluded, so the x function never bursts one target",
+			args: []string{"--cwd-file", "/tmp/portal-cwd.a1b2c3", "api"},
+			want: []Target{{Value: "api", Domain: "bare"}},
+		},
 	}
 
 	for _, tt := range tests {

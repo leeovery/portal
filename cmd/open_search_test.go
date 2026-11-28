@@ -405,6 +405,17 @@ func TestValidateOpenArgs_RefusesSearchFormWithAck(t *testing.T) {
 	executeOpenExpectingUsage(t, "cannot use a /term search with --ack", "/port", "--ack", "batch:token")
 }
 
+// The x function puts --cwd-file on every line, so x /term must stay a search.
+func TestOpenCommand_SearchForm_ComposesWithCwdFile(t *testing.T) {
+	sc := installSearchFormSeams(t)
+
+	executeOpen(t, "--cwd-file", filepath.Join(t.TempDir(), "cwd"), "/port")
+
+	if !sc.tuiCalled {
+		t.Fatal("a search form beside --cwd-file must reach the search, as one alone does")
+	}
+}
+
 // craftedOpenCommand returns a command shaped like open's positional surface
 // carrying one throwaway flag. A pflag.FlagSet cannot un-register a flag, so the
 // real openCmd is never given one.
