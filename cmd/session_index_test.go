@@ -93,7 +93,7 @@ func TestLegacyIndexStop(t *testing.T) {
 		}})
 
 		stdout, _, err := runRootCmd(t, "init", "zsh")
-		if err != nil || !strings.Contains(stdout.String(), "function x() { portal open \"$@\" }") {
+		if err != nil || !strings.Contains(stdout.String(), "function x() {\n") {
 			t.Errorf("init on a version 1 sessions.json = %q, %v; want its script", stdout, err)
 		}
 	})

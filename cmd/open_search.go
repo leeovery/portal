@@ -118,7 +118,8 @@ func validateSearchFormCollisions(cmd *cobra.Command, args []string) error {
 
 // firstSetLocalFlag returns the name of the first flag the line set among the
 // command's own, and the empty string when it set none. Inherited persistent
-// flags are outside the set: the rule exempts them.
+// flags are outside the set: the rule exempts them. So is --cwd-file, which
+// the x function puts on every line and which opens nothing.
 //
 // The walk is VisitAll filtered on Changed rather than Visit: pflag records what
 // a line set on the flag set the value was parsed through, which is the command's
@@ -128,7 +129,7 @@ func validateSearchFormCollisions(cmd *cobra.Command, args []string) error {
 func firstSetLocalFlag(cmd *cobra.Command) string {
 	var first string
 	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) {
-		if first == "" && f.Changed {
+		if first == "" && f.Changed && f.Name != cwdFileFlag {
 			first = f.Name
 		}
 	})

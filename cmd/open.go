@@ -138,65 +138,74 @@ portal to each: this terminal becomes the first surface and the remaining N−1 
 in host-terminal windows.`,
 	Args: validateOpenArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		command, destination, err := parseCommandArgs(cmd, args)
-		if err != nil {
-			return err
-		}
-
-		// Ahead of resolution, so a malformed --ack is a usage error rather than
-		// an open that acks nothing.
-		if _, _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
-			return NewUsageError("open: --ack must be <batch>:<token>")
-		}
-
-		// Ahead of the multi-target gate as much as of resolution: a term carrying
-		// glob metacharacters is literal text to search for, and the gate would read
-		// it as a target expandable to several sessions and burst it.
-		if forms := searchFormPositionals(cmd, args); len(forms) > 0 {
-			return runSearchForm(cmd, resolver.SearchTerm(forms[0]))
-		}
-
-		// Ahead of resolution and the pin dispatch: -f always opens the picker, and
-		// the Args validator has already refused every line where it would not.
-		if cmd.Flags().Changed("filter") {
-			filterVal, _ := cmd.Flags().GetString("filter")
-			return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command)
-		}
-
-		// Raw argv because cobra collapses repeated same-flag values and splits
-		// positionals from flags, losing the order and repeats the burst needs. Must
-		// precede the single-pin blocks so a two-pin set bursts rather than hitting
-		// the single -s arm. A window a burst spawned names its one surface
-		// exactly, so it never bursts again: a name with glob characters would
-		// expand, opening more windows than were asked for. No burst spawns a
-		// window naming more than one, which would ack one and drop the rest.
-		ordered := orderedOpenTargets(openOwnArgs())
-		acked := cmd.Flags().Changed("ack")
-		if acked && len(ordered) > 1 {
-			return NewUsageError("open: cannot use --ack with more than one target")
-		}
-		if !acked && isMultiTarget(ordered) {
-			return dispatchOpenBurst(cmd, ordered, command)
-		}
-
-		// Must precede the no-target early-return below, so a pin with an empty
-		// positional resolves the pin rather than launching the picker.
-		for _, flag := range openDomainPinFlags {
-			if cmd.Flags().Changed(flag) {
-				return resolvePinAndOpen(cmd, flag, pinResolvers[flag], command)
-			}
-		}
-
-		if destination == "" {
-			return openTUIFunc(cmd, pickerLanding{}, command)
-		}
-
-		qr, err := buildQueryResolver(cmd)
-		if err != nil {
-			return err
-		}
-		return openBare(cmd, qr, destination, command)
+		path, _ := cmd.Flags().GetString(cwdFileFlag)
+		left := withLeftDir(cmd, path)
+		defer left.write(cmd.Context())
+		return dispatchOpen(cmd, args)
 	},
+}
+
+// dispatchOpen opens what the line asks for: the search form, the picker, a
+// burst, a pinned target or the bare one.
+func dispatchOpen(cmd *cobra.Command, args []string) error {
+	command, destination, err := parseCommandArgs(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	// Ahead of resolution, so a malformed --ack is a usage error rather than
+	// an open that acks nothing.
+	if _, _, ok := spawnAck(cmd); cmd.Flags().Changed("ack") && !ok {
+		return NewUsageError("open: --ack must be <batch>:<token>")
+	}
+
+	// Ahead of the multi-target gate as much as of resolution: a term carrying
+	// glob metacharacters is literal text to search for, and the gate would read
+	// it as a target expandable to several sessions and burst it.
+	if forms := searchFormPositionals(cmd, args); len(forms) > 0 {
+		return runSearchForm(cmd, resolver.SearchTerm(forms[0]))
+	}
+
+	// Ahead of resolution and the pin dispatch: -f always opens the picker, and
+	// the Args validator has already refused every line where it would not.
+	if cmd.Flags().Changed("filter") {
+		filterVal, _ := cmd.Flags().GetString("filter")
+		return openTUIFunc(cmd, pickerLanding{filter: filterVal}, command)
+	}
+
+	// Raw argv because cobra collapses repeated same-flag values and splits
+	// positionals from flags, losing the order and repeats the burst needs. Must
+	// precede the single-pin blocks so a two-pin set bursts rather than hitting
+	// the single -s arm. A window a burst spawned names its one surface
+	// exactly, so it never bursts again: a name with glob characters would
+	// expand, opening more windows than were asked for. No burst spawns a
+	// window naming more than one, which would ack one and drop the rest.
+	ordered := orderedOpenTargets(openOwnArgs())
+	acked := cmd.Flags().Changed("ack")
+	if acked && len(ordered) > 1 {
+		return NewUsageError("open: cannot use --ack with more than one target")
+	}
+	if !acked && isMultiTarget(ordered) {
+		return dispatchOpenBurst(cmd, ordered, command)
+	}
+
+	// Must precede the no-target early-return below, so a pin with an empty
+	// positional resolves the pin rather than launching the picker.
+	for _, flag := range openDomainPinFlags {
+		if cmd.Flags().Changed(flag) {
+			return resolvePinAndOpen(cmd, flag, pinResolvers[flag], command)
+		}
+	}
+
+	if destination == "" {
+		return openTUIFunc(cmd, pickerLanding{}, command)
+	}
+
+	qr, err := buildQueryResolver(cmd)
+	if err != nil {
+		return err
+	}
+	return openBare(cmd, qr, destination, command)
 }
 
 // openBare opens what qr resolves the bare positional query to, logging the
@@ -797,6 +806,8 @@ func init() {
 	openCmd.Flags().StringP("zoxide", "z", "", "mint a new session at zoxide's best match (zoxide-domain; explicit error if zoxide is not installed)")
 	openCmd.Flags().String("ack", "", "internal: <batch>:<token> — a spawned window's receipt, written once its attach begins")
 	_ = openCmd.Flags().MarkHidden("ack")
+	openCmd.Flags().String(cwdFileFlag, "", "internal: a file to write, as Portal exits, the directory of the last session it left, for the shell to change to")
+	_ = openCmd.Flags().MarkHidden(cwdFileFlag)
 
 	// -p/--path and -z/--zoxide deliberately register no completer, so cobra emits
 	// ShellCompDirectiveDefault and the shell provides file/default completion.

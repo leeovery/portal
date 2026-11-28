@@ -8,11 +8,12 @@ import (
 )
 
 // reportDirWait bounds the find and the report of a session's work directory
-// at an attach, which waits on them. On a daemon that answers, both take a few
-// milliseconds: two Info probes, one listing of the process table and one
-// Output frame waited back. Under load they take longer, so the bound leaves
-// a margin of a hundred times that, yet is short enough that an attach to a
-// session slow to answer, which the driver's probe ceiling would hold a
+// at an attach, which waits on them, and the read of the last session left's
+// as Portal exits, which the exit waits on. On a daemon that answers, both
+// take a few milliseconds: two Info probes, one listing of the process table
+// and one Output frame waited back. Under load they take longer, so the bound
+// leaves a margin of a hundred times that, yet is short enough that an attach
+// to a session slow to answer, which the driver's probe ceiling would hold a
 // second per call, starts without a delay the user notices.
 const reportDirWait = 300 * time.Millisecond
 

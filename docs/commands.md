@@ -54,6 +54,8 @@ x work api ~/Code/new                # open three surfaces at once (see below)
 | `/<term>` *(positional, not a flag)* | — | open the picker pre-filtered by the term, or attach outright when exactly one live session matches |
 | `-e, --exec <cmd>` / `-- <cmd>` | — | command to run in a **freshly minted** session (never an attach target) |
 
+**Where you land.** Leaving Portal leaves your shell in the directory of the last session you left, where its work runs as you leave Portal: your home directory if that has gone, and where you were if you attached nothing, such as a picker quit at once or a switch from inside a session. `x` does the `cd`, since Portal can't change its shell's directory, so calling `portal open` directly leaves you where you were.
+
 **Multi-window bursts.** Two or more targets, or one glob expanding to several sessions, open each in its own window, this terminal among them; see [Several sessions at once](sessions.md#several-sessions-at-once).
 
 **Tab completion.** Tab after the session-opening function asks Portal for `open`'s completions: `x <TAB>` offers your live session names, and `x /po<TAB>` completes the term after the slash against the sessions a search can reach (every live session but the one you are attached to, since a search never lands you back where you already are), leaving the slash in place. A shell has this only once it has evaluated the current output of `portal init`: start a new shell, or run the `eval` in your profile again. The `/term` form itself is `portal open`'s own parsing, and doesn't depend on the shell integration. A path argument after the function does not fall through to filename completion. Switching that fallback off needs a shell that supports it: bash 4+ with `bash-completion`, zsh, or fish. macOS's stock `/bin/bash` 3.2 can't, so filenames still complete there.
@@ -187,7 +189,9 @@ xctl theme export nord > ~/.config/portal/themes/mine.theme
 
 ### `portal init`
 
-Prints the shell integration script, for `eval`: the `x` and `xctl` functions and their tab completions. It takes the shell, `zsh`, `bash` or `fish`. You call it through the `portal` binary directly. It reads no state, so a new shell's `eval` keeps defining `x` and `xctl` whatever the state directory holds.
+Prints the shell integration script, for `eval`: the `x` and `xctl` functions and their tab completions, `x` changing to the directory of the last session you left as Portal exits. It takes the shell, `zsh`, `bash` or `fish`. You call it through the `portal` binary directly. It reads no state, so a new shell's `eval` keeps defining `x` and `xctl` whatever the state directory holds.
+
+A shell keeps the functions it evaluated, so after upgrading Portal, start a new shell, or run the `eval` again, to pick up a changed `x`.
 
 ```bash
 portal init zsh
@@ -196,7 +200,7 @@ portal init bash --cmd p
 
 | Flag | Description |
 |---|---|
-| `--cmd <name>` | Name the functions `<name>` and `<name>ctl` rather than `x` and `xctl` |
+| `--cmd <name>` | Name the functions `<name>` and `<name>ctl` rather than `x` and `xctl`; `portal` is refused, since a function of that name would hide the binary |
 
 ### `portal uninstall`
 

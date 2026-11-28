@@ -114,7 +114,11 @@ eval "$(portal init bash)"
 portal init fish | source
 ```
 
-This defines **`x`**, which launches Portal (the picker, or opening a target), and **`xctl`**, which runs Portal's subcommands (`list`, `kill`, `alias` and the rest). Name them something else with `--cmd`:
+This defines **`x`**, which launches Portal (the picker, or opening a target), and **`xctl`**, which runs Portal's subcommands (`list`, `kill`, `alias` and the rest).
+
+Leaving Portal through `x` leaves your shell in the directory of the last session you left, where its work runs as you leave Portal: your home directory if that has gone, and where you were if you attached nothing. After upgrading, a shell has this once it runs `portal init` again: start a new one.
+
+Name the functions something else with `--cmd`:
 
 ```bash
 eval "$(portal init zsh --cmd p)"   # creates p() and pctl()

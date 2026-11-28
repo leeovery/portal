@@ -57,6 +57,9 @@ type runResult struct {
 	err error
 	// ended, if set, runs as the run returns.
 	ended func()
+	// began has a run answering with err begin first, as one whose attach
+	// fails after it has begun does.
+	began bool
 }
 
 type execCall struct {
@@ -73,7 +76,7 @@ func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outco
 		res = r.results[0]
 		r.results = r.results[1:]
 	}
-	if res.err == nil && cfg.Began != nil {
+	if (res.err == nil || res.began) && cfg.Began != nil {
 		cfg.Began()
 	}
 	if res.ended != nil {

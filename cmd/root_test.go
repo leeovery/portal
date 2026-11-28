@@ -64,6 +64,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := openCmd.Flags().Lookup(cwdFileFlag); f != nil {
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
 	// pflag never resets argsLenAtDash between Parse calls, so a prior
 	// `open <t> -- cmd` leaves a positive dash index that a later no-`--`
 	// Execute would slice out of range. Re-Init restores it to -1 without
