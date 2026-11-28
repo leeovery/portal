@@ -1,13 +1,15 @@
 // Package zmx implements backend.Backend on zmx: over zmx's socket protocol
-// for listing, kill, detach and history, and by running the zmx binary to
-// create a session and to attach to one, since creation is no protocol
-// message. It targets the zmx build pinned in scripts/zmx-commit.
+// for listing, kill, detach, history and telling a session its directory,
+// and by running the zmx binary to create a session and to attach to one,
+// since creation is no protocol message. It targets the zmx build pinned in
+// scripts/zmx-commit.
 package zmx
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -80,6 +82,8 @@ type Backend struct {
 	// processes is the process table AttachClients, unheld and EndDaemon
 	// read.
 	processes processTable
+	// stat reads a directory WorkDir compares.
+	stat func(string) (fs.FileInfo, error)
 }
 
 var _ backend.Backend = (*Backend)(nil)
@@ -97,6 +101,7 @@ func New(cfg Config) (*Backend, error) {
 		booted:    cfg.BootTime,
 		limits:    defaultCeilings,
 		processes: systemProcesses,
+		stat:      os.Stat,
 	}
 	if b.environ == nil {
 		b.environ = os.Environ

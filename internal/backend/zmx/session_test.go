@@ -57,6 +57,13 @@ var perSession = []struct {
 		_, err := b.LeaderEnv(ctx, name)
 		return err
 	}},
+	{"WorkDir", func(ctx context.Context, b *zmx.Backend, name string) error {
+		_, err := b.WorkDir(ctx, name)
+		return err
+	}},
+	{"ReportDir", func(ctx context.Context, b *zmx.Backend, name string) error {
+		return b.ReportDir(ctx, name, "/srv/app")
+	}},
 }
 
 func TestPerSessionCalls(t *testing.T) {
@@ -122,38 +129,59 @@ func TestPerSessionCalls(t *testing.T) {
 // anyRequest answers every request as a zmx daemon no client leads would:
 // Info with info, History and Capture with screen, EnvGet with no
 // environment, Kill by unlinking its socket and hanging up, DetachAll by
-// hanging up.
+// hanging up, and Output by broadcasting it back.
 func anyRequest(info, screen []byte) func(*daemon, net.Conn) {
-	return ledRequest(info, screen, func() []byte { return nil }, func() {})
+	return fakeSession{info: func() []byte { return info }, screen: screen}.answer
 }
 
-// ledRequest is anyRequest answering EnvGet with what leader returns then:
-// the tracked environment of the client leading the session; and calling
-// detached on DetachAll, which leaves no client to lead it.
-func ledRequest(info, screen []byte, leader func() []byte, detached func()) func(*daemon, net.Conn) {
-	return func(d *daemon, c net.Conn) {
-		r, err := d.read(c)
-		if err != nil {
-			return
-		}
-		switch r.tag {
-		case 6:
-			_, _ = c.Write(info)
-		case 8, 22:
-			_, _ = c.Write(frame(r.tag, 1, screen))
-		case 19:
-			_, _ = c.Write(frame(21, 1, leader()))
-		case 5:
-			_ = os.Remove(d.path)
-			return
-		case 4:
-			detached()
-			return
-		default:
-			return
-		}
-		_, _ = io.Copy(io.Discard, c)
+// fakeSession is how a fake zmx daemon answers each request: Info with what
+// info returns then, History and Capture with screen, EnvGet with what leader
+// returns then, the tracked environment of the client leading the session
+// (none when leader is nil), Kill by unlinking its socket and hanging up,
+// DetachAll by calling detached, which leaves no client to lead it, and
+// hanging up, and Output by passing it to output and broadcasting it back, as
+// zmx does once its terminal has taken it. detached and output may be nil.
+type fakeSession struct {
+	info     func() []byte
+	screen   []byte
+	leader   func() []byte
+	detached func()
+	output   func(payload []byte)
+}
+
+func (s fakeSession) answer(d *daemon, c net.Conn) {
+	r, err := d.read(c)
+	if err != nil {
+		return
 	}
+	switch r.tag {
+	case 1:
+		if s.output != nil {
+			s.output(r.payload)
+		}
+		_, _ = c.Write(frame(1, 1, r.payload))
+	case 6:
+		_, _ = c.Write(s.info())
+	case 8, 22:
+		_, _ = c.Write(frame(r.tag, 1, s.screen))
+	case 19:
+		var env []byte
+		if s.leader != nil {
+			env = s.leader()
+		}
+		_, _ = c.Write(frame(21, 1, env))
+	case 5:
+		_ = os.Remove(d.path)
+		return
+	case 4:
+		if s.detached != nil {
+			s.detached()
+		}
+		return
+	default:
+		return
+	}
+	_, _ = io.Copy(io.Discard, c)
 }
 
 func TestAttachFlags(t *testing.T) {

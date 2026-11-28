@@ -435,6 +435,48 @@ func TestBackendAgainstZmx(t *testing.T) {
 		}
 	})
 
+	t.Run("it replays a directory ReportDir told a session in the state a client attaching later is sent", func(t *testing.T) {
+		b := zmxtest.New(t)
+		mustCreate(t, b, "told", t.TempDir(), "sleep", "1000")
+		hostname, err := os.Hostname()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := b.ReportDir(t.Context(), "told", "/srv/a dir·x"); err != nil {
+			t.Fatalf("ReportDir = %v", err)
+		}
+
+		want := "\x1b]7;file://" + hostname + "/srv/a%20dir%C2%B7x\x1b\\"
+		if vt, err := b.History(t.Context(), "told", 0); err != nil || !bytes.Contains(vt, []byte(want)) {
+			t.Errorf("History = %q, %v; want the OSC 7 %q in it", vt, err, want)
+		}
+	})
+
+	// zmx records the directory a session is made in as its cwd, but only an
+	// OSC 7 reaches the state an attach is sent.
+	t.Run("it replays a directory ReportDir told a session made there", func(t *testing.T) {
+		b := zmxtest.New(t)
+		dir := realDir(t, t.TempDir())
+		mustCreate(t, b, "made-there", dir, "sleep", "1000")
+		if got := session(t, b, "made-there").Dir; got != dir {
+			t.Fatalf("Dir = %q, want %q, the directory it was made in, so the case shows the report sent anyway", got, dir)
+		}
+		hostname, err := os.Hostname()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := b.ReportDir(t.Context(), "made-there", dir); err != nil {
+			t.Fatalf("ReportDir = %v", err)
+		}
+
+		want := zmx.OSC7(hostname, dir)
+		if vt, err := b.History(t.Context(), "made-there", 0); err != nil || !bytes.Contains(vt, want) {
+			t.Errorf("History = %q, %v; want the OSC 7 %q in it", vt, err, want)
+		}
+	})
+
 	t.Run("it returns a blank screen's history as something, never empty", func(t *testing.T) {
 		b := zmxtest.New(t)
 		mustCreate(t, b, "blank", t.TempDir(), "sleep", "1000")

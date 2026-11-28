@@ -37,6 +37,14 @@ func (s fakeSubject) Hold(_ *testing.T, name string, state backendtest.State) ba
 	return held
 }
 
+// HoldWorkingIn has the Fake report dir for the session's work: it runs no
+// process to work there.
+func (s fakeSubject) HoldWorkingIn(t *testing.T, name, dir string) backend.Session {
+	held := s.Hold(t, name, backendtest.Answering)
+	s.f.SetWorkDir(name, dir)
+	return held
+}
+
 func (s fakeSubject) SetCurrent(name string) { s.f.SetCurrent(name) }
 
 // Lead has the Fake report the variable for the session's leader: it runs no

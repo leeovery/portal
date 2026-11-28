@@ -48,6 +48,8 @@ type attachRecorder struct {
 	// exec ran.
 	releasedAtExec int32
 	runners        runnersFake
+	// onExec, if set, runs as each exec does.
+	onExec func()
 }
 
 type runResult struct {
@@ -83,6 +85,9 @@ func (r *attachRecorder) Run(_ context.Context, cfg runner.Config) (runner.Outco
 func (r *attachRecorder) Exec(argv0 string, argv, env []string) error {
 	r.execs = append(r.execs, execCall{argv0: argv0, argv: argv, env: env})
 	r.releasedAtExec = r.runners.unlocks.Load()
+	if r.onExec != nil {
+		r.onExec()
+	}
 	if r.sink != nil && len(r.sink.Records().Matching("process", "exec")) > 0 {
 		r.markerSeen = true
 	}

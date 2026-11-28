@@ -30,13 +30,15 @@ const (
 	OpHistory       Op = "History"
 	OpLeaderEnv     Op = "LeaderEnv"
 	OpAttachClients Op = "AttachClients"
+	OpWorkDir       Op = "WorkDir"
+	OpReportDir     Op = "ReportDir"
 )
 
 // AttachProgram is Argv[0] of every command AttachCommand returns.
 const AttachProgram = "backendtest-attach"
 
-// Call is one recorded Backend call. Dir, Command and Env are set for Create
-// only, Rows for History only.
+// Call is one recorded Backend call. Dir is set for Create and ReportDir
+// only, Command and Env for Create only, Rows for History only.
 type Call struct {
 	Op      Op
 	Name    string
@@ -49,9 +51,9 @@ type Call struct {
 // Fake is an in-memory Backend that keeps the driver's contract, as Contract
 // checks: names match exactly, except that Create refuses a name held under
 // another case, as zmx on a case-insensitive filesystem does. Every session
-// answers until StopAnswering. Create, Kill and Detach change the sessions it
-// holds; Fail makes a method return an error before it changes anything, and
-// a call with an ended context fails with its cause.
+// answers until StopAnswering. Create, Kill, Detach and ReportDir change the
+// sessions it holds; Fail makes a method return an error before it changes
+// anything, and a call with an ended context fails with its cause.
 type Fake struct {
 	// Now stamps Created on the sessions Create makes, to the whole second as
 	// zmx records it; nil is time.Now.
@@ -67,6 +69,8 @@ type Fake struct {
 	history  map[string][]byte
 	leaders  map[string]backend.ClientEnv
 	clients  map[string][]backend.ClientProcess
+	workDirs map[string]string
+	reported map[string][]string
 	reach    []string
 	current  string
 	failures map[Op]error
@@ -86,6 +90,8 @@ func New(sessions ...backend.Session) *Fake {
 		history:  map[string][]byte{},
 		leaders:  map[string]backend.ClientEnv{},
 		clients:  map[string][]backend.ClientProcess{},
+		workDirs: map[string]string{},
+		reported: map[string][]string{},
 		failures: map[Op]error{},
 		lastPID:  1000,
 	}
@@ -188,6 +194,21 @@ func (f *Fake) SetAttachClients(name string, clients []backend.ClientProcess) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.clients[name] = slices.Clone(clients)
+}
+
+// SetWorkDir sets the directory WorkDir finds the session's work running
+// in, as the driver finds it from the session's processes.
+func (f *Fake) SetWorkDir(name, dir string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.workDirs[name] = dir
+}
+
+// Reported returns each directory ReportDir told the session, in order.
+func (f *Fake) Reported(name string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.reported[name])
 }
 
 // SetReachEnv sets what ReachEnv returns.
@@ -391,6 +412,44 @@ func (f *Fake) AttachClients(name string) ([]backend.ClientProcess, error) {
 	return slices.Clone(f.clients[name]), nil
 }
 
+// WorkDir returns what SetWorkDir gave the session, as its Dir spells it
+// when that is the same directory, as the driver does (zmx.PreferRecorded);
+// its Dir when SetWorkDir gave nothing.
+func (f *Fake) WorkDir(ctx context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.beginHeld(ctx, Call{Op: OpWorkDir, Name: name}, zmx.CheckLookup); err != nil {
+		return "", err
+	}
+	recorded := f.sessions[name].Dir
+	if dir, ok := f.workDirs[name]; ok {
+		return zmx.PreferRecorded(ctx, recorded, dir), nil
+	}
+	return recorded, nil
+}
+
+// ReportDir records dir as the session's Dir, as zmx records the directory
+// a session reports, and among what Reported returns, whatever Dir was: as
+// the driver does, it tells the session every time.
+func (f *Fake) ReportDir(ctx context.Context, name, dir string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	check := func(name string) error {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("report the directory of session %q: %q is not absolute", name, dir)
+		}
+		return zmx.CheckLookup(name)
+	}
+	if err := f.beginHeld(ctx, Call{Op: OpReportDir, Name: name, Dir: dir}, check); err != nil {
+		return err
+	}
+	s := f.sessions[name]
+	s.Dir = dir
+	f.sessions[name] = s
+	f.reported[name] = append(f.reported[name], dir)
+	return nil
+}
+
 // ReachEnv returns what SetReachEnv gave it, nothing until then.
 func (f *Fake) ReachEnv() []string {
 	f.mu.Lock()
@@ -422,6 +481,8 @@ func (f *Fake) forget(name string) {
 	delete(f.history, name)
 	delete(f.leaders, name)
 	delete(f.clients, name)
+	delete(f.workDirs, name)
+	delete(f.reported, name)
 }
 
 // record records the call and returns the failure injected for its op. The

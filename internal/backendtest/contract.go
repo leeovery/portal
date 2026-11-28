@@ -3,6 +3,7 @@ package backendtest
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,6 +25,11 @@ type Subject interface {
 	// positive one, and a zero Created for any time up to now: the backend
 	// chooses those.
 	Hold(t *testing.T, name string, state State) backend.Session
+	// HoldWorkingIn holds an answering session under name, as Hold does,
+	// whose work runs in dir, an existing directory with its symlinks
+	// resolved, while the session records another or none, and returns, once
+	// the work runs there, the session as List should report it.
+	HoldWorkingIn(t *testing.T, name, dir string) backend.Session
 	// SetCurrent makes the backend run inside the named session, "" outside
 	// any.
 	SetCurrent(name string)
@@ -120,6 +126,13 @@ var perSession = []struct {
 		_, err := b.LeaderEnv(ctx, name)
 		return err
 	}},
+	{"WorkDir", func(ctx context.Context, b backend.Backend, name string) error {
+		_, err := b.WorkDir(ctx, name)
+		return err
+	}},
+	{"ReportDir", func(ctx context.Context, b backend.Backend, name string) error {
+		return b.ReportDir(ctx, name, "/")
+	}},
 	{"Detach", func(ctx context.Context, b backend.Backend, name string) error { return b.Detach(ctx, name) }},
 	{"Kill", func(ctx context.Context, b backend.Backend, name string) error { return b.Kill(ctx, name) }},
 }
@@ -137,6 +150,7 @@ func Contract(t *testing.T, newSubject func(t *testing.T) Subject) {
 	t.Run("a caller context that has ended", func(t *testing.T) { endedContract(t, newSubject) })
 	t.Run("an attach from inside a session", func(t *testing.T) { switchContract(t, newSubject) })
 	t.Run("the client leading a session", func(t *testing.T) { leaderContract(t, newSubject) })
+	t.Run("a session's directory", func(t *testing.T) { dirContract(t, newSubject) })
 }
 
 func answeringContract(t *testing.T, newSubject func(t *testing.T) Subject) {
@@ -405,12 +419,8 @@ func creatingContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			t.Fatalf("Create = %v", err)
 		}
 
-		real, err := filepath.EvalSymlinks(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
 		got := listed(t, b, "made")
-		assertListing(t, got, backend.Session{Name: "made", Answered: true, Dir: real, Command: "sleep 1000"})
+		assertListing(t, got, backend.Session{Name: "made", Answered: true, Dir: realDir(t, dir), Command: "sleep 1000"})
 		if made.Clients, got.Clients = 0, 0; made != got {
 			t.Errorf("Create returned %+v, want the session as List reports it, %+v", made, got)
 		}
@@ -741,6 +751,91 @@ func leaderContract(t *testing.T, newSubject func(t *testing.T) Subject) {
 			t.Errorf("the given command's Env became %q, want it left %q", cmd.Env, given)
 		}
 	})
+}
+
+func dirContract(t *testing.T, newSubject func(t *testing.T) Subject) {
+	t.Run("WorkDir is where the session's work runs, not the directory it records", func(t *testing.T) {
+		s := newSubject(t)
+		dir := realDir(t, t.TempDir())
+		want := s.HoldWorkingIn(t, "work", dir)
+		b := s.Backend()
+
+		got := listed(t, b, "work")
+		if got.Dir == dir {
+			t.Fatalf("the session records %q, the directory its work runs in, so the case shows nothing", dir)
+		}
+		assertListing(t, got, want)
+		if got, err := b.WorkDir(t.Context(), "work"); err != nil || got != dir {
+			t.Errorf("WorkDir = %q, %v; want %q", got, err, dir)
+		}
+	})
+
+	t.Run("WorkDir keeps the spelling the session records for the directory its work runs in", func(t *testing.T) {
+		s := newSubject(t)
+		dir := realDir(t, t.TempDir())
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(dir, link); err != nil {
+			t.Fatal(err)
+		}
+		s.HoldWorkingIn(t, "work", dir)
+		b := s.Backend()
+		if err := b.ReportDir(t.Context(), "work", link); err != nil {
+			t.Fatalf("ReportDir(%q) = %v", link, err)
+		}
+
+		if got, err := b.WorkDir(t.Context(), "work"); err != nil || got != link {
+			t.Errorf("WorkDir = %q, %v; want %q, the recorded spelling of %q", got, err, link, dir)
+		}
+	})
+
+	t.Run("WorkDir of a session whose work runs where it was made is the directory it records, with no error when it records none", func(t *testing.T) {
+		s := newSubject(t)
+		want := s.Hold(t, "work", Answering)
+
+		if got, err := s.Backend().WorkDir(t.Context(), "work"); err != nil || got != want.Dir {
+			t.Errorf("WorkDir = %q, %v; want %q", got, err, want.Dir)
+		}
+	})
+
+	t.Run("ReportDir has the session report the directory it was told, whatever bytes its path holds", func(t *testing.T) {
+		s := newSubject(t)
+		s.Hold(t, "work", Answering)
+		b, ctx := s.Backend(), t.Context()
+
+		for _, dir := range []string{"/srv/a dir·x/100%;#?", "/srv/plain"} {
+			if err := b.ReportDir(ctx, "work", dir); err != nil {
+				t.Fatalf("ReportDir(%q) = %v", dir, err)
+			}
+			looked, err := b.Session(ctx, "work")
+			if got := listed(t, b, "work").Dir; got != dir || err != nil || looked.Dir != dir {
+				t.Errorf("after ReportDir(%q), List reports %q and Session %q, %v; want %q", dir, got, looked.Dir, err, dir)
+			}
+		}
+	})
+
+	t.Run("ReportDir refuses a directory that is not absolute, telling the session nothing", func(t *testing.T) {
+		s := newSubject(t)
+		want := s.Hold(t, "work", Answering)
+		b := s.Backend()
+
+		for _, dir := range []string{"", "srv/app", "./app"} {
+			if err := b.ReportDir(t.Context(), "work", dir); err == nil {
+				t.Errorf("ReportDir(%q) = nil, want a refusal", dir)
+			}
+		}
+		assertListing(t, listed(t, b, "work"), want)
+	})
+}
+
+// realDir is dir with its symlinks resolved, as the kernel reports the
+// directory a process works in.
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return real
 }
 
 func listed(t *testing.T, b backend.Backend, name string) backend.Session {

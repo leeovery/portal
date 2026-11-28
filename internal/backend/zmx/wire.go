@@ -21,6 +21,7 @@ const ProtocolVersion = 1
 type tag uint8
 
 const (
+	tagOutput      tag = 1
 	tagDetachAll   tag = 4
 	tagKill        tag = 5
 	tagInfo        tag = 6

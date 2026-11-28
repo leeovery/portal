@@ -1,7 +1,8 @@
 // Package proctable reads this user's processes from the kernel: which are
 // running and which have exited, their parents, whether each has a
-// controlling terminal, and the argv and environment each was exec'd with. It
-// reads them on darwin alone; elsewhere every read fails with ErrUnsupported.
+// controlling terminal, the argv and environment each was exec'd with, and
+// the directory each works in. It reads them on darwin alone; elsewhere every
+// read fails with ErrUnsupported.
 package proctable
 
 import (
@@ -28,10 +29,20 @@ const pathAlign = 8
 // Process is one of this user's processes as the kernel lists it.
 type Process struct {
 	PID, PPID int
+	// Group is the process's process group.
+	Group int
 	// Terminal reports whether the process has a controlling terminal.
 	Terminal bool
+	// ForegroundGroup is the process group in the foreground of the
+	// process's controlling terminal, the one the terminal's input reaches;
+	// meaningless without a terminal.
+	ForegroundGroup int
+	// Gone reports a process that has exited or is exiting, a zombie among
+	// them, which List still lists.
+	Gone bool
 	// Command is the name the kernel keeps for the file the process exec'd,
-	// cut to 16 bytes: zmx for zmx however argv[0] reads.
+	// cut to 16 bytes: zmx for zmx however argv[0] reads, and zsh for a login
+	// shell whose argv[0] is -zsh.
 	Command string
 }
 
