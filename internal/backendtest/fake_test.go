@@ -295,6 +295,47 @@ func TestFake(t *testing.T) {
 		}
 	})
 
+	t.Run("it records what ReportDir told a session, a directory it already had included", func(t *testing.T) {
+		f := backendtest.New(backend.Session{Name: "a", Dir: "/srv/a"})
+		ctx := t.Context()
+
+		for _, dir := range []string{"/srv/a", "/srv/b", "/srv/b", "/srv/c"} {
+			if err := f.ReportDir(ctx, "a", dir); err != nil {
+				t.Fatalf("ReportDir(%q) = %v", dir, err)
+			}
+		}
+
+		if got, want := f.Reported("a"), []string{"/srv/a", "/srv/b", "/srv/b", "/srv/c"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("Reported = %q, want %q", got, want)
+		}
+		if s, _ := f.Held("a"); s.Dir != "/srv/c" {
+			t.Errorf("Dir = %q, want the last told, /srv/c", s.Dir)
+		}
+		if got := len(f.CallsTo(backendtest.OpReportDir)); got != 4 {
+			t.Errorf("ReportDir calls recorded = %d, want 4", got)
+		}
+		_ = f.Kill(ctx, "a")
+		f.Add(backend.Session{Name: "a"})
+		if got := f.Reported("a"); len(got) != 0 {
+			t.Errorf("Reported for a session made again after its kill = %q, want none", got)
+		}
+	})
+
+	t.Run("its WorkDir is what SetWorkDir gave a session, until the session ends", func(t *testing.T) {
+		f := backendtest.New(backend.Session{Name: "a", Dir: "/srv/a"})
+		f.SetWorkDir("a", "/srv/a/worktree")
+		ctx := t.Context()
+
+		if got, err := f.WorkDir(ctx, "a"); err != nil || got != "/srv/a/worktree" {
+			t.Errorf("WorkDir = %q, %v; want /srv/a/worktree", got, err)
+		}
+		f.Remove("a")
+		f.Add(backend.Session{Name: "a", Dir: "/srv/a"})
+		if got, err := f.WorkDir(ctx, "a"); err != nil || got != "/srv/a" {
+			t.Errorf("WorkDir of a session made again after it ended = %q, %v; want its Dir, /srv/a", got, err)
+		}
+	})
+
 	t.Run("it records every call in order", func(t *testing.T) {
 		f := backendtest.New(backend.Session{Name: "a"})
 		ctx := t.Context()

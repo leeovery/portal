@@ -317,6 +317,25 @@ type Backend interface {
 	// ReachEnv is what another process needs in its environment, as NAME=value
 	// entries, to reach the sessions this backend reaches.
 	ReachEnv() []string
+	// WorkDir is the directory the session's work runs in: that of the
+	// process the session runs, or, while that process is a shell with one
+	// live child on the way to the foreground of the session's terminal (in
+	// its foreground group, or an ancestor of a process there, as a shell
+	// nested in another's job is), of the process reached by following each
+	// such child down, as a command under Portal's wrappers or a shell's
+	// foreground job runs. When that is the session's
+	// Dir under another spelling, it is Dir's spelling. Where no process can
+	// be read it is the session's Dir, "" with no error when the session
+	// records none. It fails as Session does.
+	WorkDir(ctx context.Context, name string) (string, error)
+	// ReportDir tells the session that it works in dir, as a shell's prompt
+	// does, so every client attached to it, and every one that attaches
+	// later, is told too, and Session reports dir as its Dir when it fits
+	// the backend's record. It tells the session every time, whatever its
+	// Dir: a Dir set as the session was made is no proof that an attach is
+	// told it. It refuses a dir that is not absolute, and otherwise fails as
+	// Session does; on ErrTimeout the report may still land later.
+	ReportDir(ctx context.Context, name, dir string) error
 	// Kill ends the session. On ErrTimeout the kill may still land later.
 	Kill(ctx context.Context, name string) error
 	// Detach detaches every client of the session. On ErrTimeout the detach

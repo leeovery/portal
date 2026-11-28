@@ -1,6 +1,45 @@
 package zmx
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestOSC7ReadsBackAsItsDirectory(t *testing.T) {
+	for _, dir := range []string{"/", "/srv/app", "/srv/a dir·x", "/tmp/100%", "/srv/a;b#c?d", "/srv/tab\there", "/srv/\x1b\\x", "/srv/a:b@c~d", "//srv"} {
+		t.Run(dir, func(t *testing.T) {
+			uri, ok := oscURI(osc7("lees-mac.local", dir))
+			if !ok {
+				t.Fatalf("osc7(%q) = %q, want one OSC 7 with no control byte inside", dir, osc7("lees-mac.local", dir))
+			}
+			if got := localDir(uri, "lees-mac.local"); got != dir {
+				t.Errorf("localDir(osc7(%q)) = %q, want it back", dir, got)
+			}
+		})
+	}
+}
+
+func FuzzOSC7ReadsBackAsItsDirectory(f *testing.F) {
+	f.Add("srv/a dir·x/100%")
+	f.Fuzz(func(t *testing.T, path string) {
+		dir := "/" + path
+		uri, ok := oscURI(osc7("host", dir))
+		if !ok {
+			t.Fatalf("osc7(%q) = %q, want one OSC 7 with no control byte inside", dir, osc7("host", dir))
+		}
+		if got := localDir(uri, "host"); got != dir {
+			t.Errorf("localDir(osc7(%q)) = %q, want it back", dir, got)
+		}
+	})
+}
+
+// oscURI is the URI an OSC 7 carries, and whether osc is one OSC 7 whose URI
+// holds no control byte to end it early.
+func oscURI(osc []byte) (string, bool) {
+	uri, opened := strings.CutPrefix(string(osc), "\x1b]7;")
+	uri, closed := strings.CutSuffix(uri, "\x1b\\")
+	return uri, opened && closed && !strings.ContainsFunc(uri, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
 
 func TestLocalDir(t *testing.T) {
 	const host = "lees-mac.local"

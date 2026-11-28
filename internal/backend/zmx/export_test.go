@@ -2,6 +2,7 @@ package zmx
 
 import (
 	"fmt"
+	"io/fs"
 	"sync"
 	"time"
 
@@ -28,12 +29,14 @@ const DefaultTracked = defaultTracked
 
 // Process is one process of a fake process table: its place in the list,
 // and the arguments it was exec'd with, or the error reading them fails with.
-// Reads, when set, fails its first reads of them.
+// Reads, when set, fails its first reads of them. Cwd is the directory it
+// works in; a read of an empty one fails.
 type Process struct {
 	proctable.Process
 	Args  proctable.Args
 	Err   error
 	Reads *FailingReads
+	Cwd   string
 }
 
 // FailingReads fails a process's reads of its arguments with each of its
@@ -69,8 +72,8 @@ func FakeProcesses(b *Backend, procs []Process, err error) {
 
 // FakeProcessesFrom has the Backend read, at each listing and each read of
 // one process, the processes table returns, or fail with table's error. A
-// process's arguments are read as the listing or read last taken shows them,
-// and a process it doesn't show is gone.
+// process's arguments and directory are read as the listing or read last
+// taken shows them, and a process it doesn't show is gone.
 func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
 	var (
 		mu   sync.Mutex
@@ -87,6 +90,16 @@ func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
 		return procs, nil
 	}
 	gone := func(pid int) error { return fmt.Errorf("read process %d: %w", pid, proctable.ErrGone) }
+	listed := func(pid int) (Process, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, p := range last {
+			if p.PID == pid {
+				return p, true
+			}
+		}
+		return Process{}, false
+	}
 	b.processes = processTable{
 		list: func() ([]proctable.Process, error) {
 			procs, err := take()
@@ -112,19 +125,30 @@ func FakeProcessesFrom(b *Backend, table func() ([]Process, error)) {
 			return proctable.Process{}, gone(pid)
 		},
 		readArgs: func(pid int) (proctable.Args, error) {
-			mu.Lock()
-			procs := last
-			mu.Unlock()
-			for _, p := range procs {
-				if p.PID != pid {
-					continue
-				}
-				if err := p.Reads.next(); err != nil {
-					return proctable.Args{}, err
-				}
-				return p.Args, p.Err
+			p, ok := listed(pid)
+			if !ok {
+				return proctable.Args{}, gone(pid)
 			}
-			return proctable.Args{}, gone(pid)
+			if err := p.Reads.next(); err != nil {
+				return proctable.Args{}, err
+			}
+			return p.Args, p.Err
+		},
+		cwd: func(pid int) (string, error) {
+			p, ok := listed(pid)
+			switch {
+			case !ok:
+				return "", gone(pid)
+			case p.Cwd == "":
+				return "", fmt.Errorf("read the directory of process %d: unreadable", pid)
+			}
+			return p.Cwd, nil
 		},
 	}
 }
+
+// FakeStat has WorkDir read the directories it compares with stat.
+func FakeStat(b *Backend, stat func(string) (fs.FileInfo, error)) { b.stat = stat }
+
+// OSC7 is the OSC 7 ReportDir sends for dir on the machine hostname.
+func OSC7(hostname, dir string) []byte { return osc7(hostname, dir) }

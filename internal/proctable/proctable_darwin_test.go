@@ -261,6 +261,36 @@ func TestExitedFrom(t *testing.T) {
 	}
 }
 
+func TestListTellsAProcessGone(t *testing.T) {
+	zombie := exec.Command("/usr/bin/true")
+	if err := zombie.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = zombie.Wait() }()
+	var gone, running bool
+	for range 200 {
+		list, err := List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range list {
+			switch p.PID {
+			case zombie.Process.Pid:
+				gone = p.Gone
+			case os.Getpid():
+				running = !p.Gone
+			}
+		}
+		if gone {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !gone || !running {
+		t.Errorf("zombie Gone = %v, this process running = %v; want both true", gone, running)
+	}
+}
+
 func TestListTellsWhetherAProcessHasATerminal(t *testing.T) {
 	onTerminal := exec.Command("sleep", "30")
 	tty, err := pty.Start(onTerminal)

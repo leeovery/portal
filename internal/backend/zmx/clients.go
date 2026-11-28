@@ -17,9 +17,10 @@ type processTable struct {
 	list     func() ([]proctable.Process, error)
 	read     func(pid int) (proctable.Process, error)
 	readArgs func(pid int) (proctable.Args, error)
+	cwd      func(pid int) (string, error)
 }
 
-var systemProcesses = processTable{list: proctable.List, read: proctable.Read, readArgs: proctable.ReadArgs}
+var systemProcesses = processTable{list: proctable.List, read: proctable.Read, readArgs: proctable.ReadArgs, cwd: proctable.Cwd}
 
 // settleEvery and settleWithin space and bound the reads of a process's
 // arguments that fail while it runs.

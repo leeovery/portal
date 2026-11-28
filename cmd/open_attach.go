@@ -119,10 +119,10 @@ func (c attachConnector) next(name string, out runner.Outcome, listing runnerLis
 	return reopenPickerFunc(c.cmd, c.backend, landing)
 }
 
-// attach runs one attach, once the take has left no other terminal on the
-// session, holding the session's take lock until the attach leads it. An
-// exec returns only if it fails, so beside its error the outcome is the zero
-// one.
+// attach runs one attach, once the session has been told the directory its
+// work runs in and the take has left no other terminal on it, holding the
+// session's take lock until the attach leads it. An exec returns only if it
+// fails, so beside its error the outcome is the zero one.
 func (c attachConnector) attach(name string, listing runnerListing) (runner.Outcome, error) {
 	ctx := c.cmd.Context()
 	command, err := c.backend.AttachCommand(ctx, name)
@@ -137,6 +137,7 @@ func (c attachConnector) attach(name string, listing runnerListing) (runner.Outc
 	if command.Switches {
 		return runner.Outcome{}, c.switchTo(name, command)
 	}
+	reportWorkDir(ctx, c.backend, name)
 	cfg := runner.Config{
 		Session: name,
 		Command: command,

@@ -7,6 +7,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/leeovery/portal/internal/backendtest"
 	"github.com/leeovery/portal/internal/harnesstest"
 	"github.com/leeovery/portal/internal/proctable"
+	"github.com/leeovery/portal/internal/shellquote"
 	"github.com/leeovery/portal/internal/zmxtest"
 )
 
@@ -50,12 +52,7 @@ func (s *zmxSubject) Backend() backend.Backend {
 func (s *zmxSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command(zmxtest.Binary(t), "run", name, "-d", "sleep", "1000")
-	cmd.Env = []string{"ZMX_DIR=" + s.b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"}
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("zmx run %q = %q, %v", name, out, err)
-	}
+	s.run(t, name, dir, "sleep", "1000")
 	switch state {
 	case backendtest.Silent:
 		zmxtest.StopDaemon(t, s.b, name)
@@ -65,11 +62,42 @@ func (s *zmxSubject) Hold(t *testing.T, name string, state backendtest.State) ba
 		fillBacklog(t, filepath.Join(s.b.Dir(), name))
 		return backend.Session{Name: name}
 	}
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
+	return backend.Session{Name: name, Answered: true, Dir: realDir(t, dir)}
+}
+
+// run makes the session name with zmx run in dir, typing command into its
+// shell.
+func (s *zmxSubject) run(t *testing.T, name, dir string, command ...string) {
+	t.Helper()
+	cmd := exec.Command(zmxtest.Binary(t), append([]string{"run", name, "-d"}, command...)...)
+	cmd.Env = []string{"ZMX_DIR=" + s.b.Dir(), "HOME=" + t.TempDir(), "PATH=/usr/bin:/bin", "SHELL=/bin/sh"}
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("zmx run %q = %q, %v", name, out, err)
 	}
-	return backend.Session{Name: name, Answered: true, Dir: real}
+}
+
+// HoldWorkingIn makes the session in a directory of its own and types into
+// its shell a sh that moves to dir and execs sleep, and returns once the
+// shell's child runs sleep: the shell, which sends no OSC 7, leaves the
+// session recording the directory it was made in.
+func (s *zmxSubject) HoldWorkingIn(t *testing.T, name, dir string) backend.Session {
+	t.Helper()
+	made := t.TempDir()
+	s.run(t, name, made, "/bin/sh", "-c", "cd "+shellquote.Single(dir)+" && exec /bin/sleep 1000")
+	session, err := s.b.Session(t.Context(), name)
+	if err != nil {
+		t.Fatalf("Session(%q) = %v", name, err)
+	}
+	if !harnesstest.PollUntil(t, settle, 20*time.Millisecond, func() bool {
+		procs, err := proctable.List()
+		return err == nil && slices.ContainsFunc(procs, func(p proctable.Process) bool {
+			return p.PPID == session.PID && p.Command == "sleep"
+		})
+	}) {
+		t.Fatalf("session %s's shell, process %d, never ran sleep", name, session.PID)
+	}
+	return backend.Session{Name: name, Answered: true, Dir: realDir(t, made)}
 }
 
 func (s *zmxSubject) SetCurrent(name string) { s.current = name }

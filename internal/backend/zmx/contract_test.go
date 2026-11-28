@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/leeovery/portal/internal/backend"
 	"github.com/leeovery/portal/internal/backend/zmx"
 	"github.com/leeovery/portal/internal/backendtest"
+	"github.com/leeovery/portal/internal/proctable"
 )
 
 // daemonSubject runs the driver over fake daemons: each answers as zmx does,
@@ -24,17 +26,20 @@ type daemonSubject struct {
 
 	mu       sync.Mutex
 	leaders  map[string][]byte
+	cwds     map[string]string
 	refusing []zmx.Process
+	working  []zmx.Process
 }
 
 // Backend reads a process table in which a daemon holds each refusing socket
-// held so far, so a refusal is a full backlog, never a crash.
+// held so far, so a refusal is a full backlog, never a crash, and in which
+// each session held working runs a process of its own.
 func (s *daemonSubject) Backend() backend.Backend {
 	b := newBackend(s.t, s.dir, "PATH=/usr/bin:/bin", "ZMX_DIR="+s.dir, "ZMX_SESSION="+s.current)
 	zmx.FakeProcessesFrom(b, func() ([]zmx.Process, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return slices.Clone(s.refusing), nil
+		return slices.Concat(s.refusing, s.working), nil
 	})
 	return b
 }
@@ -42,7 +47,13 @@ func (s *daemonSubject) Backend() backend.Backend {
 func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State) backend.Session {
 	switch state {
 	case backendtest.Answering:
-		serve(t, s.dir, name, ledRequest(s.info, []byte("screen"), func() []byte { return s.leader(name) }, func() { s.unlead(name) }))
+		serve(t, s.dir, name, fakeSession{
+			info:     func() []byte { return s.infoOf(name) },
+			screen:   []byte("screen"),
+			leader:   func() []byte { return s.leader(name) },
+			detached: func() { s.unlead(name) },
+			output:   func(p []byte) { s.output(name, p) },
+		}.answer)
 	case backendtest.Historyless:
 		serve(t, s.dir, name, anyRequest(s.info, nil))
 	case backendtest.Silent:
@@ -61,7 +72,39 @@ func (s *daemonSubject) Hold(t *testing.T, name string, state backendtest.State)
 	return fixtureListing(s.info, name)
 }
 
+// HoldWorkingIn has the process the fixture's Info names run in dir, a
+// process of the fake process table.
+func (s *daemonSubject) HoldWorkingIn(t *testing.T, name, dir string) backend.Session {
+	held := s.Hold(t, name, backendtest.Answering)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.working = append(s.working, zmx.Process{Process: proctable.Process{PID: held.PID, PPID: 1, Command: "sleep"}, Cwd: dir})
+	return held
+}
+
 func (s *daemonSubject) SetCurrent(name string) { s.current = name }
+
+// infoOf is the fixture's Info frame, with the cwd the session last took from
+// an OSC 7 in its output.
+func (s *daemonSubject) infoOf(session string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cwd, ok := s.cwds[session]; ok {
+		return withCwd(s.info, cwd)
+	}
+	return s.info
+}
+
+// output records, verbatim, the cwd an OSC 7 that is the whole of an output
+// carries, as zmx keeps a cwd its terminal reads in one.
+func (s *daemonSubject) output(session string, p []byte) {
+	osc, ok := strings.CutPrefix(string(p), "\x1b]7;")
+	if cwd, ended := strings.CutSuffix(osc, "\x1b\\"); ok && ended {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.cwds[session] = cwd
+	}
+}
 
 // Lead has the session's daemon answer EnvGet as zmx does for a client that
 // tracks the variable alongside one its environment lacks.
@@ -160,6 +203,6 @@ func folds(t *testing.T, dir, made, other, why string) string {
 
 func TestContract(t *testing.T) {
 	backendtest.Contract(t, func(t *testing.T) backendtest.Subject {
-		return &daemonSubject{t: t, dir: socketDir(t), info: infoFrame(t), leaders: map[string][]byte{}}
+		return &daemonSubject{t: t, dir: socketDir(t), info: infoFrame(t), leaders: map[string][]byte{}, cwds: map[string]string{}}
 	})
 }

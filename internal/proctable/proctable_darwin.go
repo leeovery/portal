@@ -3,6 +3,7 @@ package proctable
 import (
 	"fmt"
 	"os"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -46,10 +47,13 @@ func Read(pid int) (Process, error) {
 
 func processOf(p unix.KinfoProc) Process {
 	return Process{
-		PID:      int(p.Proc.P_pid),
-		PPID:     int(p.Eproc.Ppid),
-		Terminal: p.Eproc.Tdev != noDevice,
-		Command:  unix.ByteSliceToString(p.Proc.P_comm[:]),
+		PID:             int(p.Proc.P_pid),
+		PPID:            int(p.Eproc.Ppid),
+		Group:           int(p.Eproc.Pgid),
+		Terminal:        p.Eproc.Tdev != noDevice,
+		ForegroundGroup: int(p.Eproc.Tpgid),
+		Gone:            goneFrom([]unix.KinfoProc{p}),
+		Command:         unix.ByteSliceToString(p.Proc.P_comm[:]),
 	}
 }
 
@@ -105,4 +109,43 @@ func Parent(pid int) (int, error) {
 		return 0, fmt.Errorf("read process %d: %w", pid, err)
 	}
 	return int(p.Eproc.Ppid), nil
+}
+
+// proc_info's call and flavour for a process's working and root directories:
+// PROC_INFO_CALL_PIDINFO and PROC_PIDVNODEPATHINFO.
+const (
+	procInfoCallPIDInfo  = 2
+	procPIDVnodePathInfo = 9
+)
+
+// vnodeInfoSize is the size of a struct vnode_info, which comes before each
+// path in a struct proc_vnodepathinfo.
+const vnodeInfoSize = 152
+
+// vnodePathInfo is a struct proc_vnodepathinfo: two struct vnode_info_path,
+// the working directory's then the root's, each a struct vnode_info and a
+// NUL-terminated path of up to MAXPATHLEN bytes.
+type vnodePathInfo [2 * (vnodeInfoSize + unix.PathMax)]byte
+
+// Cwd reads pid's current working directory, from the kernel as it is
+// called. It fails with ErrGone for a process that has exited or is exiting,
+// a zombie among them, and otherwise for another user's.
+func Cwd(pid int) (string, error) {
+	var info vnodePathInfo
+	// x/sys wraps no proc_info and the module has no cgo for libproc's
+	// proc_pidinfo, so this traps into the kernel by syscall number, which
+	// Apple doesn't promise to keep. Proven by experiment on macOS 27 to read
+	// a live process's directory and refuse launchd's with EPERM; TestCwd
+	// holds it to that on every run.
+	n, _, errno := unix.Syscall6(unix.SYS_PROC_INFO, procInfoCallPIDInfo, uintptr(pid), procPIDVnodePathInfo, 0, uintptr(unsafe.Pointer(&info[0])), uintptr(len(info))) //nolint:staticcheck // no libSystem wrapper exists without cgo; the direct call is proven by experiment, above
+
+	switch {
+	case errno != 0 && gone(pid):
+		return "", fmt.Errorf("read the directory of process %d: %w: %w", pid, ErrGone, errno)
+	case errno != 0:
+		return "", fmt.Errorf("read the directory of process %d: %w", pid, errno)
+	case int(n) != len(info):
+		return "", fmt.Errorf("read the directory of process %d: the kernel answered %d bytes, want %d", pid, n, len(info))
+	}
+	return unix.ByteSliceToString(info[vnodeInfoSize : vnodeInfoSize+unix.PathMax]), nil
 }

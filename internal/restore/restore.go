@@ -954,7 +954,10 @@ func (r *run) transcript(e sessionindex.Entry) (string, bool) {
 
 // startDir is where the entry's session starts: its last working directory,
 // else the one Portal made it in, else HOME, each only while it is a directory
-// the session can start in, else the root.
+// the session can start in, else the root. Each attach reports the directory
+// a session's work runs in as its cwd, which the saver records, so the last
+// working directory is where its work ran as of the last attach, such as a
+// Claude worktree, not only where it was made.
 func startDir(e sessionindex.Entry) string {
 	home, _ := os.UserHomeDir()
 	for _, dir := range []string{e.Cwd, e.Dir, home} {
